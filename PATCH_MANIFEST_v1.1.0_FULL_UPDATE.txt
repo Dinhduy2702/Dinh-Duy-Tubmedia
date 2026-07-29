@@ -1,0 +1,3 @@
+Tubmedia 1.1.0 FULL UPDATE
+Installer: Download video Tubmedia-Setup-1.1.0-x64.exe
+Primary fixes: aspect ratio, progress state, workflow tabs, path persistence, tools update status, app updater metadata, responsive UI, universal delete action.

@@ -1,0 +1,9 @@
+Tubmedia v1.0.0 RC7
+
+- Thêm CompactDetail: popover chi tiết hỗ trợ hover, focus, click, Escape và click ngoài.
+- Cố định kích thước StatusBadge trong bảng Tiến trình/Nhật ký.
+- Cố định layout cột và chiều cao hàng của bảng Tiến trình.
+- Ẩn resultMessage dài khỏi hàng; chỉ hiện qua biểu tượng thông tin.
+- Cố định layout bảng Nhật ký và dùng ellipsis một dòng.
+- Đồng bộ nhật ký riêng bằng CompactLogRow.
+- Thêm unit test compact-operational-ui và release gate RC7.

@@ -1,0 +1,16 @@
+Tubmedia 1.0.0-rc.5
+
+Changed:
+- scripts/tools-windows.ps1
+- src/main/updates/tool-update-service.ts
+- src/main/tools/tool-manager.ts
+- tests/unit/tool-bootstrap-release.test.ts
+- scripts/verify-release-candidate.mjs
+- package.json
+- package-lock.json
+- CHANGELOG.md
+
+Purpose:
+- Handle Windows Application Control / Mark-of-the-Web safely.
+- Reuse trusted old tools and discover WinGet packages.
+- Keep dev UI available while required tools remain blocked.

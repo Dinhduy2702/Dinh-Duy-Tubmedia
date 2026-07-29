@@ -1,0 +1,5 @@
+Tubmedia v0.9.7
+- Fix false concat rejection: H.264 Main versus High profile
+- Profile/Level are non-blocking metadata
+- Keep strict codec/geometry/FPS/time-base/pixel-format/audio checks
+- Add regression unit test

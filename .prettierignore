@@ -1,0 +1,9 @@
+node_modules/
+out/
+release/
+coverage/
+verification-logs/
+test-results/
+playwright-report/
+tool/
+resources/tools/

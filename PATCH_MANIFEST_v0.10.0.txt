@@ -1,0 +1,33 @@
+TUBMEDIA v0.10.0 — MULTIPLATFORM UI CLEANUP FIX
+
+THAY ĐỔI CHÍNH
+- Save As timeline TXT từ biểu tượng trên giao diện.
+- UI compact: icon cho hành động phụ, chi tiết cố định thu gọn.
+- Nhận diện đa nền tảng và file tag theo LINK.
+- Preset tải danh sách chuẩn 720–1080 H.264/MP4, aria2c 16, 2 fragment, 2 video toàn app.
+- Google Drive dùng downloader native yt-dlp; nền tảng khác aria2c lần đầu và fallback yt-dlp.
+- Temp/quarantine/normalized tự dọn sau vòng đời tác vụ.
+- Thành phẩm xuất trực tiếp vào output folder; normalized/quarantine nằm ở temp.
+- Không để lại backup thành phẩm sau khi thay thế atomically thành công.
+
+FILE CODE CHÍNH
+- src/shared/utils/url.ts
+- src/shared/utils/download-quality.ts
+- src/main/downloader/download-engine.ts
+- src/main/merge/merge-engine.ts
+- src/main/files/temporary-cleanup.ts
+- src/main/queue/queue-manager.ts
+- src/main/workbench/workbench-service.ts
+- src/main/ipc/register-ipc.ts
+- src/renderer/src/pages/DownloadWorkbenchPage.tsx
+- src/renderer/src/pages/DownloadMergePage.tsx
+- src/renderer/src/pages/SettingsPage.tsx
+- src/renderer/src/tubmedia-theme.css
+
+KIỂM TRA
+- npm.cmd install
+- npm.cmd run typecheck
+- npm.cmd run lint
+- npm.cmd run test
+- npm.cmd run test:integration
+- npm.cmd run dev

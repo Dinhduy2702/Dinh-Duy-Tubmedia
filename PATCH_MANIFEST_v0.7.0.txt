@@ -1,0 +1,28 @@
+DOWNLOAD VIDEO TUBMEDIA v0.7.0 - PATCH MANIFEST
+
+NHAN DIEN
+- resources/icon.png
+- resources/icon.ico
+- src/renderer/public/tubmedia-app-icon.png
+
+GIAO DIEN
+- src/renderer/src/app/App.tsx
+- src/renderer/src/layout/Sidebar.tsx
+- src/renderer/src/layout/Topbar.tsx
+- src/renderer/src/pages/QueuePage.tsx
+- src/renderer/src/pages/LogsPage.tsx
+- src/renderer/src/pages/SettingsPage.tsx
+- src/renderer/src/tubmedia-theme.css
+
+HANH VI VA DU LIEU
+- src/main/processes/process-manager.ts
+- src/main/queue/queue-manager.ts
+- src/main/workbench/workbench-service.ts
+- src/main/database/repositories/project-repository.ts
+- src/main/database/repositories/queue-repository.ts
+- tests/integration/database.test.ts
+
+TAI LIEU
+- HOTFIX_v0.7.0_TUBMEDIA_PRO_UI_VI.md
+- VERIFICATION_v0.7.0.md
+- CHANGELOG.md

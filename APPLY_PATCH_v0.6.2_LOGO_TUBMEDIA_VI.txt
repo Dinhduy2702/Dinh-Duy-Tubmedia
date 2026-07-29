@@ -1,0 +1,28 @@
+DOWNLOAD VIDEO TUBMEDIA v0.6.2 - LOGO TUBMEDIA
+
+1. Dong ung dung va dung npm.cmd run dev neu dang chay.
+2. Giai nen patch.
+3. Chep toan bo noi dung thu muc patch vao thu muc project.
+4. Chon Replace the files in the destination.
+5. Khong can npm install.
+6. Chay:
+   npm.cmd run typecheck
+   npm.cmd run lint
+   npm.cmd run test
+   npm.cmd run test:integration
+   npm.cmd run build
+   npm.cmd run dev
+7. Sau khi kiem tra, build installer:
+   npm.cmd run dist
+
+LOGO DUOC THAY O:
+- Cua so ung dung
+- Taskbar
+- System tray
+- Installer va uninstaller
+- Favicon renderer
+- Sidebar
+- Trang Thong tin
+
+Light mode dung chu logo mau den.
+Dark mode dung chu logo mau trang.

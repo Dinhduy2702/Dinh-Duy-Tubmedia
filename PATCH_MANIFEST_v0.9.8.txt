@@ -1,0 +1,18 @@
+Tubmedia v0.9.8 - Progress Database Crash Fix
+
+Modified:
+- package.json
+- package-lock.json
+- src/shared/utils/progress-policy.ts
+- src/shared/utils/ffmpeg-progress.ts
+- src/main/database/repositories/queue-repository.ts
+- src/main/queue/queue-manager.ts
+- src/main/processes/process-manager.ts
+- src/main/normalize/normalize-engine.ts
+- src/main/clips/clip-engine.ts
+- src/main/merge/merge-engine.ts
+- tests/unit/progress-policy.test.ts
+- tests/unit/ffmpeg-progress.test.ts
+- tests/unit/process-callback-safety.test.ts
+- tests/integration/database.test.ts
+- KIEM_THU_v0.9.8_VI.md

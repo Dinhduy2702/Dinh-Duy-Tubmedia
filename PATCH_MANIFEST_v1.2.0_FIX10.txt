@@ -1,0 +1,17 @@
+Tubmedia 1.2.0 FIX10 — Timestamp repair and in-workflow error details
+
+Changed files:
+- src/shared/errors/app-errors.ts
+- src/main/media/media-analyzer.ts
+- src/main/media/file-verifier.ts
+- src/main/normalize/normalize-engine.ts
+- src/main/merge/merge-engine.ts
+- src/main/queue/queue-manager.ts
+- src/renderer/src/pages/DownloadMergePage.tsx
+- src/renderer/src/utils/ui-error.ts
+- src/renderer/src/tubmedia-theme.css
+- tests/unit/fix10-timestamp-error-detail.test.ts
+- tests/unit/media-duration-sanity.test.ts
+- CHANGELOG.md
+- FIX10_TIMESTAMP_REPAIR_ERROR_DETAIL_v1.2.0_VI.md
+- APPLY_FIX10_AND_BUILD.ps1

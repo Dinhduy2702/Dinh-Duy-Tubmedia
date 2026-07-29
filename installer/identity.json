@@ -1,0 +1,9 @@
+{
+  "appId": "com.tubmedia.download-video",
+  "productName": "Download video Tubmedia",
+  "companyName": "Đình Duy Tubmedia",
+  "installRegistryKey": "Software\\Tubmedia\\DownloadVideo",
+  "defaultInstallDirectoryName": "Download video Tubmedia",
+  "legacyAppId": "com.video.download.merge.studio.pro",
+  "legacyProductName": "Video Download Merge Studio Pro"
+}

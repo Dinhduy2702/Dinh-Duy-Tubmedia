@@ -1,0 +1,169 @@
+{
+  "name": "video-download-merge-studio-pro",
+  "version": "1.2.3",
+  "description": "Tubmedia â€” á»©ng dá»¥ng táº£i video Ä‘a ná»n táº£ng vÃ  ghÃ©p video chuyÃªn nghiá»‡p, tá»‘i Æ°u giao diá»‡n, cáº­p nháº­t an toÃ n vÃ  kiáº¿n trÃºc phÃ¡t hÃ nh dÃ i háº¡n.",
+  "main": "./out/main/index.js",
+  "author": "Đình Duy Tubmedia",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prepare:electron": "install-electron",
+    "dev": "npm run prepare:electron && npm run tools:prepare-dev:windows && electron-vite dev",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "lint": "eslint . --ignore-pattern \".tubmedia-patches/**\" --max-warnings=0",
+    "check:assets": "node scripts/validate-assets.mjs",
+    "format": "prettier --write .",
+    "test": "vitest run --config vitest.config.ts",
+    "test:watch": "vitest --config vitest.config.ts",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:e2e": "playwright test",
+    "build": "npm run typecheck && electron-vite build",
+    "dist": "npm run dist:official",
+    "dist:dir": "npm run prepare:electron && npm run build && electron-builder --dir",
+    "rebuild": "node scripts/no-native-rebuild.mjs",
+    "check": "npm run check:assets && npm run verify:release && npm run verify:stable && npm run typecheck && npm run lint && npm run test && npm run test:integration && npm run build",
+    "doctor:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/doctor-windows.ps1",
+    "tools:check:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tools-windows.ps1 -Mode check",
+    "tools:repair:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tools-windows.ps1 -Mode repair",
+    "tools:update:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tools-windows.ps1 -Mode update",
+    "dist:electron-builder": "npm run prepare:electron && npm run build && electron-builder --win nsis --x64",
+    "dist:nsis-safe": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-installer-windows.ps1",
+    "dist:source-update": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-source-update.ps1",
+    "verify:v0100": "node scripts/verify-v0100.mjs",
+    "verify:v0101": "node scripts/verify-v0101.mjs",
+    "verify:release": "node scripts/verify-release-candidate.mjs",
+    "release:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-release-windows.ps1",
+    "release:manifest": "node scripts/create-release-config.mjs",
+    "dist:legacy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-installer-windows.ps1",
+    "tools:repair-required:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tools-windows.ps1 -Mode repair-required",
+    "tools:prepare-dev:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tools-windows.ps1 -Mode repair-required -SoftFail",
+    "verify:stable": "node scripts/verify-stable-release.mjs",
+    "dist:official": "powershell -NoProfile -ExecutionPolicy Bypass -File BUILD_INSTALLER_CHINH_THUC.ps1",
+    "verify:audit-hardening": "node scripts/verify-audit-hardening.mjs",
+    "verify:audit-behavior": "node --experimental-strip-types scripts/verify-audit-behavior.mjs",
+    "format:check": "prettier --check .",
+    "verify:gate-fixes": "node scripts/verify-validation-gate-fixes.mjs",
+    "verify:recovery-upgrade": "node --experimental-strip-types scripts/verify-recovery-upgrade.mjs",
+    "verify:notification-cookie-upgrade": "node scripts/verify-notification-cookie-upgrade.mjs",
+    "verify:runtime-recovery-upgrade": "node scripts/verify-runtime-recovery-upgrade.mjs",
+    "verify:update-center-ui": "node scripts/verify-update-center-ui.mjs",
+    "verify:system-cleanup": "node scripts/verify-system-cleanup-integration.mjs",
+    "verify:quick-download": "node scripts/verify-quick-download-integration.mjs"
+  },
+  "dependencies": {
+    "@hookform/resolvers": "^5.2.2",
+    "@radix-ui/react-dialog": "^1.1.15",
+    "@radix-ui/react-tooltip": "^1.2.8",
+    "electron-updater": "^6.6.2",
+    "extract-zip": "^2.0.1",
+    "lucide-react": "^0.468.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "react-hook-form": "^7.62.0",
+    "zod": "4.4.3",
+    "zustand": "5.0.14"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/node": "^24.3.0",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^5.0.4",
+    "electron": "43.1.1",
+    "electron-builder": "26.15.3",
+    "electron-vite": "5.0.0",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "prettier": "^3.6.2",
+    "tailwindcss": "4.3.3",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.46.2",
+    "vite": "^7.1.7",
+    "vitest": "4.1.10"
+  },
+  "build": {
+    "appId": "com.tubmedia.download-video",
+    "productName": "Download video Tubmedia",
+    "asar": true,
+    "npmRebuild": false,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "resources/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "tool",
+        "to": "tool",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "resources/tools",
+        "to": "tools",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "resources/icon.png",
+        "to": "icon.png"
+      },
+      {
+        "from": "resources/app-update.yml",
+        "to": "app-update.yml"
+      },
+      {
+        "from": "resources/system-cleanup-helper.ps1",
+        "to": "system-cleanup-helper.ps1"
+      }
+    ],
+    "win": {
+      "icon": "resources/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "perMachine": false,
+      "differentialPackage": true,
+      "packElevateHelper": true,
+      "shortcutName": "Download video Tubmedia",
+      "uninstallDisplayName": "Download video Tubmedia",
+      "installerIcon": "resources/icon.ico",
+      "uninstallerIcon": "resources/icon.ico",
+      "include": "installer/electron-builder-upgrade.nsh"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Dinhduy2702",
+        "repo": "Dinh-Duy-Tubmedia",
+        "releaseType": "release"
+      }
+    ],
+    "artifactName": "${productName}-Setup-${version}-${arch}.${ext}",
+    "compression": "normal",
+    "removePackageScripts": true
+  }
+}

@@ -1,0 +1,3 @@
+import { AlertCircle, X } from 'lucide-react';
+import { useAppStore } from '../stores/app-store';
+export function ErrorBanner(){const error=useAppStore(s=>s.error),setError=useAppStore(s=>s.setError);if(!error)return null;return <div className="mx-5 mt-4 flex items-center gap-3 rounded-xl border px-4 py-3 text-sm" style={{borderColor:'color-mix(in srgb,var(--bad) 45%,var(--border))',background:'color-mix(in srgb,var(--bad) 12%,var(--panel))',color:'var(--bad)'}}><AlertCircle size={18}/><div className="flex-1">{error}</div><button className="btn btn-ghost p-1" onClick={()=>setError(null)}><X size={16}/></button></div>}

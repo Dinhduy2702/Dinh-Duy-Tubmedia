@@ -1,0 +1,40 @@
+TUBMEDIA v0.9.3 - SOURCE FIX
+
+Mục tiêu:
+- Tải nguồn Tải & Ghép giống code tham chiếu AVC1/H.264 + M4A/AAC.
+- Không chuyển mã sau tải.
+- Chống video 500 MB bị còn khoảng 200 MB.
+
+Tệp thay đổi:
+- package.json
+- package-lock.json
+- CHANGELOG.md
+- QUALITY_PROFILES.md
+- KIEM_THU_v0.9.3_VI.md
+- src/shared/constants/app.ts
+- src/shared/utils/download-quality.ts
+- src/shared/utils/merge-target.ts
+- src/main/downloader/download-engine.ts
+- src/main/normalize/normalize-engine.ts
+- src/main/settings/defaults.ts
+- src/main/settings/settings-service.ts
+- src/renderer/src/pages/DownloadMergePage.tsx
+- src/renderer/src/pages/SettingsPage.tsx
+- tests/unit/download-quality.test.ts
+- tests/unit/merge-target.test.ts
+- tests/unit/normalize-engine-stream-copy.test.ts
+
+Kiểm tra đã thực hiện trong môi trường hiện tại:
+- Parse cú pháp TypeScript/TSX cho toàn bộ tệp sửa: OK.
+- Kiểm tra semantic có lọc lỗi dependency chưa cài: 0 lỗi liên quan.
+- Kiểm tra logic selector AVC1/AAC, policy cache v3, MP4 và bitrate theo dung lượng thật: OK.
+
+Trên Windows chạy:
+  npm.cmd install
+  npm.cmd run typecheck
+  npm.cmd run lint
+  npm.cmd run test
+  npm.cmd run test:integration
+  npm.cmd run dev
+
+Chưa build installer.

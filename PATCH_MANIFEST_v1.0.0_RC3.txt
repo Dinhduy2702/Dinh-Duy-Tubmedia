@@ -1,0 +1,6 @@
+Tubmedia 1.0.0-rc.3
+- Auto repair required tools before dev and task creation
+- Official direct download fallback for yt-dlp and FFmpeg suite
+- 3-attempt resilient tool downloads
+- Release build gate prevents installer without required tools
+- Added tool bootstrap regression tests

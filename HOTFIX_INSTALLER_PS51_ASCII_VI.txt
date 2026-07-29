@@ -1,0 +1,14 @@
+HOTFIX INSTALLER - POWERSHELL 5.1 ASCII SAFE
+
+Sua loi ParserError tai scripts/build-installer-windows.ps1.
+Nguyen nhan: Windows PowerShell 5.1 co the doc sai file UTF-8 khong BOM co ky tu tieng Viet.
+
+Ban va:
+- Thay script build bang file chi chua ky tu ASCII.
+- Khong dung here-string de tranh loi ket thuc chuoi.
+- Ghi generated-config.nsh bang UTF-8 BOM.
+- Thay NSIS script bang ban ASCII-safe.
+- Van giu dung ten ung dung, phien ban va nha phat trien tu package.json.
+
+Sau khi chep de patch, chay:
+  npm.cmd run dist

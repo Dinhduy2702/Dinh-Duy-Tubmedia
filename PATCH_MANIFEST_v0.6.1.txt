@@ -1,0 +1,23 @@
+Download video Tubmedia v0.6.1 - Cookies On Demand
+
+FILES UPDATED
+package.json
+CHANGELOG.md
+src/shared/errors/app-errors.ts
+src/shared/utils/cookie-policy.ts
+src/main/downloader/download-engine.ts
+src/main/queue/queue-manager.ts
+src/renderer/src/pages/DownloadWorkbenchPage.tsx
+src/renderer/src/pages/SettingsPage.tsx
+tests/unit/cookie-policy.test.ts
+HOTFIX_v0.6.1_COOKIES_ON_DEMAND_VI.md
+APPLY_PATCH_v0.6.1_VI.txt
+VERIFICATION_v0.6.1_COOKIES_ON_DEMAND.md
+PATCH_MANIFEST_v0.6.1.txt
+
+BEHAVIOR
+- App startup never requests cookies.
+- Public downloads run anonymously first.
+- Cookies are attached only after the current video requests authentication.
+- Existing cookies are retried silently once.
+- User notification appears only if cookies are missing, invalid, expired, or locked.

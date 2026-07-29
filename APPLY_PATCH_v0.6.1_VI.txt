@@ -1,0 +1,23 @@
+DOWNLOAD VIDEO TUBMEDIA v0.6.1 - COOKIES CHI DUNG KHI VIDEO YEU CAU
+
+1. Dong ung dung va nhan Ctrl+C neu npm.cmd run dev dang chay.
+2. Giai nen file PATCH.
+3. Chep toan bo noi dung ben trong thu muc patch vao project hien tai.
+4. Chon Replace the files in the destination.
+5. Khong can xoa thu muc tool va khong can npm install neu node_modules van con.
+6. Chay lan luot:
+   npm.cmd run typecheck
+   npm.cmd run lint
+   npm.cmd run test
+   npm.cmd run test:integration
+   npm.cmd run build
+   npm.cmd run dev
+7. Sau khi kiem thu xong, tao installer moi:
+   npm.cmd run dist
+
+HANH VI CAN KIEM TRA
+- Mo app: khong tu bat popup/notification cookies.
+- Video cong khai: tai ma khong doc cookies trinh duyet.
+- Video can dang nhap: luc do moi yeu cau cookies.
+- Da cau hinh cookies: app tu retry mot lan, khong thong bao neu thanh cong.
+- Cookies loi/het han/database bi khoa: chi list/pipeline lien quan bi Pause va moi hien thong bao.

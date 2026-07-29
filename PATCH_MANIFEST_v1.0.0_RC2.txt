@@ -1,0 +1,14 @@
+TUBMEDIA 1.0.0-rc.2
+
+FIXED
+- electron-updater CommonJS/ESM startup crash
+- updater is lazy-loaded only for packaged builds
+- updater load failure is isolated and cannot crash the application
+
+FILES
+- src/main/updates/app-update-service.ts
+- tests/unit/release-update-system.test.ts
+- scripts/verify-release-candidate.mjs
+- package.json
+- package-lock.json
+- CHANGELOG.md

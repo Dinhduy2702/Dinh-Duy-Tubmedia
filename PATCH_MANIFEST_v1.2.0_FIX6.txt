@@ -1,0 +1,23 @@
+Tubmedia 1.2.0 FIX6 patch manifest
+APPLY_FIX6_AND_BUILD.ps1
+CHANGELOG.md
+FIX6_DIAGNOSTICS_UI_MERGE_v1.2.0_VI.md
+src/main/media/file-verifier.ts
+src/main/merge/merge-engine.ts
+src/main/queue/queue-manager.ts
+src/main/settings/defaults.ts
+src/main/settings/settings-service.ts
+src/main/updates/tool-update-service.ts
+src/renderer/src/app/App.tsx
+src/renderer/src/components/CookieManagerDialog.tsx
+src/renderer/src/components/DiagnosticDock.tsx
+src/renderer/src/components/StatusBadge.tsx
+src/renderer/src/layout/Topbar.tsx
+src/renderer/src/pages/DownloadMergePage.tsx
+src/renderer/src/pages/DownloadWorkbenchPage.tsx
+src/renderer/src/pages/UpdatesPage.tsx
+src/renderer/src/tubmedia-theme.css
+src/shared/utils/diagnostic-policy.ts
+tests/unit/diagnostic-policy.test.ts
+tests/unit/fix6-diagnostics-ui.test.ts
+PATCH_MANIFEST_v1.2.0_FIX6.txt

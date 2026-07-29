@@ -1,0 +1,16 @@
+TUBMEDIA 1.2.0 COMPLETE SMART MERGE + UI
+
+THAY ĐỔI CHÍNH
+- Pipeline ghép/chuẩn hóa thông minh, remux và cache bền vững.
+- Chuẩn hóa song song, ghép stream-copy và fallback NVENC -> CPU.
+- Sửa triệt để tỷ lệ khung hình/viền đen và preset encoder.
+- Tiến trình con, sắp xếp trạng thái, tốc độ sạch, xóa an toàn mọi hàng.
+- Hai lựa chọn xóa: chỉ danh sách hoặc xóa đúng tệp đầu ra.
+- Tab riêng cho danh sách/quy trình, nhớ đường dẫn, responsive và tooltip.
+- Thiết kế lại brand Đình Duy/Tubmedia trong ứng dụng.
+- Installer tự đóng bản cũ, xác minh yt-dlp/FFmpeg/FFprobe.
+- Đóng gói app-update.yml và tạo latest.yml cho GitHub updater.
+
+PHIÊN BẢN
+- package.json: 1.2.0
+- Windows installer: 1.2.0.0

@@ -1,0 +1,74 @@
+TUBMEDIA 1.2.0 - COMPLETE SMART MERGE + UI
+BAO CAO KIEM TRA NGUON
+Ngay: 2026-07-25
+
+1. PHAM VI DA CODE
+- Pipeline ghep thong minh: ffprobe song song, stream-copy khi tuong thich, remux khi chi lech container/timestamp.
+- Chi chuan hoa clip bat buoc; chuan hoa/remux song song va cache ben vung.
+- NVENC duoc chon khi kha dung, fallback CPU neu GPU loi runtime.
+- Sua ty le khung: scale-to-fill/crop can giua, setsar=1, khong auto pad vien den.
+- Hai luong ghep co the chay song song theo maxGlobalMergeJobs; mac dinh 2.
+- Tien trinh con co chevron, phase bar, trang thai cuoi dong bo, loc Unknown/NaN.
+- Sap xep dang chay -> dang cho -> can xu ly -> hoan tat.
+- Moi hang co icon xoa; ho tro chi xoa danh sach hoac xoa dung tep dau ra.
+- Backend tu choi xoa thu muc khi nguoi dung chon xoa tep.
+- Tab rieng cho danh sach tai va quy trinh ghep; ke thua duong dan gan nhat.
+- Rut gon ten/duong dan, tooltip, responsive min/max va icon hoa thong tin phu.
+- Thiet ke lai the thuong hieu Dinh Duy / Tubmedia trong app.
+- Tool UI chi hien Cap nhat khi co ban moi; hien version va Moi nhat khi da cap nhat.
+- Build payload bat buoc co va chay duoc yt-dlp, FFmpeg, FFprobe.
+- Installer tu dong dong Tubmedia cu truoc khi ghi de.
+- Dong goi app-update.yml; build tao latest.yml voi SHA-512 cho GitHub updater.
+- Installer ho tro --force-run de mo lai app sau cap nhat im lang.
+
+2. KIEM TRA DA CHAY TRONG MOI TRUONG HIEN TAI
+- verify-release-candidate: DAT 49/49.
+- verify-stable-release: DAT 24/24.
+- Kiem tra cu phap TypeScript/TSX bang TypeScript 5.8.3: DAT 146 tep, 0 loi cu phap.
+- package.json/package-lock.json: version 1.2.0 dong bo.
+- package.json hop le; app-update.yml duoc khai bao trong extraResources.
+
+3. KIEM TRA CHUA THE CHAY TRONG CONTAINER NAY
+- npm install/npm ci day du: CHUA CHAY DUOC vi kho goi khong co cache va mang build bi gioi han.
+- TypeScript typecheck day du: CHUA CHAY do thieu dependency/type packages.
+- ESLint: CHUA CHAY do thieu dependency.
+- Unit tests/Integration tests/E2E: CHUA CHAY do thieu dependency va Electron runtime.
+- Build NSIS Windows: CHUA CHAY vi container khong phai Windows.
+- Test runtime voi video that, GPU, installer nang cap va GitHub updater: BAT BUOC CHAY TREN WINDOWS.
+
+4. CONG KIEM SOAT BAT BUOC TREN WINDOWS
+Chay file BUILD_INSTALLER_CHINH_THUC.ps1. Script se tu dong:
+- npm install
+- verify:release
+- verify:stable
+- typecheck
+- lint
+- unit tests
+- integration tests
+- tai/xac minh yt-dlp, FFmpeg, FFprobe
+- build win-unpacked
+- xac minh 3 tool trong payload
+- build NSIS
+- tao SHA-256 va latest.yml
+
+Chi phat hanh khi PowerShell hien:
+OFFICIAL INSTALLER READY
+
+5. TEP PHAT HANH PHAI UPLOAD CUNG MOT GITHUB RELEASE
+- Download video Tubmedia-Setup-1.2.0-x64.exe
+- Download-video-Tubmedia-1.2.0-SHA256.txt
+- latest.yml
+
+6. CAC BAI TEST THUC TE BAT BUOC
+- Cai de tu 1.0.0/1.0.1/1.1.0 len 1.2.0 khi app dang dong va khi app con chay.
+- May/tai khoan Windows sach khong co FFmpeg trong PATH: yt-dlp, FFmpeg, FFprobe deu phai San sang.
+- Ghep lai bo video tung bi bop khung: khong vien den, khong meo, dung thoi luong.
+- Bo video dong thong so: bo qua chuan hoa, concat stream-copy nhanh.
+- Bo video khac container nhung codec giong: remux, khong re-encode.
+- Bo video khac codec/FPS/kich thuoc: chi clip lech chuan bi encode.
+- Hai quy trinh ghep dong thoi: ca hai vao buoc ghep rieng, khong khoa toan cuc.
+- Xoa moi trang thai; thu ca hai lua chon giu tep/xoa tep; khong duoc xoa thu muc.
+- Publish GitHub Release v1.2.0, sau do kiem tra app-update.yml/latest.yml va mot ban cap nhat thu nghiem tiep theo.
+
+KET LUAN
+Ma nguon 1.2.0 da duoc trien khai va kiem tra tinh theo cac cong phat hanh o tren. Installer chua duoc xac nhan hoan chinh cho nguoi dung cho den khi toan bo cong Windows trong muc 4 va cac bai test runtime trong muc 6 dat.

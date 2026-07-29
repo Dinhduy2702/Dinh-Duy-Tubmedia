@@ -1,0 +1,11 @@
+Tubmedia 1.0.1 ASPECT RATIO HOTFIX
+
+Mục tiêu:
+- Sửa lỗi nghiêm trọng: video nguồn đúng khung nhưng thành phẩm ghép bị thu nhỏ và đóng viền đen bốn phía.
+- Clip cùng tỷ lệ nhưng khác độ phân giải sẽ scale lấp đầy đúng canvas ghép.
+- Clip khác tỷ lệ sẽ scale-to-fill và crop cân giữa, không pad nền đen vào file thành phẩm.
+- Luôn đặt SAR = 1 khi phải mã hóa lại để tránh hình bị bóp méo.
+
+Phiên bản package/app/installer: 1.0.1
+Installer dự kiến: Download video Tubmedia-Setup-1.0.1-x64.exe
+Windows file version: 1.0.1.0

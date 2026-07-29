@@ -1,0 +1,5 @@
+Tubmedia 1.0.0-rc.9
+- Fast-fail updater when no feed metadata exists
+- 8s manual / 5s silent update-check timeout
+- Single in-flight update request
+- Lazy electron-updater initialization

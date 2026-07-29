@@ -1,0 +1,33 @@
+DOWNLOAD VIDEO TUBMEDIA v0.6.0 - RED/WHITE RESPONSIVE UI
+
+1. Dong ung dung va cua so npm.cmd run dev neu dang chay.
+2. Sao luu project hien tai neu can.
+3. Mo thu muc patch nay, copy TOAN BO noi dung vao thu muc project hien tai.
+4. Chon Replace the files in the destination.
+5. Patch KHONG chua va KHONG xoa cac file EXE trong thu muc tool.
+6. Chay lan luot:
+
+   npm.cmd run typecheck
+   npm.cmd run lint
+   npm.cmd run test
+   npm.cmd run test:integration
+   npm.cmd run build
+   npm.cmd run dev
+
+7. Kiem tra giao dien:
+   - Ten cua so: Download video Tubmedia
+   - Mau sang/toi: Cai dat > Theme > Theo giao dien Windows
+   - Logo do/trang Tubmedia o Sidebar va About
+   - Chu ky Dinh Duy / Tubmedia o goc trai duoi
+   - Trung tam cong cu khong tran ngang o cua so nho
+
+8. Tao installer:
+
+   npm.cmd run dist
+
+File cai dat du kien:
+   release\Download video Tubmedia-Setup-0.6.0-x64.exe
+
+Ghi chu:
+- Giu nguyen backend tai, ghep, cookies, queue, database va CPU fallback cua v0.5.1.
+- Product appId noi bo duoc giu nguyen de ho tro nang cap tren ban da cai.

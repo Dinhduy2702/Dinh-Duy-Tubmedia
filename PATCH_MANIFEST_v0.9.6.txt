@@ -1,0 +1,7 @@
+Tubmedia v0.9.6
+- Fix Google Drive requested format source unavailable
+- Omit -f for Google Drive Download & Merge
+- Use native/default yt-dlp behavior matching DownloadAndConcat reference
+- New cache policy v6
+- Disable aria2c for Google Drive
+- Recommended merge profile uses veryfast and copy_if_compatible audio

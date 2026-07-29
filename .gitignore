@@ -1,0 +1,14 @@
+node_modules/
+out/
+release/
+coverage/
+test-results/
+playwright-report/
+*.log
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.env
+
+.release/
+verification-logs/

@@ -1,0 +1,13 @@
+Tubmedia updater metadata recovery patch
+Date: 2026-07-28
+
+Files:
+- src/main/updates/app-update-service.ts
+- tests/unit/release-update-system.test.ts
+
+Behavior:
+- HTTP 404 for latest.yml/beta.yml is classified as unpublished updater metadata, not a fatal app error.
+- The status is disabled/non-blocking with error=null.
+- The raw HTTP stack is not emitted to the UI or warning logs for this condition.
+- The missing feed is logged once at info level per app session.
+- Repeated checks in the same session are skipped.

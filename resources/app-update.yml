@@ -1,0 +1,5 @@
+provider: github
+owner: Dinhduy2702
+repo: Dinh-Duy-Tubmedia
+releaseType: release
+updaterCacheDirName: tubmedia-updater

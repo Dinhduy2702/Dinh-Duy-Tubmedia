@@ -1,0 +1,10 @@
+Tubmedia 1.0.0-rc.4
+
+Sửa 1 unit test lỗi thời:
+- tests/unit/startup-fast.test.ts
+
+Không đổi logic runtime.
+Luồng đúng được xác nhận:
+- index.ts gọi ensureRequiredReady() trước.
+- ensureRequiredReady() gọi healthCheckRequired(), tự sửa nếu thiếu, rồi health-check lại.
+- healthCheckOptional() chỉ chạy sau khi startupTools hoàn tất.

@@ -1,0 +1,4 @@
+Tubmedia 1.0.0-rc.6
+- Fix 7 ESLint errors reported on Windows.
+- No runtime behavior changes.
+- Keep CommonJS-safe electron-updater loading.

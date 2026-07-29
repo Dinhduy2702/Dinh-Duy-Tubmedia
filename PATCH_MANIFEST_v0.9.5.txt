@@ -1,0 +1,20 @@
+TUBMEDIA v0.9.5 - GOOGLE DRIVE ORIGINAL SOURCE FIX
+
+FILES CHANGED
+- package.json
+- package-lock.json
+- src/shared/constants/app.ts
+- src/shared/utils/download-quality.ts
+- src/main/downloader/download-engine.ts
+- src/main/settings/defaults.ts
+- src/renderer/src/pages/DownloadMergePage.tsx
+- src/renderer/src/pages/SettingsPage.tsx
+- tests/unit/download-quality.test.ts
+- CHANGELOG.md
+
+CORE RULES
+1. Google Drive + Download & Merge => yt-dlp -f source
+2. No --format-sort-force for Google Drive original files
+3. Download-list settings are isolated from Download & Merge
+4. Old preview cache is invalidated by merge-google-drive-original-source-v5
+5. If source is unavailable, fail instead of silently downloading a preview

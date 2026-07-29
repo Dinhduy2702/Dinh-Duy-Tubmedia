@@ -1,0 +1,22 @@
+Download video Tubmedia v0.6.2 - Exact Tubmedia Logo
+
+FILES UPDATED
+package.json
+CHANGELOG.md
+src/shared/constants/app.ts
+src/renderer/src/components/TubmediaBrand.tsx
+src/renderer/src/tubmedia-theme.css
+src/renderer/public/tubmedia-app-icon.png
+src/renderer/public/tubmedia-logo-light.png
+src/renderer/public/tubmedia-logo-dark.png
+resources/icon.png
+resources/icon.ico
+APPLY_PATCH_v0.6.2_LOGO_TUBMEDIA_VI.txt
+PATCH_MANIFEST_v0.6.2.txt
+
+BEHAVIOR
+- Windows window/taskbar/tray/installer use the red Tubmedia play mark.
+- Sidebar/About use the provided Tubmedia wordmark.
+- Light mode displays dark lettering.
+- Dark mode displays white lettering.
+- Cookies remain on-demand from v0.6.1.

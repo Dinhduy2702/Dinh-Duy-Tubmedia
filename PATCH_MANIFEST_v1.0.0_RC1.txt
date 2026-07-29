@@ -1,0 +1,43 @@
+TUBMEDIA v1.0.0 RC1 — FINAL RELEASE CANDIDATE SOURCE
+=====================================================
+
+Mục tiêu
+- Phiên bản ứng viên cuối trước khi build installer ổn định.
+- Tối ưu độ mượt renderer/main process khi tải và FFmpeg chạy.
+- Thông báo xuất hiện/biến mất mượt, có hàng đợi, sticky error, pause khi hover.
+- Cập nhật ứng dụng tại chỗ bằng electron-updater/electron-builder.
+- Giữ app identity, thư mục cài đặt và userData khi nâng cấp.
+- Kiến trúc release beta/stable bền vững, có metadata YML, blockmap và manifest SHA-256.
+
+Các thay đổi chính
+1. Batching IPC progress/queue/log; lazy page; bỏ React StrictMode ở renderer dev.
+2. Queue scheduler setTimeout thích nghi, không chồng tick.
+3. Polling storage giảm theo active/idle/hidden; topbar dùng selector tóm tắt.
+4. Logger ghi SQLite ngay nhưng gom file log và append bất đồng bộ mỗi 140 ms.
+5. Flush log trước khi đóng database hoặc giao quyền thoát cho NSIS updater.
+6. Toast enter/visible/leaving chỉ dùng opacity + translate3d/scale, không animate blur.
+7. Tắt animation trang trí khi media đang xử lý; hỗ trợ prefers-reduced-motion.
+8. Dark theme đen ánh đỏ; Light theme trắng ánh đỏ.
+9. Trung tâm cập nhật typed: check, download nền, progress, backup, install khi queue rảnh.
+10. Kênh beta/stable, HTTPS generic feed, YML + blockmap, differentialPackage.
+11. Cầu nối NSIS giữ InstallLocation từ installer cũ.
+12. Backup cập nhật giữ tối đa 5 cặp; log/tệp tạm/quarantine có chính sách dọn.
+13. Sandbox, contextIsolation, chặn webview/navigation và từ chối permission web mặc định.
+14. CI Windows chạy verify, typecheck, unit, integration và production build.
+
+Kiểm tra tĩnh đã thực hiện trong môi trường đóng gói
+- 137 tệp TypeScript/TSX: không lỗi cú pháp transpile.
+- package.json, package-lock.json, installer/identity.json: JSON hợp lệ.
+- verify:release: 33/33 kiểm tra kiến trúc đạt.
+- Không đóng gói node_modules, out, release, .release hoặc bộ cài cũ.
+
+Kiểm tra bắt buộc trên Windows trước stable
+npm.cmd install
+npm.cmd run verify:release
+npm.cmd run typecheck
+npm.cmd run lint
+npm.cmd run test
+npm.cmd run test:integration
+npm.cmd run dev
+
+Sau khi test thực tế đạt, đổi version 1.0.0-rc.1 thành 1.0.0 và build kênh stable.

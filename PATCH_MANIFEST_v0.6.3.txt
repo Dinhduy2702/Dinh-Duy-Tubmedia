@@ -1,0 +1,72 @@
+DOWNLOAD VIDEO TUBMEDIA v0.6.3 - PATCH MANIFEST
+
+Pham vi: tu dong ket noi cong cu, Viet hoa, luu/xoa ben vung, dieu khien toan ung dung, khong spam queue:remove.
+So tep them hoac thay doi: 59
+So tep bi xoa: 0
+
+TEP THEM HOAC THAY DOI:
+- APPLY_PATCH_v0.6.3_VI.txt
+- CHANGELOG.md
+- HOTFIX_v0.6.3_AUTO_TOOLS_GLOBAL_VI.md
+- PATCH_MANIFEST_v0.6.3.txt
+- VERIFICATION_v0.6.3.md
+- installer/video-studio-pro.nsi
+- package.json
+- src/main/app/app-context.ts
+- src/main/backups/backup-service.ts
+- src/main/clips/clip-engine.ts
+- src/main/cookies/cookie-service.ts
+- src/main/database/repositories/item-repository.ts
+- src/main/database/repositories/project-repository.ts
+- src/main/database/repositories/queue-repository.ts
+- src/main/downloader/download-engine.ts
+- src/main/index.ts
+- src/main/ipc/register-ipc.ts
+- src/main/media/file-verifier.ts
+- src/main/media/media-analyzer.ts
+- src/main/normalize/normalize-engine.ts
+- src/main/queue/queue-manager.ts
+- src/main/settings/defaults.ts
+- src/main/settings/hardware-service.ts
+- src/main/tools/tool-manager.ts
+- src/main/updates/app-update-service.ts
+- src/main/updates/tool-update-service.ts
+- src/main/workbench/workbench-service.ts
+- src/preload/api-types.ts
+- src/preload/index.ts
+- src/renderer/src/app/App.tsx
+- src/renderer/src/components/CookieManagerDialog.tsx
+- src/renderer/src/components/RendererErrorBoundary.tsx
+- src/renderer/src/components/StatusBadge.tsx
+- src/renderer/src/components/ToolReadinessPanel.tsx
+- src/renderer/src/components/TubmediaBrand.tsx
+- src/renderer/src/features/projects/CreateProjectDialog.tsx
+- src/renderer/src/features/projects/ImportLinksDialog.tsx
+- src/renderer/src/hooks/use-desktop-events.ts
+- src/renderer/src/layout/Sidebar.tsx
+- src/renderer/src/layout/Topbar.tsx
+- src/renderer/src/main.tsx
+- src/renderer/src/pages/AboutPage.tsx
+- src/renderer/src/pages/CachePage.tsx
+- src/renderer/src/pages/DashboardPage.tsx
+- src/renderer/src/pages/DownloadMergePage.tsx
+- src/renderer/src/pages/DownloadWorkbenchPage.tsx
+- src/renderer/src/pages/LogsPage.tsx
+- src/renderer/src/pages/ProjectsPage.tsx
+- src/renderer/src/pages/QueuePage.tsx
+- src/renderer/src/pages/SettingsPage.tsx
+- src/renderer/src/pages/ToolsPage.tsx
+- src/renderer/src/pages/UpdatesPage.tsx
+- src/renderer/src/utils/ui-error.ts
+- src/renderer/src/utils/vi-labels.ts
+- src/shared/constants/app.ts
+- src/shared/contracts/channels.ts
+- src/shared/schemas/ipc.ts
+- src/shared/types/domain.ts
+- tests/integration/database.test.ts
+
+KHONG CHUA:
+- node_modules
+- out
+- release
+- cac file EXE trong thu muc tool

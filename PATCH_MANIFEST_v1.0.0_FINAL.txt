@@ -1,0 +1,14 @@
+Tubmedia 1.0.0 FINAL
+
+Phiên bản ổn định chính thức sau chuỗi kiểm thử RC1–RC9.
+
+Điểm chốt phát hành:
+- Phiên bản package/app/installer: 1.0.0
+- Tên sản phẩm: Download video Tubmedia
+- App ID cố định: com.tubmedia.download-video
+- Installer dự kiến: Download video Tubmedia-Setup-1.0.0-x64.exe
+- Windows file version: 1.0.0.0
+- Gỡ cài đặt không xóa AppData và không xóa thư mục video đầu ra bên ngoài thư mục cài đặt
+- Cổng build: verify:release + verify:stable + typecheck + lint + unit + integration
+- Auto-update sẵn kiến trúc; cần máy chủ HTTPS để phát hành cập nhật trực tuyến
+- Sửa đồng bộ bài test release: không còn yêu cầu sai `dist = release:windows`; build chính thức cục bộ và pipeline phát hành cập nhật được kiểm tra tách biệt.

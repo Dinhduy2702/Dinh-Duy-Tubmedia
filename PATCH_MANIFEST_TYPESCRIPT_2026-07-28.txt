@@ -1,0 +1,7 @@
+Tubmedia runtime TypeScript correction
+
+Files:
+- src/main/downloader/download-engine.ts
+  Capture validated source.sourceFile as cachedPath so asynchronous cache recovery remains type-safe.
+- tests/unit/diagnostic-policy.test.ts
+  Omit optional projectId/jobId properties instead of assigning undefined under exactOptionalPropertyTypes.

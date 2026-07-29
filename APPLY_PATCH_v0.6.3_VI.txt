@@ -1,0 +1,30 @@
+DOWNLOAD VIDEO TUBMEDIA v0.6.3
+HUONG DAN AP DUNG BAN VA
+
+1. Dong ung dung va dung npm.cmd run dev bang Ctrl + C.
+2. Giai nen file PATCH v0.6.3.
+3. Chep TOAN BO NOI DUNG ben trong thu muc patch vao thu muc project hien tai.
+4. Chon Replace the files in the destination.
+5. Khong xoa thu muc tool. Ban va khong chua va khong ghi de cac file EXE trong tool.
+
+Thu muc project hien tai:
+C:\Users\Hi\Downloads\Video_Download_Merge_Studio_Pro_FOCUSED_v0.2.0_Source\video-download-merge-studio-pro-focused-v0.2.0
+
+LENH KIEM TRA:
+Remove-Item ".\out" -Recurse -Force -ErrorAction SilentlyContinue
+npm.cmd run check
+npm.cmd run dev
+
+KIEM TRA NHANH:
+- Mo app: cong cu tu dong ket noi, khong can bam Kiem tra lai.
+- Sua link/thu muc/ten: cho khoang 1 giay, dong va mo lai, du lieu moi phai duoc giu.
+- Xoa mot danh sach/quy trinh: mo lai app, du lieu cu khong duoc xuat hien lai.
+- Trang Tien trinh: Tam dung tat ca va Tiep tuc tat ca phai tac dong den ca tai video va tai-ghep.
+- Dung va xoa toan bo danh sach: xoa du lieu trong app nhung khong xoa video tren o dia.
+- Video cong khai: khong hien yeu cau cookies. Chi video thuc su yeu cau dang nhap moi thong bao.
+
+BUILD INSTALLER:
+npm.cmd run dist
+
+File du kien:
+release\Download video Tubmedia-Setup-0.6.3-x64.exe
