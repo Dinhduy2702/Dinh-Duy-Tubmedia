@@ -231,6 +231,7 @@ export const systemCleanupCategorySchema = z.enum([
 export const systemCleanupRequestSchema = z
   .object({
     mode: z.enum(['estimate', 'clean']),
+    scope: z.enum(['currentUser', 'wholeMachine']).default('currentUser'),
     categories: z.array(systemCleanupCategorySchema).min(1).max(12)
   })
   .strict();

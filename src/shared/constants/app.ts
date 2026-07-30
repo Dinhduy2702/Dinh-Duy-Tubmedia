@@ -1,6 +1,6 @@
 export const APP_NAME = 'Download video Tubmedia';
 export const APP_ID = 'com.tubmedia.download-video';
-export const APP_VERSION_LABEL = 'v1.2.3';
+export const APP_VERSION_LABEL = 'v1.2.8';
 export const APP_DEVELOPER = 'Đình Duy Tubmedia';
 export const APP_DEVELOPER_FIRST_NAME = 'Đình Duy';
 export const APP_DEVELOPER_BRAND = 'Tubmedia';

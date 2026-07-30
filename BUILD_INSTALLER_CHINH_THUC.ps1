@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Stop"
 Set-StrictMode -Version 2.0
 
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -18,12 +18,12 @@ function Run-Step {
 }
 
 $Package = Get-Content -LiteralPath (Join-Path $ProjectRoot "package.json") -Raw | ConvertFrom-Json
-if ([string]$Package.version -ne "1.2.3") {
-  throw ("Official installer requires package version 1.2.3, found " + [string]$Package.version)
+if ([string]$Package.version -ne "1.2.8") {
+  throw ("Official installer requires package version 1.2.8, found " + [string]$Package.version)
 }
 
 Write-Host "============================================================" -ForegroundColor Red
-Write-Host "  DOWNLOAD VIDEO TUBMEDIA 1.2.3 - OFFICIAL BUILD" -ForegroundColor Red
+Write-Host "  DOWNLOAD VIDEO TUBMEDIA 1.2.8 - OFFICIAL BUILD" -ForegroundColor Red
 Write-Host "============================================================" -ForegroundColor Red
 
 Run-Step "Install exact project dependencies" {
@@ -32,7 +32,7 @@ Run-Step "Install exact project dependencies" {
 Run-Step "Verify release architecture" {
   & npm.cmd run verify:release
 }
-Run-Step "Verify stable 1.2.3 identity" {
+Run-Step "Verify stable 1.2.8 identity" {
   & npm.cmd run verify:stable
 }
 Run-Step "Verify recovery, cookie and runtime behavior" {
@@ -58,7 +58,7 @@ Run-Step "Build official Windows installer" {
   & npm.cmd run dist:nsis-safe
 }
 
-$Installer = Join-Path $ProjectRoot "release\Download video Tubmedia-Setup-1.2.3-x64.exe"
+$Installer = Join-Path $ProjectRoot "release\Download video Tubmedia-Setup-1.2.8-x64.exe"
 $LatestYml = Join-Path $ProjectRoot "release\latest.yml"
 if (-not (Test-Path -LiteralPath $Installer)) {
   throw ("Official installer was not created: " + $Installer)
@@ -68,9 +68,9 @@ if (-not (Test-Path -LiteralPath $LatestYml)) {
 }
 
 $Hash = Get-FileHash -LiteralPath $Installer -Algorithm SHA256
-$HashFile = Join-Path $ProjectRoot "release\Download-video-Tubmedia-1.2.3-SHA256.txt"
+$HashFile = Join-Path $ProjectRoot "release\Download-video-Tubmedia-1.2.8-SHA256.txt"
 $HashContent = @(
-  "TUBMEDIA 1.2.3",
+  "TUBMEDIA 1.2.8",
   "File: " + (Split-Path -Leaf $Installer),
   "SHA-256: " + $Hash.Hash
 ) -join [Environment]::NewLine

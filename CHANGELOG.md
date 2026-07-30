@@ -1,3 +1,39 @@
+# Tubmedia 1.2.8
+
+- Sửa lỗi thêm link làm mốc thời lượng Tải nhanh bị đặt lại; hai mốc hiện được tự động lưu.
+
+- Đổi ô giờ trong ngày thành ô nhập mốc thời lượng video HH:MM:SS.
+- Loại bỏ AM/PM và giới hạn 24 giờ của input type=time.
+- Cho phép nhập số giờ lớn hơn 23 cho video dài.
+- Giữ nguyên state bắt đầu, kết thúc và quy trình cắt yt-dlp hiện tại.
+
+# Tubmedia 1.2.7
+
+- Sửa lỗi HTTP 403 khi kiểm tra bản phát hành aria2 và các công cụ trên GitHub.
+- Thêm User-Agent, Accept và phiên bản GitHub API đúng chuẩn.
+- Gộp các yêu cầu kiểm tra đang chạy và cache kết quả trong 30 phút để tránh gọi API lặp lại.
+- Tôn trọng Retry-After và X-RateLimit-Reset khi GitHub giới hạn yêu cầu.
+- Dùng trang phát hành GitHub làm nguồn dự phòng khi REST API bị giới hạn.
+- Không lưu token trong ứng dụng; chỉ dùng GITHUB_TOKEN hoặc GH_TOKEN khi người dùng đã tự cấu hình môi trường.
+
+# Tubmedia 1.2.5
+
+- Thêm mục Dọn dẹp máy riêng trên thanh menu trái.
+- Hiển thị dung lượng file rác theo từng hạng mục sau khi quét.
+- Phân loại mức độ an toàn: Rất an toàn, An toàn, Cần kiểm tra và Thay đổi hệ thống.
+- Đánh giá mức độ cần dọn dựa trên dung lượng tìm thấy.
+- Khóa nút xóa cho đến khi hoàn tất một lần quét đúng với phạm vi và hạng mục đang chọn.
+- Hiển thị dung lượng ổ đĩa trước/sau, số mục đã xử lý, bị khóa và lỗi.
+- Giữ danh sách đường dẫn cho phép và bảo vệ Desktop, Documents, Downloads, Videos, Zalo Received Files cùng dữ liệu dự án.
+
+# Tubmedia 1.2.4
+
+- Đổi hai ô bắt đầu và kết thúc sang bộ chọn thời gian trực quan có giờ, phút và giây.
+- Thêm Quét thông minh toàn bộ máy cho các vị trí Temp, cache, crash report và Thùng rác được cho phép.
+- Phạm vi toàn máy quét nhiều hồ sơ Windows và ổ đĩa cố định nhưng chỉ thống kê trước khi người dùng xác nhận dọn.
+- Giữ hàng rào an toàn: không quét xóa tùy tiện Desktop, Documents, Downloads, Pictures, Videos, Zalo Received Files hoặc dữ liệu dự án.
+- Bổ sung kiểm thử và verifier cho time picker, phạm vi wholeMachine và PowerShell helper.
+
 # Tubmedia 1.2.3
 
 - Sửa Trung tâm cập nhật: ghi chú phát hành dễ đọc và nút đúng trạng thái.
@@ -55,7 +91,9 @@
 - Sửa cổng chuẩn bị công cụ chỉ kiểm tra FFmpeg trong PATH nhưng không sao chép vào payload installer.
 - Bắt buộc yt-dlp, FFmpeg và FFprobe tồn tại vật lý trong thư mục `tool` trước khi đóng gói.
 - Thêm kiểm tra payload và unit test chống tái diễn.
+
 ## Tối ưu ghép và chuẩn hóa
+
 - Chuyển sang pipeline chuẩn hóa thông minh: phân tích nguồn song song, chỉ mã hóa clip lệch chuẩn.
 - Ghép trực tiếp bằng stream copy khi nguồn tương thích.
 - Khi chỉ khác container/timestamp, remux nhanh rồi ghép lại thay vì mã hóa toàn bộ.
@@ -65,12 +103,14 @@
 - Giữ đúng tỷ lệ, SAR 1:1 và không tạo viền đen ngoài ý muốn.
 
 ## Giao diện và tiến trình
+
 - Thiết kế lại thẻ nhận diện “Phát triển bởi Đình Duy · Tubmedia” với hệ chữ rõ, khoảng cách cân đối và responsive sạch.
 - Giữ toàn bộ sửa lỗi tiến trình, tab danh sách/quy trình, tooltip, trạng thái công cụ và nhớ đường dẫn từ 1.1.0.
 - Mọi hàng tiến trình đều có icon xóa cố định và hai lựa chọn: chỉ xóa khỏi danh sách hoặc xóa đúng tệp đầu ra.
 - Backend từ chối xóa thư mục khi người dùng chọn xóa tệp, tránh thao tác nguy hiểm ngoài ý muốn.
 
 ## Phát hành và cập nhật
+
 - Mặc định 2 quy trình ghép đồng thời; cấu hình tài nguyên vẫn cho phép giảm về 1 trên máy yếu.
 - Build kiểm tra thực thi yt-dlp, FFmpeg và FFprobe ngay trong payload cài đặt.
 - NSIS tự đóng ứng dụng cũ trước khi ghi đè và hỗ trợ `--force-run` từ updater.
@@ -198,7 +238,6 @@
 - Nếu Drive không cho phép tải bản gốc, ứng dụng dừng và báo quyền truy cập thay vì âm thầm lấy bản xem trước đã chuyển mã.
 - Chính sách cache mới `merge-google-drive-original-source-v5` tự vô hiệu hóa nguồn preview từ các bản cũ.
 - Giao diện khuyên dùng cấu hình `Tệp gốc Google Drive · giữ gần dung lượng nguồn`.
-
 
 ## 0.9.3 — Tải H.264/AAC như code tham chiếu và chống 500 MB còn 200 MB
 

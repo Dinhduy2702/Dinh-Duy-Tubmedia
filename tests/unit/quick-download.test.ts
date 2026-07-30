@@ -9,6 +9,7 @@ import { buildQuickDownloadArguments } from '../../src/main/download/quick-downl
 describe('quick download', () => {
   it('parses common timestamp formats', () => {
     expect(parseQuickDownloadTime('10:00')).toBe(600);
+    expect(parseQuickDownloadTime('00:10:00')).toBe(600);
     expect(parseQuickDownloadTime('01:02:03')).toBe(3723);
     expect(parseQuickDownloadTime('90')).toBe(90);
     expect(formatQuickDownloadTime(600)).toBe('10:00');

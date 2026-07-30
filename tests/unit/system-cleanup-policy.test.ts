@@ -15,6 +15,7 @@ describe('system cleanup policy', () => {
       })
     ).toEqual({
       mode: 'clean',
+      scope: 'currentUser',
       categories: ['userTemp', 'browserCache']
     });
 
@@ -36,9 +37,28 @@ describe('system cleanup policy', () => {
     expect(SYSTEM_CLEANUP_CATEGORIES.find((item) => item.id === 'recycleBin')?.defaultSelected).toBe(false);
   });
 
-  it('requests elevation only for administrator categories', () => {
+  it('requests elevation for administrator categories or a whole-machine scan', () => {
     expect(systemCleanupRequiresAdmin(['userTemp', 'browserCache'])).toBe(false);
     expect(systemCleanupRequiresAdmin(['windowsTemp'])).toBe(true);
+    expect(systemCleanupRequiresAdmin(['userTemp'], 'wholeMachine')).toBe(true);
+  });
+
+  it('accepts only the two fixed cleanup scopes', () => {
+    expect(
+      validateSystemCleanupRequest({
+        mode: 'estimate',
+        scope: 'wholeMachine',
+        categories: ['userTemp']
+      }).scope
+    ).toBe('wholeMachine');
+
+    expect(() =>
+      validateSystemCleanupRequest({
+        mode: 'estimate',
+        scope: 'entireDisk',
+        categories: ['userTemp']
+      })
+    ).toThrow();
   });
 
   it('recognizes irreversible selections', () => {

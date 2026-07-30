@@ -132,6 +132,7 @@ const registerIpc = read('src/main/ipc/register-ipc.ts');
 const preload = read('src/preload/index.ts');
 const apiTypes = read('src/preload/api-types.ts');
 const cachePage = read('src/renderer/src/pages/CachePage.tsx');
+const cleanupPanel = read('src/renderer/src/components/SystemCleanupPanel.tsx');
 const helper = read('resources/system-cleanup-helper.ps1');
 const cleanupSource = read('src/shared/system-cleanup.ts');
 const packageJson = JSON.parse(read('package.json'));
@@ -161,6 +162,18 @@ const checks = [
     /systemCleanup\s*:/.test(preload) && /systemCleanup\s*:/.test(apiTypes)
   ],
   ['cache page renders cleanup panel', /<SystemCleanupPanel\b/.test(cachePage)],
+  [
+    'cleanup UI exposes an explicit whole-machine scan',
+    cleanupPanel.includes('Quét thông minh toàn bộ máy') &&
+      cleanupPanel.includes('scope: requestScope') &&
+      cleanupSource.includes("'wholeMachine'")
+  ],
+  [
+    'helper scans only allowlisted cache locations across user profiles',
+    helper.includes('Get-UserProfileRoots') &&
+      helper.includes('Get-WholeMachineCacheTargets') &&
+      helper.includes('Get-CategoryTargets')
+  ],
   [
     'helper blocks broad roots',
     helper.includes('Assert-SafeTarget') && helper.includes('Đã chặn đường dẫn quá rộng/nguy hiểm')

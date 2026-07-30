@@ -31,7 +31,7 @@ function initialStatus(runId: string, request: SystemCleanupRequest): SystemClea
     removedBytes: 0,
     removedItems: 0,
     skippedItems: 0,
-    requiresAdmin: systemCleanupRequiresAdmin(request.categories),
+    requiresAdmin: systemCleanupRequiresAdmin(request.categories, request.scope),
     startedAt: new Date().toISOString(),
     completedAt: null,
     driveBefore: null,

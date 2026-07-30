@@ -2,7 +2,7 @@ export const SYSTEM_CLEANUP_CATEGORIES = [
   {
     id: 'userTemp',
     label: 'Tệp tạm của người dùng',
-    description: 'Dọn Temp của tài khoản Windows hiện tại.',
+    description: 'Dọn Temp tài khoản hiện tại; chế độ toàn máy quét mọi hồ sơ Windows.',
     group: 'safe',
     requiresAdmin: false,
     irreversible: false,
@@ -114,9 +114,11 @@ export const SYSTEM_CLEANUP_CATEGORIES = [
 export type SystemCleanupCategoryId = (typeof SYSTEM_CLEANUP_CATEGORIES)[number]['id'];
 
 export type SystemCleanupMode = 'estimate' | 'clean';
+export type SystemCleanupScope = 'currentUser' | 'wholeMachine';
 
 export interface SystemCleanupRequest {
   mode: SystemCleanupMode;
+  scope: SystemCleanupScope;
   categories: SystemCleanupCategoryId[];
 }
 
@@ -168,11 +170,18 @@ export function validateSystemCleanupRequest(value: unknown): SystemCleanupReque
 
   const candidate = value as {
     mode?: unknown;
+    scope?: unknown;
     categories?: unknown;
   };
 
   if (candidate.mode !== 'estimate' && candidate.mode !== 'clean') {
     throw new Error('Chế độ dọn dẹp không hợp lệ.');
+  }
+
+  const scope = candidate.scope ?? 'currentUser';
+
+  if (scope !== 'currentUser' && scope !== 'wholeMachine') {
+    throw new Error('Phạm vi quét hệ thống không hợp lệ.');
   }
 
   if (!Array.isArray(candidate.categories)) {
@@ -195,12 +204,19 @@ export function validateSystemCleanupRequest(value: unknown): SystemCleanupReque
 
   return {
     mode: candidate.mode,
+    scope,
     categories: [...unique]
   };
 }
 
-export function systemCleanupRequiresAdmin(categories: readonly SystemCleanupCategoryId[]): boolean {
-  return SYSTEM_CLEANUP_CATEGORIES.some((item) => categories.includes(item.id) && item.requiresAdmin);
+export function systemCleanupRequiresAdmin(
+  categories: readonly SystemCleanupCategoryId[],
+  scope: SystemCleanupScope = 'currentUser'
+): boolean {
+  return (
+    scope === 'wholeMachine' ||
+    SYSTEM_CLEANUP_CATEGORIES.some((item) => categories.includes(item.id) && item.requiresAdmin)
+  );
 }
 
 export function isIrreversibleCleanupSelection(categories: readonly SystemCleanupCategoryId[]): boolean {

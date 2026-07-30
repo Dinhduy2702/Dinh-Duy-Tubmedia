@@ -335,3 +335,14 @@
     display: none;
   }
 }
+
+.video-duration-input {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+  text-align: center;
+}
+
+.video-duration-input::placeholder {
+  color: var(--muted);
+  opacity: 0.72;
+}

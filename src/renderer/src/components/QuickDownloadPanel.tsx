@@ -18,8 +18,48 @@ export function QuickDownloadPanel(): ReactElement {
   const [url, setUrl] = useState('');
   const [outputDirectory, setOutputDirectory] = useState('');
   const [quality, setQuality] = useState<QuickDownloadQuality>('best');
-  const [startTime, setStartTime] = useState('10:00');
-  const [endTime, setEndTime] = useState('13:00');
+  const [startTime, setStartTime] = useState(() => {
+    try {
+      const stored = window.localStorage.getItem('tubmedia.quick-download.start-duration');
+
+      return stored && /^\d{2,4}:[0-5]\d:[0-5]\d$/.test(stored) ? stored : '00:10:00';
+    } catch {
+      return '00:10:00';
+    }
+  });
+  const [endTime, setEndTime] = useState(() => {
+    try {
+      const stored = window.localStorage.getItem('tubmedia.quick-download.end-duration');
+
+      return stored && /^\d{2,4}:[0-5]\d:[0-5]\d$/.test(stored) ? stored : '00:13:00';
+    } catch {
+      return '00:13:00';
+    }
+  });
+
+  useEffect(() => {
+    if (!/^\d{2,4}:[0-5]\d:[0-5]\d$/.test(startTime)) {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem('tubmedia.quick-download.start-duration', startTime);
+    } catch {
+      // Ignore unavailable renderer storage.
+    }
+  }, [startTime]);
+
+  useEffect(() => {
+    if (!/^\d{2,4}:[0-5]\d:[0-5]\d$/.test(endTime)) {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem('tubmedia.quick-download.end-duration', endTime);
+    } catch {
+      // Ignore unavailable renderer storage.
+    }
+  }, [endTime]);
   const [accurateCut, setAccurateCut] = useState(false);
   const [status, setStatus] = useState<QuickDownloadStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -150,7 +190,8 @@ export function QuickDownloadPanel(): ReactElement {
           <span className="quick-download-eyebrow">TẢI NHANH 1 VIDEO</span>
           <h2>Tải toàn bộ hoặc lấy riêng một đoạn</h2>
           <p>
-            Dán một liên kết, chọn chất lượng rồi tải toàn bộ video hoặc nhập mốc thời gian như 10:00 → 13:00.
+            Dán một liên kết, chọn chất lượng rồi tải toàn bộ video hoặc nhập mốc thời gian như 00:10:00 →
+            00:13:00.
           </p>
         </div>
 
@@ -198,20 +239,29 @@ export function QuickDownloadPanel(): ReactElement {
       <div className="quick-download-range-box">
         <div className="quick-download-range-head">
           <div>
-            <strong>Tải video theo khoảng thời gian</strong>
-            <small>Hỗ trợ MM:SS hoặc HH:MM:SS</small>
+            <strong>Tải video theo mốc thời lượng</strong>
+            <small>
+              Nhập thời lượng theo HH:MM:SS. Hai mốc được tự động lưu khi thêm link và khi mở lại ứng dụng
+            </small>
           </div>
-          <span>Ví dụ: 10:00 → 13:00</span>
+          <span>Ví dụ: 00:10:00 → 00:13:00</span>
         </div>
 
         <div className="quick-download-range-inputs">
           <label className="quick-download-field">
             <span>Bắt đầu</span>
             <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9:]*"
+              maxLength={10}
               value={startTime}
               disabled={running}
-              onChange={(event) => setStartTime(event.target.value)}
-              placeholder="10:00"
+              placeholder="00:10:00"
+              title="Mốc thời lượng bắt đầu theo định dạng Giờ:Phút:Giây"
+              aria-label="Mốc thời lượng bắt đầu"
+              className="video-duration-input"
+              onChange={(event) => setStartTime(event.target.value.replace(/[^0-9:]/g, ''))}
             />
           </label>
 
@@ -220,10 +270,17 @@ export function QuickDownloadPanel(): ReactElement {
           <label className="quick-download-field">
             <span>Kết thúc</span>
             <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9:]*"
+              maxLength={10}
               value={endTime}
               disabled={running}
-              onChange={(event) => setEndTime(event.target.value)}
-              placeholder="13:00"
+              placeholder="00:10:00"
+              title="Mốc thời lượng kết thúc theo định dạng Giờ:Phút:Giây"
+              aria-label="Mốc thời lượng kết thúc"
+              className="video-duration-input"
+              onChange={(event) => setEndTime(event.target.value.replace(/[^0-9:]/g, ''))}
             />
           </label>
 

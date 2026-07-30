@@ -1,6 +1,6 @@
 {
   "name": "video-download-merge-studio-pro",
-  "version": "1.2.3",
+  "version": "1.2.8",
   "description": "Tubmedia â€” á»©ng dá»¥ng táº£i video Ä‘a ná»n táº£ng vÃ  ghÃ©p video chuyÃªn nghiá»‡p, tá»‘i Æ°u giao diá»‡n, cáº­p nháº­t an toÃ n vÃ  kiáº¿n trÃºc phÃ¡t hÃ nh dÃ i háº¡n.",
   "main": "./out/main/index.js",
   "author": "Đình Duy Tubmedia",
@@ -49,7 +49,10 @@
     "verify:runtime-recovery-upgrade": "node scripts/verify-runtime-recovery-upgrade.mjs",
     "verify:update-center-ui": "node scripts/verify-update-center-ui.mjs",
     "verify:system-cleanup": "node scripts/verify-system-cleanup-integration.mjs",
-    "verify:quick-download": "node scripts/verify-quick-download-integration.mjs"
+    "verify:quick-download": "node scripts/verify-quick-download-integration.mjs",
+    "verify:cleanup-ui": "node scripts/verify-cleanup-navigation-ui.mjs",
+    "verify:tool-update-rate-limit": "node scripts/verify-tool-update-rate-limit.mjs",
+    "verify:duration-persistence": "node scripts/verify-duration-persistence.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

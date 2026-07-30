@@ -1,16 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
-import {
-  access,
-  copyFile,
-  mkdir,
-  readFile,
-  readdir,
-  rename,
-  rm,
-  stat,
-  writeFile
-} from 'node:fs/promises';
+import { access, copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -85,6 +75,245 @@ function cleanVersion(release: GitHubRelease): string {
   return (release.name || release.tag_name || String(release.id)).trim();
 }
 
+interface TubmediaCachedGitHubResponse {
+  body: string;
+  headers: Array<[string, string]>;
+  storedAt: number;
+}
+
+const TUBMEDIA_GITHUB_RELEASE_CACHE_TTL_MS = 30 * 60 * 1000;
+const tubmediaGitHubReleaseCache = new Map<string, TubmediaCachedGitHubResponse>();
+const tubmediaGitHubReleaseInflight = new Map<string, Promise<Response>>();
+const tubmediaGitHubBlockedUntil = new Map<string, number>();
+
+function tubmediaResponseFromCache(
+  cached: TubmediaCachedGitHubResponse,
+  cacheState: 'fresh' | 'stale' | 'html-fallback'
+): Response {
+  const headers = new Headers(cached.headers);
+  headers.set('x-tubmedia-release-cache', cacheState);
+
+  return new Response(cached.body, {
+    status: 200,
+    headers
+  });
+}
+
+function tubmediaDecodeHtmlAttribute(value: string): string {
+  return value.replaceAll('&amp;', '&').replaceAll('&#39;', "'").replaceAll('&quot;', '"');
+}
+
+async function tubmediaGitHubHtmlReleaseFallback(apiUrl: string): Promise<Response | null> {
+  const match = apiUrl.match(
+    /^https:\/\/api\.github\.com\/repos\/([^/]+)\/([^/]+)\/releases\/latest(?:\?.*)?$/
+  );
+
+  if (!match) {
+    return null;
+  }
+
+  const owner = match[1];
+  const repository = match[2];
+  const repositoryUrl = `https://github.com/${owner}/${repository}`;
+  const pageResponse = await fetch(`${repositoryUrl}/releases/latest`, {
+    redirect: 'follow',
+    headers: {
+      Accept: 'text/html',
+      'User-Agent': 'Download-video-Tubmedia/${targetVersion}'
+    }
+  });
+
+  if (!pageResponse.ok) {
+    return null;
+  }
+
+  const tagMatch = pageResponse.url.match(/\/releases\/tag\/([^/?#]+)/);
+
+  if (!tagMatch) {
+    return null;
+  }
+
+  const encodedTagName = tagMatch[1];
+
+  if (!encodedTagName) {
+    return null;
+  }
+
+  const tagName = decodeURIComponent(encodedTagName);
+  const assetsResponse = await fetch(
+    `${repositoryUrl}/releases/expanded_assets/${encodeURIComponent(tagName)}`,
+    {
+      headers: {
+        Accept: 'text/html',
+        'User-Agent': 'Download-video-Tubmedia/${targetVersion}'
+      }
+    }
+  );
+
+  if (!assetsResponse.ok) {
+    return null;
+  }
+
+  const assetsHtml = await assetsResponse.text();
+  const hrefPattern = /href="([^"]*\/releases\/download\/[^"]+)"/g;
+  const assetUrls = new Set<string>();
+
+  for (const assetMatch of assetsHtml.matchAll(hrefPattern)) {
+    const encodedHref = assetMatch[1];
+
+    if (!encodedHref) {
+      continue;
+    }
+
+    const decodedHref = tubmediaDecodeHtmlAttribute(encodedHref);
+    const absoluteUrl = new URL(decodedHref, repositoryUrl).toString();
+    assetUrls.add(absoluteUrl);
+  }
+
+  if (assetUrls.size === 0) {
+    return null;
+  }
+
+  const assets = [...assetUrls].map((downloadUrl) => {
+    const pathname = new URL(downloadUrl).pathname;
+    const encodedName = pathname.slice(pathname.lastIndexOf('/') + 1);
+
+    return {
+      name: decodeURIComponent(encodedName),
+      browser_download_url: downloadUrl,
+      size: 0,
+      content_type: 'application/octet-stream',
+      state: 'uploaded'
+    };
+  });
+
+  return new Response(
+    JSON.stringify({
+      tag_name: tagName,
+      name: tagName,
+      html_url: pageResponse.url,
+      published_at: new Date(0).toISOString(),
+      assets
+    }),
+    {
+      status: 200,
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'x-tubmedia-release-source': 'github-html'
+      }
+    }
+  );
+}
+
+function tubmediaGitHubRetryAt(response: Response): number {
+  const retryAfter = Number(response.headers.get('retry-after'));
+
+  if (Number.isFinite(retryAfter) && retryAfter > 0) {
+    return Date.now() + retryAfter * 1000;
+  }
+
+  const rateLimitReset = Number(response.headers.get('x-ratelimit-reset'));
+
+  if (Number.isFinite(rateLimitReset) && rateLimitReset > 0) {
+    return rateLimitReset * 1000;
+  }
+
+  return Date.now() + 60 * 1000;
+}
+
+async function tubmediaFetchGitHubRelease(
+  input: string | URL | Request,
+  init: RequestInit = {}
+): Promise<Response> {
+  const requestUrl = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+  const now = Date.now();
+  const cached = tubmediaGitHubReleaseCache.get(requestUrl);
+
+  if (cached && now - cached.storedAt < TUBMEDIA_GITHUB_RELEASE_CACHE_TTL_MS) {
+    return tubmediaResponseFromCache(cached, 'fresh');
+  }
+
+  const existingRequest = tubmediaGitHubReleaseInflight.get(requestUrl);
+
+  if (existingRequest) {
+    return (await existingRequest).clone();
+  }
+
+  const request = (async (): Promise<Response> => {
+    const blockedUntil = tubmediaGitHubBlockedUntil.get(requestUrl) ?? 0;
+
+    if (blockedUntil > Date.now() && cached) {
+      return tubmediaResponseFromCache(cached, 'stale');
+    }
+
+    const headers = new Headers(init.headers);
+    headers.set('Accept', 'application/vnd.github+json');
+    headers.set('X-GitHub-Api-Version', '2022-11-28');
+    headers.set('User-Agent', 'Download-video-Tubmedia/${targetVersion}');
+
+    const environmentToken = process.env.GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim();
+
+    if (environmentToken && !headers.has('Authorization')) {
+      headers.set('Authorization', `Bearer ${environmentToken}`);
+    }
+
+    const apiResponse = await fetch(input, {
+      ...init,
+      headers
+    });
+    const apiBody = await apiResponse.text();
+
+    if (apiResponse.ok) {
+      const stored: TubmediaCachedGitHubResponse = {
+        body: apiBody,
+        headers: [...apiResponse.headers.entries()],
+        storedAt: Date.now()
+      };
+
+      tubmediaGitHubReleaseCache.set(requestUrl, stored);
+
+      return tubmediaResponseFromCache(stored, 'fresh');
+    }
+
+    if (apiResponse.status === 403 || apiResponse.status === 429) {
+      tubmediaGitHubBlockedUntil.set(requestUrl, tubmediaGitHubRetryAt(apiResponse));
+
+      if (cached) {
+        return tubmediaResponseFromCache(cached, 'stale');
+      }
+
+      const htmlFallback = await tubmediaGitHubHtmlReleaseFallback(requestUrl);
+
+      if (htmlFallback) {
+        const fallbackBody = await htmlFallback.text();
+        const stored: TubmediaCachedGitHubResponse = {
+          body: fallbackBody,
+          headers: [...htmlFallback.headers.entries()],
+          storedAt: Date.now()
+        };
+
+        tubmediaGitHubReleaseCache.set(requestUrl, stored);
+
+        return tubmediaResponseFromCache(stored, 'html-fallback');
+      }
+    }
+
+    return new Response(apiBody, {
+      status: apiResponse.status,
+      statusText: apiResponse.statusText,
+      headers: apiResponse.headers
+    });
+  })();
+
+  tubmediaGitHubReleaseInflight.set(requestUrl, request);
+
+  try {
+    return (await request).clone();
+  } finally {
+    tubmediaGitHubReleaseInflight.delete(requestUrl);
+  }
+}
+
 export class ToolUpdateService {
   public constructor(
     private readonly tools: ToolManager,
@@ -95,21 +324,28 @@ export class ToolUpdateService {
   ) {}
 
   private async githubLatest(repository: string): Promise<GitHubRelease> {
-    const response = await fetch(`https://api.github.com/repos/${repository}/releases/latest`, {
-      headers: GITHUB_HEADERS,
-      signal: AbortSignal.timeout(RELEASE_REQUEST_TIMEOUT_MS)
-    });
+    const response = await tubmediaFetchGitHubRelease(
+      `https://api.github.com/repos/${repository}/releases/latest`,
+      {
+        headers: GITHUB_HEADERS,
+        signal: AbortSignal.timeout(RELEASE_REQUEST_TIMEOUT_MS)
+      }
+    );
     if (!response.ok) {
       throw new UpdateFailedError(`Không đọc được bản phát hành ${repository}: HTTP ${response.status}.`);
     }
-    const value = await response.json() as Partial<GitHubRelease>;
+    const value = (await response.json()) as Partial<GitHubRelease>;
     if (!value.id || !value.tag_name || !Array.isArray(value.assets)) {
       throw new UpdateFailedError(`Dữ liệu bản phát hành ${repository} không hợp lệ.`);
     }
     return value as GitHubRelease;
   }
 
-  private selectAsset(release: GitHubRelease, predicate: (asset: GitHubAsset) => boolean, label: string): GitHubAsset {
+  private selectAsset(
+    release: GitHubRelease,
+    predicate: (asset: GitHubAsset) => boolean,
+    label: string
+  ): GitHubAsset {
     const asset = release.assets.find(predicate);
     if (!asset) throw new UpdateFailedError(`Không tìm thấy gói Windows x64 cho ${label}.`);
     return asset;
@@ -117,13 +353,14 @@ export class ToolUpdateService {
 
   private async sourceForViaApi(packageName: ToolPackage): Promise<PackageSource> {
     if (process.platform !== 'win32' || process.arch !== 'x64') {
-      throw new UpdateFailedError('Bộ cập nhật tích hợp hiện hỗ trợ Windows x64. Hệ khác vẫn có thể cấu hình đường dẫn công cụ thủ công.');
+      throw new UpdateFailedError(
+        'Bộ cập nhật tích hợp hiện hỗ trợ Windows x64. Hệ khác vẫn có thể cấu hình đường dẫn công cụ thủ công.'
+      );
     }
 
     if (packageName === 'yt-dlp') {
-      const repository = this.settings.get().toolUpdateChannel === 'beta'
-        ? 'yt-dlp/yt-dlp-nightly-builds'
-        : 'yt-dlp/yt-dlp';
+      const repository =
+        this.settings.get().toolUpdateChannel === 'beta' ? 'yt-dlp/yt-dlp-nightly-builds' : 'yt-dlp/yt-dlp';
       const release = await this.githubLatest(repository);
       const asset = this.selectAsset(release, (item) => item.name === 'yt-dlp.exe', 'yt-dlp');
       return {
@@ -178,7 +415,13 @@ export class ToolUpdateService {
       };
       return {
         packageName,
-        release: { id: -1001, tag_name: 'latest-direct', name: 'latest-direct', published_at: null, assets: [asset] },
+        release: {
+          id: -1001,
+          tag_name: 'latest-direct',
+          name: 'latest-direct',
+          published_at: null,
+          assets: [asset]
+        },
         asset,
         version: 'latest-direct',
         archive: 'none',
@@ -188,12 +431,19 @@ export class ToolUpdateService {
     if (packageName === 'ffmpeg-suite') {
       const asset: GitHubAsset = {
         name: 'ffmpeg-master-latest-win64-gpl.zip',
-        browser_download_url: 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip',
+        browser_download_url:
+          'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip',
         size: 0
       };
       return {
         packageName,
-        release: { id: -1002, tag_name: 'latest-direct', name: 'latest-direct', published_at: null, assets: [asset] },
+        release: {
+          id: -1002,
+          tag_name: 'latest-direct',
+          name: 'latest-direct',
+          published_at: null,
+          assets: [asset]
+        },
         asset,
         version: 'latest-direct',
         archive: 'zip',
@@ -205,7 +455,9 @@ export class ToolUpdateService {
 
   private async sourceFor(packageName: ToolPackage): Promise<PackageSource> {
     if (process.platform !== 'win32' || process.arch !== 'x64') {
-      throw new UpdateFailedError('Bộ cập nhật tích hợp hiện hỗ trợ Windows x64. Hệ khác vẫn có thể cấu hình đường dẫn công cụ thủ công.');
+      throw new UpdateFailedError(
+        'Bộ cập nhật tích hợp hiện hỗ trợ Windows x64. Hệ khác vẫn có thể cấu hình đường dẫn công cụ thủ công.'
+      );
     }
     try {
       return await this.sourceForViaApi(packageName);
@@ -283,7 +535,9 @@ export class ToolUpdateService {
         const fileStat = await stat(path);
         if (fileStat.size <= 0) throw new UpdateFailedError(`${asset.name} tải về bị rỗng.`);
         if (asset.size > 0 && fileStat.size !== asset.size) {
-          throw new UpdateFailedError(`Dung lượng ${asset.name} không khớp (${fileStat.size}/${asset.size} byte).`);
+          throw new UpdateFailedError(
+            `Dung lượng ${asset.name} không khớp (${fileStat.size}/${asset.size} byte).`
+          );
         }
         return;
       } catch (error) {
@@ -306,7 +560,9 @@ export class ToolUpdateService {
   }
 
   private async sha256(path: string): Promise<string> {
-    return createHash('sha256').update(await readFile(path)).digest('hex');
+    return createHash('sha256')
+      .update(await readFile(path))
+      .digest('hex');
   }
 
   private async verifyDigest(asset: GitHubAsset, packagePath: string): Promise<void> {
@@ -354,7 +610,9 @@ export class ToolUpdateService {
         priority: 'below_normal'
       });
       if (result.code !== 0) {
-        throw new UpdateFailedError(`${name} mới không chạy được (mã thoát ${result.code}). ${result.stderrTail || result.stdoutTail}`);
+        throw new UpdateFailedError(
+          `${name} mới không chạy được (mã thoát ${result.code}). ${result.stderrTail || result.stdoutTail}`
+        );
       }
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
@@ -370,7 +628,9 @@ export class ToolUpdateService {
   private assertPackageIdle(packageName: ToolPackage): void {
     for (const name of toolsForPackage(packageName)) {
       if (this.processes.isToolActive(name)) {
-        throw new UpdateFailedError(`${name} đang được sử dụng. Hãy tạm dừng hoặc hoàn tất tác vụ trước khi cập nhật.`);
+        throw new UpdateFailedError(
+          `${name} đang được sử dụng. Hãy tạm dừng hoặc hoàn tất tác vụ trước khi cập nhật.`
+        );
       }
     }
   }
@@ -433,9 +693,10 @@ export class ToolUpdateService {
           }
         }
 
-        const validationTools = requiredOnly && packageName === 'ffmpeg-suite'
-          ? (['ffmpeg', 'ffprobe'] as ToolName[])
-          : toolsForPackage(packageName);
+        const validationTools =
+          requiredOnly && packageName === 'ffmpeg-suite'
+            ? (['ffmpeg', 'ffprobe'] as ToolName[])
+            : toolsForPackage(packageName);
         for (const toolName of validationTools) await this.tools.healthCheck(toolName);
         const broken = validationTools.filter((toolName) => !this.tools.get(toolName).available);
         if (broken.length > 0) {
@@ -456,7 +717,11 @@ export class ToolUpdateService {
           const destination = join(targetFolder, executableName);
           const backup = join(backupFolder, executableName);
           await rm(destination, { force: true });
-          try { await copyFile(backup, destination); } catch { /* File did not exist before update. */ }
+          try {
+            await copyFile(backup, destination);
+          } catch {
+            /* File did not exist before update. */
+          }
         }
         await this.tools.healthCheck();
         throw error;
@@ -531,6 +796,9 @@ export class ToolUpdateService {
     }
     await this.tools.healthCheck();
     const broken = toolsForPackage(packageName).filter((toolName) => !this.tools.get(toolName).available);
-    if (broken.length > 0) throw new RollbackFailedError(`Đã khôi phục phiên bản trước nhưng bước kiểm tra vẫn lỗi: ${broken.join(', ')}.`);
+    if (broken.length > 0)
+      throw new RollbackFailedError(
+        `Đã khôi phục phiên bản trước nhưng bước kiểm tra vẫn lỗi: ${broken.join(', ')}.`
+      );
   }
 }

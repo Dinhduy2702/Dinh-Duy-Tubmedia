@@ -14,7 +14,15 @@ import type {
 } from '@shared/types/domain';
 
 export type PageId =
-  'download-workbench' | 'download-merge' | 'activity' | 'tools' | 'updates' | 'logs' | 'settings' | 'about';
+  | 'download-workbench'
+  | 'download-merge'
+  | 'activity'
+  | 'tools'
+  | 'cleanup'
+  | 'updates'
+  | 'logs'
+  | 'settings'
+  | 'about';
 
 interface State {
   ready: boolean;
