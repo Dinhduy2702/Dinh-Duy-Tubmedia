@@ -246,10 +246,15 @@ export const quickDownloadRequestSchema = z
     url: z.string().trim().min(1).max(4096),
     outputDirectory: pathSchema,
     quality: z.enum(['best', '1080p', '720p', '480p']),
+    mediaMode: z.enum(['video-audio', 'audio-only', 'video-only']).default('video-audio'),
     mode: z.enum(['full', 'range']),
     startTime: z.string().trim().max(32).optional(),
     endTime: z.string().trim().max(32).optional(),
-    accurateCut: z.boolean().default(false)
+    accurateCut: z.boolean().default(false),
+    downloadSubtitles: z.boolean().default(false),
+    subtitleLanguage: z.string().trim().max(64).default('vi,en'),
+    downloadThumbnail: z.boolean().default(false),
+    writeMetadata: z.boolean().default(false)
   })
   .strict();
 export const quickDownloadTaskSchema = z

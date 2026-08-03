@@ -195,6 +195,7 @@ export class ProcessManager {
   private readonly active = new Map<string, Managed>();
   public constructor(private readonly logger: Logger) {}
   public count(): number { return this.active.size; }
+  public hasJob(jobId: string): boolean { return [...this.active.values()].some((item) => item.jobId === jobId); }
   public isToolActive(tool: string): boolean { return [...this.active.values()].some((item) => item.tool === tool); }
   public async run(options: ProcessRunOptions): Promise<ProcessResult> {
     const id = randomUUID();

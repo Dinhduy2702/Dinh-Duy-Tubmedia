@@ -21,11 +21,11 @@ describe('lưu mốc thời lượng Tải nhanh', () => {
     expect(panel).toContain('^\\d{2,4}:[0-5]\\d:[0-5]\\d$');
   });
 
-  it('giữ nguyên phiên bản 1.2.8', () => {
+  it('giữ nguyên phiên bản 1.3.0', () => {
     const packageJson = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as {
       version: string;
     };
 
-    expect(packageJson.version).toBe('1.2.8');
+    expect(packageJson.version).toBe('1.3.0');
   });
 });

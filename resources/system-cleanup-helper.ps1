@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
     [string]$RequestPath,
@@ -40,6 +40,19 @@ foreach ($Category in $Selected) {
 
 if ($Request.mode -notin @("estimate", "clean")) {
     throw "Chế độ không hợp lệ."
+}
+
+$Scope = if (
+    $Request.PSObject.Properties.Name -contains "scope"
+) {
+    [string]$Request.scope
+}
+else {
+    "currentUser"
+}
+
+if ($Scope -notin @("currentUser", "wholeMachine")) {
+    throw "Phạm vi quét không hợp lệ."
 }
 
 $Status = Get-Content -LiteralPath $StatusPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -157,6 +170,231 @@ function Assert-SafeTarget {
     }
 
     return $Resolved
+}
+
+function Get-UserProfileRoots {
+    if ($Scope -ne "wholeMachine") {
+        return @($env:USERPROFILE)
+    }
+
+    $UsersRoot = Join-Path $env:SystemDrive "Users"
+
+    if (-not (Test-Path -LiteralPath $UsersRoot -PathType Container)) {
+        return @($env:USERPROFILE)
+    }
+
+    $BlockedNames = @(
+        "All Users",
+        "Default",
+        "Default User",
+        "Public",
+        "defaultuser0",
+        "WDAGUtilityAccount"
+    )
+
+    $Profiles = @(
+        Get-ChildItem `
+            -LiteralPath $UsersRoot `
+            -Directory `
+            -Force `
+            -ErrorAction SilentlyContinue |
+            Where-Object {
+                $BlockedNames -notcontains $_.Name -and
+                (Test-Path -LiteralPath (Join-Path $_.FullName "AppData") -PathType Container)
+            } |
+            ForEach-Object {
+                $_.FullName
+            }
+    )
+
+    if ($Profiles.Count -eq 0) {
+        return @($env:USERPROFILE)
+    }
+
+    return $Profiles
+}
+
+function Get-FixedDriveRoots {
+    $Roots = @(
+        Get-CimInstance `
+            -ClassName Win32_LogicalDisk `
+            -Filter "DriveType=3" `
+            -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                ([string]$_.DeviceID).TrimEnd("\") + "\"
+            }
+    )
+
+    if ($Roots.Count -eq 0) {
+        return @($env:SystemDrive + "\")
+    }
+
+    return $Roots
+}
+
+function New-CleanupTarget {
+    param(
+        [string]$Path,
+        [string[]]$Patterns = @("*"),
+        [bool]$DeleteSubdirectories = $true
+    )
+
+    return [pscustomobject]@{
+        Path = $Path
+        Patterns = $Patterns
+        DeleteSubdirectories = $DeleteSubdirectories
+    }
+}
+
+function Get-WholeMachineCacheTargets {
+    param([string]$Category)
+
+    if ($Scope -ne "wholeMachine") {
+        return @()
+    }
+
+    $Targets = @()
+
+    foreach ($ProfileRoot in @(Get-UserProfileRoots)) {
+        $LocalRoot = Join-Path $ProfileRoot "AppData\Local"
+        $RoamingRoot = Join-Path $ProfileRoot "AppData\Roaming"
+
+        switch ($Category) {
+            "userTemp" {
+                $Targets += New-CleanupTarget -Path (Join-Path $LocalRoot "Temp")
+            }
+
+            "thumbnailCache" {
+                $Targets += New-CleanupTarget `
+                    -Path (Join-Path $LocalRoot "Microsoft\Windows\Explorer") `
+                    -Patterns @("thumbcache_*.db", "iconcache_*.db") `
+                    -DeleteSubdirectories $false
+            }
+
+            "crashReports" {
+                $Targets += New-CleanupTarget -Path (Join-Path $LocalRoot "CrashDumps")
+            }
+
+            "browserCache" {
+                foreach ($BrowserRoot in @(
+                    (Join-Path $LocalRoot "Google\Chrome\User Data"),
+                    (Join-Path $LocalRoot "Microsoft\Edge\User Data")
+                )) {
+                    if (-not (Test-Path -LiteralPath $BrowserRoot -PathType Container)) {
+                        continue
+                    }
+
+                    foreach ($BrowserProfile in @(
+                        Get-ChildItem `
+                            -LiteralPath $BrowserRoot `
+                            -Directory `
+                            -Force `
+                            -ErrorAction SilentlyContinue |
+                            Where-Object {
+                                $_.Name -eq "Default" -or
+                                $_.Name -like "Profile *"
+                            }
+                    )) {
+                        foreach ($Relative in @(
+                            "Cache",
+                            "Code Cache",
+                            "GPUCache",
+                            "DawnCache",
+                            "GrShaderCache"
+                        )) {
+                            $Targets += New-CleanupTarget `
+                                -Path (Join-Path $BrowserProfile.FullName $Relative)
+                        }
+                    }
+                }
+            }
+
+            "capcutCache" {
+                foreach ($Candidate in @(
+                    (Join-Path $LocalRoot "CapCut\User Data\Cache"),
+                    (Join-Path $LocalRoot "CapCut\User Data\Code Cache"),
+                    (Join-Path $LocalRoot "CapCut\User Data\GPUCache"),
+                    (Join-Path $LocalRoot "CapCut\User Data\ShaderCache"),
+                    (Join-Path $LocalRoot "CapCut\Cache"),
+                    (Join-Path $LocalRoot "CapCut\Temp"),
+                    (Join-Path $LocalRoot "CapCut\Logs"),
+                    (Join-Path $LocalRoot "CapCut\Crashpad"),
+                    (Join-Path $RoamingRoot "CapCut\Cache"),
+                    (Join-Path $RoamingRoot "CapCut\Temp"),
+                    (Join-Path $RoamingRoot "CapCut\Logs"),
+                    (Join-Path $LocalRoot "ByteDance\Cache"),
+                    (Join-Path $LocalRoot "ByteDance\Temp"),
+                    (Join-Path $LocalRoot "ByteDance\Logs"),
+                    (Join-Path $LocalRoot "Temp\CapCut"),
+                    (Join-Path $LocalRoot "Temp\ByteDance")
+                )) {
+                    $Targets += New-CleanupTarget -Path $Candidate
+                }
+            }
+
+            "zaloCache" {
+                foreach ($Candidate in @(
+                    (Join-Path $LocalRoot "Zalo\Cache"),
+                    (Join-Path $LocalRoot "Zalo\Temp"),
+                    (Join-Path $LocalRoot "Zalo\Logs"),
+                    (Join-Path $RoamingRoot "Zalo\Cache"),
+                    (Join-Path $RoamingRoot "Zalo\Temp"),
+                    (Join-Path $RoamingRoot "Zalo\Logs"),
+                    (Join-Path $LocalRoot "Programs\Zalo\temp"),
+                    (Join-Path $LocalRoot "Programs\Zalo\logs"),
+                    (Join-Path $LocalRoot "ZaloPC\Cache"),
+                    (Join-Path $LocalRoot "ZaloPC\temp"),
+                    (Join-Path $LocalRoot "ZaloPC\logs"),
+                    (Join-Path $RoamingRoot "ZaloPC\Cache"),
+                    (Join-Path $RoamingRoot "ZaloPC\temp"),
+                    (Join-Path $RoamingRoot "ZaloPC\logs")
+                )) {
+                    $Targets += New-CleanupTarget -Path $Candidate
+                }
+            }
+        }
+    }
+
+    if ($Category -eq "crashReports") {
+        foreach ($SystemCrashPath in @(
+            (Join-Path $env:WINDIR "Minidump"),
+            (Join-Path $env:ProgramData "Microsoft\Windows\WER\ReportArchive"),
+            (Join-Path $env:ProgramData "Microsoft\Windows\WER\ReportQueue"),
+            (Join-Path $env:ProgramData "Microsoft\Windows\WER\Temp")
+        )) {
+            $Targets += New-CleanupTarget -Path $SystemCrashPath
+        }
+    }
+
+    return @(
+        $Targets |
+            Group-Object Path |
+            ForEach-Object {
+                $_.Group[0]
+            }
+    )
+}
+
+function Get-CategoryTargets {
+    param([string]$Category)
+
+    $ProfileCategories = @(
+        "userTemp",
+        "thumbnailCache",
+        "crashReports",
+        "browserCache",
+        "capcutCache",
+        "zaloCache"
+    )
+
+    if (
+        $Scope -eq "wholeMachine" -and
+        $ProfileCategories -contains $Category
+    ) {
+        return @(Get-WholeMachineCacheTargets -Category $Category)
+    }
+
+    return @(Get-CacheTargets -Category $Category)
 }
 
 function Get-CacheTargets {
@@ -412,7 +650,7 @@ function Invoke-CacheCategory {
         errors = New-Object System.Collections.ArrayList
     }
 
-    foreach ($Target in @(Get-CacheTargets -Category $Category)) {
+    foreach ($Target in @(Get-CategoryTargets -Category $Category)) {
         Test-Cancelled
 
         try {
@@ -425,6 +663,51 @@ function Invoke-CacheCategory {
             foreach ($ErrorText in @($Result.errors)) {
                 [void]$Summary.errors.Add([string]$ErrorText)
             }
+        }
+        catch {
+            [void]$Summary.errors.Add($_.Exception.Message)
+        }
+    }
+
+    return $Summary
+}
+
+function Invoke-RecycleBinCleanup {
+    param([bool]$Delete)
+
+    $Summary = @{
+        estimatedBytes = 0L
+        removedBytes = 0L
+        removedItems = 0
+        skippedItems = 0
+        errors = New-Object System.Collections.ArrayList
+    }
+
+    $DriveRoots = if ($Scope -eq "wholeMachine") {
+        @(Get-FixedDriveRoots)
+    }
+    else {
+        @($env:SystemDrive + "\")
+    }
+
+    foreach ($DriveRoot in $DriveRoots) {
+        $RecyclePath = Join-Path $DriveRoot '$Recycle.Bin'
+        $Target = New-CleanupTarget -Path $RecyclePath
+
+        try {
+            $Result = Process-Target -Target $Target -Delete $false
+            $Summary.estimatedBytes += [int64]$Result.estimatedBytes
+        }
+        catch {
+            [void]$Summary.errors.Add($_.Exception.Message)
+        }
+    }
+
+    if ($Delete) {
+        try {
+            Clear-RecycleBin -Force -ErrorAction Stop
+            $Summary.removedBytes = [int64]$Summary.estimatedBytes
+            $Summary.removedItems = 1
         }
         catch {
             [void]$Summary.errors.Add($_.Exception.Message)
@@ -503,7 +786,7 @@ try {
         Save-Status `
             -Phase $Phase `
             -Progress $Progress `
-            -Message "$ActionText: $Category" `
+            -Message "${ActionText}: $Category" `
             -CurrentCategory $Category
 
         $Delete = $Request.mode -eq "clean"
@@ -514,23 +797,7 @@ try {
             }
 
             "recycleBin" {
-                $Summary = @{
-                    estimatedBytes = 0L
-                    removedBytes = 0L
-                    removedItems = 0
-                    skippedItems = 0
-                    errors = @()
-                }
-
-                if ($Delete) {
-                    try {
-                        Clear-RecycleBin -Force -ErrorAction Stop
-                        $Summary.removedItems = 1
-                    }
-                    catch {
-                        $Summary.errors = @($_.Exception.Message)
-                    }
-                }
+                $Summary = Invoke-RecycleBinCleanup -Delete $Delete
             }
 
             "componentStore" {
@@ -598,7 +865,7 @@ try {
         [void]$Results.Add($Result)
 
         foreach ($ErrorText in @($Result.errors)) {
-            [void]$GlobalErrors.Add("$Category: $ErrorText")
+            [void]$GlobalErrors.Add("${Category}: $ErrorText")
         }
 
         $Processed++

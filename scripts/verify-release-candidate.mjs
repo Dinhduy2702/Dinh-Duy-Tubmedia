@@ -184,14 +184,23 @@ check(
 );
 check(
   'RC7 keeps long progress and log details out of fixed-height rows',
-  has('src/renderer/src/components/CompactDetail.tsx', 'createPortal(') &&
-    has('src/renderer/src/components/CompactDetail.tsx', 'onMouseEnter={openFromHover}') &&
-    has('src/renderer/src/pages/QueuePage.tsx', 'queue-message-compact') &&
-    has(
-      'src/renderer/src/pages/QueuePage.tsx',
-      'const discloseMessage = Boolean(issue || (messageDetail && messageDetail.length > 72))'
-    ) &&
-    has('src/renderer/src/pages/QueuePage.tsx', '<StatusBadge status={job.status} fixed/>') &&
+  (
+    (
+      has('src/renderer/src/components/CompactDetail.tsx', 'createPortal(') &&
+      has('src/renderer/src/components/CompactDetail.tsx', 'onMouseEnter={openFromHover}') &&
+      has('src/renderer/src/pages/QueuePage.tsx', 'queue-message-compact') &&
+      has(
+        'src/renderer/src/pages/QueuePage.tsx',
+        'const discloseMessage = Boolean(issue || (messageDetail && messageDetail.length > 72))'
+      )
+    ) ||
+    (
+      has('src/renderer/src/pages/QueuePage.tsx', 'useVirtualTableWindow') &&
+      has('src/renderer/src/pages/QueuePage.tsx', 'queue-detail-drawer') &&
+      has('src/renderer/src/pages/QueuePage.tsx', 'detailJob.errorMessage')
+    )
+  ) &&
+    has('src/renderer/src/pages/QueuePage.tsx', '<StatusBadge status={job.status} fixed') &&
     has('src/renderer/src/pages/LogsPage.tsx', 'logs-message-compact') &&
     has('src/renderer/src/components/CompactLogRow.tsx', 'log-row-message') &&
     has('src/renderer/src/tubmedia-theme.css', '/* v1.0.0 RC7 — tiến trình và nhật ký gọn') &&

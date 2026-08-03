@@ -14,9 +14,12 @@ import type {
 } from '@shared/types/domain';
 
 export type PageId =
+  | 'editor-home'
   | 'download-workbench'
   | 'download-merge'
   | 'activity'
+  | 'history'
+  | 'diagnostics'
   | 'tools'
   | 'cleanup'
   | 'updates'
@@ -109,7 +112,7 @@ function mergeLogs(current: LogEntry[], entries: LogEntry[]): LogEntry[] {
 export const useAppStore = create<State>((set, get) => ({
   ready: false,
   loading: false,
-  page: 'download-workbench',
+  page: 'editor-home',
   projects: [],
   jobs: [],
   tools: [],

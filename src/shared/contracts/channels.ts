@@ -107,9 +107,12 @@ export const IPC = {
   },
   quickDownload: {
     defaults: 'quick-download:defaults',
+    current: 'quick-download:current',
     chooseDirectory: 'quick-download:choose-directory',
     start: 'quick-download:start',
     status: 'quick-download:status',
+    pause: 'quick-download:pause',
+    resume: 'quick-download:resume',
     cancel: 'quick-download:cancel',
     revealOutput: 'quick-download:reveal-output'
   },

@@ -1,4 +1,22 @@
+# Tubmedia 1.3.0
+
+- Thiết kế lại không gian làm việc theo mô hình Editor Studio, nhóm điều hướng rõ ràng và giảm khối giao diện cố định không tương tác.
+- Thêm trang Tổng quan Editor với số liệu thật từ hàng đợi, công cụ, ổ đĩa và lối tắt tới các workflow đang hoạt động.
+- Thêm Lịch sử chuyên dụng có tìm kiếm, lọc trạng thái và xuất CSV/JSON cục bộ.
+- Thêm Chẩn đoán chuyên dụng tổng hợp công cụ, tài nguyên máy, lỗi gần nhất và thao tác kiểm tra lại.
+- Nâng cấp nhập nguồn TXT/CSV, kéo thả, chuẩn hóa dữ liệu và loại liên kết trùng trước khi đưa vào dự án.
+- Nâng cấp hàng đợi với tìm kiếm, lọc trạng thái, chọn nhiều, thao tác hàng loạt và cửa sổ hóa danh sách lớn.
+- Giữ nguyên cơ chế Quick Download, chống ghi đè, xác minh media, Smart Merge, ProcessManager và các lớp bảo mật đang hoạt động tốt.
+- Sửa quality gate để phân biệt source sạch với workspace đã sinh .tsbuildinfo.
+
 # Tubmedia 1.2.8
+
+- Khôi phục đầy đủ source Tải nhanh và bộ cài đã bị công cụ nén loại nhầm.
+- Tải nhanh dùng chung ProcessManager, ToolManager và FileVerifier; hỗ trợ pause/resume/cancel cây tiến trình thật.
+- Tác vụ Tải nhanh chỉ hoàn thành sau khi file đầu ra vượt qua xác minh media.
+- Chặn hai yêu cầu Tải nhanh đồng thời và giữ lịch sử tác vụ bị gián đoạn sau khi ứng dụng khởi động lại.
+- Thêm source completeness gate để chặn thiếu import, installer, asset, dependency, secret và version không đồng bộ.
+- Thêm script nén source 1.2.8 không loại nhầm thư mục installer hoặc src/main/download.
 
 - Sửa lỗi thêm link làm mốc thời lượng Tải nhanh bị đặt lại; hai mốc hiện được tự động lưu.
 

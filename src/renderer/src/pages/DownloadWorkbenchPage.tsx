@@ -311,7 +311,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
       await Promise.all([refreshJobs(), refreshProjects()]);
       notify(
         `Danh sách ${laneNumber(slot)} đã bắt đầu`,
-        `${profile.downloadWorkers} video tối đa trong danh sách này; toàn ứng dụng không vượt ${settings?.maxGlobalDownloadWorkers ?? 4} video tải đồng thời.`
+        `${profile.downloadWorkers} video tối đa trong danh sách này; danh sách bắt đầu độc lập và chạy song song, không phải chờ danh sách khác.`
       );
     } catch (error) {
       setError(messageOf(error));
@@ -519,7 +519,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
       );
       notify(
         'Đã áp dụng cấu hình khuyến nghị',
-        `${laneCount} danh sách · ${plan.workersPerList} luồng tải mỗi danh sách · ${plan.globalWorkers} luồng tải toàn ứng dụng.`
+        `${laneCount} danh sách độc lập · ${plan.workersPerList} luồng tải mỗi danh sách · tối đa ${laneCount * plan.workersPerList} video có thể chạy song song.`
       );
     } catch (error) {
       setError(messageOf(error));
@@ -551,7 +551,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
       setSettings(next);
       notify(
         'Đã áp dụng chuẩn đa nền tảng 1080p',
-        'H.264/MP4, 720p–1080p, fallback thông minh, aria2c 16 kết nối, 2 fragment và tối đa 2 video tải đồng thời toàn ứng dụng.'
+        'H.264/MP4, 720p–1080p, fallback thông minh, aria2c 16 kết nối và 2 fragment cho mỗi video; mỗi danh sách vẫn chạy độc lập.'
       );
     } catch (error) {
       setError(messageOf(error));
@@ -564,7 +564,10 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
       <header className="page-heading">
         <div>
           <h1>Tải danh sách đa nền tảng</h1>
-          <p>Nhiều danh sách độc lập, bỏ qua theo link và kiểm tra tệp trước khi hoàn tất.</p>
+          <p>
+            Mỗi danh sách bắt đầu độc lập và chạy song song; bỏ qua theo link và kiểm tra tệp trước khi hoàn
+            tất.
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
@@ -715,7 +718,7 @@ function PreflightPanel({
       icon={Gauge}
       title="Thiết lập tải đang dùng"
       summary={qualityLabel(settings)}
-      status={plan ? `${plan.workersPerList}/danh sách · ${plan.globalWorkers} tổng` : 'Đang nhận diện máy'}
+      status={plan ? `${plan.workersPerList}/danh sách · chạy song song độc lập` : 'Đang nhận diện máy'}
       tone="info"
       actions={
         <>
@@ -757,7 +760,7 @@ function PreflightPanel({
           title="Khuyến nghị"
           value={
             plan
-              ? `${plan.workersPerList} luồng tải/danh sách · ${plan.globalWorkers} tổng`
+              ? `${plan.workersPerList} luồng tải/danh sách · tối đa ${laneCount * plan.workersPerList} song song`
               : 'Chưa đọc cấu hình máy'
           }
         />

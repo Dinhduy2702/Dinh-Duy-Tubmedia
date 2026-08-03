@@ -152,7 +152,7 @@ export function Topbar(): React.JSX.Element {
       <button className="btn btn-primary topbar-pause" disabled={busy || queueSummary.controllableCount === 0} onClick={() => void toggle()}>
         {busy ? <LoaderCircle className="animate-spin" size={17}/> : queueSummary.allPaused ? <Play size={17}/> : <Pause size={17}/>}<span>{queueSummary.allPaused ? 'Tiếp tục tất cả' : 'Tạm dừng tất cả'}</span>
       </button>
-      <button className="btn btn-ghost topbar-icon-button" title="Mở nhật ký" aria-label="Mở nhật ký" onClick={() => setPage('logs')}><Bell size={18}/></button>
+      <button className="btn btn-ghost topbar-icon-button" title="Mở chẩn đoán" aria-label="Mở chẩn đoán" onClick={() => setPage('diagnostics')}><Bell size={18}/></button>
     </div>
   </header>;
 }

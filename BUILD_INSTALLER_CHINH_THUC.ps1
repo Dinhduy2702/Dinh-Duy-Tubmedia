@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 Set-StrictMode -Version 2.0
 
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -18,22 +18,46 @@ function Run-Step {
 }
 
 $Package = Get-Content -LiteralPath (Join-Path $ProjectRoot "package.json") -Raw | ConvertFrom-Json
-if ([string]$Package.version -ne "1.2.8") {
-  throw ("Official installer requires package version 1.2.8, found " + [string]$Package.version)
+if ([string]$Package.version -ne "1.3.0") {
+  throw ("Official installer requires package version 1.3.0, found " + [string]$Package.version)
 }
 
 Write-Host "============================================================" -ForegroundColor Red
-Write-Host "  DOWNLOAD VIDEO TUBMEDIA 1.2.8 - OFFICIAL BUILD" -ForegroundColor Red
+Write-Host "  DOWNLOAD VIDEO TUBMEDIA 1.3.0 - OFFICIAL BUILD" -ForegroundColor Red
 Write-Host "============================================================" -ForegroundColor Red
 
+Run-Step "Verify clean source completeness" {
+  & node scripts/verify-source-completeness.mjs --root $ProjectRoot --strict-clean
+}
 Run-Step "Install exact project dependencies" {
-  & npm.cmd install
+  & npm.cmd ci
 }
+Run-Step "Verify installed workspace completeness" {
+  & npm.cmd run verify:source-completeness
+}
+
 Run-Step "Verify release architecture" {
   & npm.cmd run verify:release
 }
-Run-Step "Verify stable 1.2.8 identity" {
+Run-Step "Verify stable 1.3.0 identity" {
   & npm.cmd run verify:stable
+}
+Run-Step "Verify audit, Quick Download and cleanup gates" {
+  & npm.cmd run verify:audit-hardening
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  & npm.cmd run verify:audit-behavior
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  & npm.cmd run verify:quick-download
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  & npm.cmd run verify:editor-workflows
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  & npm.cmd run verify:duration-persistence
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  & npm.cmd run verify:tool-update-rate-limit
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  & npm.cmd run verify:cleanup-ui
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  & npm.cmd run verify:system-cleanup
 }
 Run-Step "Verify recovery, cookie and runtime behavior" {
   & npm.cmd run verify:recovery-upgrade
@@ -54,11 +78,17 @@ Run-Step "Unit tests" {
 Run-Step "Integration tests" {
   & npm.cmd run test:integration
 }
+Run-Step "Production build" {
+  & npm.cmd run build
+}
+Run-Step "Electron E2E smoke test" {
+  & npm.cmd run test:e2e
+}
 Run-Step "Build official Windows installer" {
   & npm.cmd run dist:nsis-safe
 }
 
-$Installer = Join-Path $ProjectRoot "release\Download video Tubmedia-Setup-1.2.8-x64.exe"
+$Installer = Join-Path $ProjectRoot "release\Download video Tubmedia-Setup-1.3.0-x64.exe"
 $LatestYml = Join-Path $ProjectRoot "release\latest.yml"
 if (-not (Test-Path -LiteralPath $Installer)) {
   throw ("Official installer was not created: " + $Installer)
@@ -68,9 +98,9 @@ if (-not (Test-Path -LiteralPath $LatestYml)) {
 }
 
 $Hash = Get-FileHash -LiteralPath $Installer -Algorithm SHA256
-$HashFile = Join-Path $ProjectRoot "release\Download-video-Tubmedia-1.2.8-SHA256.txt"
+$HashFile = Join-Path $ProjectRoot "release\Download-video-Tubmedia-1.3.0-SHA256.txt"
 $HashContent = @(
-  "TUBMEDIA 1.2.8",
+  "TUBMEDIA 1.3.0",
   "File: " + (Split-Path -Leaf $Installer),
   "SHA-256: " + $Hash.Hash
 ) -join [Environment]::NewLine

@@ -1,0 +1,16 @@
+{
+  "packages": {
+    "yt-dlp": {
+      "releaseId": 349050911,
+      "version": "yt-dlp 2026.07.04",
+      "installedAt": "2026-07-24T04:05:39.081Z",
+      "sourceUrl": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.07.04/yt-dlp.exe"
+    },
+    "ffmpeg-suite": {
+      "releaseId": 358754455,
+      "version": "Latest Auto-Build (2026-07-23 14:16)",
+      "installedAt": "2026-07-24T04:06:35.979Z",
+      "sourceUrl": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+    }
+  }
+}

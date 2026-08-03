@@ -10,7 +10,7 @@ const base = spawnSync(process.execPath, ['scripts/verify-release-candidate.mjs'
 });
 if (base.status !== 0) process.exit(base.status ?? 1);
 
-const expectedVersion = '1.2.8';
+const expectedVersion = '1.3.0';
 const packageJson = JSON.parse(await read('package.json'));
 const packageLock = JSON.parse(await read('package-lock.json'));
 const constants = await read('src/shared/constants/app.ts');
@@ -30,14 +30,14 @@ const confirmDialog = await read('src/renderer/src/components/ConfirmDialog.tsx'
 const preloadApi = await read('src/preload/index.ts');
 
 const checks = [
-  ['package version 1.2.8', packageJson.version === expectedVersion],
+  ['package version 1.3.0', packageJson.version === expectedVersion],
   [
-    'package-lock version 1.2.8',
+    'package-lock version 1.3.0',
     packageLock.version === expectedVersion && packageLock.packages?.['']?.version === expectedVersion
   ],
-  ['renderer label v1.2.8', constants.includes("APP_VERSION_LABEL = 'v1.2.8'")],
-  ['changelog 1.2.8 first', changelog.startsWith('# Tubmedia 1.2.8')],
-  ['official build targets 1.2.8', buildScript.includes('Download video Tubmedia-Setup-1.2.8-x64.exe')],
+  ['renderer label v1.3.0', constants.includes("APP_VERSION_LABEL = 'v1.3.0'")],
+  ['changelog 1.3.0 first', changelog.startsWith('# Tubmedia 1.3.0')],
+  ['official build targets 1.3.0', buildScript.includes('Download video Tubmedia-Setup-1.3.0-x64.exe')],
   [
     'GitHub updater configured',
     Array.isArray(packageJson.build?.publish) && packageJson.build.publish[0]?.provider === 'github'
@@ -81,10 +81,11 @@ const checks = [
     queue.includes("const finalStage = completionStatus === 'skipped' ? 'Đã tải trước đó' : 'Đã hoàn tất'") &&
       queue.includes('progressPhases: progressPhases')
   ],
-  ['queue sorted by status', queuePage.includes('return rank(a) - rank(b)')],
+  ['queue sorted by status', /return\s+rank\((?:a|left)\)\s*-\s*rank\((?:b|right)\)/.test(queuePage)],
   [
     'queue has expand details',
-    queuePage.includes('Mở chi tiết tiến trình') && queuePage.includes('queue-detail-row')
+    queuePage.includes('Mở chi tiết tiến trình') &&
+      (queuePage.includes('queue-detail-row') || queuePage.includes('queue-detail-drawer'))
   ],
   ['queue has universal delete', queuePage.includes('title="Xóa tác vụ"')],
   [
@@ -125,8 +126,8 @@ const checks = [
 ];
 const failed = checks.filter(([, ok]) => !ok);
 if (failed.length) {
-  console.error('Tubmedia 1.2.8 stable verification failed:');
+  console.error('Tubmedia 1.3.0 stable verification failed:');
   for (const [name] of failed) console.error(`- ${name}`);
   process.exit(1);
 }
-console.log(`Tubmedia 1.2.8 stable verification OK: ${checks.length} checks.`);
+console.log(`Tubmedia 1.3.0 stable verification OK: ${checks.length} checks.`);

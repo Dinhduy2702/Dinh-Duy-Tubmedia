@@ -47,7 +47,9 @@ export class SystemCleanupService {
   private readonly runRoot = join(app.getPath('userData'), 'system-cleanup-runs');
 
   public isActive(): boolean {
-    return this.activeRunId !== null;
+    if (!this.activeRunId) return false;
+    if (!this.activeProcess) return true;
+    return this.activeProcess.exitCode === null && !this.activeProcess.killed;
   }
 
   public async start(rawRequest: unknown): Promise<SystemCleanupStatus> {

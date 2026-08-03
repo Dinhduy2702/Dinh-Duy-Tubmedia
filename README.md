@@ -1,4 +1,4 @@
-# Download video Tubmedia 1.2.0
+# Download video Tubmedia 1.2.8
 
 Ứng dụng desktop Windows tập trung vào hai workflow:
 
@@ -42,7 +42,8 @@ Lỗi tool, hết dung lượng, quyền thư mục hoặc lỗi mạng/CDN lặ
 ## Chạy source trên Windows
 
 ```powershell
-npm.cmd install
+npm.cmd ci
+npm.cmd run verify:source-completeness
 npm.cmd run doctor:windows
 npm.cmd run check
 npm.cmd run dev
@@ -54,7 +55,7 @@ Tạo installer ổn định chính thức:
 npm.cmd run dist:official
 ```
 
-Installer được tạo tại `release\Download video Tubmedia-Setup-1.2.0-x64.exe`.
+Installer được tạo tại `release\Download video Tubmedia-Setup-1.2.8-x64.exe`.
 
 Installer nằm trong `release\`.
 

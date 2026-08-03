@@ -47,13 +47,11 @@ import { redactSecrets } from '@shared/utils/secret-redaction.js';
 import type { AppContext } from '../app/app-context.js';
 
 import { SystemCleanupService } from '../system/system-cleanup-service.js';
-import { QuickDownloadService } from '../download/quick-download-service.js';
 type MaybePromise<T> = T | Promise<T>;
 
 export function registerIpc(ctx: AppContext): void {
   // TUBMEDIA_FEATURE_SERVICES
   const systemCleanup = new SystemCleanupService();
-  const quickDownload = new QuickDownloadService();
 
   const handle = <Input, Output>(
     channel: string,
@@ -76,6 +74,7 @@ export function registerIpc(ctx: AppContext): void {
   const configureCookies = async <Output>(action: () => MaybePromise<Output>): Promise<Output> => {
     const result = await action();
     ctx.queue.resumeCookieBlockedJobs();
+    await ctx.quickDownload.retryCookieBlocked();
     return result;
   };
 
@@ -240,8 +239,14 @@ export function registerIpc(ctx: AppContext): void {
 
   noArgs(IPC.queue.list, () => ctx.queue.list());
   handle(IPC.queue.enqueueProject, projectIdSchema, ({ projectId }) => ctx.queue.enqueueProject(projectId));
-  noArgs(IPC.queue.pauseAll, () => ctx.queue.pauseAll());
-  noArgs(IPC.queue.resumeAll, () => ctx.queue.resumeAll());
+  noArgs(IPC.queue.pauseAll, async () => {
+    await ctx.queue.pauseAll();
+    await ctx.quickDownload.pauseActive();
+  });
+  noArgs(IPC.queue.resumeAll, async () => {
+    await ctx.queue.resumeAll();
+    await ctx.quickDownload.resumeActive();
+  });
   handle(IPC.queue.pause, jobIdSchema, ({ jobId }) => ctx.queue.pause(jobId));
   handle(IPC.queue.resume, jobIdSchema, ({ jobId }) => ctx.queue.resume(jobId));
   handle(IPC.queue.cancel, jobIdSchema, ({ jobId }) => ctx.queue.cancel(jobId));
@@ -352,8 +357,8 @@ export function registerIpc(ctx: AppContext): void {
   );
   handle(IPC.backups.preview, showPathSchema, ({ path }) => ctx.backups.preview(path));
   handle(IPC.backups.restore, backupRestoreSchema, ({ path, mode }) => {
-    if (ctx.queue.activeCount() > 0 || ctx.processes.count() > 0) {
-      throw new InvalidInputError('Không thể phục hồi khi còn tác vụ hoặc tiến trình đang chạy.');
+    if (ctx.queue.activeCount() > 0 || ctx.processes.count() > 0 || ctx.quickDownload.isActive()) {
+      throw new InvalidInputError('Không thể phục hồi khi còn tác vụ, tiến trình hoặc Tải nhanh đang chạy.');
     }
     const result = ctx.backups.restore(path, mode);
     setTimeout(() => {
@@ -365,7 +370,7 @@ export function registerIpc(ctx: AppContext): void {
 
   // TUBMEDIA_SYSTEM_CLEANUP_HANDLERS
   handle(IPC.systemCleanup.start, systemCleanupRequestSchema, (request) => {
-    if (ctx.queue.activeCount() > 0 || ctx.processes.count() > 0 || quickDownload.isActive()) {
+    if (ctx.queue.activeCount() > 0 || ctx.processes.count() > 0 || ctx.quickDownload.isActive()) {
       throw new InvalidInputError(
         'Không thể dọn dẹp khi Tubmedia còn tác vụ tải, cắt, chuẩn hóa, ghép hoặc tải nhanh đang chạy.'
       );
@@ -377,8 +382,9 @@ export function registerIpc(ctx: AppContext): void {
 
   // TUBMEDIA_QUICK_DOWNLOAD_HANDLERS
   noArgs(IPC.quickDownload.defaults, () => ({
-    outputDirectory: quickDownload.defaultOutputDirectory()
+    outputDirectory: ctx.quickDownload.defaultOutputDirectory()
   }));
+  noArgs(IPC.quickDownload.current, () => ctx.quickDownload.currentStatus());
   handle(IPC.quickDownload.chooseDirectory, chooseFolderSchema, async ({ defaultPath }) => {
     const result = await dialog.showOpenDialog({
       ...(defaultPath ? { defaultPath } : {}),
@@ -390,17 +396,19 @@ export function registerIpc(ctx: AppContext): void {
     return selected;
   });
   handle(IPC.quickDownload.start, quickDownloadRequestSchema, (request) => {
-    if (systemCleanup.isActive() || ctx.queue.activeCount() > 0 || ctx.processes.count() > 0) {
+    if (systemCleanup.isActive()) {
       throw new InvalidInputError(
-        'Hãy tạm dừng tác vụ đang chạy hoặc chờ dọn dẹp hoàn tất trước khi dùng Tải nhanh 1 video.'
+        'Dọn dẹp hệ thống đang chạy. Hãy chờ dọn dẹp kết thúc hoặc hủy tác vụ dọn dẹp trước khi tải video.'
       );
     }
-    return quickDownload.start(request);
+    return ctx.quickDownload.start(request);
   });
-  handle(IPC.quickDownload.status, quickDownloadTaskSchema, ({ taskId }) => quickDownload.status(taskId));
-  handle(IPC.quickDownload.cancel, quickDownloadTaskSchema, ({ taskId }) => quickDownload.cancel(taskId));
+  handle(IPC.quickDownload.status, quickDownloadTaskSchema, ({ taskId }) => ctx.quickDownload.status(taskId));
+  handle(IPC.quickDownload.pause, quickDownloadTaskSchema, ({ taskId }) => ctx.quickDownload.pause(taskId));
+  handle(IPC.quickDownload.resume, quickDownloadTaskSchema, ({ taskId }) => ctx.quickDownload.resume(taskId));
+  handle(IPC.quickDownload.cancel, quickDownloadTaskSchema, ({ taskId }) => ctx.quickDownload.cancel(taskId));
   handle(IPC.quickDownload.revealOutput, quickDownloadTaskSchema, ({ taskId }) =>
-    quickDownload.revealOutput(taskId)
+    ctx.quickDownload.revealOutput(taskId)
   );
 
   noArgs(IPC.updates.status, () => ctx.appUpdates.getStatus());

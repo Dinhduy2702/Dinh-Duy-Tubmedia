@@ -9,6 +9,9 @@ import { DiagnosticDock } from '../components/DiagnosticDock';
 import { TubmediaMark } from '../components/TubmediaBrand';
 import { friendlyIssue } from '../utils/ui-error';
 
+const EditorHomePage = lazy(() =>
+  import('../pages/EditorHomePage').then((module) => ({ default: module.EditorHomePage }))
+);
 const DownloadWorkbenchPage = lazy(() =>
   import('../pages/DownloadWorkbenchPage').then((module) => ({ default: module.DownloadWorkbenchPage }))
 );
@@ -16,6 +19,12 @@ const DownloadMergePage = lazy(() =>
   import('../pages/DownloadMergePage').then((module) => ({ default: module.DownloadMergePage }))
 );
 const QueuePage = lazy(() => import('../pages/QueuePage').then((module) => ({ default: module.QueuePage })));
+const HistoryPage = lazy(() =>
+  import('../pages/HistoryPage').then((module) => ({ default: module.HistoryPage }))
+);
+const DiagnosticsPage = lazy(() =>
+  import('../pages/DiagnosticsPage').then((module) => ({ default: module.DiagnosticsPage }))
+);
 const ToolsPage = lazy(() => import('../pages/ToolsPage').then((module) => ({ default: module.ToolsPage })));
 const SystemCleanupPage = lazy(() =>
   import('../pages/SystemCleanupPage').then((module) => ({ default: module.SystemCleanupPage }))
@@ -178,9 +187,12 @@ export function App(): React.JSX.Element {
         <DiagnosticDock />
         <main className="app-main scroll min-h-0 flex-1 overflow-auto">
           <Suspense fallback={<PageLoader />}>
+            {page === 'editor-home' && <EditorHomePage />}
             {page === 'download-workbench' && <DownloadWorkbenchPage />}
             {page === 'download-merge' && <DownloadMergePage />}
             {page === 'activity' && <QueuePage mode="all" />}
+            {page === 'history' && <HistoryPage />}
+            {page === 'diagnostics' && <DiagnosticsPage />}
             {page === 'tools' && <ToolsPage />}
             {page === 'cleanup' && <SystemCleanupPage />}
             {page === 'updates' && <UpdatesPage />}

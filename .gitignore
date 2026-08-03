@@ -12,3 +12,16 @@ playwright-report/
 
 .release/
 verification-logs/
+dist/
+.vite/
+.tubmedia-patches/
+*.tsbuildinfo
+installer/generated-config.nsh
+tool/*.exe
+tool/*.dll
+tool/*.zip
+tool/*.7z
+tool/*.part
+npm-debug.log*
+.DS_Store
+Thumbs.db

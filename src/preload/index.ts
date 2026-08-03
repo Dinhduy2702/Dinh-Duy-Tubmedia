@@ -117,10 +117,13 @@ const api: DesktopApi = {
   },
   quickDownload: {
     defaults: () => invoke(IPC.quickDownload.defaults),
+    current: () => invoke(IPC.quickDownload.current),
     chooseDirectory: (currentDirectory) =>
       invoke(IPC.quickDownload.chooseDirectory, currentDirectory ? { defaultPath: currentDirectory } : {}),
     start: (input) => invoke(IPC.quickDownload.start, input),
     status: (taskId) => invoke(IPC.quickDownload.status, { taskId }),
+    pause: (taskId) => invoke(IPC.quickDownload.pause, { taskId }),
+    resume: (taskId) => invoke(IPC.quickDownload.resume, { taskId }),
     cancel: (taskId) => invoke(IPC.quickDownload.cancel, { taskId }),
     revealOutput: (taskId) => invoke(IPC.quickDownload.revealOutput, { taskId })
   },

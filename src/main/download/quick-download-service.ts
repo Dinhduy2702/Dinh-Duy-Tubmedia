@@ -1,24 +1,46 @@
 import { app, shell } from 'electron';
-import { spawn, execFile, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { access, mkdir, readdir, rm, stat } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { constants as fsConstants } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { validateQuickDownloadRequest, type QuickDownloadStatus } from '@shared/quick-download.js';
+import { access, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { constants as fsConstants, existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import {
+  validateQuickDownloadRequest,
+  type QuickDownloadErrorCode,
+  type QuickDownloadStatus,
+  type ValidatedQuickDownloadRequest
+} from '@shared/quick-download.js';
+import { ProcessCancelledError, ToolNotFoundError } from '@shared/errors/app-errors.js';
+import { hasConfiguredCookies } from '@shared/utils/cookie-policy.js';
+import type { FileVerifier } from '../media/file-verifier.js';
+import type { Logger } from '../logging/logger.js';
+import type { ProcessManager } from '../processes/process-manager.js';
+import type { SettingsService } from '../settings/settings-service.js';
+import type { ToolManager } from '../tools/tool-manager.js';
 import { buildQuickDownloadArguments } from './quick-download-command.js';
+
+interface PersistedQuickDownloadState {
+  version: 1;
+  statuses: QuickDownloadStatus[];
+}
 
 interface ActiveQuickTask {
   status: QuickDownloadStatus;
-  process: ChildProcessWithoutNullStreams;
+  request: ValidatedQuickDownloadRequest;
+  controller: AbortController;
   tempDirectory: string;
   outputToken: string;
-  stdoutBuffer: string;
-  stderrBuffer: string;
+  runToken: string;
+  cookiesAttached: boolean;
   recentLines: string[];
+  done: Promise<void>;
 }
 
-const TERMINAL_PHASES = new Set(['completed', 'cancelled', 'failed']);
+const TERMINAL_PHASES = new Set<QuickDownloadStatus['phase']>([
+  'completed',
+  'cancelled',
+  'failed',
+  'interrupted'
+]);
 
 function cloneStatus(status: QuickDownloadStatus): QuickDownloadStatus {
   return {
@@ -34,86 +56,230 @@ function parseByteValue(value: string): number {
 
 function parseProgressPercent(value: string): number {
   const parsed = Number.parseFloat(value.replace('%', '').trim());
-
-  if (!Number.isFinite(parsed)) {
-    return 0;
-  }
-
+  if (!Number.isFinite(parsed)) return 0;
   return Math.max(0, Math.min(99.5, parsed));
 }
 
-function execFileAsync(file: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    execFile(
-      file,
-      args,
-      {
-        windowsHide: true,
-        encoding: 'utf8',
-        maxBuffer: 4 * 1024 * 1024
-      },
-      (error, stdout, stderr) => {
-        if (error) {
-          reject(new Error(error.message));
-          return;
-        }
+function classifyCookieFailure(lines: string[], cookiesAttached: boolean): QuickDownloadErrorCode | null {
+  const lower = lines.join('\n').toLowerCase();
 
-        resolve({
-          stdout: String(stdout),
-          stderr: String(stderr)
-        });
-      }
-    );
-  });
+  if (
+    lower.includes('could not copy chrome cookie database') ||
+    lower.includes('cookie database is locked') ||
+    (lower.includes('permission denied') && lower.includes('cookie'))
+  ) {
+    return 'BROWSER_COOKIE_DATABASE_LOCKED';
+  }
+
+  if (
+    /sign in|login required|confirm (?:you(?:'|’)?re|you are) not a bot|not a bot|cookies-from-browser|use --cookies|authentication|members.only|age.restricted|account required/.test(
+      lower
+    )
+  ) {
+    return cookiesAttached ? 'COOKIES_EXPIRED' : 'AUTHENTICATION_REQUIRED';
+  }
+
+  return null;
+}
+
+function cookieFailureMessage(code: QuickDownloadErrorCode): string {
+  if (code === 'BROWSER_COOKIE_DATABASE_LOCKED') {
+    return 'Trình duyệt đang khóa dữ liệu đăng nhập. Hãy đóng hoàn toàn trình duyệt hoặc dùng Dán cookies / Chọn tệp cookies.txt; Tải nhanh sẽ tự tiếp tục sau khi cập nhật.';
+  }
+
+  if (code === 'COOKIES_EXPIRED') {
+    return 'Cookies hiện tại đã hết hạn hoặc không còn được YouTube chấp nhận. Hãy cập nhật cookies mới; Tải nhanh sẽ tự tiếp tục tác vụ này.';
+  }
+
+  return 'Video yêu cầu đăng nhập để xác nhận bạn không phải bot. Hãy mở Cookies và chọn một trong ba cách cấu hình; Tải nhanh sẽ tự tiếp tục sau khi lưu.';
+}
+
+function isPersistedState(value: unknown): value is PersistedQuickDownloadState {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<PersistedQuickDownloadState>;
+  return candidate.version === 1 && Array.isArray(candidate.statuses);
 }
 
 export class QuickDownloadService {
   private activeTask: ActiveQuickTask | null = null;
   private readonly statuses = new Map<string, QuickDownloadStatus>();
+  private persistTail: Promise<void> = Promise.resolve();
+  private startTail: Promise<void> = Promise.resolve();
+  private readonly statePath: string;
+  private readonly tempRoot: string;
+  private cookieBlockedRequest: ValidatedQuickDownloadRequest | null = null;
+
+  public constructor(
+    private readonly processes: ProcessManager,
+    private readonly tools: ToolManager,
+    private readonly verifier: FileVerifier,
+    private readonly logger: Logger,
+    stateDirectory: string,
+    private readonly settings?: SettingsService
+  ) {
+    this.statePath = join(stateDirectory, 'state.json');
+    this.tempRoot = join(stateDirectory, 'temp');
+  }
+
+  private cookieSettings(): {
+    cookiesFilePath: string;
+    cookiesBrowser: 'none' | 'chrome' | 'edge' | 'firefox';
+    cookiesBrowserProfile: string;
+  } {
+    const settings = this.settings?.get();
+    return settings
+      ? {
+          cookiesFilePath: settings.cookiesFilePath,
+          cookiesBrowser: settings.cookiesBrowser,
+          cookiesBrowserProfile: settings.cookiesBrowserProfile
+        }
+      : {
+          cookiesFilePath: '',
+          cookiesBrowser: 'none',
+          cookiesBrowserProfile: ''
+        };
+  }
 
   public isActive(): boolean {
     return Boolean(this.activeTask && !TERMINAL_PHASES.has(this.activeTask.status.phase));
+  }
+
+  public currentStatus(): QuickDownloadStatus | null {
+    const active = this.activeTask?.status;
+    if (active) return cloneStatus(active);
+
+    const latest = [...this.statuses.values()].sort(
+      (left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt)
+    )[0];
+    return latest ? cloneStatus(latest) : null;
+  }
+
+  public async pauseActive(): Promise<QuickDownloadStatus | null> {
+    const taskId = this.activeTask?.status.taskId;
+    return taskId ? this.pause(taskId) : null;
+  }
+
+  public async resumeActive(): Promise<QuickDownloadStatus | null> {
+    const taskId = this.activeTask?.status.taskId;
+    return taskId ? this.resume(taskId) : null;
+  }
+
+  public async cancelActive(): Promise<QuickDownloadStatus | null> {
+    const taskId = this.activeTask?.status.taskId;
+    return taskId ? this.cancel(taskId) : null;
   }
 
   public defaultOutputDirectory(): string {
     return app.getPath('downloads');
   }
 
+  public async recover(): Promise<void> {
+    await mkdir(dirname(this.statePath), { recursive: true });
+    const raw = await readFile(this.statePath, 'utf8').catch(() => null);
+    if (!raw) return;
+
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (!isPersistedState(parsed)) return;
+
+      for (const stored of parsed.statuses.slice(-30)) {
+        const recovered = cloneStatus({
+          ...stored,
+          mediaMode: (stored as Partial<QuickDownloadStatus>).mediaMode ?? 'video-audio',
+          errorCode: (stored as Partial<QuickDownloadStatus>).errorCode ?? null
+        });
+        if (!TERMINAL_PHASES.has(recovered.phase)) {
+          recovered.phase = 'interrupted';
+          recovered.message =
+            'Tác vụ Tải nhanh bị gián đoạn khi ứng dụng đóng. Hãy kiểm tra file hiện có rồi tải lại khi cần.';
+          recovered.error = 'Tác vụ trước đó chưa hoàn tất.';
+          recovered.completedAt = new Date().toISOString();
+        }
+        this.statuses.set(recovered.taskId, recovered);
+      }
+      this.pruneStatuses();
+      await this.persist();
+    } catch (error) {
+      this.logger.warn(
+        'quick-download',
+        'QUICK_DOWNLOAD_STATE_RECOVERY_FAILED',
+        `Không thể đọc trạng thái Tải nhanh cũ: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
   public async start(rawRequest: unknown): Promise<QuickDownloadStatus> {
+    return this.enqueueStart(rawRequest, false);
+  }
+
+  public async retryCookieBlocked(): Promise<QuickDownloadStatus | null> {
+    const request = this.cookieBlockedRequest;
+    if (!request || !hasConfiguredCookies(this.cookieSettings())) {
+      return this.currentStatus();
+    }
+
+    if (this.isActive()) return this.currentStatus();
+    this.cookieBlockedRequest = null;
+    return this.enqueueStart(request, true);
+  }
+
+  private async enqueueStart(rawRequest: unknown, forceCookies: boolean): Promise<QuickDownloadStatus> {
+    const previousStart = this.startTail;
+    let releaseStart!: () => void;
+    this.startTail = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+
+    await previousStart;
+
+    try {
+      return await this.startLocked(rawRequest, forceCookies);
+    } finally {
+      releaseStart();
+    }
+  }
+
+  private async startLocked(rawRequest: unknown, forceCookies: boolean): Promise<QuickDownloadStatus> {
     const request = validateQuickDownloadRequest(rawRequest);
 
-    if (this.activeTask && !TERMINAL_PHASES.has(this.activeTask.status.phase)) {
-      throw new Error(
-        'MÃƒÂ¡Ã‚Â»Ã¢â€žÂ¢t video Ãƒâ€žÃ¢â‚¬Ëœang Ãƒâ€žÃ¢â‚¬ËœÃƒâ€ Ã‚Â°ÃƒÂ¡Ã‚Â»Ã‚Â£c tÃƒÂ¡Ã‚ÂºÃ‚Â£i nhanh. HÃƒÆ’Ã‚Â£y chÃƒÂ¡Ã‚Â»Ã‚Â hoÃƒÆ’Ã‚Â n tÃƒÂ¡Ã‚ÂºÃ‚Â¥t hoÃƒÂ¡Ã‚ÂºÃ‚Â·c hÃƒÂ¡Ã‚Â»Ã‚Â§y tÃƒÆ’Ã‚Â¡c vÃƒÂ¡Ã‚Â»Ã‚Â¥ hiÃƒÂ¡Ã‚Â»Ã¢â‚¬Â¡n tÃƒÂ¡Ã‚ÂºÃ‚Â¡i.'
-      );
+    if (this.isActive()) {
+      throw new Error('Một video đang được tải nhanh. Hãy chờ hoàn tất hoặc hủy tác vụ hiện tại.');
     }
 
     await this.assertWritableDirectory(request.outputDirectory);
+    await this.tools.ensureRequiredReady();
 
-    const tools = this.resolveTools();
+    const ytDlp = this.tools.get('yt-dlp');
+    const ffmpeg = this.tools.get('ffmpeg');
+    const ffprobe = this.tools.get('ffprobe');
+
+    for (const tool of [ytDlp, ffmpeg, ffprobe]) {
+      if (!tool.available || !tool.executablePath) {
+        throw new ToolNotFoundError(tool.name);
+      }
+    }
+
+    const ytDlpPath = ytDlp.executablePath;
+    const ffmpegPath = ffmpeg.executablePath;
+    if (!ytDlpPath || !ffmpegPath) {
+      throw new Error('Đường dẫn công cụ Tải nhanh chưa sẵn sàng.');
+    }
+
     const taskId = randomUUID();
     const outputToken = taskId.replaceAll('-', '').slice(0, 12);
     const runToken = `${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}` + `-${outputToken}`;
-    const tempDirectory = join(app.getPath('temp'), 'TubmediaQuickDownload', taskId);
-
+    const tempDirectory = join(this.tempRoot, taskId);
     await mkdir(tempDirectory, { recursive: true });
-
-    const args = buildQuickDownloadArguments(request, {
-      ffmpegDirectory: dirname(tools.ffmpeg),
-      tempDirectory,
-      runToken
-    });
 
     const status: QuickDownloadStatus = {
       taskId,
       mode: request.mode,
+      mediaMode: request.mediaMode,
       phase: 'preparing',
       progress: 0,
       title: '',
       message:
-        request.mode === 'range'
-          ? 'Ãƒâ€žÃ‚Âang chuÃƒÂ¡Ã‚ÂºÃ‚Â©n bÃƒÂ¡Ã‚Â»Ã¢â‚¬Â¹ tÃƒÂ¡Ã‚ÂºÃ‚Â£i Ãƒâ€žÃ¢â‚¬ËœoÃƒÂ¡Ã‚ÂºÃ‚Â¡n video.'
-          : 'Ãƒâ€žÃ‚Âang chuÃƒÂ¡Ã‚ÂºÃ‚Â©n bÃƒÂ¡Ã‚Â»Ã¢â‚¬Â¹ tÃƒÂ¡Ã‚ÂºÃ‚Â£i toÃƒÆ’Ã‚Â n bÃƒÂ¡Ã‚Â»Ã¢â€žÂ¢ video.',
+        request.mode === 'range' ? 'Đang chuẩn bị tải đoạn video.' : 'Đang chuẩn bị tải toàn bộ video.',
       speed: '',
       eta: '',
       downloadedBytes: 0,
@@ -127,52 +293,26 @@ export class QuickDownloadService {
       startedAt: new Date().toISOString(),
       completedAt: null,
       error: null,
+      errorCode: null,
       warnings: []
     };
 
-    const child = spawn(tools.ytDlp, args, {
-      windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      cwd: request.outputDirectory
-    });
-    child.stdin.end();
-
     const active: ActiveQuickTask = {
       status,
-      process: child,
+      request,
+      controller: new AbortController(),
       tempDirectory,
       outputToken,
-      stdoutBuffer: '',
-      stderrBuffer: '',
-      recentLines: []
+      runToken,
+      cookiesAttached: forceCookies && hasConfiguredCookies(this.cookieSettings()),
+      recentLines: [],
+      done: Promise.resolve()
     };
 
+    if (!forceCookies) this.cookieBlockedRequest = null;
     this.activeTask = active;
-    this.statuses.set(taskId, cloneStatus(status));
-    this.pruneStatuses();
-
-    child.stdout.setEncoding('utf8');
-    child.stderr.setEncoding('utf8');
-
-    child.stdout.on('data', (chunk: string) => {
-      active.stdoutBuffer = this.consumeText(active, active.stdoutBuffer + chunk);
-    });
-
-    child.stderr.on('data', (chunk: string) => {
-      active.stderrBuffer = this.consumeText(active, active.stderrBuffer + chunk);
-    });
-
-    child.once('error', (error) => {
-      this.failTask(
-        active,
-        `KhÃƒÆ’Ã‚Â´ng thÃƒÂ¡Ã‚Â»Ã†â€™ khÃƒÂ¡Ã‚Â»Ã…Â¸i chÃƒÂ¡Ã‚ÂºÃ‚Â¡y yt-dlp: ${error.message}`
-      );
-    });
-
-    child.once('close', (code) => {
-      void this.finishTask(active, code, tools.ffprobe);
-    });
-
+    this.publish(active);
+    active.done = this.execute(active, ytDlpPath, ffmpegPath);
     return cloneStatus(status);
   }
 
@@ -181,79 +321,214 @@ export class QuickDownloadService {
     return current ? cloneStatus(current) : null;
   }
 
-  public async cancel(taskId: string): Promise<QuickDownloadStatus | null> {
+  public async pause(taskId: string): Promise<QuickDownloadStatus | null> {
     const active = this.activeTask;
-
-    if (!active || active.status.taskId !== taskId) {
-      return this.status(taskId);
-    }
-
-    if (TERMINAL_PHASES.has(active.status.phase)) {
+    if (!active || active.status.taskId !== taskId) return this.status(taskId);
+    if (TERMINAL_PHASES.has(active.status.phase) || active.status.phase === 'paused') {
       return cloneStatus(active.status);
     }
 
-    active.status.phase = 'cancelling';
-    active.status.message =
-      'Ãƒâ€žÃ‚Âang dÃƒÂ¡Ã‚Â»Ã‚Â«ng yt-dlp vÃƒÆ’Ã‚Â  cÃƒÆ’Ã‚Â¡c tiÃƒÂ¡Ã‚ÂºÃ‚Â¿n trÃƒÆ’Ã‚Â¬nh FFmpeg liÃƒÆ’Ã‚Âªn quan.';
+    active.status.phase = 'pausing';
+    active.status.message = 'Đang tạm dừng cây tiến trình Tải nhanh.';
     this.publish(active);
 
-    await new Promise<void>((resolve) => {
-      const killer = spawn(
-        join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe'),
-        ['/PID', String(active.process.pid ?? 0), '/T', '/F'],
-        {
-          windowsHide: true,
-          stdio: 'ignore'
-        }
-      );
+    await this.processes.pauseByJob(taskId);
+    if (!this.processes.hasJob(taskId)) {
+      await Promise.resolve();
+      if (!TERMINAL_PHASES.has(active.status.phase)) {
+        throw new Error('Tiến trình Tải nhanh đã kết thúc trước khi có thể tạm dừng.');
+      }
+      return cloneStatus(active.status);
+    }
 
-      killer.once('close', () => resolve());
-      killer.once('error', () => {
-        active.process.kill();
-        resolve();
-      });
-    });
+    active.status.phase = 'paused';
+    active.status.message = 'Đã tạm dừng Tải nhanh.';
+    this.publish(active);
+    return cloneStatus(active.status);
+  }
 
+  public async resume(taskId: string): Promise<QuickDownloadStatus | null> {
+    const active = this.activeTask;
+    if (!active || active.status.taskId !== taskId) return this.status(taskId);
+    if (active.status.phase !== 'paused') return cloneStatus(active.status);
+
+    active.status.phase = 'resuming';
+    active.status.message = 'Đang tiếp tục cây tiến trình Tải nhanh.';
+    this.publish(active);
+
+    await this.processes.resumeByJob(taskId);
+    if (!this.processes.hasJob(taskId)) {
+      await Promise.resolve();
+      if (!TERMINAL_PHASES.has(active.status.phase)) {
+        throw new Error('Tiến trình Tải nhanh không còn tồn tại để tiếp tục.');
+      }
+      return cloneStatus(active.status);
+    }
+
+    active.status.phase = 'downloading';
+    active.status.message = 'Đang tiếp tục tải video.';
+    this.publish(active);
+    return cloneStatus(active.status);
+  }
+
+  public async cancel(taskId: string): Promise<QuickDownloadStatus | null> {
+    const active = this.activeTask;
+    if (!active || active.status.taskId !== taskId) return this.status(taskId);
+    if (TERMINAL_PHASES.has(active.status.phase)) return cloneStatus(active.status);
+
+    active.status.phase = 'cancelling';
+    active.status.message = 'Đang dừng yt-dlp và toàn bộ tiến trình con.';
+    this.publish(active);
+
+    active.controller.abort();
+    await this.processes.killByJob(taskId).catch(() => undefined);
+    await active.done;
     return cloneStatus(active.status);
   }
 
   public revealOutput(taskId: string): boolean {
     const current = this.statuses.get(taskId);
-
-    if (!current?.outputPath || !existsSync(current.outputPath)) {
-      return false;
-    }
-
+    if (!current?.outputPath || !existsSync(current.outputPath)) return false;
     shell.showItemInFolder(current.outputPath);
     return true;
   }
 
-  private consumeText(active: ActiveQuickTask, text: string): string {
-    const lines = text.split(/\r?\n/);
-    const remainder = lines.pop() ?? '';
-
-    for (const rawLine of lines) {
-      this.consumeLine(active, rawLine.trim());
-    }
-
-    return remainder;
-  }
-
-  private consumeLine(active: ActiveQuickTask, line: string): void {
-    if (!line) {
+  public async shutdown(preserve = true): Promise<void> {
+    const active = this.activeTask;
+    if (!active || TERMINAL_PHASES.has(active.status.phase)) {
+      await this.persist();
       return;
     }
 
-    active.recentLines.push(line);
+    active.status.phase = preserve ? 'interrupted' : 'cancelling';
+    active.status.message = preserve
+      ? 'Tác vụ bị gián đoạn do ứng dụng đang đóng.'
+      : 'Đang hủy Tải nhanh do ứng dụng đang đóng.';
+    active.status.error = preserve ? 'Ứng dụng đã đóng trước khi tác vụ hoàn tất.' : null;
+    active.status.errorCode = null;
+    active.status.completedAt = preserve ? new Date().toISOString() : null;
+    this.publish(active);
 
-    if (active.recentLines.length > 60) {
-      active.recentLines.splice(0, active.recentLines.length - 60);
+    active.controller.abort();
+    await this.processes.killByJob(active.status.taskId).catch(() => undefined);
+    await active.done;
+    await this.persist();
+  }
+
+  private async execute(active: ActiveQuickTask, ytDlpPath: string, ffmpegPath: string): Promise<void> {
+    try {
+      while (true) {
+        const authentication = active.cookiesAttached ? this.cookieSettings() : undefined;
+        const args = buildQuickDownloadArguments(
+          active.request,
+          {
+            ffmpegDirectory: dirname(ffmpegPath),
+            tempDirectory: active.tempDirectory,
+            runToken: active.runToken
+          },
+          authentication
+        );
+
+        active.recentLines = [];
+        const result = await this.processes.run({
+          jobId: active.status.taskId,
+          tool: 'yt-dlp',
+          executablePath: ytDlpPath,
+          args,
+          cwd: active.request.outputDirectory,
+          signal: active.controller.signal,
+          timeoutMs: 24 * 60 * 60 * 1000,
+          priority: 'below_normal',
+          onStdoutLine: (line) => this.consumeLine(active, line.trim()),
+          onStderrLine: (line) => this.consumeLine(active, line.trim())
+        });
+
+        if (
+          active.controller.signal.aborted ||
+          active.status.phase === 'cancelling' ||
+          active.status.phase === 'interrupted'
+        ) {
+          throw new ProcessCancelledError();
+        }
+
+        if (result.code !== 0) {
+          const cookieCode = classifyCookieFailure(active.recentLines, active.cookiesAttached);
+
+          if (
+            cookieCode === 'AUTHENTICATION_REQUIRED' &&
+            !active.cookiesAttached &&
+            hasConfiguredCookies(this.cookieSettings())
+          ) {
+            active.cookiesAttached = true;
+            active.status.phase = 'preparing';
+            active.status.progress = 0;
+            active.status.speed = '';
+            active.status.eta = '';
+            active.status.downloadedBytes = 0;
+            active.status.totalBytes = 0;
+            active.status.outputPath = null;
+            active.status.error = null;
+            active.status.errorCode = null;
+            active.status.message = 'Video yêu cầu đăng nhập. Đang tự thử lại bằng cookies đã cấu hình.';
+            this.publish(active);
+            this.logger.info(
+              'quick-download',
+              'QUICK_DOWNLOAD_COOKIES_ATTACHED_ON_DEMAND',
+              'Tải nhanh tự thử lại bằng cookies sau khi nền tảng yêu cầu xác thực.',
+              { jobId: active.status.taskId }
+            );
+            continue;
+          }
+
+          if (cookieCode) {
+            this.cookieBlockedRequest = active.request;
+            this.failTask(active, cookieFailureMessage(cookieCode), cookieCode);
+            await this.cleanupActive(active, false);
+            return;
+          }
+        }
+
+        await this.finishTask(active, result.code);
+        return;
+      }
+    } catch (error) {
+      if (active.status.phase === 'interrupted') {
+        await this.cleanupActive(active, false);
+        return;
+      }
+
+      if (
+        active.status.phase === 'cancelling' ||
+        error instanceof ProcessCancelledError ||
+        active.controller.signal.aborted
+      ) {
+        active.status.phase = 'cancelled';
+        active.status.message = 'Đã hủy Tải nhanh.';
+        active.status.error = null;
+        active.status.errorCode = null;
+        active.status.completedAt = new Date().toISOString();
+        this.publish(active);
+        await this.cleanupActive(active, true);
+        return;
+      }
+
+      this.failTask(active, error instanceof Error ? error.message : String(error), null);
+      await this.cleanupActive(active, false);
+    }
+  }
+
+  private consumeLine(active: ActiveQuickTask, line: string): void {
+    if (!line) return;
+
+    active.recentLines.push(line);
+    if (active.recentLines.length > 80) {
+      active.recentLines.splice(0, active.recentLines.length - 80);
     }
 
     if (line.startsWith('TUBMEDIA_TITLE|')) {
       active.status.title = line.slice('TUBMEDIA_TITLE|'.length);
       active.status.phase = 'downloading';
-      active.status.message = 'Ãƒâ€žÃ‚Âang tÃƒÂ¡Ã‚ÂºÃ‚Â£i dÃƒÂ¡Ã‚Â»Ã‚Â¯ liÃƒÂ¡Ã‚Â»Ã¢â‚¬Â¡u video.';
+      active.status.message = 'Đang tải dữ liệu video.';
       this.publish(active);
       return;
     }
@@ -262,7 +537,7 @@ export class QuickDownloadService {
       active.status.outputPath = line.slice('TUBMEDIA_FILE|'.length);
       active.status.phase = 'processing';
       active.status.progress = Math.max(99, active.status.progress);
-      active.status.message = 'Ãƒâ€žÃ‚Âang hoÃƒÆ’Ã‚Â n tÃƒÂ¡Ã‚ÂºÃ‚Â¥t file video.';
+      active.status.message = 'Đang hoàn tất file video.';
       this.publish(active);
       return;
     }
@@ -276,36 +551,15 @@ export class QuickDownloadService {
       active.status.downloadedBytes = parseByteValue(parts[4] ?? '');
       active.status.totalBytes = parseByteValue(parts[5] ?? '');
       active.status.message =
-        active.status.mode === 'range'
-          ? 'Ãƒâ€žÃ‚Âang tÃƒÂ¡Ã‚ÂºÃ‚Â£i Ãƒâ€žÃ¢â‚¬ËœoÃƒÂ¡Ã‚ÂºÃ‚Â¡n video Ãƒâ€žÃ¢â‚¬ËœÃƒÆ’Ã‚Â£ chÃƒÂ¡Ã‚Â»Ã‚Ân.'
-          : 'Ãƒâ€žÃ‚Âang tÃƒÂ¡Ã‚ÂºÃ‚Â£i toÃƒÆ’Ã‚Â n bÃƒÂ¡Ã‚Â»Ã¢â€žÂ¢ video.';
+        active.status.mode === 'range' ? 'Đang tải đoạn video đã chọn.' : 'Đang tải toàn bộ video.';
       this.publish(active);
     }
   }
 
-  private async finishTask(active: ActiveQuickTask, code: number | null, ffprobePath: string): Promise<void> {
-    active.stdoutBuffer = this.consumeText(active, active.stdoutBuffer + '\n');
-    active.stderrBuffer = this.consumeText(active, active.stderrBuffer + '\n');
-
-    if (active.status.phase === 'cancelling') {
-      active.status.phase = 'cancelled';
-      active.status.message = 'Ãƒâ€žÃ‚ÂÃƒÆ’Ã‚Â£ hÃƒÂ¡Ã‚Â»Ã‚Â§y tÃƒÂ¡Ã‚ÂºÃ‚Â£i nhanh.';
-      active.status.completedAt = new Date().toISOString();
-      this.publish(active);
-      await this.cleanupActive(active);
-      return;
-    }
-
+  private async finishTask(active: ActiveQuickTask, code: number): Promise<void> {
     if (code !== 0) {
       const detail = this.lastUsefulError(active.recentLines);
-      this.failTask(
-        active,
-        detail
-          ? `TÃƒÂ¡Ã‚ÂºÃ‚Â£i video thÃƒÂ¡Ã‚ÂºÃ‚Â¥t bÃƒÂ¡Ã‚ÂºÃ‚Â¡i: ${detail}`
-          : `yt-dlp kÃƒÂ¡Ã‚ÂºÃ‚Â¿t thÃƒÆ’Ã‚Âºc vÃƒÂ¡Ã‚Â»Ã¢â‚¬Âºi mÃƒÆ’Ã‚Â£ ${String(code)}.`
-      );
-      await this.cleanupActive(active);
-      return;
+      throw new Error(detail ? `Tải video thất bại: ${detail}` : `yt-dlp kết thúc với mã ${code}.`);
     }
 
     if (!active.status.outputPath || !existsSync(active.status.outputPath)) {
@@ -316,167 +570,129 @@ export class QuickDownloadService {
     }
 
     if (!active.status.outputPath || !existsSync(active.status.outputPath)) {
-      this.failTask(
-        active,
-        'yt-dlp bÃƒÆ’Ã‚Â¡o hoÃƒÆ’Ã‚Â n tÃƒÂ¡Ã‚ÂºÃ‚Â¥t nhÃƒâ€ Ã‚Â°ng khÃƒÆ’Ã‚Â´ng tÃƒÆ’Ã‚Â¬m thÃƒÂ¡Ã‚ÂºÃ‚Â¥y file Ãƒâ€žÃ¢â‚¬ËœÃƒÂ¡Ã‚ÂºÃ‚Â§u ra.'
-      );
-      await this.cleanupActive(active);
-      return;
+      throw new Error('yt-dlp báo hoàn tất nhưng không tìm thấy file đầu ra.');
     }
 
-    try {
-      const duration = await this.readDuration(ffprobePath, active.status.outputPath);
-      active.status.actualDurationSeconds = duration;
+    active.status.phase = 'verifying';
+    active.status.progress = 99.5;
+    active.status.message = 'Đang kiểm tra file đầu ra bằng ffprobe/FFmpeg.';
+    this.publish(active);
 
-      if (duration <= 0) {
-        throw new Error(
-          'FFprobe khÃƒÆ’Ã‚Â´ng Ãƒâ€žÃ¢â‚¬ËœÃƒÂ¡Ã‚Â»Ã‚Âc Ãƒâ€žÃ¢â‚¬ËœÃƒâ€ Ã‚Â°ÃƒÂ¡Ã‚Â»Ã‚Â£c thÃƒÂ¡Ã‚Â»Ã‚Âi lÃƒâ€ Ã‚Â°ÃƒÂ¡Ã‚Â»Ã‚Â£ng video.'
-        );
+    const expectedDuration =
+      active.status.mode === 'range' &&
+      active.status.requestedStartSeconds !== null &&
+      active.status.requestedEndSeconds !== null
+        ? active.status.requestedEndSeconds - active.status.requestedStartSeconds
+        : undefined;
+
+    const checked = await this.verifier.verify(active.status.outputPath, 'standard', expectedDuration, {
+      jobId: active.status.taskId,
+      signal: active.controller.signal,
+      expectedStreams: {
+        video: active.status.mediaMode !== 'audio-only',
+        audio: active.status.mediaMode !== 'video-only'
       }
+    });
 
-      if (
-        active.status.mode === 'range' &&
-        active.status.requestedStartSeconds !== null &&
-        active.status.requestedEndSeconds !== null
-      ) {
-        const requestedDuration = active.status.requestedEndSeconds - active.status.requestedStartSeconds;
-        const difference = Math.abs(duration - requestedDuration);
-        const tolerance = active.status.accurateCut
-          ? Math.max(2, requestedDuration * 0.08)
-          : Math.max(12, requestedDuration * 0.25);
-
-        if (difference > tolerance) {
-          active.status.warnings.push(
-            `ThÃƒÂ¡Ã‚Â»Ã‚Âi lÃƒâ€ Ã‚Â°ÃƒÂ¡Ã‚Â»Ã‚Â£ng thÃƒÂ¡Ã‚Â»Ã‚Â±c tÃƒÂ¡Ã‚ÂºÃ‚Â¿ ${duration.toFixed(1)} giÃƒÆ’Ã‚Â¢y khÃƒÆ’Ã‚Â¡c ` +
-              `mÃƒÂ¡Ã‚Â»Ã‚Â©c yÃƒÆ’Ã‚Âªu cÃƒÂ¡Ã‚ÂºÃ‚Â§u ${requestedDuration.toFixed(1)} giÃƒÆ’Ã‚Â¢y. ` +
-              'Video vÃƒÂ¡Ã‚ÂºÃ‚Â«n Ãƒâ€žÃ¢â‚¬ËœÃƒâ€ Ã‚Â°ÃƒÂ¡Ã‚Â»Ã‚Â£c giÃƒÂ¡Ã‚Â»Ã‚Â¯ lÃƒÂ¡Ã‚ÂºÃ‚Â¡i Ãƒâ€žÃ¢â‚¬ËœÃƒÂ¡Ã‚Â»Ã†â€™ trÃƒÆ’Ã‚Â¡nh xÃƒÆ’Ã‚Â³a nhÃƒÂ¡Ã‚ÂºÃ‚Â§m file hÃƒÂ¡Ã‚Â»Ã‚Â£p lÃƒÂ¡Ã‚Â»Ã¢â‚¬Â¡.'
-          );
-        }
-      }
-    } catch (error) {
-      active.status.warnings.push(
-        error instanceof Error
-          ? error.message
-          : 'KhÃƒÆ’Ã‚Â´ng kiÃƒÂ¡Ã‚Â»Ã†â€™m tra Ãƒâ€žÃ¢â‚¬ËœÃƒâ€ Ã‚Â°ÃƒÂ¡Ã‚Â»Ã‚Â£c thÃƒÂ¡Ã‚Â»Ã‚Âi lÃƒâ€ Ã‚Â°ÃƒÂ¡Ã‚Â»Ã‚Â£ng video.'
-      );
+    active.status.actualDurationSeconds = checked.duration;
+    if (!checked.ok) {
+      throw new Error(`File đầu ra không đạt kiểm tra: ${checked.reasons.join('; ')}`);
     }
 
     active.status.phase = 'completed';
     active.status.progress = 100;
     active.status.message =
-      active.status.mode === 'range'
-        ? 'Ãƒâ€žÃ‚ÂÃƒÆ’Ã‚Â£ tÃƒÂ¡Ã‚ÂºÃ‚Â£i xong Ãƒâ€žÃ¢â‚¬ËœoÃƒÂ¡Ã‚ÂºÃ‚Â¡n video.'
-        : 'Ãƒâ€žÃ‚ÂÃƒÆ’Ã‚Â£ tÃƒÂ¡Ã‚ÂºÃ‚Â£i xong video.';
+      active.status.mediaMode === 'audio-only'
+        ? 'Đã tải và kiểm tra xong tệp âm thanh.'
+        : active.status.mediaMode === 'video-only'
+          ? 'Đã tải và kiểm tra xong video không âm thanh.'
+          : active.status.mode === 'range'
+            ? 'Đã tải và kiểm tra xong đoạn video.'
+            : 'Đã tải và kiểm tra xong video.';
     active.status.completedAt = new Date().toISOString();
+    active.status.error = null;
+    active.status.errorCode = null;
+    this.cookieBlockedRequest = null;
     this.publish(active);
-    await this.cleanupActive(active);
+    await this.cleanupActive(active, true);
   }
 
-  private failTask(active: ActiveQuickTask, message: string): void {
-    if (TERMINAL_PHASES.has(active.status.phase)) {
-      return;
-    }
-
+  private failTask(active: ActiveQuickTask, message: string, errorCode: QuickDownloadErrorCode | null): void {
+    if (TERMINAL_PHASES.has(active.status.phase)) return;
     active.status.phase = 'failed';
     active.status.error = message;
+    active.status.errorCode = errorCode;
     active.status.message = message;
     active.status.completedAt = new Date().toISOString();
     this.publish(active);
+    this.logger.error('quick-download', 'QUICK_DOWNLOAD_FAILED', message, {
+      jobId: active.status.taskId,
+      metadata: {
+        outputPath: active.status.outputPath,
+        recentLines: active.recentLines.slice(-10)
+      }
+    });
   }
 
   private publish(active: ActiveQuickTask): void {
     this.statuses.set(active.status.taskId, cloneStatus(active.status));
+    this.pruneStatuses();
+    void this.persist();
   }
 
-  private async cleanupActive(active: ActiveQuickTask): Promise<void> {
-    await rm(active.tempDirectory, {
-      recursive: true,
-      force: true
-    }).catch(() => undefined);
-
-    if (this.activeTask === active) {
-      this.activeTask = null;
+  private async cleanupActive(active: ActiveQuickTask, removeTemp: boolean): Promise<void> {
+    if (removeTemp) {
+      await rm(active.tempDirectory, {
+        recursive: true,
+        force: true
+      }).catch(() => undefined);
     }
+
+    if (this.activeTask === active) this.activeTask = null;
+    await this.persist();
+  }
+
+  private async persist(): Promise<void> {
+    const snapshot: PersistedQuickDownloadState = {
+      version: 1,
+      statuses: [...this.statuses.values()].map(cloneStatus)
+    };
+    const pending = `${this.statePath}.${process.pid}.pending`;
+
+    const operation = this.persistTail.then(async () => {
+      await mkdir(dirname(this.statePath), { recursive: true });
+      await writeFile(pending, JSON.stringify(snapshot, null, 2), 'utf8');
+      await rename(pending, this.statePath).catch(async (error: NodeJS.ErrnoException) => {
+        if (error.code !== 'EEXIST' && error.code !== 'EPERM') throw error;
+        await rm(this.statePath, { force: true });
+        await rename(pending, this.statePath);
+      });
+    });
+
+    this.persistTail = operation.catch((error: unknown) => {
+      this.logger.warn(
+        'quick-download',
+        'QUICK_DOWNLOAD_STATE_WRITE_FAILED',
+        `Không thể lưu trạng thái Tải nhanh: ${error instanceof Error ? error.message : String(error)}`
+      );
+    });
+    await operation;
   }
 
   private async assertWritableDirectory(directory: string): Promise<void> {
     const info = await stat(directory).catch(() => null);
-
-    if (!info?.isDirectory()) {
-      throw new Error(
-        'ThÃƒâ€ Ã‚Â° mÃƒÂ¡Ã‚Â»Ã‚Â¥c lÃƒâ€ Ã‚Â°u video khÃƒÆ’Ã‚Â´ng tÃƒÂ¡Ã‚Â»Ã¢â‚¬Å“n tÃƒÂ¡Ã‚ÂºÃ‚Â¡i.'
-      );
-    }
+    if (!info?.isDirectory()) throw new Error('Thư mục lưu video không tồn tại.');
 
     await access(directory, fsConstants.W_OK).catch(() => {
-      throw new Error(
-        'Tubmedia khÃƒÆ’Ã‚Â´ng cÃƒÆ’Ã‚Â³ quyÃƒÂ¡Ã‚Â»Ã‚Ân ghi vÃƒÆ’Ã‚Â o thÃƒâ€ Ã‚Â° mÃƒÂ¡Ã‚Â»Ã‚Â¥c Ãƒâ€žÃ¢â‚¬ËœÃƒÆ’Ã‚Â£ chÃƒÂ¡Ã‚Â»Ã‚Ân.'
-      );
+      throw new Error('Tubmedia không có quyền ghi vào thư mục đã chọn.');
     });
-  }
-
-  private resolveTools(): {
-    ytDlp: string;
-    ffmpeg: string;
-    ffprobe: string;
-  } {
-    const appRoot = app.getAppPath();
-    const roots = [
-      join(process.resourcesPath, 'tool'),
-      join(process.resourcesPath, 'app.asar.unpacked', 'resources', 'tool'),
-      join(appRoot, 'tool'),
-      join(process.cwd(), 'tool')
-    ];
-
-    const resolve = (name: string): string => {
-      const candidate = roots.map((root) => join(root, `${name}.exe`)).find((item) => existsSync(item));
-
-      if (!candidate) {
-        throw new Error(
-          `KhÃƒÆ’Ã‚Â´ng tÃƒÆ’Ã‚Â¬m thÃƒÂ¡Ã‚ÂºÃ‚Â¥y cÃƒÆ’Ã‚Â´ng cÃƒÂ¡Ã‚Â»Ã‚Â¥ ${name}.exe trong gÃƒÆ’Ã‚Â³i Tubmedia.`
-        );
-      }
-
-      return candidate;
-    };
-
-    return {
-      ytDlp: resolve('yt-dlp'),
-      ffmpeg: resolve('ffmpeg'),
-      ffprobe: resolve('ffprobe')
-    };
-  }
-
-  private async readDuration(ffprobePath: string, mediaPath: string): Promise<number> {
-    const result = await execFileAsync(ffprobePath, [
-      '-v',
-      'error',
-      '-show_entries',
-      'format=duration',
-      '-of',
-      'default=noprint_wrappers=1:nokey=1',
-      mediaPath
-    ]);
-    const duration = Number.parseFloat(result.stdout.trim());
-
-    if (!Number.isFinite(duration)) {
-      throw new Error(
-        'FFprobe trÃƒÂ¡Ã‚ÂºÃ‚Â£ thÃƒÂ¡Ã‚Â»Ã‚Âi lÃƒâ€ Ã‚Â°ÃƒÂ¡Ã‚Â»Ã‚Â£ng khÃƒÆ’Ã‚Â´ng hÃƒÂ¡Ã‚Â»Ã‚Â£p lÃƒÂ¡Ã‚Â»Ã¢â‚¬Â¡.'
-      );
-    }
-
-    return duration;
   }
 
   private async findOutputByToken(outputDirectory: string, token: string): Promise<string | null> {
     const entries = await readdir(outputDirectory, {
       withFileTypes: true
     }).catch(() => []);
-
-    const matches: Array<{
-      path: string;
-      modifiedAt: number;
-    }> = [];
+    const matches: Array<{ path: string; modifiedAt: number }> = [];
 
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.includes(token) || entry.name.endsWith('.part')) {
@@ -485,17 +701,12 @@ export class QuickDownloadService {
 
       const fullPath = join(outputDirectory, entry.name);
       const info = await stat(fullPath).catch(() => null);
-
       if (info && info.size > 0) {
-        matches.push({
-          path: fullPath,
-          modifiedAt: info.mtimeMs
-        });
+        matches.push({ path: fullPath, modifiedAt: info.mtimeMs });
       }
     }
 
     matches.sort((left, right) => right.modifiedAt - left.modifiedAt);
-
     return matches[0]?.path ?? null;
   }
 
@@ -504,27 +715,22 @@ export class QuickDownloadService {
 
     for (let index = lines.length - 1; index >= 0; index -= 1) {
       const line = lines[index];
-
       if (line && !ignored.some((prefix) => line.startsWith(prefix))) {
         return line.slice(0, 500);
       }
     }
-
     return null;
   }
 
   private pruneStatuses(): void {
-    if (this.statuses.size <= 30) {
-      return;
-    }
-
+    if (this.statuses.size <= 30) return;
     const removable = [...this.statuses.entries()]
       .filter(([, status]) => TERMINAL_PHASES.has(status.phase))
       .sort((left, right) => left[1].startedAt.localeCompare(right[1].startedAt));
 
     while (this.statuses.size > 20 && removable.length > 0) {
-      const [taskId] = removable.shift()!;
-      this.statuses.delete(taskId);
+      const next = removable.shift();
+      if (next) this.statuses.delete(next[0]);
     }
   }
 }

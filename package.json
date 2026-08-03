@@ -1,7 +1,7 @@
 {
   "name": "video-download-merge-studio-pro",
-  "version": "1.2.8",
-  "description": "Tubmedia â€” á»©ng dá»¥ng táº£i video Ä‘a ná»n táº£ng vÃ  ghÃ©p video chuyÃªn nghiá»‡p, tá»‘i Æ°u giao diá»‡n, cáº­p nháº­t an toÃ n vÃ  kiáº¿n trÃºc phÃ¡t hÃ nh dÃ i háº¡n.",
+  "version": "1.3.0",
+  "description": "Tubmedia 1.3.0 — trung tâm tải, quản lý hàng đợi và chuẩn bị video cho editor với giao diện Studio mới.",
   "main": "./out/main/index.js",
   "author": "Đình Duy Tubmedia",
   "license": "UNLICENSED",
@@ -22,7 +22,7 @@
     "dist": "npm run dist:official",
     "dist:dir": "npm run prepare:electron && npm run build && electron-builder --dir",
     "rebuild": "node scripts/no-native-rebuild.mjs",
-    "check": "npm run check:assets && npm run verify:release && npm run verify:stable && npm run typecheck && npm run lint && npm run test && npm run test:integration && npm run build",
+    "check": "npm run verify:source-completeness && npm run check:assets && npm run verify:release && npm run verify:stable && npm run verify:audit-hardening && npm run verify:audit-behavior && npm run verify:quick-download && npm run verify:editor-workflows && npm run verify:duration-persistence && npm run verify:tool-update-rate-limit && npm run verify:cleanup-ui && npm run verify:system-cleanup && npm run typecheck && npm run lint && npm run test && npm run test:integration && npm run build && npm run test:e2e",
     "doctor:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/doctor-windows.ps1",
     "tools:check:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tools-windows.ps1 -Mode check",
     "tools:repair:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tools-windows.ps1 -Mode repair",
@@ -52,7 +52,9 @@
     "verify:quick-download": "node scripts/verify-quick-download-integration.mjs",
     "verify:cleanup-ui": "node scripts/verify-cleanup-navigation-ui.mjs",
     "verify:tool-update-rate-limit": "node scripts/verify-tool-update-rate-limit.mjs",
-    "verify:duration-persistence": "node scripts/verify-duration-persistence.mjs"
+    "verify:duration-persistence": "node scripts/verify-duration-persistence.mjs",
+    "verify:source-completeness": "node scripts/verify-source-completeness.mjs",
+    "verify:editor-workflows": "node scripts/verify-editor-workflows-1.3.0.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -68,6 +70,7 @@
     "zustand": "5.0.14"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.1",
     "@playwright/test": "^1.55.0",
     "@tailwindcss/vite": "4.3.3",
     "@types/node": "^24.3.0",

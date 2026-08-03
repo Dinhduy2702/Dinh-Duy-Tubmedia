@@ -32,6 +32,7 @@ import { WorkbenchService } from '../workbench/workbench-service.js';
 import { SenderValidator } from '../security/sender-validator.js';
 import { CookieService } from '../cookies/cookie-service.js';
 import { cleanupTemporaryArtifacts } from '../files/temporary-cleanup.js';
+import { QuickDownloadService } from '../download/quick-download-service.js';
 
 export class AppContext {
   public readonly userData = app.getPath('userData');
@@ -50,24 +51,92 @@ export class AppContext {
   public readonly projects = new ProjectService(this.projectRepo, this.paths);
   public readonly input = new InputService(this.itemRepo);
   public readonly processes = new ProcessManager(this.logger);
-  public readonly tools = new ToolManager(this.processes, this.logger, () => this.settings.get(), process.resourcesPath, this.userData, app.getAppPath(), app.isPackaged);
+  public readonly tools = new ToolManager(
+    this.processes,
+    this.logger,
+    () => this.settings.get(),
+    process.resourcesPath,
+    this.userData,
+    app.getAppPath(),
+    app.isPackaged
+  );
   public readonly analyzer = new MediaAnalyzer(this.processes, this.tools);
   public readonly verifier = new FileVerifier(this.analyzer, this.processes, this.tools);
+  public readonly quickDownload = new QuickDownloadService(
+    this.processes,
+    this.tools,
+    this.verifier,
+    this.logger,
+    join(this.userData, 'quick-download'),
+    this.settings
+  );
   public readonly quarantine = new QuarantineService(this.logger);
-  public readonly downloader = new DownloadEngine(this.processes, this.tools, this.sourceRepo, this.projectRepo, this.settings, this.analyzer, this.verifier, this.quarantine, this.logger);
+  public readonly downloader = new DownloadEngine(
+    this.processes,
+    this.tools,
+    this.sourceRepo,
+    this.projectRepo,
+    this.settings,
+    this.analyzer,
+    this.verifier,
+    this.quarantine,
+    this.logger
+  );
   public readonly clips = new ClipEngine(this.tools, this.processes, this.verifier, this.quarantine);
-  public readonly normalizer = new NormalizeEngine(this.tools, this.processes, this.analyzer, this.verifier, this.quarantine, this.logger);
+  public readonly normalizer = new NormalizeEngine(
+    this.tools,
+    this.processes,
+    this.analyzer,
+    this.verifier,
+    this.quarantine,
+    this.logger
+  );
   public readonly timeline = new TimelineService(this.analyzer);
-  public readonly merger = new MergeEngine(this.tools, this.processes, this.analyzer, this.verifier, this.normalizer, this.timeline, this.quarantine);
-  public readonly queue = new QueueManager(this.queueRepo, this.projectRepo, this.itemRepo, this.sourceRepo, this.settings, this.downloader, this.clips, this.merger, this.processes, this.logger, () => this.tools.requiredReady());
+  public readonly merger = new MergeEngine(
+    this.tools,
+    this.processes,
+    this.analyzer,
+    this.verifier,
+    this.normalizer,
+    this.timeline,
+    this.quarantine
+  );
+  public readonly queue = new QueueManager(
+    this.queueRepo,
+    this.projectRepo,
+    this.itemRepo,
+    this.sourceRepo,
+    this.settings,
+    this.downloader,
+    this.clips,
+    this.merger,
+    this.processes,
+    this.logger,
+    () => this.tools.requiredReady()
+  );
   public readonly backups = new BackupService(this.database, join(this.userData, 'backups'), this.logger);
-  public readonly toolUpdates = new ToolUpdateService(this.tools, this.settings, join(this.userData, 'tools'), this.logger, this.processes);
+  public readonly toolUpdates = new ToolUpdateService(
+    this.tools,
+    this.settings,
+    join(this.userData, 'tools'),
+    this.logger,
+    this.processes
+  );
   public readonly appUpdates: AppUpdateService;
-  public readonly workbench = new WorkbenchService(this.projectRepo, this.projects, this.input, this.queue, this.tools, this.settings, this.logger, this.sourceRepo);
+  public readonly workbench = new WorkbenchService(
+    this.projectRepo,
+    this.projects,
+    this.input,
+    this.queue,
+    this.tools,
+    this.settings,
+    this.logger,
+    this.sourceRepo
+  );
   public readonly sender = new SenderValidator();
   public readonly systemStats = new SystemStatsService(this.queue, this.processes, () => {
     const s = this.settings.get();
-    return [s.defaultSourceFolder, s.defaultTempFolder, s.defaultOutputFolder].map(x => parse(x).root || x);
+    return [s.defaultSourceFolder, s.defaultTempFolder, s.defaultOutputFolder].map((x) => parse(x).root || x);
   });
   public constructor(prepareForAppUpdate: () => Promise<void> = () => Promise.resolve()) {
     this.tools.setRequiredRepairHandler(() => this.toolUpdates.repairRequired());
@@ -81,13 +150,22 @@ export class AppContext {
   }
   public initialize(): void {
     this.settings.initialize();
+    void this.quickDownload.recover().catch((error: unknown) => {
+      this.logger.warn(
+        'quick-download',
+        'QUICK_DOWNLOAD_RECOVERY_WARNING',
+        `Không thể khôi phục trạng thái Tải nhanh: ${error instanceof Error ? error.message : String(error)}`
+      );
+    });
     const logRetentionDays = this.settings.get().logRetentionDays;
     this.logRepo.prune(logRetentionDays);
     this.logger.pruneFiles(logRetentionDays);
-    const legacyFolders = this.projectRepo.list().flatMap((project) => [
-      join(project.outputFolder, '_normalized'),
-      join(project.outputFolder, '_quarantine')
-    ]);
+    const legacyFolders = this.projectRepo
+      .list()
+      .flatMap((project) => [
+        join(project.outputFolder, '_normalized'),
+        join(project.outputFolder, '_quarantine')
+      ]);
     void Promise.all(legacyFolders.map((folder) => cleanupTemporaryArtifacts(folder)))
       .then((reports) => {
         const removedFiles = reports.reduce((sum, report) => sum + report.removedFiles, 0);

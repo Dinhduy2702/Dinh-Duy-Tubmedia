@@ -346,3 +346,270 @@
   color: var(--muted);
   opacity: 0.72;
 }
+.quick-download-mode-row {
+  grid-template-columns: minmax(0, 1.5fr) minmax(170px, 0.55fr) minmax(150px, 0.45fr);
+}
+.quick-download-sidecars {
+  display: grid;
+  grid-template-columns: 1fr minmax(130px, 0.65fr) 1fr 1fr;
+  gap: 0.55rem;
+  padding: 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--panel2) 88%, transparent);
+}
+.quick-download-sidecars > label {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.quick-download-sidecars > label > span {
+  display: grid;
+  gap: 0.08rem;
+}
+.quick-download-sidecars b {
+  font-size: 0.65rem;
+}
+.quick-download-sidecars small {
+  color: var(--muted);
+  font-size: 0.52rem;
+}
+.quick-download-sidecars input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+.quick-download-sidecars .quick-download-sub-language {
+  display: grid;
+  gap: 0.25rem;
+}
+.quick-download-sidecars .quick-download-sub-language > span {
+  color: var(--muted);
+  font-size: 0.55rem;
+  font-weight: 800;
+}
+.quick-download-sidecars .quick-download-sub-language input {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel2);
+  color: var(--text);
+  padding: 0.42rem 0.5rem;
+  font-size: 0.62rem;
+}
+@media (max-width: 1100px) {
+  .quick-download-mode-row,
+  .quick-download-sidecars {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 700px) {
+  .quick-download-mode-row,
+  .quick-download-sidecars {
+    grid-template-columns: 1fr;
+  }
+}
+
+.quick-download-timeline-toggle {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.72rem;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--panel, transparent) 94%, transparent);
+  padding: 0.74rem 0.82rem;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    transform 0.18s ease;
+}
+
+.quick-download-timeline-toggle:hover {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+}
+
+.quick-download-timeline-toggle.is-active {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel, transparent));
+}
+
+.quick-download-timeline-toggle > input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+.quick-download-timeline-toggle > span {
+  display: grid;
+  min-width: 0;
+  gap: 0.15rem;
+}
+
+.quick-download-timeline-toggle strong {
+  font-size: 0.78rem;
+}
+
+.quick-download-timeline-toggle small,
+.quick-download-timeline-toggle > b {
+  color: var(--muted);
+  font-size: 0.65rem;
+}
+
+.quick-download-timeline-toggle > b {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 11%, transparent);
+  padding: 0.35rem 0.55rem;
+  white-space: nowrap;
+}
+
+.quick-download-timeline-toggle.is-active > b {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
+
+@media (max-width: 760px) {
+  .quick-download-timeline-toggle {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .quick-download-timeline-toggle > b {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
+.quick-download-heading-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.quick-download-cookie-button,
+.quick-download-cookie-block button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--panel2);
+  color: var(--text);
+  padding: 0.55rem 0.7rem;
+  font-size: 0.65rem;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.quick-download-cookie-button:hover,
+.quick-download-cookie-block button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.quick-download-cookie-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.quick-download-cookie-block {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--warn) 58%, var(--border));
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--warn) 10%, var(--panel));
+  color: var(--warn);
+}
+
+.quick-download-cookie-block > div {
+  min-width: 0;
+}
+
+.quick-download-cookie-block strong {
+  display: block;
+  color: var(--text);
+  font-size: 0.78rem;
+}
+
+.quick-download-cookie-block p {
+  margin: 0.2rem 0 0;
+  color: var(--muted);
+  font-size: 0.65rem;
+  line-height: 1.5;
+}
+
+@media (max-width: 760px) {
+  .quick-download-cookie-block {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .quick-download-cookie-block button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+}
+
+/* Unified with list-download progress */
+.quick-download-unified-progress {
+  margin-top: 0.05rem;
+  border-color: color-mix(in srgb, var(--accent2) 34%, var(--border));
+}
+
+.quick-download-ready-progress {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel2));
+  padding: 0.72rem 0.78rem;
+}
+
+.quick-download-ready-progress > div {
+  display: grid;
+  min-width: 0;
+  gap: 0.14rem;
+}
+
+.quick-download-ready-progress b {
+  font-size: 0.72rem;
+}
+
+.quick-download-ready-progress span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.58rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-download-unified-warnings {
+  border: 1px solid color-mix(in srgb, var(--warn) 34%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--warn) 6%, var(--panel2));
+  padding: 0.55rem 0.65rem;
+}
+
+@media (max-width: 760px) {
+  .quick-download-ready-progress {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .quick-download-ready-progress .btn {
+    width: 100%;
+  }
+}

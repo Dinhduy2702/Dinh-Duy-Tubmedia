@@ -7,7 +7,11 @@ import type { AttentionNotice, JobType, QueueJob, ResourceProfile } from '@share
 import { IPC } from '@shared/contracts/channels.js';
 import { retryDelayMs } from '@shared/utils/retry.js';
 import { hasConfiguredCookies, isCookieBlockingCode } from '@shared/utils/cookie-policy.js';
-import { mergeSourceDownloadLimit, queueExecutionLane } from '@shared/utils/queue-lane.js';
+import {
+  independentDownloadProjectCanStart,
+  mergeSourceDownloadLimit,
+  queueExecutionLane
+} from '@shared/utils/queue-lane.js';
 import type { QueueRepository } from '../database/repositories/queue-repository.js';
 import type { ProjectRepository } from '../database/repositories/project-repository.js';
 import type { ItemRepository } from '../database/repositories/item-repository.js';
@@ -402,14 +406,16 @@ export class QueueManager {
       ).length;
       if (job.type === 'download') {
         const lane = queueExecutionLane(job);
-        const activeInLane = [...this.active.values()].filter(
-          (entry) => entry.job.type === 'download' && queueExecutionLane(entry.job) === lane
-        ).length;
-        const laneLimit =
-          lane === 'merge-workflow'
-            ? mergeSourceDownloadLimit(this.settings.get(), profile)
-            : Math.max(1, Math.min(16, this.settings.get().maxGlobalDownloadWorkers));
-        if (activeOfProjectType >= profile.downloadWorkers || activeInLane >= laneLimit) continue;
+        if (lane === 'download-list') {
+          if (!independentDownloadProjectCanStart(activeOfProjectType, profile)) continue;
+        }
+        if (lane === 'merge-workflow') {
+          const activeInLane = [...this.active.values()].filter(
+            (entry) => entry.job.type === 'download' && queueExecutionLane(entry.job) === lane
+          ).length;
+          const laneLimit = mergeSourceDownloadLimit(this.settings.get(), profile);
+          if (activeOfProjectType >= profile.downloadWorkers || activeInLane >= laneLimit) continue;
+        }
       } else if (job.type === 'merge') {
         const globalMergeLimit = Math.max(1, Math.min(4, this.settings.get().maxGlobalMergeJobs));
         if (activeOfProjectType >= 1 || activeOfType >= globalMergeLimit) continue;

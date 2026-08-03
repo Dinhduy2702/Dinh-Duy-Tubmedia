@@ -16,6 +16,7 @@ export interface VerificationResult {
 
 export interface VerificationOptions {
   jobId?: string;
+  expectedStreams?: { video: boolean; audio: boolean };
   projectId?: string | null;
   signal?: AbortSignal;
   onProgress?: (percent: number) => void;
@@ -152,13 +153,17 @@ export class FileVerifier {
           );
         }
       }
-      if (info.width <= 0 || info.height <= 0) {
-        reasons.push('Độ phân giải không hợp lệ.');
+      const expectedStreams = options.expectedStreams ?? { video: true, audio: false };
+      if (expectedStreams.video && (info.width <= 0 || info.height <= 0)) {
+        reasons.push('Không tìm thấy video stream hoặc độ phân giải không hợp lệ.');
+      }
+      if (expectedStreams.audio && !info.audioCodec) {
+        reasons.push('Không tìm thấy audio stream theo lựa chọn tải.');
       }
       if (info.duration <= 0) reasons.push('Thời lượng không hợp lệ.');
       if (info.fileSize <= 0) reasons.push('Dung lượng file không hợp lệ.');
 
-      if (level === 'standard' && info.duration > 0) {
+      if (level === 'standard' && info.duration > 0 && expectedStreams.video) {
         const sampleDuration = expectedDuration !== undefined &&
           Number.isFinite(expectedDuration) &&
           expectedDuration > 0 &&
@@ -202,10 +207,8 @@ export class FileVerifier {
             'error',
             '-i',
             path,
-            '-map',
-            '0:v:0',
-            '-map',
-            '0:a:0?',
+            ...(expectedStreams.video ? ['-map', '0:v:0'] : []),
+            ...(expectedStreams.audio ? ['-map', '0:a:0'] : []),
             '-progress',
             'pipe:1',
             '-nostats',

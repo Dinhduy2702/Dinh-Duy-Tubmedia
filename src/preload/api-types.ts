@@ -168,9 +168,12 @@ export interface DesktopApi {
   };
   quickDownload: {
     defaults(): Promise<{ outputDirectory: string }>;
+    current(): Promise<QuickDownloadStatus | null>;
     chooseDirectory(currentDirectory?: string): Promise<string | null>;
     start(input: QuickDownloadRequest): Promise<QuickDownloadStatus>;
     status(taskId: string): Promise<QuickDownloadStatus | null>;
+    pause(taskId: string): Promise<QuickDownloadStatus | null>;
+    resume(taskId: string): Promise<QuickDownloadStatus | null>;
     cancel(taskId: string): Promise<QuickDownloadStatus | null>;
     revealOutput(taskId: string): Promise<boolean>;
   };

@@ -70,7 +70,7 @@ function ensureTray(): void {
 async function requestClose(window: BrowserWindow): Promise<void> {
   if (!context || allowWindowClose) return;
   const settings = context.settings.get();
-  const active = context.queue.activeCount();
+  const active = context.queue.activeCount() + (context.quickDownload.isActive() ? 1 : 0);
 
   if (settings.closeBehavior === 'tray' || settings.minimizeToTray) {
     ensureTray();
@@ -159,7 +159,7 @@ async function runBackgroundUpdateChecks(current: AppContext): Promise<void> {
 }
 
 function syncPowerSaveBlocker(current: AppContext): void {
-  const hasActiveWork = current.queue.activeCount() > 0;
+  const hasActiveWork = current.queue.activeCount() > 0 || current.quickDownload.isActive();
   if (hasActiveWork && powerSaveBlockerId === null) {
     powerSaveBlockerId = powerSaveBlocker.start('prevent-app-suspension');
     current.logger.info(
@@ -234,6 +234,7 @@ function initializeApplication(): void {
     if (statsTimer) clearInterval(statsTimer);
     if (updateTimer) clearInterval(updateTimer);
     if (updateInitialTimer) clearTimeout(updateInitialTimer);
+    await activeContext.quickDownload.shutdown(true);
     await activeContext.queue.stop(true);
     await activeContext.processes.shutdown();
     await activeContext.logger.flush();
@@ -316,6 +317,7 @@ app.on('before-quit', (event: ElectronEvent) => {
   if (updateInitialTimer) clearTimeout(updateInitialTimer);
 
   void (async () => {
+    await current.quickDownload.shutdown(shutdownMode === 'preserve');
     await current.queue.stop(shutdownMode === 'preserve');
     await current.processes.shutdown();
     await current.logger.flush();

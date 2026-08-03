@@ -14,12 +14,17 @@ export function queueExecutionLane(job: LaneJob): QueueExecutionLane {
   return 'processing';
 }
 
+export function independentDownloadProjectCanStart(
+  activeInProject: number,
+  profile: Pick<ResourceProfile, 'downloadWorkers'>
+): boolean {
+  const projectLimit = Math.max(1, Math.min(16, Math.round(profile.downloadWorkers || 1)));
+  return Math.max(0, activeInProject) < projectLimit;
+}
+
 export function mergeSourceDownloadLimit(
   settings: Pick<AppSettings, 'maxGlobalMergeJobs'>,
   profile: Pick<ResourceProfile, 'downloadWorkers'>
 ): number {
-  return Math.max(
-    1,
-    Math.min(16, settings.maxGlobalMergeJobs * Math.max(1, profile.downloadWorkers))
-  );
+  return Math.max(1, Math.min(16, settings.maxGlobalMergeJobs * Math.max(1, profile.downloadWorkers)));
 }

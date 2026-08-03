@@ -1,27 +1,62 @@
-import { useEffect, useMemo, useState, type ReactElement } from 'react';
-import type { QuickDownloadMode, QuickDownloadQuality, QuickDownloadStatus } from '@shared/quick-download';
+import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { Cookie, ExternalLink, Pause, Play, ShieldAlert, Square } from 'lucide-react';
+import type {
+  QuickDownloadMediaMode,
+  QuickDownloadQuality,
+  QuickDownloadStatus
+} from '@shared/quick-download';
+import { CookieManagerDialog } from './CookieManagerDialog';
+import { UnifiedDownloadProgress } from './UnifiedDownloadProgress';
 
 function formatBytes(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) {
-    return '0 B';
-  }
-
+  if (!Number.isFinite(value) || value <= 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
-
   return `${(value / 1024 ** index).toFixed(index >= 3 ? 2 : 1)} ${units[index]}`;
 }
 
-const TERMINAL_PHASES = new Set(['completed', 'cancelled', 'failed']);
+function readableError(value: unknown, fallback: string): string {
+  const message = value instanceof Error ? value.message : typeof value === 'string' ? value : fallback;
+  return (
+    message
+      .replace(/^Error invoking remote method '[^']+':\s*/i, '')
+      .replace(/^[A-Za-z]+Error:\s*/i, '')
+      .trim() || fallback
+  );
+}
+
+const TERMINAL_PHASES = new Set<QuickDownloadStatus['phase']>([
+  'completed',
+  'cancelled',
+  'failed',
+  'interrupted'
+]);
+
+const COOKIE_BLOCKING_CODES = new Set([
+  'AUTHENTICATION_REQUIRED',
+  'COOKIES_EXPIRED',
+  'BROWSER_COOKIE_DATABASE_LOCKED'
+]);
 
 export function QuickDownloadPanel(): ReactElement {
   const [url, setUrl] = useState('');
   const [outputDirectory, setOutputDirectory] = useState('');
   const [quality, setQuality] = useState<QuickDownloadQuality>('best');
+  const [mediaMode, setMediaMode] = useState<QuickDownloadMediaMode>('video-audio');
+  const [downloadSubtitles, setDownloadSubtitles] = useState(false);
+  const [subtitleLanguage, setSubtitleLanguage] = useState('vi,en');
+  const [downloadThumbnail, setDownloadThumbnail] = useState(false);
+  const [writeMetadata, setWriteMetadata] = useState(false);
+  const [useTimeline, setUseTimeline] = useState(() => {
+    try {
+      return window.localStorage.getItem('tubmedia.quick-download.use-timeline') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [startTime, setStartTime] = useState(() => {
     try {
       const stored = window.localStorage.getItem('tubmedia.quick-download.start-duration');
-
       return stored && /^\d{2,4}:[0-5]\d:[0-5]\d$/.test(stored) ? stored : '00:10:00';
     } catch {
       return '00:10:00';
@@ -30,348 +65,505 @@ export function QuickDownloadPanel(): ReactElement {
   const [endTime, setEndTime] = useState(() => {
     try {
       const stored = window.localStorage.getItem('tubmedia.quick-download.end-duration');
-
       return stored && /^\d{2,4}:[0-5]\d:[0-5]\d$/.test(stored) ? stored : '00:13:00';
     } catch {
       return '00:13:00';
     }
   });
+  const [accurateCut, setAccurateCut] = useState(false);
+  const [status, setStatus] = useState<QuickDownloadStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [cookieOpen, setCookieOpen] = useState(false);
+  const openedCookieTask = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!/^\d{2,4}:[0-5]\d:[0-5]\d$/.test(startTime)) {
-      return;
+    try {
+      window.localStorage.setItem('tubmedia.quick-download.use-timeline', String(useTimeline));
+    } catch {
+      // Renderer storage can be unavailable in hardened test environments.
     }
+  }, [useTimeline]);
 
+  useEffect(() => {
+    if (!/^\d{2,4}:[0-5]\d:[0-5]\d$/.test(startTime)) return;
     try {
       window.localStorage.setItem('tubmedia.quick-download.start-duration', startTime);
     } catch {
-      // Ignore unavailable renderer storage.
+      // Renderer storage can be unavailable in hardened test environments.
     }
   }, [startTime]);
 
   useEffect(() => {
-    if (!/^\d{2,4}:[0-5]\d:[0-5]\d$/.test(endTime)) {
-      return;
-    }
-
+    if (!/^\d{2,4}:[0-5]\d:[0-5]\d$/.test(endTime)) return;
     try {
       window.localStorage.setItem('tubmedia.quick-download.end-duration', endTime);
     } catch {
-      // Ignore unavailable renderer storage.
+      // Renderer storage can be unavailable in hardened test environments.
     }
   }, [endTime]);
-  const [accurateCut, setAccurateCut] = useState(false);
-  const [status, setStatus] = useState<QuickDownloadStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   const running = Boolean(status && !TERMINAL_PHASES.has(status.phase));
+  const paused = status?.phase === 'paused';
+  const pausable = Boolean(
+    status && ['preparing', 'downloading', 'processing', 'verifying'].includes(status.phase)
+  );
+  const canStart = Boolean(
+    !running && url.trim() && outputDirectory && (!useTimeline || (startTime.trim() && endTime.trim()))
+  );
+
+  const cookieBlocked = Boolean(status?.errorCode && COOKIE_BLOCKING_CODES.has(status.errorCode));
 
   const progressText = useMemo(() => {
-    if (!status) {
-      return '';
-    }
-
-    const parts = [
+    if (!status) return '';
+    return [
       status.speed,
       status.eta ? `Còn ${status.eta}` : '',
       status.totalBytes > 0
         ? `${formatBytes(status.downloadedBytes)}/${formatBytes(status.totalBytes)}`
         : formatBytes(status.downloadedBytes)
-    ].filter(Boolean);
-
-    return parts.join(' • ');
+    ]
+      .filter(Boolean)
+      .join(' • ');
   }, [status]);
 
   useEffect(() => {
     let mounted = true;
-
-    void window.desktop.quickDownload
-      .defaults()
-      .then((defaults) => {
-        if (mounted) {
-          setOutputDirectory(defaults.outputDirectory);
-        }
+    void Promise.all([window.desktop.quickDownload.defaults(), window.desktop.quickDownload.current()])
+      .then(([defaults, current]) => {
+        if (!mounted) return;
+        setOutputDirectory(defaults.outputDirectory);
+        if (current) setStatus(current);
       })
       .catch((loadError) => {
-        if (mounted) {
-          setError(loadError instanceof Error ? loadError.message : 'Không đọc được thư mục mặc định.');
-        }
+        if (mounted) setError(readableError(loadError, 'Không đọc được trạng thái Tải nhanh.'));
       });
-
     return () => {
       mounted = false;
     };
   }, []);
 
   useEffect(() => {
-    if (!status || TERMINAL_PHASES.has(status.phase)) {
-      return;
-    }
-
+    if (!status || TERMINAL_PHASES.has(status.phase)) return;
     const timer = window.setInterval(() => {
       void window.desktop.quickDownload
         .status(status.taskId)
         .then((next) => {
-          if (next) {
-            setStatus(next);
-          }
+          if (next) setStatus(next);
         })
         .catch((pollError) => {
-          setError(pollError instanceof Error ? pollError.message : 'Không đọc được tiến trình tải.');
+          setError(readableError(pollError, 'Không đọc được tiến trình tải.'));
         });
     }, 500);
-
     return () => window.clearInterval(timer);
   }, [status?.taskId, status?.phase]);
+
+  useEffect(() => {
+    if (!cookieBlocked || !status || openedCookieTask.current === status.taskId) return;
+    openedCookieTask.current = status.taskId;
+    setCookieOpen(true);
+  }, [cookieBlocked, status]);
+
+  async function resumeAfterCookies(): Promise<void> {
+    const current = await window.desktop.quickDownload.current();
+    if (current) setStatus(current);
+    setError(null);
+  }
 
   async function chooseDirectory(): Promise<void> {
     try {
       const selected = await window.desktop.quickDownload.chooseDirectory(outputDirectory);
-
-      if (selected) {
-        setOutputDirectory(selected);
-      }
+      if (selected) setOutputDirectory(selected);
     } catch (chooseError) {
-      setError(chooseError instanceof Error ? chooseError.message : 'Không chọn được thư mục.');
+      setError(readableError(chooseError, 'Không chọn được thư mục.'));
     }
   }
 
-  async function start(mode: QuickDownloadMode): Promise<void> {
+  async function start(): Promise<void> {
     setError(null);
-
     try {
       const next = await window.desktop.quickDownload.start({
         url,
         outputDirectory,
         quality,
-        mode,
-        startTime,
-        endTime,
-        accurateCut
+        mediaMode,
+        mode: useTimeline ? 'range' : 'full',
+        ...(useTimeline ? { startTime, endTime } : {}),
+        accurateCut: useTimeline && accurateCut,
+        downloadSubtitles,
+        subtitleLanguage,
+        downloadThumbnail,
+        writeMetadata
       });
       setStatus(next);
     } catch (startError) {
-      setError(startError instanceof Error ? startError.message : 'Không thể bắt đầu tải nhanh.');
+      setError(readableError(startError, 'Không thể bắt đầu tải nhanh.'));
+    }
+  }
+
+  async function pause(): Promise<void> {
+    if (!status) return;
+    try {
+      const next = await window.desktop.quickDownload.pause(status.taskId);
+      if (next) setStatus(next);
+    } catch (pauseError) {
+      setError(readableError(pauseError, 'Không thể tạm dừng Tải nhanh.'));
+    }
+  }
+
+  async function resume(): Promise<void> {
+    if (!status) return;
+    try {
+      const next = await window.desktop.quickDownload.resume(status.taskId);
+      if (next) setStatus(next);
+    } catch (resumeError) {
+      setError(readableError(resumeError, 'Không thể tiếp tục Tải nhanh.'));
     }
   }
 
   async function cancel(): Promise<void> {
-    if (!status) {
-      return;
-    }
-
+    if (!status) return;
     try {
       const next = await window.desktop.quickDownload.cancel(status.taskId);
-
-      if (next) {
-        setStatus(next);
-      }
+      if (next) setStatus(next);
     } catch (cancelError) {
-      setError(cancelError instanceof Error ? cancelError.message : 'Không thể hủy tải nhanh.');
+      setError(readableError(cancelError, 'Không thể hủy tải nhanh.'));
     }
   }
 
   async function revealOutput(): Promise<void> {
-    if (!status) {
-      return;
-    }
-
+    if (!status) return;
     const revealed = await window.desktop.quickDownload.revealOutput(status.taskId);
-
-    if (!revealed) {
-      setError('File đầu ra không còn tồn tại.');
-    }
+    if (!revealed) setError('File đầu ra không còn tồn tại.');
   }
 
   return (
-    <section className="card quick-download-panel" data-testid="quick-download-panel">
-      <div className="quick-download-heading">
-        <div>
-          <span className="quick-download-eyebrow">TẢI NHANH 1 VIDEO</span>
-          <h2>Tải toàn bộ hoặc lấy riêng một đoạn</h2>
-          <p>
-            Dán một liên kết, chọn chất lượng rồi tải toàn bộ video hoặc nhập mốc thời gian như 00:10:00 →
-            00:13:00.
-          </p>
-        </div>
-
-        <span className="quick-download-badge">Không tải playlist</span>
-      </div>
-
-      <label className="quick-download-field full">
-        <span>Liên kết video</span>
-        <input
-          value={url}
-          disabled={running}
-          onChange={(event) => setUrl(event.target.value)}
-          placeholder="https://www.youtube.com/watch?v=..."
-          autoComplete="off"
-          spellCheck={false}
-        />
-      </label>
-
-      <div className="quick-download-row">
-        <label className="quick-download-field folder">
-          <span>Thư mục lưu</span>
-          <div className="quick-download-folder-input">
-            <input value={outputDirectory} readOnly title={outputDirectory} />
-            <button type="button" disabled={running} onClick={() => void chooseDirectory()}>
-              Chọn thư mục
-            </button>
-          </div>
-        </label>
-
-        <label className="quick-download-field quality">
-          <span>Chất lượng</span>
-          <select
-            value={quality}
-            disabled={running}
-            onChange={(event) => setQuality(event.target.value as QuickDownloadQuality)}
-          >
-            <option value="best">Cao nhất</option>
-            <option value="1080p">Tối đa 1080p</option>
-            <option value="720p">Tối đa 720p</option>
-            <option value="480p">Tối đa 480p</option>
-          </select>
-        </label>
-      </div>
-
-      <div className="quick-download-range-box">
-        <div className="quick-download-range-head">
+    <>
+      <section className="card quick-download-panel quick-download-studio" data-testid="quick-download-panel">
+        <div className="quick-download-heading">
           <div>
-            <strong>Tải video theo mốc thời lượng</strong>
-            <small>
-              Nhập thời lượng theo HH:MM:SS. Hai mốc được tự động lưu khi thêm link và khi mở lại ứng dụng
-            </small>
+            <span className="quick-download-eyebrow">TẢI NHANH 1 VIDEO</span>
+            <h2>Video, âm thanh hoặc chỉ lấy đoạn cần dùng</h2>
+            <p>
+              Tải nhanh dùng chung ProcessManager, tự đồng bộ trạng thái khi chuyển trang và nhận lệnh Tạm
+              dừng/Tiếp tục tất cả.
+            </p>
           </div>
-          <span>Ví dụ: 00:10:00 → 00:13:00</span>
+          <div className="quick-download-heading-actions">
+            <button
+              type="button"
+              className="quick-download-cookie-button"
+              disabled={running}
+              onClick={() => setCookieOpen(true)}
+            >
+              <Cookie size={15} />
+              Cookies
+            </button>
+            <span className="quick-download-badge">Không tải playlist</span>
+          </div>
         </div>
 
-        <div className="quick-download-range-inputs">
-          <label className="quick-download-field">
-            <span>Bắt đầu</span>
-            <input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9:]*"
-              maxLength={10}
-              value={startTime}
-              disabled={running}
-              placeholder="00:10:00"
-              title="Mốc thời lượng bắt đầu theo định dạng Giờ:Phút:Giây"
-              aria-label="Mốc thời lượng bắt đầu"
-              className="video-duration-input"
-              onChange={(event) => setStartTime(event.target.value.replace(/[^0-9:]/g, ''))}
-            />
+        <label className="quick-download-field full">
+          <span>Liên kết video</span>
+          <input
+            value={url}
+            disabled={running}
+            onChange={(event) => setUrl(event.target.value)}
+            placeholder="https://www.youtube.com/watch?v=..."
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </label>
+
+        <div className="quick-download-row quick-download-mode-row">
+          <label className="quick-download-field folder">
+            <span>Thư mục lưu</span>
+            <div className="quick-download-folder-input">
+              <input value={outputDirectory} readOnly title={outputDirectory} />
+              <button type="button" disabled={running} onClick={() => void chooseDirectory()}>
+                Chọn thư mục
+              </button>
+            </div>
           </label>
-
-          <div className="quick-download-arrow">→</div>
-
-          <label className="quick-download-field">
-            <span>Kết thúc</span>
-            <input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9:]*"
-              maxLength={10}
-              value={endTime}
+          <label className="quick-download-field quality">
+            <span>Nội dung tải</span>
+            <select
+              value={mediaMode}
               disabled={running}
-              placeholder="00:10:00"
-              title="Mốc thời lượng kết thúc theo định dạng Giờ:Phút:Giây"
-              aria-label="Mốc thời lượng kết thúc"
-              className="video-duration-input"
-              onChange={(event) => setEndTime(event.target.value.replace(/[^0-9:]/g, ''))}
-            />
+              onChange={(event) => setMediaMode(event.target.value as QuickDownloadMediaMode)}
+            >
+              <option value="video-audio">Video + âm thanh</option>
+              <option value="audio-only">Chỉ âm thanh M4A</option>
+              <option value="video-only">Chỉ video, không âm thanh</option>
+            </select>
           </label>
+          <label className="quick-download-field quality">
+            <span>Chất lượng video</span>
+            <select
+              value={quality}
+              disabled={running || mediaMode === 'audio-only'}
+              onChange={(event) => setQuality(event.target.value as QuickDownloadQuality)}
+            >
+              <option value="best">Cao nhất nguồn</option>
+              <option value="1080p">Tối đa 1080p</option>
+              <option value="720p">Tối đa 720p</option>
+              <option value="480p">Tối đa 480p</option>
+            </select>
+          </label>
+        </div>
 
-          <label className="quick-download-accurate">
+        <div className="quick-download-sidecars">
+          <label>
             <input
               type="checkbox"
-              checked={accurateCut}
+              checked={downloadSubtitles}
               disabled={running}
-              onChange={(event) => setAccurateCut(event.target.checked)}
+              onChange={(event) => setDownloadSubtitles(event.target.checked)}
             />
             <span>
-              <strong>Cắt chính xác</strong>
-              <small>Sát điểm cắt hơn nhưng chậm hơn</small>
+              <b>Phụ đề SRT</b>
+              <small>Phụ đề chính thức và tự động</small>
+            </span>
+          </label>
+          <label className="quick-download-sub-language">
+            <span>Ngôn ngữ</span>
+            <input
+              value={subtitleLanguage}
+              disabled={running || !downloadSubtitles}
+              onChange={(event) => setSubtitleLanguage(event.target.value)}
+              placeholder="vi,en"
+            />
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={downloadThumbnail}
+              disabled={running}
+              onChange={(event) => setDownloadThumbnail(event.target.checked)}
+            />
+            <span>
+              <b>Thumbnail JPG</b>
+              <small>Ảnh đại diện cạnh video</small>
+            </span>
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={writeMetadata}
+              disabled={running}
+              onChange={(event) => setWriteMetadata(event.target.checked)}
+            />
+            <span>
+              <b>Metadata</b>
+              <small>Info JSON và mô tả</small>
             </span>
           </label>
         </div>
-      </div>
 
-      {error && <div className="quick-download-error">{error}</div>}
+        <label className={`quick-download-timeline-toggle ${useTimeline ? 'is-active' : ''}`}>
+          <input
+            type="checkbox"
+            checked={useTimeline}
+            disabled={running}
+            onChange={(event) => setUseTimeline(event.target.checked)}
+          />
+          <span>
+            <strong>Tải video theo mốc thời lượng</strong>
+            <small>Chỉ hiện Timeline và cắt đoạn khi bạn bật lựa chọn này.</small>
+          </span>
+          <b>{useTimeline ? 'Đang bật' : 'Đang tắt'}</b>
+        </label>
 
-      {status && (
-        <div className="quick-download-progress">
-          <div className="quick-download-progress-head">
+        {useTimeline && (
+          <div className="quick-download-range-box" data-testid="quick-download-timeline-editor">
+            <div className="quick-download-range-head">
+              <div>
+                <strong>Thiết lập Timeline</strong>
+                <small>Nhập HH:MM:SS. Hai mốc được tự động lưu khi thêm link và khi mở lại ứng dụng</small>
+              </div>
+              <span>Ví dụ: 25:10:30 → 25:15:30</span>
+            </div>
+            <div className="quick-download-range-inputs">
+              <label className="quick-download-field">
+                <span>Bắt đầu</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9:]*"
+                  maxLength={10}
+                  value={startTime}
+                  disabled={running}
+                  placeholder="00:10:00"
+                  title="Mốc thời lượng bắt đầu theo định dạng Giờ:Phút:Giây"
+                  aria-label="Mốc thời lượng bắt đầu"
+                  className="video-duration-input"
+                  onChange={(event) => setStartTime(event.target.value.replace(/[^0-9:]/g, ''))}
+                />
+              </label>
+              <div className="quick-download-arrow">→</div>
+              <label className="quick-download-field">
+                <span>Kết thúc</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9:]*"
+                  maxLength={10}
+                  value={endTime}
+                  disabled={running}
+                  placeholder="00:13:00"
+                  title="Mốc thời lượng kết thúc theo định dạng Giờ:Phút:Giây"
+                  aria-label="Mốc thời lượng kết thúc"
+                  className="video-duration-input"
+                  onChange={(event) => setEndTime(event.target.value.replace(/[^0-9:]/g, ''))}
+                />
+              </label>
+              <label className="quick-download-accurate">
+                <input
+                  type="checkbox"
+                  checked={accurateCut}
+                  disabled={running}
+                  onChange={(event) => setAccurateCut(event.target.checked)}
+                />
+                <span>
+                  <strong>Cắt chính xác</strong>
+                  <small>Sát điểm cắt hơn nhưng chậm hơn</small>
+                </span>
+              </label>
+            </div>
+          </div>
+        )}
+
+        {cookieBlocked && status && (
+          <div className="quick-download-cookie-block" role="alert">
+            <ShieldAlert size={20} />
             <div>
-              <strong>{status.title || status.message}</strong>
-              {status.title && <small>{status.message}</small>}
+              <strong>
+                {status.errorCode === 'COOKIES_EXPIRED'
+                  ? 'Cookies cần được cập nhật'
+                  : status.errorCode === 'BROWSER_COOKIE_DATABASE_LOCKED'
+                    ? 'Trình duyệt đang khóa cookies'
+                    : 'Video cần đăng nhập hoặc cookies'}
+              </strong>
+              <p>{status.message}</p>
             </div>
-            <span>{Math.round(status.progress)}%</span>
+            <button type="button" onClick={() => setCookieOpen(true)}>
+              <Cookie size={15} />
+              Mở 3 cách thêm cookies
+            </button>
           </div>
+        )}
 
-          <div className="quick-download-progress-track">
-            <span
-              style={{
-                width: `${Math.max(0, Math.min(100, status.progress))}%`
-              }}
-            />
-          </div>
+        {error && <div className="quick-download-error">{error}</div>}
 
-          {progressText && <div className="quick-download-progress-meta">{progressText}</div>}
-
-          {status.outputPath && (
-            <div className="quick-download-output" title={status.outputPath}>
-              {status.outputPath}
+        {status ? (
+          <UnifiedDownloadProgress
+            className="quick-download-unified-progress"
+            title={status.title || 'Tải nhanh 1 video'}
+            subtitle={status.message}
+            status={
+              status.phase === 'queued'
+                ? 'pending'
+                : status.phase === 'preparing'
+                  ? 'analyzing'
+                  : status.phase === 'pausing'
+                    ? 'paused'
+                    : status.phase === 'resuming'
+                      ? 'downloading'
+                      : status.phase === 'cancelling'
+                        ? 'cancelled'
+                        : status.phase
+            }
+            progress={status.progress}
+            completed={status.phase === 'completed' ? 1 : 0}
+            total={1}
+            detail={progressText || (paused ? 'Đang tạm dừng' : status.message)}
+            secondary={
+              status.warnings.length > 0
+                ? `${status.warnings.length} cảnh báo cần xem`
+                : useTimeline
+                  ? `${startTime} → ${endTime}`
+                  : mediaMode === 'audio-only'
+                    ? 'Chỉ âm thanh M4A'
+                    : mediaMode === 'video-only'
+                      ? 'Chỉ video'
+                      : 'Video + âm thanh'
+            }
+            outputPath={status.outputPath}
+            actions={
+              <>
+                {!running && (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={!canStart}
+                    onClick={() => void start()}
+                  >
+                    <Play size={15} />
+                    {useTimeline ? 'Tải đoạn theo Timeline' : 'Tải video mới'}
+                  </button>
+                )}
+                {pausable && (
+                  <button type="button" className="btn" onClick={() => void pause()}>
+                    <Pause size={15} />
+                    Tạm dừng
+                  </button>
+                )}
+                {paused && (
+                  <button type="button" className="btn btn-primary" onClick={() => void resume()}>
+                    <Play size={15} />
+                    Tiếp tục
+                  </button>
+                )}
+                {running && (
+                  <button type="button" className="btn btn-danger" onClick={() => void cancel()}>
+                    <Square size={15} />
+                    Hủy tải
+                  </button>
+                )}
+                {status.phase === 'completed' && status.outputPath && (
+                  <button type="button" className="btn" onClick={() => void revealOutput()}>
+                    <ExternalLink size={15} />
+                    Mở vị trí file
+                  </button>
+                )}
+              </>
+            }
+          />
+        ) : (
+          <div className="quick-download-ready-progress">
+            <div>
+              <b>Sẵn sàng tải một video</b>
+              <span>Không tích Timeline để tải toàn bộ; tích Timeline để chỉ tải đoạn đã chọn.</span>
             </div>
-          )}
+            <button
+              type="button"
+              className="btn btn-primary workflow-primary"
+              disabled={!canStart}
+              onClick={() => void start()}
+            >
+              <Play size={16} />
+              {useTimeline ? 'Tải đoạn theo Timeline' : 'Tải toàn bộ video'}
+            </button>
+          </div>
+        )}
 
-          {status.warnings.length > 0 && (
-            <details className="quick-download-warnings">
-              <summary>{status.warnings.length} cảnh báo</summary>
-              <pre>{status.warnings.join('\n')}</pre>
-            </details>
-          )}
+        {status?.warnings.length ? (
+          <details className="quick-download-warnings quick-download-unified-warnings">
+            <summary>{status.warnings.length} cảnh báo</summary>
+            <pre>{status.warnings.join('\n')}</pre>
+          </details>
+        ) : null}
+
+        <div className="quick-download-note">
+          {useTimeline
+            ? 'Timeline đang bật: Tubmedia chỉ tải đoạn đã chọn. Cắt nhanh có thể lệch nhẹ quanh keyframe; bật Cắt chính xác khi cần mốc sát hơn.'
+            : 'Timeline đang tắt: Tubmedia tải toàn bộ video. File luôn có Video ID và mã tác vụ để không bỏ qua nhầm video trùng tên.'}
         </div>
-      )}
-
-      <div className="quick-download-actions">
-        <button
-          type="button"
-          className="quick-download-button secondary"
-          disabled={running || !url.trim() || !outputDirectory}
-          onClick={() => void start('full')}
-        >
-          Tải nhanh toàn bộ
-        </button>
-
-        <button
-          type="button"
-          className="quick-download-button primary"
-          disabled={running || !url.trim() || !outputDirectory || !startTime.trim() || !endTime.trim()}
-          onClick={() => void start('range')}
-        >
-          Tải đoạn đã chọn
-        </button>
-
-        {running && (
-          <button type="button" className="quick-download-button danger" onClick={() => void cancel()}>
-            Hủy tải
-          </button>
-        )}
-
-        {status?.phase === 'completed' && status.outputPath && (
-          <button type="button" className="quick-download-button success" onClick={() => void revealOutput()}>
-            Mở vị trí file
-          </button>
-        )}
-      </div>
-
-      <div className="quick-download-note">
-        Chế độ nhanh có thể lệch nhẹ quanh điểm keyframe. Bật “Cắt chính xác” khi cần mốc sát hơn. File luôn
-        có ID video và mã tác vụ để không bỏ qua nhầm hai video trùng tên.
-      </div>
-    </section>
+      </section>
+      <CookieManagerDialog
+        open={cookieOpen}
+        onClose={() => setCookieOpen(false)}
+        onConfigured={resumeAfterCookies}
+      />
+    </>
   );
 }

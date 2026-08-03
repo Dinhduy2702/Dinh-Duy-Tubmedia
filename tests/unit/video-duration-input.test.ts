@@ -14,8 +14,15 @@ describe('ô nhập mốc thời lượng video', () => {
   it('nhập HH:MM:SS và không hiển thị AM/PM', () => {
     expect(panel).toContain('pattern="[0-9:]*"');
     expect(panel).toContain('placeholder="00:10:00"');
+    expect(panel).toContain('placeholder="00:13:00"');
     expect(panel).toContain('Hai mốc được tự động lưu khi thêm link và khi mở lại ứng dụng');
     expect(panel).not.toContain('type="time"');
+  });
+
+  it('chỉ hiện Timeline khi bật dấu tích', () => {
+    expect(panel).toContain('checked={useTimeline}');
+    expect(panel).toContain('{useTimeline && (');
+    expect(panel).toContain('quick-download-timeline-editor');
   });
 
   it('giữ giá trị bắt đầu và kết thúc trong state hiện tại', () => {
