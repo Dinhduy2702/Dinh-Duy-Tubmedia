@@ -57,7 +57,7 @@ import { useAppStore } from '../stores/app-store';
 import { createUiEventId } from '../utils/ui-id';
 import { loadWorkbenchPath, saveWorkbenchPath } from '../utils/workbench-path-memory';
 import { friendlyIssue } from '../utils/ui-error';
-import { audioModeLabel, statusLabel } from '../utils/vi-labels';
+import { audioModeLabel, jobTypeLabel, statusLabel } from '../utils/vi-labels';
 
 interface MergeForm {
   name: string;
@@ -1634,54 +1634,54 @@ function MergeErrorDetailPanel({
 }): React.JSX.Element {
   const technical = useMemo(() => mergeErrorTechnical(job, log), [job, log]);
   const time = log?.timestamp ?? job.finishedAt ?? job.updatedAt;
-  const code = job.errorCode ?? 'UNHANDLED_ERROR';
-  const eventCode = log?.eventCode ?? 'JOB_FAILED';
-  const message = job.errorMessage ?? log?.message ?? 'Lỗi chưa xác định.';
+  const issue = friendlyIssue(job.errorMessage ?? log?.message ?? job.errorCode ?? '');
 
   return (
-    <section className="merge-error-detail" role="alert" aria-live="assertive">
+    <section className={`merge-error-detail merge-error-${issue.tone}`} role="alert" aria-live="assertive">
       <header className="merge-error-detail-head">
         <span className="merge-error-detail-icon">
           <AlertTriangle size={18} />
         </span>
         <div className="min-w-0 flex-1">
-          <b>Chi tiết lỗi của quy trình</b>
-          <small>
-            {eventCode} · {code}
-          </small>
+          <b>{issue.title}</b>
+          <small>Cập nhật lúc {new Date(time).toLocaleString('vi-VN')}</small>
         </div>
         <StatusBadge status="failed" fixed />
       </header>
+      <p className="merge-error-message">{issue.message}</p>
+      {issue.steps.length > 0 && (
+        <ol className="merge-error-user-steps">
+          {issue.steps.map((step) => <li key={step}>{step}</li>)}
+        </ol>
+      )}
       <div className="merge-error-summary-grid">
         <div>
-          <span>Thời gian</span>
-          <b>{new Date(time).toLocaleString('vi-VN')}</b>
+          <span>Công đoạn</span>
+          <b>{jobTypeLabel(job.type)}</b>
         </div>
         <div>
-          <span>Mã lỗi</span>
-          <b>{code}</b>
+          <span>Tiến độ cuối</span>
+          <b>{job.progress.toFixed(1)}%</b>
         </div>
         <div>
-          <span>Sự kiện</span>
-          <b>{eventCode}</b>
+          <span>Số lần thử</span>
+          <b>{job.attempts}/{job.maxAttempts}</b>
         </div>
         <div>
-          <span>Tác vụ</span>
-          <b>{job.id}</b>
+          <span>Trạng thái</span>
+          <b>{statusLabel(job.status)}</b>
         </div>
       </div>
-      <p className="merge-error-message">{message}</p>
       <div className="merge-error-actions">
-        <button className="btn btn-small" onClick={() => void window.desktop.app.writeClipboard(technical)}>
-          <Copy size={14} />
-          Sao chép chi tiết lỗi
-        </button>
         <button className="btn btn-small" onClick={onOpenLogs}>
           <FileText size={14} />
-          Mở nhật ký riêng
+          Mở nhật ký quy trình
+        </button>
+        <button className="btn btn-small btn-ghost" onClick={() => void window.desktop.app.writeClipboard(technical)}>
+          <Copy size={14} />
+          Sao chép thông tin hỗ trợ
         </button>
       </div>
-      <pre className="merge-error-technical">{technical}</pre>
     </section>
   );
 }

@@ -19,13 +19,26 @@ const NON_ACTIONABLE_EVENT_CODES = new Set([
   'DOWNLOAD_SIZE_ESTIMATE_MISMATCH'
 ]);
 
+const ACTIONABLE_WARNING_EVENT_CODES = new Set([
+  'DISK_FULL',
+  'DISK_SPACE_LOW',
+  'OUTPUT_PERMISSION_DENIED',
+  'PERMISSION_REQUIRED',
+  'FILE_LOCKED',
+  'COOKIES_REQUIRED',
+  'COOKIES_EXPIRED'
+]);
+
 const BLOCKING_STATUSES: ReadonlySet<QueueJob['status']> = new Set(['paused', 'interrupted', 'failed']);
 
 export const TRANSIENT_DIAGNOSTIC_DURATION_MS = 8_000;
 
 export function isActionableDiagnostic(entry: Pick<LogEntry, 'level' | 'eventCode'>): boolean {
   if (NON_ACTIONABLE_EVENT_CODES.has(entry.eventCode)) return false;
-  return entry.level === 'error' || entry.level === 'warn';
+  if (entry.level === 'error') return true;
+  // Chỉ đưa cảnh báo cần người dùng hành động vào trung tâm chẩn đoán.
+  // Các cảnh báo kỹ thuật đã tự phục hồi hoặc chỉ mang tính thông tin vẫn bị ẩn.
+  return entry.level === 'warn' && ACTIONABLE_WARNING_EVENT_CODES.has(entry.eventCode);
 }
 
 export function isDiagnosticStillBlocking(

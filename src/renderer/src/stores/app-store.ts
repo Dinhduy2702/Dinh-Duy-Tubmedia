@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { friendlyIssue, safeUiText } from '../utils/ui-error';
 import type {
   AppSettings,
   AppUpdateStatus,
@@ -41,7 +42,7 @@ interface State {
   stats: SystemStats | null;
   logs: LogEntry[];
   selectedProjectId: string | null;
-  error: string | null;
+  error: unknown;
   attention: AttentionNotice | null;
   attentionQueue: AttentionNotice[];
   updateStatus: AppUpdateStatus | null;
@@ -58,7 +59,7 @@ interface State {
   updateJobs(jobs: QueueJob[]): void;
   replaceJobs(jobs: QueueJob[]): void;
   setStats(stats: SystemStats): void;
-  setError(error: string | null): void;
+  setError(error: unknown): void;
   setAttention(attention: AttentionNotice | null): void;
   dismissAttention(id?: string): void;
   dismissAttentionByCodes(codes: readonly string[]): void;
@@ -158,7 +159,7 @@ export const useAppStore = create<State>((set, get) => ({
         .then((hardware) => set({ hardware }))
         .catch(() => undefined);
     } catch (error) {
-      set({ loading: false, error: error instanceof Error ? error.message : String(error) });
+      set({ loading: false, error });
     }
   },
   setPage: (page) => set({ page }),
@@ -196,16 +197,51 @@ export const useAppStore = create<State>((set, get) => ({
         return state;
       return { stats };
     }),
-  setError: (error) => set({ error }),
+  setError: (error) =>
+    set((state) => {
+      if (error === null || error === undefined || error === '') return { error: null };
+      const issue = friendlyIssue(error);
+      if (issue.tone === 'success' || issue.tone === 'info') {
+        const notice: AttentionNotice = {
+          id: `ui-result-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          severity: issue.tone,
+          title: issue.title,
+          message: issue.message,
+          steps: issue.steps,
+          sticky: false
+        };
+        if (!state.attention) return { error: null, attention: notice };
+        return {
+          error: null,
+          attentionQueue: [
+            ...state.attentionQueue.filter((item) => item.id !== notice.id),
+            notice
+          ].slice(-5)
+        };
+      }
+      return { error };
+    }),
   setAttention: (attention) =>
     set((state) => {
       if (!attention) {
         const [next, ...rest] = state.attentionQueue;
         return { attention: next ?? null, attentionQueue: rest };
       }
-      if (state.attention?.id === attention.id) return { attention };
-      if (!state.attention) return { attention };
-      const queue = [...state.attentionQueue.filter((item) => item.id !== attention.id), attention].slice(-5);
+      const sanitizedSteps = attention.steps?.map((step) =>
+        safeUiText(step, 'Kiểm tra lại thao tác.')
+      );
+      const cleanAttention: AttentionNotice = {
+        ...attention,
+        title: safeUiText(attention.title, 'Thông báo'),
+        message: safeUiText(attention.message, 'Ứng dụng đã cập nhật trạng thái.'),
+        ...(sanitizedSteps ? { steps: sanitizedSteps } : {})
+      };
+      if (state.attention?.id === cleanAttention.id) return { attention: cleanAttention };
+      if (!state.attention) return { attention: cleanAttention };
+      const queue = [
+        ...state.attentionQueue.filter((item) => item.id !== cleanAttention.id),
+        cleanAttention
+      ].slice(-5);
       return { attentionQueue: queue };
     }),
   dismissAttention: (id) =>

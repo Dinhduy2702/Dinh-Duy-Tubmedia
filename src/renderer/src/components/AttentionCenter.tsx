@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Info, XCircle, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Info, XCircle, X } from 'lucide-react';
 import { isAttentionNoticeResolved, notificationDuration } from '@shared/utils/notification-policy';
 import { useAppStore } from '../stores/app-store';
 import { friendlyIssue } from '../utils/ui-error';
@@ -16,7 +16,6 @@ export function AttentionCenter(): React.JSX.Element | null {
   const queued = useAppStore((state) => state.attentionQueue.length);
   const setError = useAppStore((state) => state.setError);
   const dismissAttention = useAppStore((state) => state.dismissAttention);
-  const [details, setDetails] = useState(false);
   const [phase, setPhase] = useState<Phase>('entering');
   const [paused, setPaused] = useState(false);
   const closeTimer = useRef<number | null>(null);
@@ -25,7 +24,11 @@ export function AttentionCenter(): React.JSX.Element | null {
 
   const issue = useMemo(() => (error ? friendlyIssue(error) : null), [error]);
   const tone = issue?.tone ?? attention?.severity ?? 'info';
-  const key = error ? `error:${error}` : attention ? `attention:${attention.id}` : '';
+  const key = error
+    ? `error:${issue?.tone ?? 'error'}:${issue?.title ?? ''}:${issue?.message ?? ''}`
+    : attention
+      ? `attention:${attention.id}`
+      : '';
   const attentionResolved = attention ? isAttentionNoticeResolved(attention, jobs) : false;
   // Chỉ giữ cố định khi nguyên nhân vẫn đang chặn tác vụ.
   const sticky = Boolean(error || (attention?.sticky && !attentionResolved));
@@ -41,7 +44,6 @@ export function AttentionCenter(): React.JSX.Element | null {
   const finishClose = useCallback((): void => {
     if (error) setError(null);
     else if (attention) dismissAttention(attention.id);
-    setDetails(false);
   }, [attention, dismissAttention, error, setError]);
 
   const beginClose = useCallback((): void => {
@@ -58,7 +60,6 @@ export function AttentionCenter(): React.JSX.Element | null {
 
   useEffect(() => {
     clearTimers();
-    setDetails(false);
     setPaused(false);
     remainingMs.current = duration;
     if (!key) return;
@@ -95,7 +96,6 @@ export function AttentionCenter(): React.JSX.Element | null {
   const title = issue?.title ?? attention?.title ?? 'Thông báo';
   const message = issue?.message ?? attention?.message ?? '';
   const steps = issue?.steps ?? attention?.steps ?? [];
-  const technical = issue?.technical ?? '';
   const Icon =
     tone === 'error'
       ? XCircle
@@ -137,16 +137,6 @@ export function AttentionCenter(): React.JSX.Element | null {
               </li>
             ))}
           </ol>
-        )}
-        {technical && (
-          <div className="mt-2">
-            <button className="attention-details-button" onClick={() => setDetails((value) => !value)}>
-              {details ? <ChevronUp size={14} /> : <ChevronDown size={14} />}Thông tin kỹ thuật
-            </button>
-            <div className={`attention-technical-wrap ${details ? 'is-open' : ''}`}>
-              <pre className="attention-technical">{technical}</pre>
-            </div>
-          </div>
         )}
       </div>
       <button className="attention-close" aria-label="Đóng thông báo" onClick={beginClose}>

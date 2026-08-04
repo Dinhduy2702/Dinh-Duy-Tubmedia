@@ -2,6 +2,7 @@ import { CheckCircle2, CircleAlert, ExternalLink, LoaderCircle, Wrench } from 'l
 import type { ToolStatus } from '@shared/types/domain';
 import { useAppStore } from '../stores/app-store';
 import { InfoDisclosure } from './InfoDisclosure';
+import { safeUiText } from '../utils/ui-error';
 
 const REQUIRED = ['yt-dlp', 'ffmpeg', 'ffprobe'] as const;
 
@@ -52,7 +53,7 @@ export function ToolReadinessPanel({ workflow }: { workflow: 'download' | 'merge
     <div className="tool-chip-grid">
       {REQUIRED.map((name) => {
         const tool = toolByName(tools, name);
-        return <div key={name} className={`tool-chip ${tool?.available ? 'tool-chip-ready' : 'tool-chip-broken'}`} title={tool?.executablePath ?? tool?.error ?? ''}>
+        return <div key={name} className={`tool-chip ${tool?.available ? 'tool-chip-ready' : 'tool-chip-broken'}`} title={tool?.executablePath ?? safeUiText(tool?.error, 'Công cụ chưa sẵn sàng.')}>
           <span className="tool-chip-dot"/>
           <div><b>{name}</b><small>{tool?.version ?? 'đang nhận diện'}</small><em>{shortPath(tool?.executablePath ?? null)}</em></div>
         </div>;

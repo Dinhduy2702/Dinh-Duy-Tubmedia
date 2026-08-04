@@ -7841,32 +7841,101 @@ body {
 }
 /* TUBMEDIA_INDEPENDENT_WORKFLOW_ACCORDION_1_3_0_END */
 
-/* TUBMEDIA_TRUE_UPDATE_NOTICE_R3_START */
-.topbar-update-button > i {
-  width: 7px;
-  height: 7px;
+/* TUBMEDIA_USER_FACING_NOTIFICATION_BOUNDARY_1_3_0_START */
+.queue-detail-result,
+.update-user-issue {
+  margin-top: 0.85rem;
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel2) 82%, transparent);
+}
+
+.queue-detail-result > b,
+.update-user-issue > b {
+  display: block;
+  margin-bottom: 0.55rem;
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.queue-detail-result dl {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.queue-detail-result dl > div {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr);
+  gap: 0.55rem;
+  align-items: start;
+}
+
+.queue-detail-result dt {
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 800;
+}
+
+.queue-detail-result dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.7rem;
+  overflow-wrap: anywhere;
+}
+
+.queue-detail-warning,
+.update-user-warning {
+  border-color: color-mix(in srgb, var(--warn) 42%, var(--border));
+  background: color-mix(in srgb, var(--warn) 10%, var(--panel));
+}
+
+.queue-detail-error,
+.update-user-error {
+  border-color: color-mix(in srgb, var(--bad) 42%, var(--border));
+  background: color-mix(in srgb, var(--bad) 10%, var(--panel));
+}
+
+.queue-detail-success,
+.update-user-success {
+  border-color: color-mix(in srgb, var(--good) 42%, var(--border));
+  background: color-mix(in srgb, var(--good) 9%, var(--panel));
+}
+
+.update-user-issue p {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.update-user-issue ol,
+.merge-error-user-steps,
+.diagnostic-dock ol,
+.system-cleanup-errors ul,
+.quick-download-warnings ul {
+  display: grid;
+  gap: 0.34rem;
+  margin: 0.65rem 0 0;
+  padding-left: 1.15rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.diagnostic-dock small {
+  color: var(--muted);
+  font-size: 0.65rem;
+}
+
+.diagnostic-warning .diagnostic-dock-accent {
+  background: var(--warn);
+}
+
+.diagnostic-error .diagnostic-dock-accent {
   background: var(--bad);
-  color: var(--bad);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 14%, transparent);
-  animation: tubmedia-update-dot-pulse 1.8s ease-in-out infinite;
 }
-
-@keyframes tubmedia-update-dot-pulse {
-  0%, 100% {
-    opacity: 0.72;
-    transform: scale(0.92);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--bad) 12%, transparent);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.08);
-    box-shadow: 0 0 0 5px color-mix(in srgb, var(--bad) 5%, transparent);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .topbar-update-button > i {
-    animation: none;
-  }
-}
-/* TUBMEDIA_TRUE_UPDATE_NOTICE_R3_END */
+/* TUBMEDIA_USER_FACING_NOTIFICATION_BOUNDARY_1_3_0_END */

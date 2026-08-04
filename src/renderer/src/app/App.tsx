@@ -7,7 +7,7 @@ import { Topbar } from '../layout/Topbar';
 import { AttentionCenter } from '../components/AttentionCenter';
 import { DiagnosticDock } from '../components/DiagnosticDock';
 import { TubmediaMark } from '../components/TubmediaBrand';
-import { friendlyIssue } from '../utils/ui-error';
+import { friendlyIssue, safeUiText } from '../utils/ui-error';
 
 const EditorHomePage = lazy(() =>
   import('../pages/EditorHomePage').then((module) => ({ default: module.EditorHomePage }))
@@ -127,7 +127,7 @@ export function App(): React.JSX.Element {
             </div>
             {loading && (
               <div className="startup-status" aria-live="polite">
-                {startupToolMessage ?? 'Đang dò, kiểm tra và tự sửa công cụ cần thiết'}
+                {safeUiText(startupToolMessage, 'Đang dò, kiểm tra và tự sửa công cụ cần thiết')}
                 <span className="startup-dots">
                   <i />
                   <i />
@@ -156,10 +156,6 @@ export function App(): React.JSX.Element {
                     <li key={step}>{step}</li>
                   ))}
                 </ol>
-                <details className="mt-2 text-xs" style={{ color: 'var(--muted)' }}>
-                  <summary>Thông tin kỹ thuật</summary>
-                  <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap">{issue.technical}</pre>
-                </details>
               </div>
             )}
             {!loading && (

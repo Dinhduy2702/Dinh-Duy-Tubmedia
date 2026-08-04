@@ -317,6 +317,7 @@ src/shared/utils/safe-json.ts
 src/shared/utils/secret-redaction.ts
 src/shared/utils/text-encoding.ts
 src/shared/utils/timestamp.ts
+src/shared/utils/ui-error.ts
 src/shared/utils/url.ts
 TEST_RESULTS.md
 tests/e2e/app.spec.ts
@@ -385,6 +386,7 @@ tests/unit/ui-density.test.ts
 tests/unit/unified-download-progress-1.3.0.test.ts
 tests/unit/update-center-release-notes.test.ts
 tests/unit/url.test.ts
+tests/unit/user-facing-notifications.test.ts
 tests/unit/video-duration-input.test.ts
 tests/unit/video-duration-persistence.test.ts
 tests/unit/windows-process-control.test.ts

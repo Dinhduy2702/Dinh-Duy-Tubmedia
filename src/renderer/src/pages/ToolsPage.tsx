@@ -20,8 +20,9 @@ import { StatusBadge } from '../components/StatusBadge';
 import { useAppStore } from '../stores/app-store';
 import { createUiEventId } from '../utils/ui-id';
 import { toolSourceLabel } from '../utils/vi-labels';
+import { safeUiText } from '../utils/ui-error';
 
-const messageOf = (error: unknown): string => error instanceof Error ? error.message : String(error);
+const messageOf = (error: unknown): string => safeUiText(error, 'Không thể hoàn tất thao tác với công cụ.');
 const REQUIRED = ['yt-dlp', 'ffmpeg', 'ffprobe'] as const;
 
 const toolIcons: Record<ToolStatus['name'], LucideIcon> = {
@@ -192,7 +193,7 @@ export function ToolsPage(): React.JSX.Element {
             {!tool.capabilities.length && <em>{connecting ? 'Đang nhận diện khả năng của công cụ.' : tool.available ? 'Đã xác nhận tệp thực thi và phiên bản.' : 'Chưa thể kiểm tra khả năng vì công cụ chưa chạy được.'}</em>}
           </div>
 
-          {tool.error && !connecting && <div className="tool-error-box"><CircleAlert size={17}/><span>{tool.error}</span></div>}
+          {tool.error && !connecting && <div className="tool-error-box"><CircleAlert size={17}/><span>{safeUiText(tool.error, 'Công cụ chưa sẵn sàng. Hãy chạy Sửa chữa tất cả.')}</span></div>}
 
           <footer className="tool-card-actions">
             <div className="tool-action-group tool-action-group-secondary">

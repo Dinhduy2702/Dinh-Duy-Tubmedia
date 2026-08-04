@@ -1,4 +1,4 @@
-import { Bug, ChevronDown, ChevronUp, Copy, FileText, X } from 'lucide-react';
+import { AlertTriangle, Copy, FileText, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import type { LogEntry } from '@shared/types/domain';
 import {
@@ -7,95 +7,90 @@ import {
   TRANSIENT_DIAGNOSTIC_DURATION_MS
 } from '@shared/utils/diagnostic-policy';
 import { useAppStore } from '../stores/app-store';
+import { friendlyIssue } from '../utils/ui-error';
 
-function technicalText(error: string | null, log: LogEntry | null): string {
-  if (error) return error;
+function supportText(error: unknown, log: LogEntry | null): string {
+  if (error instanceof Error) return error.stack ?? error.message;
+  if (typeof error === 'string') return error;
+  if (error !== null && error !== undefined) {
+    try {
+      return JSON.stringify(error, null, 2);
+    } catch {
+      return 'Không thể tạo thông tin hỗ trợ.';
+    }
+  }
   if (!log) return '';
-  return JSON.stringify(
-    {
-      time: log.timestamp,
-      component: log.module,
-      eventCode: log.eventCode,
-      message: log.message,
-      projectId: log.projectId ?? null,
-      jobId: log.jobId ?? null,
-      metadata: log.metadata ?? null
-    },
-    null,
-    2
-  );
+  try {
+    return JSON.stringify(
+      {
+        time: log.timestamp,
+        component: log.module,
+        eventCode: log.eventCode,
+        message: log.message,
+        projectId: log.projectId ?? null,
+        jobId: log.jobId ?? null,
+        metadata: log.metadata ?? null
+      },
+      null,
+      2
+    );
+  } catch {
+    return log.message;
+  }
 }
 
 export function DiagnosticDock(): React.JSX.Element | null {
-  const error = useAppStore((state) => state.error);
   const jobs = useAppStore((state) => state.jobs);
   const logs = useAppStore((state) => state.logs);
-  const setError = useAppStore((state) => state.setError);
   const setPage = useAppStore((state) => state.setPage);
   const log = logs.find((entry) => shouldDisplayDiagnostic(entry, jobs)) ?? null;
-  const diagnosticId = error ? `ui:${error}` : (log?.id ?? '');
   const blocking = Boolean(log && isDiagnosticStillBlocking(log, jobs));
+  const issue = useMemo(() => friendlyIssue(log?.message ?? ''), [log]);
+  const diagnosticId = log?.id ?? '';
   const [dismissedId, setDismissedId] = useState('');
-  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
-    if (diagnosticId && diagnosticId !== dismissedId) setExpanded(false);
-  }, [diagnosticId, dismissedId]);
-
-  useEffect(() => {
-    if (!diagnosticId || error || blocking) return;
+    if (!diagnosticId || blocking) return;
     const timestamp = log ? Date.parse(log.timestamp) : Date.now();
     const elapsed = Number.isFinite(timestamp) ? Math.max(0, Date.now() - timestamp) : 0;
     const wait = Math.max(500, TRANSIENT_DIAGNOSTIC_DURATION_MS - elapsed);
     const timer = window.setTimeout(() => setDismissedId(diagnosticId), wait);
     return () => window.clearTimeout(timer);
-  }, [blocking, diagnosticId, error, log]);
+  }, [blocking, diagnosticId, log]);
 
-  const technical = useMemo(() => technicalText(error, log), [error, log]);
   if (!diagnosticId || diagnosticId === dismissedId) return null;
-
-  const eventCode = error ? 'UI_RUNTIME_ERROR' : (log?.eventCode ?? 'UNKNOWN_ERROR');
-  const message = error ?? log?.message ?? 'Lỗi chưa xác định.';
+  const technical = supportText(null, log);
   const close = (): void => {
     setDismissedId(diagnosticId);
-    if (error) setError(null);
   };
 
   return (
-    <aside className="diagnostic-dock" role="alert" aria-live="assertive">
+    <aside className={`diagnostic-dock diagnostic-${issue.tone}`} role="alert" aria-live="assertive">
       <div className="diagnostic-dock-accent" />
       <div className="diagnostic-dock-head">
-        <span className="diagnostic-dock-icon">
-          <Bug size={17} />
-        </span>
+        <span className="diagnostic-dock-icon"><AlertTriangle size={17} /></span>
         <div className="min-w-0 flex-1">
-          <b>{blocking || error ? 'Trung tâm lỗi cần xử lý' : 'Thông báo chẩn đoán'}</b>
-          <small>{eventCode}</small>
+          <b>{issue.title}</b>
+          <small>{blocking ? 'Tác vụ đang chờ bạn xử lý' : 'Thông báo cần kiểm tra'}</small>
         </div>
-        <button
-          className="icon-action"
-          title="Đóng thông báo này"
-          aria-label="Đóng thông báo này"
-          onClick={close}
-        >
+        <button className="icon-action" title="Đóng thông báo này" aria-label="Đóng thông báo này" onClick={close}>
           <X size={15} />
         </button>
       </div>
-      <p>{message}</p>
+      <p>{issue.message}</p>
+      {issue.steps.length > 0 && (
+        <ol>{issue.steps.map((step) => <li key={step}>{step}</li>)}</ol>
+      )}
       <div className="diagnostic-dock-actions">
-        <button className="btn btn-small" onClick={() => void window.desktop.app.writeClipboard(technical)}>
-          <Copy size={14} />
-          Sao chép lỗi
-        </button>
         <button className="btn btn-small" onClick={() => setPage('logs')}>
           <FileText size={14} />
           Mở nhật ký
         </button>
-        <button className="btn btn-small btn-ghost" onClick={() => setExpanded((value) => !value)}>
-          {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}Chi tiết
+        <button className="btn btn-small btn-ghost" onClick={() => void window.desktop.app.writeClipboard(technical)}>
+          <Copy size={14} />
+          Sao chép thông tin hỗ trợ
         </button>
       </div>
-      {expanded && <pre className="diagnostic-dock-technical">{technical}</pre>}
     </aside>
   );
 }

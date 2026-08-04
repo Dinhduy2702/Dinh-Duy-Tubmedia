@@ -43,7 +43,7 @@ import { CompactLogRow } from '../components/CompactLogRow';
 import { useAppStore } from '../stores/app-store';
 import { createUiEventId } from '../utils/ui-id';
 import { loadWorkbenchPath, saveWorkbenchPath } from '../utils/workbench-path-memory';
-import { friendlyIssue } from '../utils/ui-error';
+import { friendlyIssue, safeUiText } from '../utils/ui-error';
 import { statusLabel } from '../utils/vi-labels';
 import { QuickDownloadPanel } from '../components/QuickDownloadPanel';
 
@@ -80,7 +80,7 @@ const BLOCKING_CODES = [
 ] as const;
 
 function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return safeUiText(error, 'Không thể hoàn tất thao tác.');
 }
 function laneNumber(slot: DownloadLaneId): number {
   return Number(slot.slice('download-'.length));

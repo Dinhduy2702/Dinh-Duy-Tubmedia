@@ -7,6 +7,7 @@ import type {
 } from '@shared/quick-download';
 import { CookieManagerDialog } from './CookieManagerDialog';
 import { UnifiedDownloadProgress } from './UnifiedDownloadProgress';
+import { safeUiText } from '../utils/ui-error';
 
 function formatBytes(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0 B';
@@ -16,13 +17,26 @@ function formatBytes(value: number): string {
 }
 
 function readableError(value: unknown, fallback: string): string {
-  const message = value instanceof Error ? value.message : typeof value === 'string' ? value : fallback;
-  return (
-    message
-      .replace(/^Error invoking remote method '[^']+':\s*/i, '')
-      .replace(/^[A-Za-z]+Error:\s*/i, '')
-      .trim() || fallback
-  );
+  return safeUiText(value, fallback);
+}
+
+function quickPhaseLabel(phase: QuickDownloadStatus['phase']): string {
+  const labels: Record<QuickDownloadStatus['phase'], string> = {
+    queued: 'Đang xếp hàng',
+    preparing: 'Đang chuẩn bị',
+    downloading: 'Đang tải video',
+    processing: 'Đang xử lý tệp',
+    verifying: 'Đang kiểm tra tệp',
+    pausing: 'Đang tạm dừng',
+    paused: 'Đã tạm dừng',
+    resuming: 'Đang tiếp tục',
+    completed: 'Đã hoàn tất',
+    cancelling: 'Đang hủy',
+    cancelled: 'Đã hủy',
+    failed: 'Tải chưa thành công',
+    interrupted: 'Tác vụ bị gián đoạn'
+  };
+  return labels[phase];
 }
 
 const TERMINAL_PHASES = new Set<QuickDownloadStatus['phase']>([
@@ -112,6 +126,11 @@ export function QuickDownloadPanel(): ReactElement {
   );
 
   const cookieBlocked = Boolean(status?.errorCode && COOKIE_BLOCKING_CODES.has(status.errorCode));
+
+  const displayStatusMessage = status
+    ? safeUiText(status.message, quickPhaseLabel(status.phase))
+    : '';
+  const displayWarnings = status?.warnings.map((warning) => safeUiText(warning, 'Có một cảnh báo cần kiểm tra.')) ?? [];
 
   const progressText = useMemo(() => {
     if (!status) return '';
@@ -443,7 +462,7 @@ export function QuickDownloadPanel(): ReactElement {
                     ? 'Trình duyệt đang khóa cookies'
                     : 'Video cần đăng nhập hoặc cookies'}
               </strong>
-              <p>{status.message}</p>
+              <p>{displayStatusMessage}</p>
             </div>
             <button type="button" onClick={() => setCookieOpen(true)}>
               <Cookie size={15} />
@@ -458,7 +477,7 @@ export function QuickDownloadPanel(): ReactElement {
           <UnifiedDownloadProgress
             className="quick-download-unified-progress"
             title={status.title || 'Tải nhanh 1 video'}
-            subtitle={status.message}
+            subtitle={displayStatusMessage}
             status={
               status.phase === 'queued'
                 ? 'pending'
@@ -475,10 +494,10 @@ export function QuickDownloadPanel(): ReactElement {
             progress={status.progress}
             completed={status.phase === 'completed' ? 1 : 0}
             total={1}
-            detail={progressText || (paused ? 'Đang tạm dừng' : status.message)}
+            detail={progressText || (paused ? 'Đang tạm dừng' : displayStatusMessage)}
             secondary={
-              status.warnings.length > 0
-                ? `${status.warnings.length} cảnh báo cần xem`
+              displayWarnings.length > 0
+                ? `${displayWarnings.length} cảnh báo cần xem`
                 : useTimeline
                   ? `${startTime} → ${endTime}`
                   : mediaMode === 'audio-only'
@@ -546,10 +565,10 @@ export function QuickDownloadPanel(): ReactElement {
           </div>
         )}
 
-        {status?.warnings.length ? (
+        {displayWarnings.length ? (
           <details className="quick-download-warnings quick-download-unified-warnings">
-            <summary>{status.warnings.length} cảnh báo</summary>
-            <pre>{status.warnings.join('\n')}</pre>
+            <summary>{displayWarnings.length} cảnh báo</summary>
+            <ul>{displayWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
           </details>
         ) : null}
 

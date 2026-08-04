@@ -1,5 +1,6 @@
 import { AlertTriangle, CheckCircle2, HardDrive, ShieldCheck, Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { safeUiText } from '../utils/ui-error';
 import {
   SYSTEM_CLEANUP_CATEGORIES,
   isIrreversibleCleanupSelection,
@@ -229,7 +230,7 @@ export function SystemCleanupPanel(): React.JSX.Element {
           setStatus(next);
         }
       } catch (pollError) {
-        setError(pollError instanceof Error ? pollError.message : 'Không đọc được tiến trình dọn dẹp.');
+        setError(safeUiText(pollError, 'Không đọc được tiến trình dọn dẹp.'));
       }
     }, 600);
 
@@ -330,7 +331,7 @@ export function SystemCleanupPanel(): React.JSX.Element {
 
       setStatus(next);
     } catch (startError) {
-      setError(startError instanceof Error ? startError.message : 'Không thể bắt đầu dọn dẹp.');
+      setError(safeUiText(startError, 'Không thể bắt đầu dọn dẹp.'));
     }
   }
 
@@ -350,7 +351,7 @@ export function SystemCleanupPanel(): React.JSX.Element {
         setStatus(next);
       }
     } catch (cancelError) {
-      setError(cancelError instanceof Error ? cancelError.message : 'Không gửi được yêu cầu dừng.');
+      setError(safeUiText(cancelError, 'Không gửi được yêu cầu dừng.'));
     }
   }
 
@@ -527,21 +528,23 @@ export function SystemCleanupPanel(): React.JSX.Element {
           {status.results.length > 0 && (
             <details className="system-cleanup-errors">
               <summary>Chi tiết dung lượng theo từng hạng mục</summary>
-              <pre>
-                {status.results
-                  .map((result) => {
-                    const category = SYSTEM_CLEANUP_CATEGORIES.find((item) => item.id === result.id);
-                    return `${category?.label ?? result.id}: ${formatBytes(result.estimatedBytes)} | đã xóa ${formatBytes(result.removedBytes)} | bỏ qua ${result.skippedItems}`;
-                  })
-                  .join('\n')}
-              </pre>
+              <ul>
+                {status.results.map((result) => {
+                  const category = SYSTEM_CLEANUP_CATEGORIES.find((item) => item.id === result.id);
+                  return (
+                    <li key={result.id}>
+                      <b>{category?.label ?? 'Hạng mục hệ thống'}:</b> ước tính {formatBytes(result.estimatedBytes)}, đã xóa {formatBytes(result.removedBytes)}, bỏ qua {result.skippedItems} mục
+                    </li>
+                  );
+                })}
+              </ul>
             </details>
           )}
 
           {status.errors.length > 0 && (
             <details className="system-cleanup-errors">
-              <summary>{status.errors.length} lỗi hoặc mục không thể xử lý</summary>
-              <pre>{status.errors.join('\n')}</pre>
+              <summary>{status.errors.length} mục chưa thể xử lý</summary>
+              <ul>{status.errors.map((item) => <li key={item}>{safeUiText(item, 'Một mục đang được Windows sử dụng nên đã được bỏ qua.')}</li>)}</ul>
             </details>
           )}
         </div>

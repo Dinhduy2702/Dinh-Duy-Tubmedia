@@ -1,6 +1,7 @@
 import { Activity, CircleAlert, Cpu, HardDrive, RefreshCcw, ShieldCheck, Wrench } from 'lucide-react';
 import { useState } from 'react';
 import { useAppStore } from '../stores/app-store';
+import { friendlyIssue, safeUiText } from '../utils/ui-error';
 
 function bytes(value: number | undefined): string {
   const safe = Math.max(0, value ?? 0);
@@ -56,12 +57,12 @@ export function DiagnosticsPage(): React.JSX.Element {
           <div className="diagnostics-section-title"><ShieldCheck size={20} /><div><h2>Công cụ media</h2><p>Trạng thái lấy từ ToolManager.</p></div><button className="btn btn-small" onClick={() => setPage('tools')}>Mở trung tâm công cụ</button></div>
           <div className="diagnostics-tool-list">{tools.map((tool) => <div key={tool.name} className={tool.available && tool.health !== 'broken' ? 'is-good' : 'is-bad'}>
             {tool.available && tool.health !== 'broken' ? <ShieldCheck size={17} /> : <CircleAlert size={17} />}
-            <div><b>{tool.name}</b><span>{tool.version ?? tool.error ?? 'Chưa xác minh'}</span></div><small>{tool.source ?? '—'}</small>
+            <div><b>{tool.name}</b><span>{tool.version ?? safeUiText(tool.error, 'Chưa xác minh')}</span></div><small>{tool.source ?? '—'}</small>
           </div>)}</div>
         </section>
         <section className="card p-5">
           <div className="diagnostics-section-title"><CircleAlert size={20} /><div><h2>Lỗi gần nhất</h2><p>Không hiển thị token hoặc cookies nhạy cảm.</p></div><button className="btn btn-small" onClick={() => setPage('logs')}>Mở nhật ký</button></div>
-          <div className="diagnostics-error-list">{errors.map((entry) => <article key={entry.id}><b>{entry.module} · {entry.eventCode}</b><p>{entry.message}</p><time>{new Date(entry.timestamp).toLocaleString('vi-VN')}</time></article>)}</div>
+          <div className="diagnostics-error-list">{errors.map((entry) => { const issue = friendlyIssue(entry.message); return <article key={entry.id}><b>{issue.title}</b><p>{issue.message}</p><time>{new Date(entry.timestamp).toLocaleString('vi-VN')}</time></article>; })}</div>
           {!errors.length && <div className="diagnostics-empty"><ShieldCheck size={24} /><span>Chưa có lỗi được ghi trong phiên hiện tại.</span></div>}
         </section>
       </div>

@@ -23,7 +23,7 @@ import { UnifiedDownloadProgress } from '../components/UnifiedDownloadProgress';
 import { useVirtualTableWindow } from '../components/VirtualTableWindow';
 import { jobTypeLabel, statusLabel } from '../utils/vi-labels';
 import { createUiEventId } from '../utils/ui-id';
-import { friendlyIssue } from '../utils/ui-error';
+import { friendlyIssue, safeUiText } from '../utils/ui-error';
 
 const ACTIVE = new Set<QueueJob['status']>([
   'pending',
@@ -331,12 +331,6 @@ function QueueChildRows({
                         ))}
                       </ol>
                     )}
-                    {issue?.technical && (
-                      <details>
-                        <summary>Thông tin kỹ thuật</summary>
-                        <pre>{issue.technical}</pre>
-                      </details>
-                    )}
                   </CompactDetail>
                 )}
                 {!discloseMessage && messageDetail && <small>{messageDetail}</small>}
@@ -518,7 +512,7 @@ function QuickDownloadAccordion({
           progress={status.progress}
           completed={completed ? 1 : 0}
           total={1}
-          detail={status.speed || (status.eta ? `Còn ${status.eta}` : status.message)}
+          detail={status.speed || (status.eta ? `Còn ${status.eta}` : safeUiText(status.message, quickPhaseLabel(status.phase)))}
           secondary="Một video độc lập · có thể chạy song song với mọi danh sách tải"
           outputPath={status.outputPath}
           actions={
@@ -584,7 +578,7 @@ function QuickDownloadAccordion({
             <div>
               <span>TRẠNG THÁI CHI TIẾT</span>
               <b>{quickPhaseLabel(status.phase)}</b>
-              <p>{status.message || 'Đang đồng bộ dữ liệu Tải nhanh.'}</p>
+              <p>{safeUiText(status.message, 'Đang đồng bộ dữ liệu Tải nhanh.')}</p>
             </div>
             <dl>
               <div>
@@ -606,12 +600,15 @@ function QuickDownloadAccordion({
                 <dd>{status.eta || '—'}</dd>
               </div>
             </dl>
-            {status.error && (
-              <div className="queue-detail-error">
-                <b>Lỗi Tải nhanh</b>
-                <p>{status.error}</p>
-              </div>
-            )}
+            {status.error && (() => {
+              const issue = friendlyIssue(status.error);
+              return (
+                <div className={`queue-detail-error queue-detail-${issue.tone}`}>
+                  <b>{issue.title}</b>
+                  <p>{issue.message}</p>
+                </div>
+              );
+            })()}
           </div>
         </div>
       </div>
@@ -1173,22 +1170,55 @@ export function QueuePage({ mode }: { mode: 'downloads' | 'processing' | 'all' }
                 <dd>{new Date(detailJob.updatedAt).toLocaleString('vi-VN')}</dd>
               </div>
             </dl>
-            {detailJob.errorMessage && (
-              <div className="queue-detail-error">
-                <b>{detailJob.errorCode ?? 'Lỗi tác vụ'}</b>
-                <p>{detailJob.errorMessage}</p>
-              </div>
-            )}
+            {detailJob.errorMessage && (() => {
+              const issue = friendlyIssue(detailJob.errorMessage);
+              return (
+                <div className={`queue-detail-error queue-detail-${issue.tone}`}>
+                  <b>{issue.title}</b>
+                  <p>{issue.message}</p>
+                  {issue.steps.length > 0 && (
+                    <ol>
+                      {issue.steps.map((step) => <li key={step}>{step}</li>)}
+                    </ol>
+                  )}
+                </div>
+              );
+            })()}
             {!ACTIVE.has(detailJob.status) && (
               <button className="btn btn-danger" title="Xóa tác vụ" onClick={() => setConfirm('remove-one')}>
                 <Trash2 size={15} />
                 Xóa tác vụ
               </button>
             )}
-            <details>
-              <summary>Dữ liệu đầu vào kỹ thuật</summary>
-              <pre>{JSON.stringify(detailJob.input, null, 2)}</pre>
-            </details>
+            <section className="queue-detail-result">
+              <b>Thông tin tác vụ</b>
+              <dl>
+                {inputText(detailJob, 'url') && (
+                  <div>
+                    <dt>Nguồn</dt>
+                    <dd title={inputText(detailJob, 'url')}>{inputText(detailJob, 'displayName') || inputText(detailJob, 'url')}</dd>
+                  </div>
+                )}
+                {inputText(detailJob, 'progressStage') && (
+                  <div>
+                    <dt>Trạng thái</dt>
+                    <dd>{safeUiText(inputText(detailJob, 'progressStage'), 'Đang cập nhật trạng thái.')}</dd>
+                  </div>
+                )}
+                {inputText(detailJob, 'outputPath') && (
+                  <div>
+                    <dt>Tệp đầu ra</dt>
+                    <dd title={inputText(detailJob, 'outputPath')}>{inputText(detailJob, 'outputPath')}</dd>
+                  </div>
+                )}
+                {inputText(detailJob, 'resultMessage') && (
+                  <div>
+                    <dt>Kết quả</dt>
+                    <dd>{safeUiText(inputText(detailJob, 'resultMessage'), 'Tác vụ đã hoàn tất.')}</dd>
+                  </div>
+                )}
+              </dl>
+            </section>
           </aside>
         )}
       </div>

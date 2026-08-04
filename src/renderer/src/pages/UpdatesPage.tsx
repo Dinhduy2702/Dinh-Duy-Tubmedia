@@ -12,6 +12,7 @@ import { useState } from 'react';
 import type { AppUpdateStatus } from '@shared/types/domain';
 import { useAppStore } from '../stores/app-store';
 import { createUiEventId } from '../utils/ui-id';
+import { friendlyIssue } from '../utils/ui-error';
 
 import { formatReleaseNotesForDisplay } from '../../../shared/release-notes';
 import { compareAppVersions, isNewerAppVersion } from '../../../shared/app-version';
@@ -72,18 +73,17 @@ export function UpdatesPage(): React.JSX.Element {
         const relation = result.info?.version
           ? compareAppVersions(result.info.version, result.currentVersion)
           : null;
+        const ahead = relation === -1;
 
-        // Khi máy chủ cũ hơn, chỉ hiển thị thông tin trung tính trong trang cập nhật.
-        // Không tạo popup, chấm đỏ hoặc lỗi chẩn đoán.
-        if (relation !== -1) {
-          setAttention({
-            id: createUiEventId('update-current'),
-            severity: 'success',
-            title: 'Tubmedia đã được cập nhật',
-            message: `Bạn đang dùng phiên bản ${result.currentVersion}.`,
-            sticky: false
-          });
-        }
+        setAttention({
+          id: createUiEventId('update-current'),
+          severity: 'success',
+          title: ahead ? 'Bạn đang dùng bản mới hơn máy chủ' : 'Tubmedia đã được cập nhật',
+          message: ahead
+            ? `Máy này đang chạy ${result.currentVersion}; máy chủ hiện có ${result.info?.version ?? 'không xác định'}.`
+            : `Bạn đang dùng phiên bản ${result.currentVersion}.`,
+          sticky: false
+        });
       }
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
@@ -105,6 +105,7 @@ export function UpdatesPage(): React.JSX.Element {
     status?.state === 'downloaded' && isNewerAppVersion(remoteVersion, status.currentVersion);
   const feedConfigured =
     Boolean(settings?.appFeedUrl) || Boolean(status?.supported && status?.state !== 'disabled');
+  const updateIssue = status?.error ? friendlyIssue(status.error) : null;
   return (
     <div className="page-shell updates-page">
       <div className="page-heading-row">
@@ -186,11 +187,14 @@ export function UpdatesPage(): React.JSX.Element {
             </details>
           )}
 
-          {status?.error && (
-            <details className="update-error-detail mt-4">
-              <summary>Thông tin kỹ thuật</summary>
-              <pre>{status.error}</pre>
-            </details>
+          {updateIssue && status?.state === 'error' && (
+            <div className={`update-user-issue update-user-${updateIssue.tone} mt-4`} role="alert">
+              <b>{updateIssue.title}</b>
+              <p>{updateIssue.message}</p>
+              {updateIssue.steps.length > 0 && (
+                <ol>{updateIssue.steps.map((step) => <li key={step}>{step}</li>)}</ol>
+              )}
+            </div>
           )}
 
           <div className="mt-5 flex flex-wrap gap-2">

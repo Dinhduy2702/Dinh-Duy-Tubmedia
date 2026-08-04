@@ -26,8 +26,9 @@ describe('FIX10 timestamp repair and in-workflow error details', () => {
 
     expect(queue).toContain('details: appError.details ?? null');
     expect(queue).toContain('jobType: job.type');
-    expect(page).toContain('Chi tiết lỗi của quy trình');
-    expect(page).toContain('Sao chép chi tiết lỗi');
+    expect(page).toContain('Mở nhật ký quy trình');
+    expect(page).toContain('Sao chép thông tin hỗ trợ');
+    expect(page).not.toContain('<pre className="merge-error-technical"');
     expect(page).toContain('mergeErrorTechnical');
     expect(css).toMatch(/\.merge-error-detail\s*\{/);
     expect(css).toMatch(/\.merge-error-technical\s*\{/);
