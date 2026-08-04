@@ -7840,3 +7840,33 @@ body {
   }
 }
 /* TUBMEDIA_INDEPENDENT_WORKFLOW_ACCORDION_1_3_0_END */
+
+/* TUBMEDIA_TRUE_UPDATE_NOTICE_R3_START */
+.topbar-update-button > i {
+  width: 7px;
+  height: 7px;
+  background: var(--bad);
+  color: var(--bad);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 14%, transparent);
+  animation: tubmedia-update-dot-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes tubmedia-update-dot-pulse {
+  0%, 100% {
+    opacity: 0.72;
+    transform: scale(0.92);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--bad) 12%, transparent);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--bad) 5%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topbar-update-button > i {
+    animation: none;
+  }
+}
+/* TUBMEDIA_TRUE_UPDATE_NOTICE_R3_END */

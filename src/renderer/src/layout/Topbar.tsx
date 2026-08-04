@@ -15,40 +15,65 @@ import { useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useAppStore } from '../stores/app-store';
 import { createUiEventId } from '../utils/ui-id';
+import { compareAppVersions, isNewerAppVersion } from '../../../shared/app-version';
 
 const pct = (value: number | undefined): string => `${Math.round(value ?? 0)}%`;
-const CONTROLLABLE = new Set(['pending', 'analyzing', 'downloading', 'verifying', 'normalizing', 'processing', 'merging', 'retrying', 'paused', 'interrupted']);
-const ACTIVE = new Set(['pending', 'analyzing', 'downloading', 'verifying', 'normalizing', 'processing', 'merging', 'retrying']);
+const CONTROLLABLE = new Set([
+  'pending',
+  'analyzing',
+  'downloading',
+  'verifying',
+  'normalizing',
+  'processing',
+  'merging',
+  'retrying',
+  'paused',
+  'interrupted'
+]);
+const ACTIVE = new Set([
+  'pending',
+  'analyzing',
+  'downloading',
+  'verifying',
+  'normalizing',
+  'processing',
+  'merging',
+  'retrying'
+]);
 const PAUSED = new Set(['paused', 'interrupted']);
 
 export function Topbar(): React.JSX.Element {
   const cpuPercent = useAppStore((state) => state.stats?.cpuPercent);
-  const queueSummary = useAppStore(useShallow((state) => {
-    let activeJobs = 0;
-    let controllableCount = 0;
-    let pausedCount = 0;
-    for (const job of state.jobs) {
-      if (ACTIVE.has(job.status)) activeJobs += 1;
-      if (CONTROLLABLE.has(job.status)) {
-        controllableCount += 1;
-        if (PAUSED.has(job.status)) pausedCount += 1;
+  const queueSummary = useAppStore(
+    useShallow((state) => {
+      let activeJobs = 0;
+      let controllableCount = 0;
+      let pausedCount = 0;
+      for (const job of state.jobs) {
+        if (ACTIVE.has(job.status)) activeJobs += 1;
+        if (CONTROLLABLE.has(job.status)) {
+          controllableCount += 1;
+          if (PAUSED.has(job.status)) pausedCount += 1;
+        }
       }
-    }
-    return {
-      activeJobs,
-      controllableCount,
-      allPaused: controllableCount > 0 && pausedCount === controllableCount
-    };
-  }));
-  const toolSummary = useAppStore(useShallow((state) => {
-    const checkedTools = state.tools.filter((tool) => tool.lastCheckedAt !== null).length;
-    return {
-      connecting: checkedTools < state.tools.length,
-      ready: ['yt-dlp', 'ffmpeg', 'ffprobe'].every(
-        (name) => state.tools.find((tool) => tool.name === name)?.available
-      )
-    };
-  }));
+      return {
+        activeJobs,
+        controllableCount,
+        allPaused: controllableCount > 0 && pausedCount === controllableCount
+      };
+    })
+  );
+  const toolSummary = useAppStore(
+    useShallow((state) => {
+      const checkedTools = state.tools.filter((tool) => tool.lastCheckedAt !== null).length;
+      return {
+        connecting: checkedTools < state.tools.length,
+        ready: ['yt-dlp', 'ffmpeg', 'ffprobe'].every(
+          (name) => state.tools.find((tool) => tool.name === name)?.available
+        )
+      };
+    })
+  );
   const settings = useAppStore((state) => state.settings);
   const updateStatus = useAppStore((state) => state.updateStatus);
   const refreshJobs = useAppStore((state) => state.refreshJobs);
@@ -59,9 +84,20 @@ export function Topbar(): React.JSX.Element {
   const [themeBusy, setThemeBusy] = useState(false);
 
   const isLight = document.documentElement.classList.contains('light');
-  const updateReady = updateStatus?.state === 'downloaded';
-  const updateAvailable = updateStatus?.state === 'available' || updateStatus?.state === 'downloading';
-  const updateBusy = updateStatus?.state === 'checking' || updateStatus?.state === 'downloading' || updateStatus?.state === 'installing';
+  const updateRemoteVersion = updateStatus?.info?.version ?? null;
+  const updateRelation =
+    updateRemoteVersion && updateStatus?.currentVersion
+      ? compareAppVersions(updateRemoteVersion, updateStatus.currentVersion)
+      : null;
+  const updateIsNewer = isNewerAppVersion(updateRemoteVersion, updateStatus?.currentVersion);
+  const updateAhead = updateRelation === -1;
+  const updateReady = updateStatus?.state === 'downloaded' && updateIsNewer;
+  const updateAvailable =
+    (updateStatus?.state === 'available' || updateStatus?.state === 'downloading') && updateIsNewer;
+  const updateBusy =
+    updateStatus?.state === 'checking' ||
+    (updateStatus?.state === 'downloading' && updateIsNewer) ||
+    updateStatus?.state === 'installing';
 
   const toggleTheme = async (): Promise<void> => {
     if (!settings || themeBusy) return;
@@ -104,55 +140,124 @@ export function Topbar(): React.JSX.Element {
     }
   };
 
-  return <header className="app-topbar">
-    <div className="topbar-metrics">
-      <div className="topbar-cpu-card">
-        <div className="topbar-cpu-icon"><Cpu size={18}/></div>
-        <div><span>BỘ XỬ LÝ</span><b>{pct(cpuPercent)}</b></div>
-        <i className={`topbar-sparkline ${(cpuPercent ?? 0) > 2 ? 'is-live' : ''}`} aria-hidden="true"><span/><span/><span/><span/><span/><span/></i>
+  return (
+    <header className="app-topbar">
+      <div className="topbar-metrics">
+        <div className="topbar-cpu-card">
+          <div className="topbar-cpu-icon">
+            <Cpu size={18} />
+          </div>
+          <div>
+            <span>BỘ XỬ LÝ</span>
+            <b>{pct(cpuPercent)}</b>
+          </div>
+          <i className={`topbar-sparkline ${(cpuPercent ?? 0) > 2 ? 'is-live' : ''}`} aria-hidden="true">
+            <span />
+            <span />
+            <span />
+            <span />
+            <span />
+            <span />
+          </i>
+        </div>
+        <div className="topbar-job-pill">
+          <span className={queueSummary.activeJobs > 0 ? 'pulse-dot' : ''} />
+          <div>
+            <b>{queueSummary.activeJobs}</b>
+            <small>công việc đang chạy</small>
+          </div>
+        </div>
       </div>
-      <div className="topbar-job-pill">
-        <span className={queueSummary.activeJobs > 0 ? 'pulse-dot' : ''}/>
-        <div><b>{queueSummary.activeJobs}</b><small>công việc đang chạy</small></div>
-      </div>
-    </div>
 
-    <div className="topbar-actions">
-      <button
-        aria-label={isLight ? 'Chuyển sang giao diện tối' : 'Chuyển sang giao diện sáng'}
-        aria-checked={isLight}
-        className={`topbar-theme-switch ${isLight ? 'is-light' : 'is-dark'}`}
-        disabled={!settings || themeBusy}
-        onClick={() => void toggleTheme()}
-        role="switch"
-        title={isLight ? 'Chuyển sang giao diện tối' : 'Chuyển sang giao diện sáng'}
-      >
-        <span className="topbar-theme-switch-label" aria-hidden="true">{isLight ? 'Sáng' : 'Tối'}</span>
-        <span className="topbar-theme-switch-track" aria-hidden="true">
-          <Sun className="topbar-theme-switch-sun" size={13}/>
-          <Moon className="topbar-theme-switch-moon" size={13}/>
-          <span className="topbar-theme-switch-thumb">
-            {themeBusy ? <LoaderCircle className="animate-spin" size={14}/> : isLight ? <Sun size={14}/> : <Moon size={14}/>} 
+      <div className="topbar-actions">
+        <button
+          aria-label={isLight ? 'Chuyển sang giao diện tối' : 'Chuyển sang giao diện sáng'}
+          aria-checked={isLight}
+          className={`topbar-theme-switch ${isLight ? 'is-light' : 'is-dark'}`}
+          disabled={!settings || themeBusy}
+          onClick={() => void toggleTheme()}
+          role="switch"
+          title={isLight ? 'Chuyển sang giao diện tối' : 'Chuyển sang giao diện sáng'}
+        >
+          <span className="topbar-theme-switch-label" aria-hidden="true">
+            {isLight ? 'Sáng' : 'Tối'}
           </span>
-        </span>
-      </button>
-      <button className={`tool-status-button ${toolSummary.ready ? 'is-ready' : ''}`} onClick={() => setPage('tools')} title="Mở Trung tâm công cụ">
-        {toolSummary.connecting ? <LoaderCircle className="animate-spin" size={17}/> : toolSummary.ready ? <CheckCircle2 size={17}/> : <Wrench size={17}/>} 
-        <span>{toolSummary.connecting ? 'Đang tự kết nối' : toolSummary.ready ? 'Công cụ sẵn sàng' : 'Cần sửa công cụ'}</span>
-      </button>
-      <button
-        className={`topbar-update-button ${updateReady ? 'is-ready' : updateAvailable ? 'is-available' : ''}`}
-        onClick={() => setPage('updates')}
-        title="Mở Trung tâm cập nhật"
-      >
-        {updateReady ? <DownloadCloud size={17}/> : <RefreshCcw size={17}/>} 
-        <span>{updateReady ? 'Cài bản mới' : updateAvailable ? 'Có bản mới' : updateBusy ? 'Đang kiểm tra' : 'Cập nhật thủ công'}</span>
-        {(updateReady || updateAvailable) && <i aria-hidden="true"/>}
-      </button>
-      <button className="btn btn-primary topbar-pause" disabled={busy || queueSummary.controllableCount === 0} onClick={() => void toggle()}>
-        {busy ? <LoaderCircle className="animate-spin" size={17}/> : queueSummary.allPaused ? <Play size={17}/> : <Pause size={17}/>}<span>{queueSummary.allPaused ? 'Tiếp tục tất cả' : 'Tạm dừng tất cả'}</span>
-      </button>
-      <button className="btn btn-ghost topbar-icon-button" title="Mở chẩn đoán" aria-label="Mở chẩn đoán" onClick={() => setPage('diagnostics')}><Bell size={18}/></button>
-    </div>
-  </header>;
+          <span className="topbar-theme-switch-track" aria-hidden="true">
+            <Sun className="topbar-theme-switch-sun" size={13} />
+            <Moon className="topbar-theme-switch-moon" size={13} />
+            <span className="topbar-theme-switch-thumb">
+              {themeBusy ? (
+                <LoaderCircle className="animate-spin" size={14} />
+              ) : isLight ? (
+                <Sun size={14} />
+              ) : (
+                <Moon size={14} />
+              )}
+            </span>
+          </span>
+        </button>
+        <button
+          className={`tool-status-button ${toolSummary.ready ? 'is-ready' : ''}`}
+          onClick={() => setPage('tools')}
+          title="Mở Trung tâm công cụ"
+        >
+          {toolSummary.connecting ? (
+            <LoaderCircle className="animate-spin" size={17} />
+          ) : toolSummary.ready ? (
+            <CheckCircle2 size={17} />
+          ) : (
+            <Wrench size={17} />
+          )}
+          <span>
+            {toolSummary.connecting
+              ? 'Đang tự kết nối'
+              : toolSummary.ready
+                ? 'Công cụ sẵn sàng'
+                : 'Cần sửa công cụ'}
+          </span>
+        </button>
+        <button
+          className={`topbar-update-button ${updateReady ? 'is-ready' : updateAvailable ? 'is-available' : ''}`}
+          onClick={() => setPage('updates')}
+          title="Mở Trung tâm cập nhật"
+        >
+          {updateReady ? <DownloadCloud size={17} /> : <RefreshCcw size={17} />}
+          <span>
+            {updateReady
+              ? 'Cài bản mới'
+              : updateAvailable
+                ? 'Có bản mới'
+                : updateAhead
+                  ? 'Đang dùng bản mới hơn'
+                  : updateBusy
+                    ? 'Đang kiểm tra'
+                    : 'Cập nhật thủ công'}
+          </span>
+          {(updateReady || updateAvailable) && <i aria-hidden="true" />}
+        </button>
+        <button
+          className="btn btn-primary topbar-pause"
+          disabled={busy || queueSummary.controllableCount === 0}
+          onClick={() => void toggle()}
+        >
+          {busy ? (
+            <LoaderCircle className="animate-spin" size={17} />
+          ) : queueSummary.allPaused ? (
+            <Play size={17} />
+          ) : (
+            <Pause size={17} />
+          )}
+          <span>{queueSummary.allPaused ? 'Tiếp tục tất cả' : 'Tạm dừng tất cả'}</span>
+        </button>
+        <button
+          className="btn btn-ghost topbar-icon-button"
+          title="Mở chẩn đoán"
+          aria-label="Mở chẩn đoán"
+          onClick={() => setPage('diagnostics')}
+        >
+          <Bell size={18} />
+        </button>
+      </div>
+    </header>
+  );
 }

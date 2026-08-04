@@ -6,6 +6,7 @@ import type { AppUpdater, ProgressInfo, UpdateInfo } from 'electron-updater';
 import type { AppUpdateReleaseInfo, AppUpdateStatus } from '@shared/types/domain.js';
 import { IPC } from '@shared/contracts/channels.js';
 import { sanitizeProgress } from '@shared/utils/progress-policy.js';
+import { compareAppVersions, isNewerAppVersion } from '@shared/app-version.js';
 import type { SettingsService } from '../settings/settings-service.js';
 import type { QueueManager } from '../queue/queue-manager.js';
 import type { BackupService } from '../backups/backup-service.js';
@@ -29,6 +30,12 @@ function isRemoteUpdateMetadataMissing(message: string): boolean {
 
 function isLocalUpdateSourceMissing(message: string): boolean {
   return /app-update\.yml|feed|provider|ENOENT/i.test(message);
+}
+
+function isExpectedDowngradeBlock(message: string): boolean {
+  return /(?:downgrade|older version|version[^\n]*(?:older|lower)|new version[^\n]*not (?:greater|newer)|APP_UPDATE_DOWNGRADE_BLOCKED)/i.test(
+    message
+  );
 }
 
 // electron-updater hiện được phát hành dưới dạng CommonJS. Main process của
@@ -123,17 +130,52 @@ export class AppUpdateService {
       });
     });
     updater.on('update-available', (info: UpdateInfo) => {
+      const currentVersion = app.getVersion();
+      const relation = compareAppVersions(info.version, currentVersion);
+      const checkedAt = new Date().toISOString();
+
+      if (relation !== 1) {
+        const invalid = relation === null;
+        const message =
+          relation === -1
+            ? `Bạn đang dùng Tubmedia ${currentVersion}, mới hơn phiên bản ${info.version} trên máy chủ. Không có thao tác cập nhật nào được thực hiện.`
+            : relation === 0
+              ? 'Bạn đang dùng phiên bản mới nhất.'
+              : `Máy chủ trả về phiên bản không hợp lệ (${info.version}). Tubmedia đã chặn tải để bảo vệ bản cài đặt.`;
+
+        this.emit({
+          ...this.baseStatus(invalid ? 'error' : 'not-available', message),
+          checkedAt,
+          info: releaseInfo(info),
+          error: invalid ? 'INVALID_REMOTE_APP_VERSION' : null
+        });
+        if (invalid) {
+          this.logger.warn('update', 'APP_UPDATE_REMOTE_VERSION_INVALID', message);
+        }
+        return;
+      }
+
       this.emit({
         ...this.baseStatus('available', `Đã có Tubmedia ${info.version}.`),
-        checkedAt: new Date().toISOString(),
+        checkedAt,
         info: releaseInfo(info)
       });
     });
     updater.on('update-not-available', (info: UpdateInfo) => {
+      const currentVersion = app.getVersion();
+      const relation = compareAppVersions(info.version, currentVersion);
+      const message =
+        relation === -1
+          ? `Bạn đang dùng Tubmedia ${currentVersion}, mới hơn phiên bản ${info.version} trên máy chủ.`
+          : relation === null
+            ? `Không thể xác minh phiên bản máy chủ (${info.version}). Tubmedia không cho phép tải hoặc cài đặt.`
+            : 'Bạn đang dùng phiên bản mới nhất.';
+
       this.emit({
-        ...this.baseStatus('not-available', 'Bạn đang dùng phiên bản mới nhất.'),
+        ...this.baseStatus(relation === null ? 'error' : 'not-available', message),
         checkedAt: new Date().toISOString(),
-        info: releaseInfo(info)
+        info: releaseInfo(info),
+        error: relation === null ? 'INVALID_REMOTE_APP_VERSION' : null
       });
     });
     updater.on('download-progress', (progress: ProgressInfo) => {
@@ -146,6 +188,20 @@ export class AppUpdateService {
       });
     });
     updater.on('update-downloaded', (info: UpdateInfo) => {
+      const currentVersion = app.getVersion();
+
+      if (!isNewerAppVersion(info.version, currentVersion)) {
+        const message = `Đã bỏ qua gói Tubmedia ${info.version} vì phiên bản đang chạy là ${currentVersion}.`;
+
+        this.emit({
+          ...this.baseStatus('not-available', message),
+          checkedAt: this.status.checkedAt,
+          info: releaseInfo(info)
+        });
+        this.logger.info('update', 'APP_UPDATE_STALE_PACKAGE_IGNORED', message);
+        return;
+      }
+
       this.emit({
         ...this.baseStatus('downloaded', 'Bản cập nhật đã tải xong và sẵn sàng cài đặt.'),
         checkedAt: this.status.checkedAt,
@@ -155,6 +211,18 @@ export class AppUpdateService {
     });
     updater.on('error', (error: Error) => {
       const message = error.message;
+      if (isExpectedDowngradeBlock(message)) {
+        this.emit({
+          ...this.baseStatus(
+            'not-available',
+            'Bạn đang dùng phiên bản mới nhất hoặc mới hơn phiên bản trên máy chủ.'
+          ),
+          checkedAt: new Date().toISOString(),
+          info: this.status.info,
+          error: null
+        });
+        return;
+      }
       if (isRemoteUpdateMetadataMissing(message)) {
         this.handleMetadataUnavailable(this.silentCheck);
         return;
@@ -282,29 +350,58 @@ export class AppUpdateService {
   }
 
   public async download(): Promise<AppUpdateStatus> {
-    if (this.status.state === 'downloaded') return this.status;
-    if (this.status.state !== 'available') await this.check(false);
-    if (this.status.state !== 'available') {
-      throw new Error(this.status.message ?? 'Chưa tìm thấy bản cập nhật để tải.');
+    const currentVersion = app.getVersion();
+
+    if (
+      this.status.state === 'downloaded' &&
+      isNewerAppVersion(this.status.info?.version, currentVersion)
+    ) {
+      return this.status;
     }
+
+    if (
+      this.status.state !== 'available' ||
+      !isNewerAppVersion(this.status.info?.version, currentVersion)
+    ) {
+      await this.check(false);
+    }
+
+    if (
+      this.status.state !== 'available' ||
+      !isNewerAppVersion(this.status.info?.version, currentVersion)
+    ) {
+      throw new Error(
+        this.status.message ?? 'Không có phiên bản mới hơn để tải. Tubmedia không cho phép hạ cấp.'
+      );
+    }
+
     await this.getUpdater().downloadUpdate();
     return this.status;
   }
-
   public async install(): Promise<void> {
-    if (this.status.state !== 'downloaded') {
-      throw new Error('Hãy tải hoàn tất bản cập nhật trước khi cài đặt.');
+    if (
+      this.status.state !== 'downloaded' ||
+      !isNewerAppVersion(this.status.info?.version, app.getVersion())
+    ) {
+      throw new Error(
+        'Chỉ có thể cài phiên bản mới hơn phiên bản đang chạy. Tubmedia đã chặn thao tác hạ cấp.'
+      );
     }
+
     if (this.queue.activeCount() > 0) {
       throw new Error('Hãy tạm dừng hoặc hoàn tất các tác vụ trước khi cập nhật.');
     }
-    this.emit({ ...this.status, state: 'installing', message: 'Đang sao lưu và chuẩn bị khởi động lại...' });
+
+    this.emit({
+      ...this.status,
+      state: 'installing',
+      message: 'Đang sao lưu và chuẩn bị khởi động lại...'
+    });
     await this.backups.create(undefined, false, 'update');
     await this.prepareForInstall();
     const updater = this.getUpdater();
     setImmediate(() => updater.quitAndInstall(false, true));
   }
-
   private baseStatus(state: AppUpdateStatus['state'], message: string): AppUpdateStatus {
     return {
       state,
@@ -348,6 +445,20 @@ export class AppUpdateService {
 
   private handleCheckFailure(error: unknown, silent: boolean): AppUpdateStatus {
     const message = error instanceof Error ? error.message : String(error);
+
+    if (isExpectedDowngradeBlock(message)) {
+      const status: AppUpdateStatus = {
+        ...this.baseStatus(
+          'not-available',
+          'Bạn đang dùng phiên bản mới nhất hoặc mới hơn phiên bản trên máy chủ.'
+        ),
+        checkedAt: new Date().toISOString(),
+        info: this.status.info,
+        error: null
+      };
+      this.emit(status);
+      return status;
+    }
 
     if (isRemoteUpdateMetadataMissing(message)) {
       if (this.feedUnavailableForSession) return this.status;

@@ -1,10 +1,23 @@
 import { useEffect } from 'react';
 import type { AppUpdateStatus, LogEntry, QueueJob } from '@shared/types/domain';
 import { useAppStore } from '../stores/app-store';
+import { isNewerAppVersion } from '../../../shared/app-version';
 
 const JOB_FLUSH_MS = 150;
 const LOG_FLUSH_MS = 280;
 const QUEUE_FLUSH_MS = 220;
+const UPDATE_NOTICE_STORAGE_PREFIX = 'tubmedia:update-notice:v1';
+
+function claimUpdateNotice(state: 'available' | 'downloaded', version: string): boolean {
+  const storageKey = `${UPDATE_NOTICE_STORAGE_PREFIX}:${state}:${version}`;
+  try {
+    if (window.localStorage.getItem(storageKey) === '1') return false;
+    window.localStorage.setItem(storageKey, '1');
+  } catch {
+    // localStorage có thể bị chặn; bộ nhớ trong phiên bên dưới vẫn ngăn lặp liên tục.
+  }
+  return true;
+}
 
 export function useDesktopEvents(): void {
   useEffect(() => {
@@ -52,20 +65,31 @@ export function useDesktopEvents(): void {
     const updateStatus = (status: AppUpdateStatus): void => {
       const store = useAppStore.getState();
       store.setUpdateStatus(status);
-      if (status.state !== 'available' && status.state !== 'downloaded') return;
-      const key = `${status.state}:${status.info?.version ?? ''}`;
+
+      const version = status.info?.version ?? '';
+      const remoteIsNewer = isNewerAppVersion(version, status.currentVersion);
+      if (
+        !remoteIsNewer ||
+        (status.state !== 'available' && status.state !== 'downloaded')
+      ) {
+        return;
+      }
+
+      const state = status.state;
+      const key = `${state}:${version}`;
       if (key === lastUpdateNotice) return;
       lastUpdateNotice = key;
+      if (!claimUpdateNotice(state, version)) return;
+
+      const downloaded = state === 'downloaded';
       store.setAttention({
         id: `app-update-${key}`,
-        severity: status.state === 'downloaded' ? 'success' : 'info',
-        title: status.state === 'downloaded'
-          ? 'Bản cập nhật đã sẵn sàng'
-          : `Đã có Tubmedia ${status.info?.version ?? 'mới'}`,
-        message: status.state === 'downloaded'
-          ? 'Mở Trung tâm cập nhật để sao lưu và cài đặt khi các tác vụ đã dừng.'
-          : 'Bạn có thể tải trong nền và tiếp tục sử dụng ứng dụng.',
-        sticky: status.state === 'downloaded'
+        severity: downloaded ? 'success' : 'info',
+        title: downloaded ? 'Bản cập nhật đã sẵn sàng' : `Đã có Tubmedia ${version}`,
+        message: downloaded
+          ? 'Bản cập nhật đã tải xong. Mở Trung tâm cập nhật để sao lưu và cài đặt khi các tác vụ đã dừng.'
+          : 'Một phiên bản Tubmedia mới hơn đang có sẵn. Bạn có thể tải trong nền và tiếp tục công việc.',
+        sticky: downloaded
       });
     };
 

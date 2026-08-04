@@ -14,6 +14,7 @@ import { useAppStore } from '../stores/app-store';
 import { createUiEventId } from '../utils/ui-id';
 
 import { formatReleaseNotesForDisplay } from '../../../shared/release-notes';
+import { compareAppVersions, isNewerAppVersion } from '../../../shared/app-version';
 const channelLabel = (value: string | undefined): string => (value === 'beta' ? 'Thử nghiệm' : 'Ổn định');
 
 function bytes(value: number | undefined): string {
@@ -26,20 +27,29 @@ function bytes(value: number | undefined): string {
 
 function stateLabel(status: AppUpdateStatus | null): string {
   if (!status) return 'Chưa đọc trạng thái';
+
+  const relation = status.info?.version
+    ? compareAppVersions(status.info.version, status.currentVersion)
+    : null;
+
+  if (status.state === 'not-available' && relation === -1) {
+    return 'Đang dùng bản mới hơn';
+  }
+
   const labels: Record<AppUpdateStatus['state'], string> = {
     idle: 'Sẵn sàng',
     disabled: 'Chưa liên kết máy chủ',
     checking: 'Đang kiểm tra',
-    available: 'Có phiên bản mới',
+    available: relation === 1 ? 'Có phiên bản mới' : 'Không có bản mới',
     'not-available': 'Đang dùng bản mới nhất',
     downloading: 'Đang tải trong nền',
     downloaded: 'Sẵn sàng cài đặt',
     installing: 'Đang chuẩn bị cài đặt',
     error: 'Cập nhật gặp sự cố'
   };
+
   return labels[status.state];
 }
-
 export function UpdatesPage(): React.JSX.Element {
   const settings = useAppStore((state) => state.settings);
   const status = useAppStore((state) => state.updateStatus);
@@ -59,13 +69,21 @@ export function UpdatesPage(): React.JSX.Element {
       const result = await window.desktop.updates[kind]();
       setStatus(result);
       if (kind === 'check' && result.state === 'not-available') {
-        setAttention({
-          id: createUiEventId('update-current'),
-          severity: 'success',
-          title: 'Tubmedia đã được cập nhật',
-          message: `Bạn đang dùng phiên bản ${result.currentVersion}.`,
-          sticky: false
-        });
+        const relation = result.info?.version
+          ? compareAppVersions(result.info.version, result.currentVersion)
+          : null;
+
+        // Khi máy chủ cũ hơn, chỉ hiển thị thông tin trung tính trong trang cập nhật.
+        // Không tạo popup, chấm đỏ hoặc lỗi chẩn đoán.
+        if (relation !== -1) {
+          setAttention({
+            id: createUiEventId('update-current'),
+            severity: 'success',
+            title: 'Tubmedia đã được cập nhật',
+            message: `Bạn đang dùng phiên bản ${result.currentVersion}.`,
+            sticky: false
+          });
+        }
       }
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
@@ -76,11 +94,17 @@ export function UpdatesPage(): React.JSX.Element {
 
   const downloading = status?.state === 'downloading';
   const progress = status?.progress?.percent ?? 0;
-  const canDownload = status?.state === 'available';
-  const canInstall = status?.state === 'downloaded';
+  const remoteVersion = status?.info?.version ?? null;
+  const versionRelation =
+    remoteVersion && status?.currentVersion ? compareAppVersions(remoteVersion, status.currentVersion) : null;
+  const remoteIsNewer = versionRelation === 1;
+  const remoteIsOlder = versionRelation === -1;
+  const canDownload =
+    status?.state === 'available' && isNewerAppVersion(remoteVersion, status.currentVersion);
+  const canInstall =
+    status?.state === 'downloaded' && isNewerAppVersion(remoteVersion, status.currentVersion);
   const feedConfigured =
     Boolean(settings?.appFeedUrl) || Boolean(status?.supported && status?.state !== 'disabled');
-
   return (
     <div className="page-shell updates-page">
       <div className="page-heading-row">
@@ -117,7 +141,7 @@ export function UpdatesPage(): React.JSX.Element {
             </div>
             {status?.info?.version && (
               <div className="update-next-version">
-                <span>PHIÊN BẢN MỚI</span>
+                <span>{remoteIsNewer ? 'PHIÊN BẢN MỚI' : 'PHIÊN BẢN TRÊN MÁY CHỦ'}</span>
                 <b>{status.info.version}</b>
               </div>
             )}
@@ -150,9 +174,12 @@ export function UpdatesPage(): React.JSX.Element {
           {status?.info?.releaseNotes && (
             <details
               className="update-notes mt-4"
-              open={status.state === 'available' || status.state === 'downloaded'}
+              open={remoteIsNewer && (status.state === 'available' || status.state === 'downloaded')}
             >
-              <summary>Điểm mới trong phiên bản {status.info.version}</summary>
+              <summary>
+                {remoteIsNewer ? 'Điểm mới trong phiên bản' : 'Thông tin phiên bản trên máy chủ'}{' '}
+                {status.info.version}
+              </summary>
               <div style={{ whiteSpace: 'pre-line', overflowWrap: 'anywhere' }}>
                 {formatReleaseNotesForDisplay(status.info.releaseNotes)}
               </div>
@@ -222,10 +249,18 @@ export function UpdatesPage(): React.JSX.Element {
                 <Server size={20} />
               </div>
               <div className="min-w-0 flex-1">
-                <b>{feedConfigured ? 'Máy chủ cập nhật đã sẵn sàng' : 'Chưa liên kết máy chủ cập nhật'}</b>
+                <b>
+                  {feedConfigured
+                    ? remoteIsOlder
+                      ? 'Đã kết nối — máy chủ đang có bản cũ hơn'
+                      : 'Đã kết nối máy chủ cập nhật'
+                    : 'Chưa liên kết máy chủ cập nhật'}
+                </b>
                 <p>
                   {feedConfigured
-                    ? 'Ứng dụng chỉ kiểm tra khi người dùng bấm Kiểm tra ngay; không chạy vòng xoay cập nhật nền.'
+                    ? remoteIsOlder
+                      ? `Máy chủ: ${remoteVersion}. Máy này: ${status?.currentVersion}. Các nút tải và cài đã bị khóa để tránh hạ cấp.`
+                      : 'Ứng dụng chỉ kiểm tra khi người dùng bấm Kiểm tra ngay; không chạy vòng xoay cập nhật nền.'
                     : 'Bản phát hành phải được build với URL HTTPS hoặc nhập URL nâng cao trong Cài đặt.'}
                 </p>
               </div>

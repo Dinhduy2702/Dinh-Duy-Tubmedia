@@ -2,6 +2,10 @@ import type { LogEntry, QueueJob } from '../types/domain.js';
 import { isCookieBlockingCode } from './cookie-policy.js';
 
 const NON_ACTIONABLE_EVENT_CODES = new Set([
+  'APP_UPDATE_DOWNGRADE_BLOCKED',
+  'APP_UPDATE_DOWNLOADED_DOWNGRADE_BLOCKED',
+  'APP_UPDATE_SERVER_OLDER',
+  'APP_UPDATE_STALE_PACKAGE_IGNORED',
   'TOOL_RELEASE_API_DIRECT_FALLBACK',
   'PROCESS_STARTED',
   'PROCESS_FINISHED',

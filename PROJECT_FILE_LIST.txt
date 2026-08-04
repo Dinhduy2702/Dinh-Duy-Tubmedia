@@ -287,6 +287,7 @@ src/renderer/src/utils/ui-error.ts
 src/renderer/src/utils/ui-id.ts
 src/renderer/src/utils/vi-labels.ts
 src/renderer/src/utils/workbench-path-memory.ts
+src/shared/app-version.ts
 src/shared/constants/app.ts
 src/shared/contracts/channels.ts
 src/shared/errors/app-errors.ts
@@ -320,6 +321,7 @@ src/shared/utils/url.ts
 TEST_RESULTS.md
 tests/e2e/app.spec.ts
 tests/integration/database.test.ts
+tests/unit/app-update-version.test.ts
 tests/unit/brand-layout.test.ts
 tests/unit/clip-engine-mute-copy.test.ts
 tests/unit/compact-operational-ui.test.ts
