@@ -5,6 +5,7 @@ import { useDesktopEvents } from '../hooks/use-desktop-events';
 import { Sidebar } from '../layout/Sidebar';
 import { Topbar } from '../layout/Topbar';
 import { AttentionCenter } from '../components/AttentionCenter';
+import { NotificationCenter } from '../components/NotificationCenter';
 import { DiagnosticDock } from '../components/DiagnosticDock';
 import { TubmediaMark } from '../components/TubmediaBrand';
 import { friendlyIssue, safeUiText } from '../utils/ui-error';
@@ -179,6 +180,7 @@ export function App(): React.JSX.Element {
       <Sidebar />
       <div className="app-workspace flex min-w-0 flex-1 flex-col">
         <Topbar />
+        <NotificationCenter />
         <AttentionCenter />
         <DiagnosticDock />
         <main className="app-main scroll min-h-0 flex-1 overflow-auto">

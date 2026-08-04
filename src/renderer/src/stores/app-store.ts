@@ -4,6 +4,7 @@ import type {
   AppSettings,
   AppUpdateStatus,
   AttentionNotice,
+  AttentionSeverity,
   HardwareProfile,
   LogEntry,
   Project,
@@ -28,6 +29,15 @@ export type PageId =
   | 'settings'
   | 'about';
 
+export interface NotificationRecord extends AttentionNotice {
+  createdAt: string;
+  updatedAt: string;
+  readAt?: string;
+  outputPath?: string;
+  pinned: boolean;
+  count: number;
+}
+
 interface State {
   ready: boolean;
   loading: boolean;
@@ -45,6 +55,8 @@ interface State {
   error: unknown;
   attention: AttentionNotice | null;
   attentionQueue: AttentionNotice[];
+  notifications: NotificationRecord[];
+  notificationCenterOpen: boolean;
   updateStatus: AppUpdateStatus | null;
   bootstrap(): Promise<void>;
   setPage(page: PageId): void;
@@ -63,8 +75,229 @@ interface State {
   setAttention(attention: AttentionNotice | null): void;
   dismissAttention(id?: string): void;
   dismissAttentionByCodes(codes: readonly string[]): void;
+  openNotificationCenter(): void;
+  closeNotificationCenter(): void;
+  toggleNotificationCenter(): void;
+  markNotificationRead(id: string): void;
+  markAllNotificationsRead(): void;
+  removeNotification(id: string): void;
+  clearReadNotifications(): void;
+  toggleNotificationPin(id: string): void;
   setUpdateStatus(status: AppUpdateStatus): void;
   clearProjectLogs(projectId: string): void;
+}
+
+const NOTIFICATION_STORAGE_KEY = 'tubmedia.notification-center.v1';
+const MAX_NOTIFICATIONS = 150;
+const DUPLICATE_WINDOW_MS = 15_000;
+const DAY_MS = 24 * 60 * 60 * 1_000;
+const RETENTION_MS: Record<AttentionSeverity, number> = {
+  success: DAY_MS,
+  info: 3 * DAY_MS,
+  warning: 30 * DAY_MS,
+  error: 30 * DAY_MS
+};
+
+function optionalText(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+
+function outputPathFromUnknown(value: unknown): string | null {
+  let candidate = value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        candidate = JSON.parse(trimmed) as unknown;
+      } catch {
+        return null;
+      }
+    } else {
+      return null;
+    }
+  }
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null;
+  const record = candidate as Record<string, unknown>;
+  for (const key of ['outputPath', 'outputFile', 'outputFolder', 'destinationPath']) {
+    const path = optionalText(record[key]);
+    if (path) return path;
+  }
+  return null;
+}
+
+function validSeverity(value: unknown): value is AttentionSeverity {
+  return value === 'info' || value === 'success' || value === 'warning' || value === 'error';
+}
+
+function normalizeStoredNotification(value: unknown): NotificationRecord | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const id = optionalText(record.id);
+  const title = optionalText(record.title);
+  const message = optionalText(record.message);
+  if (!id || !title || !message || !validSeverity(record.severity)) return null;
+  const now = new Date().toISOString();
+  const createdAt = optionalText(record.createdAt) ?? now;
+  const updatedAt = optionalText(record.updatedAt) ?? createdAt;
+  const steps = Array.isArray(record.steps)
+    ? record.steps
+        .filter((step): step is string => typeof step === 'string' && Boolean(step.trim()))
+        .map((step) => safeUiText(step, 'Kiểm tra lại thao tác.'))
+    : [];
+  const countValue = typeof record.count === 'number' ? Math.floor(record.count) : 1;
+  const readAt = optionalText(record.readAt);
+  const projectId = optionalText(record.projectId);
+  const jobId = optionalText(record.jobId);
+  const code = optionalText(record.code);
+  const outputPath = optionalText(record.outputPath);
+  return {
+    id,
+    severity: record.severity,
+    title: safeUiText(title, 'Thông báo'),
+    message: safeUiText(message, 'Ứng dụng đã cập nhật trạng thái.'),
+    createdAt,
+    updatedAt,
+    pinned: record.pinned === true,
+    count: Math.max(1, countValue),
+    ...(readAt ? { readAt } : {}),
+    ...(projectId ? { projectId } : {}),
+    ...(jobId ? { jobId } : {}),
+    ...(code ? { code } : {}),
+    ...(outputPath ? { outputPath } : {}),
+    ...(steps.length > 0 ? { steps } : {}),
+    ...(typeof record.sticky === 'boolean' ? { sticky: record.sticky } : {})
+  };
+}
+
+function trimNotificationHistory(records: NotificationRecord[], now = Date.now()): NotificationRecord[] {
+  return records
+    .filter((record) => {
+      if (record.pinned) return true;
+      const timestamp = Date.parse(record.updatedAt);
+      if (!Number.isFinite(timestamp)) return true;
+      return now - timestamp <= RETENTION_MS[record.severity];
+    })
+    .sort((left, right) => {
+      if (left.pinned !== right.pinned) return left.pinned ? -1 : 1;
+      return Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+    })
+    .slice(0, MAX_NOTIFICATIONS);
+}
+
+function loadNotificationHistory(): NotificationRecord[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(NOTIFICATION_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return trimNotificationHistory(
+      parsed
+        .map((item) => normalizeStoredNotification(item))
+        .filter((item): item is NotificationRecord => Boolean(item))
+    );
+  } catch {
+    return [];
+  }
+}
+
+function persistNotificationHistory(records: NotificationRecord[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(NOTIFICATION_STORAGE_KEY, JSON.stringify(records));
+  } catch {
+    // Lịch sử thông báo là tiện ích phụ; lỗi bộ nhớ trình duyệt không được chặn ứng dụng.
+  }
+}
+
+function cleanNotice(attention: AttentionNotice): AttentionNotice {
+  const sanitizedSteps = attention.steps
+    ?.filter((step) => Boolean(step.trim()))
+    .map((step) => safeUiText(step, 'Kiểm tra lại thao tác.'));
+  return {
+    ...attention,
+    title: safeUiText(attention.title, 'Thông báo'),
+    message: safeUiText(attention.message, 'Ứng dụng đã cập nhật trạng thái.'),
+    ...(sanitizedSteps && sanitizedSteps.length > 0 ? { steps: sanitizedSteps } : {})
+  };
+}
+
+function notificationFromNotice(
+  notice: AttentionNotice,
+  timestamp: string,
+  options?: { pinned?: boolean; count?: number; createdAt?: string; outputPath?: string }
+): NotificationRecord {
+  return {
+    ...notice,
+    createdAt: options?.createdAt ?? timestamp,
+    updatedAt: timestamp,
+    pinned: options?.pinned ?? false,
+    count: options?.count ?? 1,
+    ...(options?.outputPath ? { outputPath: options.outputPath } : {})
+  };
+}
+
+function addNotification(
+  current: NotificationRecord[],
+  rawNotice: AttentionNotice,
+  now = Date.now(),
+  outputPath?: string
+): NotificationRecord[] {
+  const notice = cleanNotice(rawNotice);
+  const timestamp = new Date(now).toISOString();
+  const sameId = current.find((item) => item.id === notice.id);
+  if (sameId) {
+    const replacementOutputPath = outputPath ?? sameId.outputPath;
+    const replacement = notificationFromNotice(notice, timestamp, {
+      pinned: sameId.pinned,
+      count: sameId.count,
+      createdAt: sameId.createdAt,
+      ...(replacementOutputPath ? { outputPath: replacementOutputPath } : {})
+    });
+    const next = trimNotificationHistory([
+      replacement,
+      ...current.filter((item) => item.id !== notice.id)
+    ], now);
+    persistNotificationHistory(next);
+    return next;
+  }
+
+  const duplicate = current.find((item) => {
+    if (item.pinned || item.readAt || item.sticky || notice.sticky) return false;
+    const elapsed = now - Date.parse(item.updatedAt);
+    return (
+      Number.isFinite(elapsed) &&
+      elapsed >= 0 &&
+      elapsed <= DUPLICATE_WINDOW_MS &&
+      item.severity === notice.severity &&
+      item.title === notice.title &&
+      (item.code ?? '') === (notice.code ?? '')
+    );
+  });
+
+  if (duplicate) {
+    const groupedOutputPath = outputPath ?? duplicate.outputPath;
+    const grouped = notificationFromNotice(notice, timestamp, {
+      pinned: duplicate.pinned,
+      count: duplicate.count + 1,
+      createdAt: duplicate.createdAt,
+      ...(groupedOutputPath ? { outputPath: groupedOutputPath } : {})
+    });
+    const next = trimNotificationHistory([
+      grouped,
+      ...current.filter((item) => item.id !== duplicate.id)
+    ], now);
+    persistNotificationHistory(next);
+    return next;
+  }
+
+  const next = trimNotificationHistory([
+    notificationFromNotice(notice, timestamp, { ...(outputPath ? { outputPath } : {}) }),
+    ...current
+  ], now);
+  persistNotificationHistory(next);
+  return next;
 }
 
 function sameJob(left: QueueJob, right: QueueJob): boolean {
@@ -110,6 +343,8 @@ function mergeLogs(current: LogEntry[], entries: LogEntry[]): LogEntry[] {
     .slice(0, 1000);
 }
 
+const initialNotifications = loadNotificationHistory();
+
 export const useAppStore = create<State>((set, get) => ({
   ready: false,
   loading: false,
@@ -127,6 +362,8 @@ export const useAppStore = create<State>((set, get) => ({
   error: null,
   attention: null,
   attentionQueue: [],
+  notifications: initialNotifications,
+  notificationCenterOpen: false,
   updateStatus: null,
   bootstrap: async () => {
     set({ loading: true, error: null });
@@ -201,25 +438,32 @@ export const useAppStore = create<State>((set, get) => ({
     set((state) => {
       if (error === null || error === undefined || error === '') return { error: null };
       const issue = friendlyIssue(error);
+      const notice: AttentionNotice = {
+        id: `ui-result-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        severity: issue.tone,
+        title: issue.title,
+        message: issue.message,
+        ...(issue.steps.length > 0 ? { steps: issue.steps } : {}),
+        sticky: false
+      };
+      const notifications = addNotification(
+        state.notifications,
+        notice,
+        Date.now(),
+        outputPathFromUnknown(error) ?? undefined
+      );
       if (issue.tone === 'success' || issue.tone === 'info') {
-        const notice: AttentionNotice = {
-          id: `ui-result-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-          severity: issue.tone,
-          title: issue.title,
-          message: issue.message,
-          steps: issue.steps,
-          sticky: false
-        };
-        if (!state.attention) return { error: null, attention: notice };
+        if (!state.attention) return { error: null, attention: notice, notifications };
         return {
           error: null,
+          notifications,
           attentionQueue: [
             ...state.attentionQueue.filter((item) => item.id !== notice.id),
             notice
           ].slice(-5)
         };
       }
-      return { error };
+      return { error, notifications };
     }),
   setAttention: (attention) =>
     set((state) => {
@@ -227,22 +471,17 @@ export const useAppStore = create<State>((set, get) => ({
         const [next, ...rest] = state.attentionQueue;
         return { attention: next ?? null, attentionQueue: rest };
       }
-      const sanitizedSteps = attention.steps?.map((step) =>
-        safeUiText(step, 'Kiểm tra lại thao tác.')
-      );
-      const cleanAttention: AttentionNotice = {
-        ...attention,
-        title: safeUiText(attention.title, 'Thông báo'),
-        message: safeUiText(attention.message, 'Ứng dụng đã cập nhật trạng thái.'),
-        ...(sanitizedSteps ? { steps: sanitizedSteps } : {})
-      };
-      if (state.attention?.id === cleanAttention.id) return { attention: cleanAttention };
-      if (!state.attention) return { attention: cleanAttention };
+      const cleanAttention = cleanNotice(attention);
+      const notifications = addNotification(state.notifications, cleanAttention);
+      if (state.attention?.id === cleanAttention.id) {
+        return { attention: cleanAttention, notifications };
+      }
+      if (!state.attention) return { attention: cleanAttention, notifications };
       const queue = [
         ...state.attentionQueue.filter((item) => item.id !== cleanAttention.id),
         cleanAttention
       ].slice(-5);
-      return { attentionQueue: queue };
+      return { attentionQueue: queue, notifications };
     }),
   dismissAttention: (id) =>
     set((state) => {
@@ -259,7 +498,56 @@ export const useAppStore = create<State>((set, get) => ({
         .filter((notice): notice is AttentionNotice => Boolean(notice))
         .filter((notice) => !notice.code || !blocked.has(notice.code));
       const [attention, ...attentionQueue] = remaining;
-      return { attention: attention ?? null, attentionQueue };
+      const now = new Date().toISOString();
+      const notifications = state.notifications.map((notice) =>
+        notice.code && blocked.has(notice.code) && !notice.readAt
+          ? { ...notice, readAt: now }
+          : notice
+      );
+      persistNotificationHistory(notifications);
+      return { attention: attention ?? null, attentionQueue, notifications };
+    }),
+  openNotificationCenter: () => set({ notificationCenterOpen: true }),
+  closeNotificationCenter: () => set({ notificationCenterOpen: false }),
+  toggleNotificationCenter: () =>
+    set((state) => ({ notificationCenterOpen: !state.notificationCenterOpen })),
+  markNotificationRead: (id) =>
+    set((state) => {
+      const now = new Date().toISOString();
+      const notifications = state.notifications.map((notice) =>
+        notice.id === id && !notice.readAt ? { ...notice, readAt: now } : notice
+      );
+      persistNotificationHistory(notifications);
+      return { notifications };
+    }),
+  markAllNotificationsRead: () =>
+    set((state) => {
+      const now = new Date().toISOString();
+      const notifications = state.notifications.map((notice) =>
+        notice.readAt ? notice : { ...notice, readAt: now }
+      );
+      persistNotificationHistory(notifications);
+      return { notifications };
+    }),
+  removeNotification: (id) =>
+    set((state) => {
+      const notifications = state.notifications.filter((notice) => notice.id !== id);
+      persistNotificationHistory(notifications);
+      return { notifications };
+    }),
+  clearReadNotifications: () =>
+    set((state) => {
+      const notifications = state.notifications.filter((notice) => !notice.readAt || notice.pinned);
+      persistNotificationHistory(notifications);
+      return { notifications };
+    }),
+  toggleNotificationPin: (id) =>
+    set((state) => {
+      const notifications = state.notifications.map((notice) =>
+        notice.id === id ? { ...notice, pinned: !notice.pinned } : notice
+      );
+      persistNotificationHistory(notifications);
+      return { notifications };
     }),
   setUpdateStatus: (updateStatus) => set({ updateStatus }),
   clearProjectLogs: (projectId) =>

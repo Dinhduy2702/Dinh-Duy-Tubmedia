@@ -246,6 +246,7 @@ src/renderer/src/components/ErrorBanner.tsx
 src/renderer/src/components/FolderField.tsx
 src/renderer/src/components/InfoDisclosure.tsx
 src/renderer/src/components/JobProgressList.tsx
+src/renderer/src/components/NotificationCenter.tsx
 src/renderer/src/components/QuickDownloadPanel.tsx
 src/renderer/src/components/RendererErrorBoundary.tsx
 src/renderer/src/components/StatCard.tsx
@@ -353,6 +354,7 @@ tests/unit/merge-target.test.ts
 tests/unit/non-conflicting-path.test.ts
 tests/unit/normalization-match.test.ts
 tests/unit/normalize-engine-stream-copy.test.ts
+tests/unit/notification-center.test.ts
 tests/unit/notification-policy.test.ts
 tests/unit/process-callback-safety.test.ts
 tests/unit/process-encoding.test.ts

@@ -80,6 +80,13 @@ export function Topbar(): React.JSX.Element {
   const setError = useAppStore((state) => state.setError);
   const setAttention = useAppStore((state) => state.setAttention);
   const setPage = useAppStore((state) => state.setPage);
+  const notificationSummary = useAppStore(
+    useShallow((state) => ({
+      open: state.notificationCenterOpen,
+      unread: state.notifications.filter((notification) => !notification.readAt).length,
+      toggle: state.toggleNotificationCenter
+    }))
+  );
   const [busy, setBusy] = useState(false);
   const [themeBusy, setThemeBusy] = useState(false);
 
@@ -250,12 +257,20 @@ export function Topbar(): React.JSX.Element {
           <span>{queueSummary.allPaused ? 'Tiếp tục tất cả' : 'Tạm dừng tất cả'}</span>
         </button>
         <button
-          className="btn btn-ghost topbar-icon-button"
-          title="Mở chẩn đoán"
-          aria-label="Mở chẩn đoán"
-          onClick={() => setPage('diagnostics')}
+          id="notification-center-trigger"
+          className={`btn btn-ghost topbar-icon-button topbar-notification-button ${notificationSummary.open ? 'is-open' : ''} ${notificationSummary.unread > 0 ? 'has-unread' : ''}`}
+          title="Mở Trung tâm thông báo"
+          aria-label={`Mở Trung tâm thông báo${notificationSummary.unread > 0 ? `, ${notificationSummary.unread} chưa đọc` : ''}`}
+          aria-controls="notification-center-panel"
+          aria-expanded={notificationSummary.open}
+          onClick={notificationSummary.toggle}
         >
           <Bell size={18} />
+          {notificationSummary.unread > 0 && (
+            <span className="topbar-notification-count" aria-hidden="true">
+              {notificationSummary.unread > 99 ? '99+' : notificationSummary.unread}
+            </span>
+          )}
         </button>
       </div>
     </header>
