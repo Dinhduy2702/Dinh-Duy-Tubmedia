@@ -9,6 +9,12 @@ export interface QuickDownloadCommandPaths {
   ffmpegDirectory: string;
   tempDirectory: string;
   runToken: string;
+  outputToken?: string;
+}
+
+export interface QuickDownloadCommandOptions {
+  compactFilename?: boolean;
+  forceGenericExtractor?: boolean;
 }
 
 export type QuickDownloadAuthentication = Pick<
@@ -53,11 +59,13 @@ function safeRangeSuffix(request: ValidatedQuickDownloadRequest): string {
 export function buildQuickDownloadArguments(
   request: ValidatedQuickDownloadRequest,
   paths: QuickDownloadCommandPaths,
-  authentication?: QuickDownloadAuthentication
+  authentication?: QuickDownloadAuthentication,
+  options: QuickDownloadCommandOptions = {}
 ): string[] {
-  const outputTemplate =
-    `%(title).160B [%(id)s]${safeRangeSuffix(request)}` +
-    ` [QD-${paths.runToken}].${extensionFor(request.mediaMode)}`;
+  const filenameToken = paths.outputToken ?? paths.runToken;
+  const outputTemplate = options.compactFilename
+    ? `Video [%(id)s]${safeRangeSuffix(request)} [QD-${filenameToken}].${extensionFor(request.mediaMode)}`
+    : `%(title).80B [%(id)s]${safeRangeSuffix(request)} [QD-${filenameToken}].${extensionFor(request.mediaMode)}`;
 
   const args = [
     '--ignore-config',
@@ -66,7 +74,7 @@ export function buildQuickDownloadArguments(
     '--no-color',
     '--windows-filenames',
     '--trim-filenames',
-    '220',
+    '128',
     '--continue',
     '--no-overwrites',
     '--no-post-overwrites',
@@ -140,6 +148,10 @@ export function buildQuickDownloadArguments(
       ? `${authentication.cookiesBrowser}:${authentication.cookiesBrowserProfile}`
       : authentication.cookiesBrowser;
     args.push('--cookies-from-browser', browserSpec);
+  }
+
+  if (options.forceGenericExtractor) {
+    args.push('--ies', 'generic,default');
   }
 
   args.push(request.url);

@@ -8,7 +8,11 @@ export const QUICK_DOWNLOAD_MEDIA_MODES = ['video-audio', 'audio-only', 'video-o
 export type QuickDownloadMediaMode = (typeof QUICK_DOWNLOAD_MEDIA_MODES)[number];
 
 export type QuickDownloadErrorCode =
-  'AUTHENTICATION_REQUIRED' | 'COOKIES_EXPIRED' | 'BROWSER_COOKIE_DATABASE_LOCKED';
+  | 'AUTHENTICATION_REQUIRED'
+  | 'COOKIES_EXPIRED'
+  | 'BROWSER_COOKIE_DATABASE_LOCKED'
+  | 'UNSUPPORTED_URL'
+  | 'OUTPUT_PATH_INVALID';
 
 export interface QuickDownloadRequest {
   url: string;

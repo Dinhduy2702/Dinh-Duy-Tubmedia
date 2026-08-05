@@ -363,6 +363,7 @@ tests/unit/progress-policy.test.ts
 tests/unit/quality.test.ts
 tests/unit/queue-lane.test.ts
 tests/unit/quick-download-cookie-integration.test.ts
+tests/unit/quick-download-resilience.test.ts
 tests/unit/quick-download-service.test.ts
 tests/unit/quick-download-sync.test.ts
 tests/unit/quick-download.test.ts

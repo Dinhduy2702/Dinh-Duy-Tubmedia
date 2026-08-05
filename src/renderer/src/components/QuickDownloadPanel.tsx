@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
-import { Cookie, ExternalLink, Pause, Play, ShieldAlert, Square } from 'lucide-react';
+import { AlertTriangle, Copy, Cookie, ExternalLink, Pause, Play, RotateCcw, ShieldAlert, Square, Wrench } from 'lucide-react';
 import type {
   QuickDownloadMediaMode,
   QuickDownloadQuality,
@@ -8,6 +8,7 @@ import type {
 import { CookieManagerDialog } from './CookieManagerDialog';
 import { UnifiedDownloadProgress } from './UnifiedDownloadProgress';
 import { safeUiText } from '../utils/ui-error';
+import { useAppStore } from '../stores/app-store';
 
 function formatBytes(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0 B';
@@ -52,6 +53,9 @@ const COOKIE_BLOCKING_CODES = new Set([
   'BROWSER_COOKIE_DATABASE_LOCKED'
 ]);
 
+const UNSUPPORTED_LINK_CODE = 'UNSUPPORTED_URL';
+const OUTPUT_PATH_CODE = 'OUTPUT_PATH_INVALID';
+
 export function QuickDownloadPanel(): ReactElement {
   const [url, setUrl] = useState('');
   const [outputDirectory, setOutputDirectory] = useState('');
@@ -89,6 +93,7 @@ export function QuickDownloadPanel(): ReactElement {
   const [error, setError] = useState<string | null>(null);
   const [cookieOpen, setCookieOpen] = useState(false);
   const openedCookieTask = useRef<string | null>(null);
+  const setPage = useAppStore((state) => state.setPage);
 
   useEffect(() => {
     try {
@@ -126,6 +131,8 @@ export function QuickDownloadPanel(): ReactElement {
   );
 
   const cookieBlocked = Boolean(status?.errorCode && COOKIE_BLOCKING_CODES.has(status.errorCode));
+  const unsupportedLink = status?.errorCode === UNSUPPORTED_LINK_CODE;
+  const outputPathBlocked = status?.errorCode === OUTPUT_PATH_CODE;
 
   const displayStatusMessage = status
     ? safeUiText(status.message, quickPhaseLabel(status.phase))
@@ -186,6 +193,21 @@ export function QuickDownloadPanel(): ReactElement {
     const current = await window.desktop.quickDownload.current();
     if (current) setStatus(current);
     setError(null);
+  }
+
+  async function copyCurrentLink(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(url.trim());
+      setError(null);
+    } catch {
+      setError('Không thể sao chép liên kết. Hãy chọn và sao chép trực tiếp trong ô liên kết.');
+    }
+  }
+
+  function openCurrentLink(): void {
+    const target = url.trim();
+    if (!target) return;
+    window.open(target, '_blank', 'noopener,noreferrer');
   }
 
   async function chooseDirectory(): Promise<void> {
@@ -471,6 +493,59 @@ export function QuickDownloadPanel(): ReactElement {
           </div>
         )}
 
+        {unsupportedLink && status && (
+          <div className="quick-download-recovery-block is-unsupported" role="alert">
+            <AlertTriangle size={21} />
+            <div className="quick-download-recovery-copy">
+              <strong>Liên kết chưa được nền tảng tải hỗ trợ</strong>
+              <p>{displayStatusMessage}</p>
+              <small>
+                Tubmedia đã thử bộ trích xuất chuyên dụng và chế độ liên kết trực tiếp/chung. Bạn có thể cập
+                nhật yt-dlp, mở trang gốc hoặc sao chép liên kết để kiểm tra lại.
+              </small>
+            </div>
+            <div className="quick-download-recovery-actions">
+              <button type="button" className="primary" onClick={() => void start()}>
+                <RotateCcw size={15} />
+                Thử lại
+              </button>
+              <button type="button" onClick={() => setPage('tools')}>
+                <Wrench size={15} />
+                Cập nhật yt-dlp
+              </button>
+              <button type="button" onClick={openCurrentLink}>
+                <ExternalLink size={15} />
+                Mở liên kết
+              </button>
+              <button type="button" onClick={() => void copyCurrentLink()}>
+                <Copy size={15} />
+                Sao chép link
+              </button>
+            </div>
+          </div>
+        )}
+        {outputPathBlocked && status && (
+          <div className="quick-download-recovery-block is-path" role="alert">
+            <AlertTriangle size={21} />
+            <div className="quick-download-recovery-copy">
+              <strong>Không thể tạo tệp trong đường dẫn đã chọn</strong>
+              <p>{displayStatusMessage}</p>
+              <small>
+                Tubmedia đã tự thử lại bằng tên tệp ngắn. Hãy chọn thư mục có đường dẫn ngắn hơn, còn dung lượng
+                và có quyền ghi rồi thử lại.
+              </small>
+            </div>
+            <div className="quick-download-recovery-actions">
+              <button type="button" className="primary" onClick={() => void chooseDirectory()}>
+                Chọn thư mục khác
+              </button>
+              <button type="button" onClick={() => void start()}>
+                <RotateCcw size={15} />
+                Thử lại
+              </button>
+            </div>
+          </div>
+        )}
         {error && <div className="quick-download-error">{error}</div>}
 
         {status ? (

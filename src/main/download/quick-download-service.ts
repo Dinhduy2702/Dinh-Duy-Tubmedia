@@ -31,6 +31,8 @@ interface ActiveQuickTask {
   outputToken: string;
   runToken: string;
   cookiesAttached: boolean;
+  compactFilename: boolean;
+  genericFallbackTried: boolean;
   recentLines: string[];
   done: Promise<void>;
 }
@@ -94,6 +96,28 @@ function cookieFailureMessage(code: QuickDownloadErrorCode): string {
   return 'Video yêu cầu đăng nhập để xác nhận bạn không phải bot. Hãy mở Cookies và chọn một trong ba cách cấu hình; Tải nhanh sẽ tự tiếp tục sau khi lưu.';
 }
 
+function classifyOutputPathFailure(lines: string[]): boolean {
+  const lower = lines.join('\n').toLowerCase();
+  return /unable to open for writing|no such file or directory|filename or extension is too long|file name too long|winerror 206|cannot create (?:the )?file|path too long/.test(
+    lower
+  );
+}
+
+function classifyUnsupportedUrlFailure(lines: string[]): boolean {
+  const lower = lines.join('\n').toLowerCase();
+  return /unsupported url|no suitable extractor|url could not be handled|not a valid url|unknown url type/.test(
+    lower
+  );
+}
+
+function outputPathFailureMessage(): string {
+  return 'Không thể tạo tệp tải xuống vì tên hoặc đường dẫn không hợp lệ/quá dài. Tubmedia đã tự thử lại bằng tên ngắn; hãy chọn thư mục có đường dẫn ngắn hơn, còn dung lượng và có quyền ghi.';
+}
+
+function unsupportedUrlMessage(): string {
+  return 'Liên kết này chưa được yt-dlp hỗ trợ. Tubmedia đã thử bộ trích xuất chuyên dụng và chế độ liên kết trực tiếp/chung nhưng chưa tìm thấy luồng media. Hãy cập nhật yt-dlp trong Công cụ, kiểm tra lại liên kết bài/video cụ thể hoặc mở trang gốc để lấy liên kết trực tiếp.';
+}
+
 function isPersistedState(value: unknown): value is PersistedQuickDownloadState {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<PersistedQuickDownloadState>;
@@ -118,7 +142,7 @@ export class QuickDownloadService {
     private readonly settings?: SettingsService
   ) {
     this.statePath = join(stateDirectory, 'state.json');
-    this.tempRoot = join(stateDirectory, 'temp');
+    this.tempRoot = join(app.getPath('temp'), 'TubmediaQD');
   }
 
   private cookieSettings(): {
@@ -268,7 +292,7 @@ export class QuickDownloadService {
     const taskId = randomUUID();
     const outputToken = taskId.replaceAll('-', '').slice(0, 12);
     const runToken = `${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}` + `-${outputToken}`;
-    const tempDirectory = join(this.tempRoot, taskId);
+    const tempDirectory = join(this.tempRoot, outputToken);
     await mkdir(tempDirectory, { recursive: true });
 
     const status: QuickDownloadStatus = {
@@ -305,6 +329,8 @@ export class QuickDownloadService {
       outputToken,
       runToken,
       cookiesAttached: forceCookies && hasConfiguredCookies(this.cookieSettings()),
+      compactFilename: false,
+      genericFallbackTried: false,
       recentLines: [],
       done: Promise.resolve()
     };
@@ -424,9 +450,14 @@ export class QuickDownloadService {
           {
             ffmpegDirectory: dirname(ffmpegPath),
             tempDirectory: active.tempDirectory,
-            runToken: active.runToken
+            runToken: active.runToken,
+            outputToken: active.outputToken
           },
-          authentication
+          authentication,
+          {
+            compactFilename: active.compactFilename,
+            forceGenericExtractor: active.genericFallbackTried
+          }
         );
 
         active.recentLines = [];
@@ -486,6 +517,55 @@ export class QuickDownloadService {
             await this.cleanupActive(active, false);
             return;
           }
+
+          if (classifyOutputPathFailure(active.recentLines)) {
+            if (!active.compactFilename) {
+              active.compactFilename = true;
+              await this.prepareAutomaticRetry(
+                active,
+                'Tên tệp từ nền tảng quá dài hoặc không phù hợp với Windows. Đang tự thử lại bằng tên rút gọn an toàn.'
+              );
+              this.logger.warn(
+                'quick-download',
+                'QUICK_DOWNLOAD_SAFE_FILENAME_RETRY',
+                'Tải nhanh tự thử lại bằng tên tệp ngắn sau lỗi mở tệp để ghi.',
+                { jobId: active.status.taskId }
+              );
+              continue;
+            }
+
+            this.failTask(active, outputPathFailureMessage(), 'OUTPUT_PATH_INVALID');
+            await this.cleanupActive(active, true);
+            return;
+          }
+
+          if (classifyUnsupportedUrlFailure(active.recentLines)) {
+            if (!active.genericFallbackTried) {
+              active.genericFallbackTried = true;
+              active.compactFilename = true;
+              await this.prepareAutomaticRetry(
+                active,
+                'Nền tảng chưa có bộ trích xuất riêng. Đang thử chế độ liên kết trực tiếp/chung.'
+              );
+              this.logger.info(
+                'quick-download',
+                'QUICK_DOWNLOAD_GENERIC_EXTRACTOR_RETRY',
+                'Tải nhanh tự thử lại liên kết bằng generic/default extractors.',
+                { jobId: active.status.taskId }
+              );
+              continue;
+            }
+
+            this.failTask(active, unsupportedUrlMessage(), 'UNSUPPORTED_URL');
+            await this.cleanupActive(active, true);
+            return;
+          }
+
+          if (active.genericFallbackTried) {
+            this.failTask(active, unsupportedUrlMessage(), 'UNSUPPORTED_URL');
+            await this.cleanupActive(active, true);
+            return;
+          }
         }
 
         await this.finishTask(active, result.code);
@@ -515,6 +595,24 @@ export class QuickDownloadService {
       this.failTask(active, error instanceof Error ? error.message : String(error), null);
       await this.cleanupActive(active, false);
     }
+  }
+
+  private async prepareAutomaticRetry(active: ActiveQuickTask, message: string): Promise<void> {
+    await rm(active.tempDirectory, { recursive: true, force: true }).catch(() => undefined);
+    await mkdir(active.tempDirectory, { recursive: true });
+    active.status.phase = 'preparing';
+    active.status.progress = 0;
+    active.status.title = '';
+    active.status.speed = '';
+    active.status.eta = '';
+    active.status.downloadedBytes = 0;
+    active.status.totalBytes = 0;
+    active.status.outputPath = null;
+    active.status.error = null;
+    active.status.errorCode = null;
+    active.status.message = message;
+    active.recentLines = [];
+    this.publish(active);
   }
 
   private consumeLine(active: ActiveQuickTask, line: string): void {
