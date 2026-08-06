@@ -2,7 +2,7 @@ import { app, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { access, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { constants as fsConstants, existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import {
   validateQuickDownloadRequest,
   type QuickDownloadErrorCode,
@@ -11,6 +11,7 @@ import {
 } from '@shared/quick-download.js';
 import { ProcessCancelledError, ToolNotFoundError } from '@shared/errors/app-errors.js';
 import { hasConfiguredCookies } from '@shared/utils/cookie-policy.js';
+import { cleanExternalText } from '@shared/utils/text-encoding.js';
 import type { FileVerifier } from '../media/file-verifier.js';
 import type { Logger } from '../logging/logger.js';
 import type { ProcessManager } from '../processes/process-manager.js';
@@ -116,6 +117,17 @@ function outputPathFailureMessage(): string {
 
 function unsupportedUrlMessage(): string {
   return 'Liên kết này chưa được yt-dlp hỗ trợ. Tubmedia đã thử bộ trích xuất chuyên dụng và chế độ liên kết trực tiếp/chung nhưng chưa tìm thấy luồng media. Hãy cập nhật yt-dlp trong Công cụ, kiểm tra lại liên kết bài/video cụ thể hoặc mở trang gốc để lấy liên kết trực tiếp.';
+}
+
+/* TUBMEDIA AUDIO MODE TEXT R30 */
+function quickMediaLabel(mediaMode: ValidatedQuickDownloadRequest['mediaMode']): 'âm thanh' | 'video' {
+  return mediaMode === 'audio-only' ? 'âm thanh' : 'video';
+}
+
+function titleFromOutputPath(outputPath: string): string | null {
+  const withoutExtension = basename(outputPath).replace(/\.[^.]+$/, '');
+  const withoutTokens = withoutExtension.replace(/\s+\[[^\]]+\]\s+\[QD-[^\]]+\]$/, '');
+  return cleanExternalText(withoutTokens) ?? cleanExternalText(withoutExtension);
 }
 
 function isPersistedState(value: unknown): value is PersistedQuickDownloadState {
@@ -303,7 +315,13 @@ export class QuickDownloadService {
       progress: 0,
       title: '',
       message:
-        request.mode === 'range' ? 'Đang chuẩn bị tải đoạn video.' : 'Đang chuẩn bị tải toàn bộ video.',
+        request.mediaMode === 'audio-only'
+          ? request.mode === 'range'
+            ? 'Đang chuẩn bị tải đoạn âm thanh.'
+            : 'Đang chuẩn bị tải toàn bộ tệp âm thanh.'
+          : request.mode === 'range'
+            ? 'Đang chuẩn bị tải đoạn video.'
+            : 'Đang chuẩn bị tải toàn bộ video.',
       speed: '',
       eta: '',
       downloadedBytes: 0,
@@ -624,18 +642,23 @@ export class QuickDownloadService {
     }
 
     if (line.startsWith('TUBMEDIA_TITLE|')) {
-      active.status.title = line.slice('TUBMEDIA_TITLE|'.length);
+      const cleanTitle = cleanExternalText(line.slice('TUBMEDIA_TITLE|'.length));
+      if (cleanTitle) active.status.title = cleanTitle;
       active.status.phase = 'downloading';
-      active.status.message = 'Đang tải dữ liệu video.';
+      active.status.message = `Đang tải dữ liệu ${quickMediaLabel(active.request.mediaMode)}.`;
       this.publish(active);
       return;
     }
 
     if (line.startsWith('TUBMEDIA_FILE|')) {
       active.status.outputPath = line.slice('TUBMEDIA_FILE|'.length);
+      if (!active.status.title) {
+        const recoveredTitle = titleFromOutputPath(active.status.outputPath);
+        if (recoveredTitle) active.status.title = recoveredTitle;
+      }
       active.status.phase = 'processing';
       active.status.progress = Math.max(99, active.status.progress);
-      active.status.message = 'Đang hoàn tất file video.';
+      active.status.message = `Đang hoàn tất tệp ${quickMediaLabel(active.request.mediaMode)}.`;
       this.publish(active);
       return;
     }
@@ -649,7 +672,13 @@ export class QuickDownloadService {
       active.status.downloadedBytes = parseByteValue(parts[4] ?? '');
       active.status.totalBytes = parseByteValue(parts[5] ?? '');
       active.status.message =
-        active.status.mode === 'range' ? 'Đang tải đoạn video đã chọn.' : 'Đang tải toàn bộ video.';
+        active.status.mediaMode === 'audio-only'
+          ? active.status.mode === 'range'
+            ? 'Đang tải đoạn âm thanh đã chọn.'
+            : 'Đang tải toàn bộ tệp âm thanh.'
+          : active.status.mode === 'range'
+            ? 'Đang tải đoạn video đã chọn.'
+            : 'Đang tải toàn bộ video.';
       this.publish(active);
     }
   }
@@ -657,7 +686,8 @@ export class QuickDownloadService {
   private async finishTask(active: ActiveQuickTask, code: number): Promise<void> {
     if (code !== 0) {
       const detail = this.lastUsefulError(active.recentLines);
-      throw new Error(detail ? `Tải video thất bại: ${detail}` : `yt-dlp kết thúc với mã ${code}.`);
+      const contentLabel = active.status.mediaMode === 'audio-only' ? 'âm thanh' : 'video';
+      throw new Error(detail ? `Tải ${contentLabel} thất bại: ${detail}` : `yt-dlp kết thúc với mã ${code}.`);
     }
 
     if (!active.status.outputPath || !existsSync(active.status.outputPath)) {

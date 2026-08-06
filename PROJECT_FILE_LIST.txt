@@ -340,6 +340,7 @@ tests/unit/editor-workflows-1.3.0.test.ts
 tests/unit/encoder-selection.test.ts
 tests/unit/existing-download.test.ts
 tests/unit/ffmpeg-progress.test.ts
+tests/unit/file-verifier-audio-only.test.ts
 tests/unit/filename.test.ts
 tests/unit/fix10-timestamp-error-detail.test.ts
 tests/unit/fix11-path-and-retry.test.ts

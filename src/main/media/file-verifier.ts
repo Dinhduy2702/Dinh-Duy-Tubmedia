@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { access } from 'node:fs/promises';
+import { access, stat } from 'node:fs/promises';
 import type { VerificationLevel } from '@shared/types/domain.js';
 import { VerificationFailedError } from '@shared/errors/app-errors.js';
 import type { MediaAnalyzer } from './media-analyzer.js';
@@ -42,12 +42,88 @@ function conciseProcessError(...values: string[]): string {
     .slice(0, 1_500);
 }
 
+/* TUBMEDIA AUDIO ONLY VERIFICATION R30 */
+interface VerificationMediaSummary {
+  duration: number;
+  width: number;
+  height: number;
+  audioCodec: string | null;
+  fileSize: number;
+}
+
+function finitePositive(value: unknown): number | null {
+  const parsed = typeof value === 'number' ? value : Number(typeof value === 'string' ? value : '');
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function timeBaseSeconds(stream: Record<string, unknown> | undefined): number | null {
+  if (!stream) return null;
+  const durationTs = finitePositive(stream.duration_ts);
+  const timeBase = typeof stream.time_base === 'string' ? stream.time_base : '';
+  const [numeratorText = '', denominatorText = ''] = timeBase.split('/');
+  const numerator = Number(numeratorText);
+  const denominator = Number(denominatorText);
+  if (durationTs === null || !Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0) {
+    return null;
+  }
+  const duration = durationTs * (numerator / denominator);
+  return Number.isFinite(duration) && duration > 0 ? duration : null;
+}
+
 export class FileVerifier {
   public constructor(
     private readonly analyzer: MediaAnalyzer,
     private readonly processes: ProcessManager,
     private readonly tools: ToolManager
   ) {}
+
+  private async analyzeAudioOnly(
+    path: string,
+    verifyJobId: string,
+    options: VerificationOptions
+  ): Promise<VerificationMediaSummary> {
+    const ffprobe = this.tools.get('ffprobe');
+    if (!ffprobe.available || !ffprobe.executablePath) {
+      throw new VerificationFailedError('Thiếu ffprobe để kiểm tra tệp âm thanh.');
+    }
+    const result = await this.processes.run({
+      jobId: `${verifyJobId}-audio-probe`,
+      ...(options.projectId ? { projectId: options.projectId } : {}),
+      tool: 'ffprobe',
+      executablePath: ffprobe.executablePath,
+      args: ['-v', 'error', '-show_streams', '-show_format', '-of', 'json=compact=1', path],
+      timeoutMs: 120_000,
+      priority: 'below_normal',
+      ...(options.signal ? { signal: options.signal } : {})
+    });
+    if (result.code !== 0) {
+      throw new VerificationFailedError(result.stderrTail || 'ffprobe không đọc được tệp âm thanh.');
+    }
+    let data: { streams?: Array<Record<string, unknown>>; format?: Record<string, unknown> };
+    try {
+      data = JSON.parse(result.stdoutTail) as typeof data;
+    } catch {
+      throw new VerificationFailedError('ffprobe trả JSON không hợp lệ khi kiểm tra âm thanh.');
+    }
+    const audio = data.streams?.find((stream) => stream.codec_type === 'audio');
+    const duration =
+      finitePositive(data.format?.duration) ??
+      finitePositive(audio?.duration) ??
+      timeBaseSeconds(audio) ??
+      0;
+    const file = await stat(path);
+    return {
+      duration,
+      width: 0,
+      height: 0,
+      audioCodec: audio
+        ? typeof audio.codec_name === 'string' && audio.codec_name.trim()
+          ? audio.codec_name.trim()
+          : 'unknown'
+        : null,
+      fileSize: file.size
+    };
+  }
 
   private async verifyVideoSample(
     path: string,
@@ -144,7 +220,10 @@ export class FileVerifier {
 
     try {
       const verifyJobId = options.jobId ?? `verify-${Date.now()}`;
-      const info = await this.analyzer.analyze(path, verifyJobId);
+      const expectedStreams = options.expectedStreams ?? { video: true, audio: false };
+      const info = expectedStreams.video
+        ? await this.analyzer.analyze(path, verifyJobId)
+        : await this.analyzeAudioOnly(path, verifyJobId, options);
       if (expectedDuration !== undefined) {
         const durationTolerance = Math.max(3, expectedDuration * 0.02);
         if (Math.abs(info.duration - expectedDuration) > durationTolerance) {
@@ -153,7 +232,6 @@ export class FileVerifier {
           );
         }
       }
-      const expectedStreams = options.expectedStreams ?? { video: true, audio: false };
       if (expectedStreams.video && (info.width <= 0 || info.height <= 0)) {
         reasons.push('Không tìm thấy video stream hoặc độ phân giải không hợp lệ.');
       }

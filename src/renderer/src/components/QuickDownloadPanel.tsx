@@ -56,6 +56,11 @@ const COOKIE_BLOCKING_CODES = new Set([
 const UNSUPPORTED_LINK_CODE = 'UNSUPPORTED_URL';
 const OUTPUT_PATH_CODE = 'OUTPUT_PATH_INVALID';
 
+/* TUBMEDIA AUDIO MODE UI R30 */
+function quickMediaNoun(mediaMode: QuickDownloadMediaMode): string {
+  return mediaMode === 'audio-only' ? 'tệp âm thanh' : 'video';
+}
+
 export function QuickDownloadPanel(): ReactElement {
   const [url, setUrl] = useState('');
   const [outputDirectory, setOutputDirectory] = useState('');
@@ -551,7 +556,7 @@ export function QuickDownloadPanel(): ReactElement {
         {status ? (
           <UnifiedDownloadProgress
             className="quick-download-unified-progress"
-            title={status.title || 'Tải nhanh 1 video'}
+            title={status.title || `Tải nhanh 1 ${quickMediaNoun(status.mediaMode)}`}
             subtitle={displayStatusMessage}
             status={
               status.phase === 'queued'
@@ -592,7 +597,11 @@ export function QuickDownloadPanel(): ReactElement {
                     onClick={() => void start()}
                   >
                     <Play size={15} />
-                    {useTimeline ? 'Tải đoạn theo Timeline' : 'Tải video mới'}
+                    {useTimeline
+                      ? 'Tải đoạn theo Timeline'
+                      : mediaMode === 'audio-only'
+                        ? 'Tải âm thanh mới'
+                        : 'Tải video mới'}
                   </button>
                 )}
                 {pausable && (
@@ -625,7 +634,7 @@ export function QuickDownloadPanel(): ReactElement {
         ) : (
           <div className="quick-download-ready-progress">
             <div>
-              <b>Sẵn sàng tải một video</b>
+              <b>Sẵn sàng tải một {quickMediaNoun(mediaMode)}</b>
               <span>Không tích Timeline để tải toàn bộ; tích Timeline để chỉ tải đoạn đã chọn.</span>
             </div>
             <button
@@ -635,7 +644,11 @@ export function QuickDownloadPanel(): ReactElement {
               onClick={() => void start()}
             >
               <Play size={16} />
-              {useTimeline ? 'Tải đoạn theo Timeline' : 'Tải toàn bộ video'}
+              {useTimeline
+                ? 'Tải đoạn theo Timeline'
+                : mediaMode === 'audio-only'
+                  ? 'Tải toàn bộ âm thanh'
+                  : 'Tải toàn bộ video'}
             </button>
           </div>
         )}
@@ -650,7 +663,9 @@ export function QuickDownloadPanel(): ReactElement {
         <div className="quick-download-note">
           {useTimeline
             ? 'Timeline đang bật: Tubmedia chỉ tải đoạn đã chọn. Cắt nhanh có thể lệch nhẹ quanh keyframe; bật Cắt chính xác khi cần mốc sát hơn.'
-            : 'Timeline đang tắt: Tubmedia tải toàn bộ video. File luôn có Video ID và mã tác vụ để không bỏ qua nhầm video trùng tên.'}
+            : mediaMode === 'audio-only'
+                ? 'Timeline đang tắt: Tubmedia tải toàn bộ tệp âm thanh. Tên file vẫn có ID nguồn và mã tác vụ để tránh ghi đè.'
+                : 'Timeline đang tắt: Tubmedia tải toàn bộ video. File luôn có Video ID và mã tác vụ để không bỏ qua nhầm video trùng tên.'}
         </div>
       </section>
       <CookieManagerDialog
