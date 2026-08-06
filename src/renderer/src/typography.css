@@ -1,0 +1,556 @@
+/* Tubmedia 1.3.0 — unified typography system
+   Loaded after all legacy/component styles so every screen uses one readable scale. */
+
+:root {
+  --font-ui: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", Inter, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "Cascadia Mono", "Cascadia Code", Consolas, "SFMono-Regular", monospace;
+
+  --type-2xs: 0.625rem;   /* 10px — compact counters and decorative labels only */
+  --type-xs: 0.6875rem;   /* 11px — timestamps and dense metadata */
+  --type-sm: 0.75rem;     /* 12px — secondary labels */
+  --type-body-sm: 0.8125rem; /* 13px — buttons, fields and compact body copy */
+  --type-body: 0.875rem;  /* 14px — default application text */
+  --type-md: 0.9375rem;   /* 15px — emphasized body copy */
+  --type-lg: 1rem;        /* 16px — card titles */
+  --type-xl: 1.125rem;    /* 18px — section titles */
+  --type-2xl: 1.375rem;   /* 22px — page titles */
+  --type-3xl: 1.75rem;    /* 28px — hero titles */
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+  --weight-heavy: 800;
+
+  --line-tight: 1.2;
+  --line-heading: 1.3;
+  --line-control: 1.35;
+  --line-body: 1.5;
+  --line-relaxed: 1.6;
+
+  --tracking-tight: -0.015em;
+  --tracking-normal: 0;
+  --tracking-label: 0.04em;
+  --tracking-kicker: 0.08em;
+}
+
+html {
+  font-size: 16px;
+  text-size-adjust: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+
+body,
+button,
+input,
+select,
+textarea,
+option,
+optgroup {
+  font-family: var(--font-ui);
+}
+
+body {
+  font-size: var(--type-body);
+  font-weight: var(--weight-regular);
+  line-height: var(--line-body);
+  letter-spacing: var(--tracking-normal);
+  font-synthesis: none;
+  font-kerning: normal;
+  font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+*,
+*::before,
+*::after {
+  font-synthesis: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font-size: var(--type-body-sm);
+  font-weight: var(--weight-medium);
+  line-height: var(--line-control);
+  letter-spacing: var(--tracking-normal);
+}
+
+input::placeholder,
+textarea::placeholder {
+  font-weight: var(--weight-regular);
+  letter-spacing: var(--tracking-normal);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+[role="heading"] {
+  margin-block-start: 0;
+  font-family: var(--font-ui);
+  font-weight: var(--weight-bold);
+  line-height: var(--line-heading);
+  letter-spacing: var(--tracking-tight);
+  text-wrap: balance;
+}
+
+h1 { font-size: var(--type-2xl); }
+h2 { font-size: var(--type-xl); }
+h3 { font-size: var(--type-lg); }
+h4,
+h5,
+h6 { font-size: var(--type-md); }
+
+p,
+li,
+dd,
+dt,
+figcaption,
+summary {
+  line-height: var(--line-body);
+}
+
+strong,
+b {
+  font-weight: var(--weight-semibold);
+}
+
+small {
+  font-size: var(--type-sm);
+  line-height: 1.45;
+}
+
+code,
+pre,
+kbd,
+samp,
+.font-mono,
+.attention-technical,
+.diagnostic-dock-technical,
+.merge-error-technical,
+.queue-detail-drawer pre,
+.system-cleanup-errors pre,
+.quick-download-warnings pre,
+.update-error-detail pre,
+.log-row,
+.compact-log-row {
+  font-family: var(--font-mono) !important;
+  font-variant-ligatures: none;
+}
+
+/* Tailwind utility normalization — remove mixed type scales and synthetic weights. */
+.text-\[11px\],
+.text-xs {
+  font-size: var(--type-sm) !important;
+  line-height: 1.45 !important;
+}
+
+.text-sm {
+  font-size: var(--type-body) !important;
+  line-height: var(--line-body) !important;
+}
+
+.text-base {
+  font-size: var(--type-md) !important;
+  line-height: var(--line-body) !important;
+}
+
+.text-lg {
+  font-size: var(--type-lg) !important;
+  line-height: var(--line-heading) !important;
+}
+
+.text-xl {
+  font-size: var(--type-xl) !important;
+  line-height: var(--line-heading) !important;
+}
+
+.text-2xl {
+  font-size: var(--type-2xl) !important;
+  line-height: var(--line-tight) !important;
+}
+
+.text-3xl {
+  font-size: var(--type-3xl) !important;
+  line-height: var(--line-tight) !important;
+}
+
+.font-thin,
+.font-light,
+.font-normal { font-weight: var(--weight-regular) !important; }
+.font-medium { font-weight: var(--weight-medium) !important; }
+.font-semibold { font-weight: var(--weight-semibold) !important; }
+.font-bold,
+.font-extrabold,
+.font-black { font-weight: var(--weight-bold) !important; }
+
+.tracking-wide,
+.tracking-wider,
+.tracking-widest { letter-spacing: var(--tracking-label) !important; }
+
+.uppercase {
+  letter-spacing: var(--tracking-label);
+}
+
+/* Global controls and reusable primitives. */
+.btn,
+.quick-download-button,
+.system-cleanup-button,
+.tool-status-button,
+.topbar-update-button,
+.notification-center-filters button,
+.notification-center-bulk-actions button,
+.notification-item-actions button,
+.cookie-tabs button,
+.log-filters button {
+  font-family: var(--font-ui);
+  font-size: var(--type-body-sm);
+  font-weight: var(--weight-semibold);
+  line-height: var(--line-control);
+  letter-spacing: var(--tracking-normal);
+  text-transform: none;
+}
+
+.btn-small,
+.notification-item-actions button,
+.log-filters button,
+.quick-download-cookie-button,
+.quick-download-cookie-block button {
+  font-size: var(--type-sm);
+}
+
+.input,
+.select,
+.textarea,
+.quick-download-field input,
+.quick-download-field select,
+.compact-config-grid .input,
+.compact-config-grid .select,
+.history-search input,
+.queue-search input,
+.editor-import-search input,
+.queue-filter select {
+  font-family: var(--font-ui);
+  font-size: var(--type-body-sm);
+  font-weight: var(--weight-regular);
+  line-height: var(--line-control);
+  letter-spacing: var(--tracking-normal);
+}
+
+.label,
+.quick-download-field > span,
+.field-heading,
+.cleanup-option-title strong,
+.settings-safety-note summary b,
+.merge-timeline-toggle b {
+  font-size: var(--type-sm);
+  font-weight: var(--weight-semibold);
+  line-height: var(--line-control);
+  letter-spacing: var(--tracking-normal);
+  text-transform: none;
+}
+
+.badge,
+.badge-strong,
+.quick-download-badge,
+.update-state-badge,
+.sidebar-count,
+.editor-platform-badge,
+.editor-duplicate-badge,
+.notification-count,
+.notification-action-label,
+.topbar-notification-count,
+.tool-readiness-status,
+.live-indicator {
+  font-size: var(--type-xs);
+  font-weight: var(--weight-bold);
+  line-height: 1.25;
+  letter-spacing: var(--tracking-label);
+}
+
+/* Page and section hierarchy. */
+.page-heading h1,
+.editor-hero h1,
+.about-hero h1,
+.cleanup-page-hero h1,
+.startup-title,
+.dialog-content .text-2xl,
+.dialog-content .text-xl {
+  font-size: var(--type-2xl) !important;
+  font-weight: var(--weight-bold) !important;
+  line-height: var(--line-tight) !important;
+  letter-spacing: var(--tracking-tight) !important;
+}
+
+.editor-hero h1,
+.about-hero h1 {
+  font-size: var(--type-3xl) !important;
+}
+
+.page-heading p,
+.editor-hero-copy > p,
+.about-hero p,
+.cleanup-page-hero p,
+.startup-status,
+.dialog-content .text-sm {
+  font-size: var(--type-body) !important;
+  font-weight: var(--weight-regular);
+  line-height: var(--line-body) !important;
+  letter-spacing: var(--tracking-normal);
+}
+
+.preflight-card h2,
+.merge-recommend-card h2,
+.tool-readiness-heading h2,
+.tool-card-title h2,
+.system-cleanup-heading h2,
+.quick-download-heading h2,
+.notification-center-heading h2,
+.diagnostics-section-title h2,
+.editor-workflow-card h2,
+.queue-detail-drawer h2,
+.confirm-dialog h2,
+.developer-profile h2 {
+  font-size: var(--type-xl);
+  font-weight: var(--weight-bold);
+  line-height: var(--line-heading);
+  letter-spacing: var(--tracking-tight);
+}
+
+.lane-title,
+.tool-card-title h2,
+.about-feature-card h3,
+.responsibility-card h3,
+.editor-workflow-card h2,
+.quick-download-range-head strong,
+.notification-item-title-row > b,
+.diagnostic-dock-head b,
+.merge-error-detail-head b,
+.quick-progress-child-card > div:first-child > b {
+  font-size: var(--type-lg);
+  font-weight: var(--weight-semibold);
+  line-height: var(--line-heading);
+  letter-spacing: var(--tracking-normal);
+}
+
+/* Navigation and app chrome. */
+.sidebar-product,
+.topbar-title h1 {
+  font-size: var(--type-lg);
+  font-weight: var(--weight-bold);
+  line-height: var(--line-tight);
+  letter-spacing: var(--tracking-tight);
+}
+
+.sidebar-group-label,
+.topbar-title > span,
+.eyebrow,
+.editor-kicker,
+.editor-workflow-eyebrow,
+.quick-download-eyebrow,
+.cleanup-page-hero span,
+.system-cleanup-eyebrow,
+.queue-detail-kicker,
+.queue-download-overview > header span,
+.quick-progress-child-card > div:first-child > span,
+.page-heading > div:first-child::before,
+.tools-overview-status span,
+.tools-ready-hero span,
+.developer-profile span,
+.developer-card span,
+.sidebar-version,
+.startup-brand-copy span,
+.developer-signature-card .developer-signature-eyebrow,
+.developer-signature-card .developer-signature-product,
+.developer-signature-card .developer-signature-tagline {
+  font-size: var(--type-xs);
+  font-weight: var(--weight-bold);
+  line-height: 1.3;
+  letter-spacing: var(--tracking-kicker);
+  text-transform: uppercase;
+}
+
+.sidebar-item-copy b,
+.topbar-metric b,
+.topbar-cpu-card b,
+.topbar-job-pill b,
+.tool-chip b,
+.tools-ready-hero b,
+.queue-studio-source b,
+.editor-readiness-title b,
+.editor-stat-strip b,
+.queue-stat-strip b,
+.diagnostics-summary b {
+  font-size: var(--type-body-sm);
+  font-weight: var(--weight-semibold);
+  line-height: var(--line-control);
+  letter-spacing: var(--tracking-normal);
+}
+
+.sidebar-item-copy small,
+.topbar-title p,
+.topbar-metric span,
+.topbar-cpu-card span,
+.topbar-job-pill small,
+.sidebar-help,
+.tool-chip small,
+.tools-overview-status p,
+.editor-readiness-title span,
+.diagnostics-summary small {
+  font-size: var(--type-xs);
+  font-weight: var(--weight-regular);
+  line-height: 1.4;
+  letter-spacing: var(--tracking-normal);
+}
+
+/* Tables, queues and progress surfaces. */
+.table th,
+.queue-grid-header,
+.editor-readiness-card dt,
+.queue-detail-drawer dt,
+.editor-stat-strip span,
+.queue-stat-strip span,
+.diagnostics-summary span,
+.metric span,
+.cleanup-summary-grid small,
+.system-cleanup-stats small,
+.merge-error-summary-grid span,
+.queue-phase-item small,
+.quick-progress-child-card dt {
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1.35;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.table td,
+.queue-studio-row,
+.queue-detail-drawer dd,
+.queue-detail-result dd,
+.history-path-cell,
+.editor-import-source-grid,
+.notification-item-main p,
+.update-user-issue p {
+  font-size: var(--type-body-sm);
+  font-weight: var(--weight-regular);
+  line-height: var(--line-body);
+  letter-spacing: var(--tracking-normal);
+}
+
+.progress-meta,
+.quick-download-progress-meta,
+.quick-download-progress-head small,
+.quick-download-progress-head > span,
+.unified-download-progress-meta,
+.unified-download-progress-foot,
+.queue-row-progress-meta,
+.queue-studio-progress span,
+.notification-item-main time,
+.notification-center-footer,
+.field-hint,
+.cleanup-action-note {
+  font-size: var(--type-xs);
+  font-weight: var(--weight-regular);
+  line-height: 1.4;
+  letter-spacing: var(--tracking-normal);
+}
+
+/* Body copy and helper text. */
+.lane-subtitle,
+.preflight-card p,
+.merge-recommend-card p,
+.recommend-strip,
+.lane-quality,
+.merge-quality-summary,
+.merge-quality-advice,
+.blocking-card,
+.cookie-warning,
+.cookie-settings-callout p,
+.quick-download-heading p,
+.quick-download-note,
+.quick-download-cookie-block p,
+.system-cleanup-warning,
+.cleanup-drive-comparison,
+.tool-readiness-note,
+.merge-recommend-detail > p,
+.settings-detail-copy,
+.settings-inline-note p,
+.diagnostic-dock > p,
+.merge-error-message,
+.editor-workflow-card p,
+.diagnostics-section-title p,
+.diagnostics-error-list p,
+.editor-import-source-grid aside p,
+.queue-detail-error p,
+.quick-progress-child-card p,
+.notification-item-main ol,
+.update-user-issue ol,
+.merge-error-user-steps,
+.diagnostic-dock ol,
+.system-cleanup-errors ul,
+.quick-download-warnings ul {
+  font-size: var(--type-body-sm);
+  font-weight: var(--weight-regular);
+  line-height: var(--line-body);
+  letter-spacing: var(--tracking-normal);
+}
+
+/* Technical text stays compact but readable. */
+.attention-technical,
+.diagnostic-dock-technical,
+.merge-error-technical,
+.queue-detail-drawer pre,
+.system-cleanup-errors pre,
+.quick-download-warnings pre,
+.update-error-detail pre,
+.log-row,
+.compact-detail-popover-body {
+  font-size: var(--type-sm);
+  font-weight: var(--weight-regular);
+  line-height: 1.5;
+  letter-spacing: var(--tracking-normal);
+}
+
+/* Numbers should align across progress, storage and system metrics. */
+.metric b,
+.progress-meta,
+.topbar-metric,
+.topbar-cpu-card,
+.topbar-job-pill,
+.cleanup-summary-grid strong,
+.system-cleanup-stats b,
+.quick-download-progress-meta,
+.unified-download-progress-meta,
+.queue-studio-progress,
+.editor-readiness-card dd,
+.editor-stat-strip,
+.queue-stat-strip,
+.diagnostics-summary,
+.update-version-row b,
+.notification-count,
+.topbar-notification-count {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Responsive hierarchy remains the same at narrow widths. */
+@media (max-width: 760px) {
+  .page-heading h1,
+  .editor-hero h1,
+  .about-hero h1,
+  .cleanup-page-hero h1 {
+    font-size: var(--type-xl) !important;
+  }
+
+  .notification-center-heading h2,
+  .quick-download-heading h2,
+  .system-cleanup-heading h2 {
+    font-size: var(--type-lg);
+  }
+}

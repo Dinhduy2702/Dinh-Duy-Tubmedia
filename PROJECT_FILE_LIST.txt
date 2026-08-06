@@ -284,6 +284,7 @@ src/renderer/src/stores/app-store.ts
 src/renderer/src/styles.css
 src/renderer/src/system-cleanup.css
 src/renderer/src/tubmedia-theme.css
+src/renderer/src/typography.css
 src/renderer/src/utils/ui-error.ts
 src/renderer/src/utils/ui-id.ts
 src/renderer/src/utils/vi-labels.ts
@@ -388,6 +389,7 @@ tests/unit/timestamp.test.ts
 tests/unit/tool-bootstrap-release.test.ts
 tests/unit/tool-capabilities.test.ts
 tests/unit/tool-update-rate-limit.test.ts
+tests/unit/typography-system.test.ts
 tests/unit/ui-density.test.ts
 tests/unit/unified-download-progress-1.3.0.test.ts
 tests/unit/update-center-release-notes.test.ts
