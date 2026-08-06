@@ -332,6 +332,7 @@ tests/unit/cookie-auto-resume.test.ts
 tests/unit/cookie-normalization.test.ts
 tests/unit/cookie-policy.test.ts
 tests/unit/diagnostic-policy.test.ts
+tests/unit/disk-full-recovery.test.ts
 tests/unit/download-performance.test.ts
 tests/unit/download-quality.test.ts
 tests/unit/download-recovery-policy.test.ts
@@ -347,6 +348,7 @@ tests/unit/hardware-recommendation.test.ts
 tests/unit/independent-workflow-accordion-1.3.0.test.ts
 tests/unit/input-parser.test.ts
 tests/unit/installer-upgrade.test.ts
+tests/unit/job-resume-race.test.ts
 tests/unit/job-state-machine.test.ts
 tests/unit/media-analyzer-hdr.test.ts
 tests/unit/media-duration-sanity.test.ts

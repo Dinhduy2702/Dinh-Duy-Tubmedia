@@ -108,7 +108,13 @@ export function useDesktopEvents(): void {
       }),
       window.desktop.events.onSystemStats((stats) => useAppStore.getState().setStats(stats)),
       window.desktop.events.onUpdateStatus(updateStatus),
-      window.desktop.events.onAttention((notice) => useAppStore.getState().setAttention(notice)),
+      window.desktop.events.onAttention((notice) => {
+        const store = useAppStore.getState();
+        if (notice.code === 'DISK_SPACE_RECOVERED') {
+          store.dismissAttentionByCodes(['DISK_FULL'], notice.projectId);
+        }
+        store.setAttention(notice);
+      }),
       window.desktop.events.onToolsChanged((tools) => useAppStore.setState({ tools }))
     ];
 

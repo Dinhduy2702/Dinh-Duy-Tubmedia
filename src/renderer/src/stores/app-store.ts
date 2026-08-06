@@ -74,7 +74,7 @@ interface State {
   setError(error: unknown): void;
   setAttention(attention: AttentionNotice | null): void;
   dismissAttention(id?: string): void;
-  dismissAttentionByCodes(codes: readonly string[]): void;
+  dismissAttentionByCodes(codes: readonly string[], projectId?: string | null): void;
   openNotificationCenter(): void;
   closeNotificationCenter(): void;
   toggleNotificationCenter(): void;
@@ -331,6 +331,34 @@ function mergeJobUpdates(current: QueueJob[], updates: QueueJob[]): QueueJob[] {
   return changed ? next : current;
 }
 
+// TUBMEDIA STALE DISK NOTICE RECONCILIATION R28
+function reconcileDiskFullNotifications(
+  notifications: NotificationRecord[],
+  jobs: QueueJob[]
+): NotificationRecord[] {
+  const activeProjects = new Set(
+    jobs
+      .filter(
+        (job) =>
+          job.errorCode === 'DISK_FULL' &&
+          (job.status === 'paused' || job.status === 'interrupted')
+      )
+      .map((job) => job.projectId)
+      .filter((projectId): projectId is string => Boolean(projectId))
+  );
+  const anyActiveDiskBlock = jobs.some(
+    (job) =>
+      job.errorCode === 'DISK_FULL' &&
+      (job.status === 'paused' || job.status === 'interrupted')
+  );
+  const next = notifications.filter((notice) => {
+    if (notice.code !== 'DISK_FULL') return true;
+    return notice.projectId ? activeProjects.has(notice.projectId) : anyActiveDiskBlock;
+  });
+  if (next.length !== notifications.length) persistNotificationHistory(next);
+  return next.length === notifications.length ? notifications : next;
+}
+
 function mergeLogs(current: LogEntry[], entries: LogEntry[]): LogEntry[] {
   if (entries.length === 0) return current;
   const seen = new Set<string>();
@@ -377,6 +405,7 @@ export const useAppStore = create<State>((set, get) => ({
         loading: false,
         projects: data.projects,
         jobs: data.jobs,
+        notifications: reconcileDiskFullNotifications(initialNotifications, data.jobs),
         tools: data.tools,
         settings: data.settings,
         resources: data.profiles.resources,
@@ -402,24 +431,38 @@ export const useAppStore = create<State>((set, get) => ({
   setPage: (page) => set({ page }),
   selectProject: (id) => set({ selectedProjectId: id, page: get().page }),
   refreshProjects: async () => set({ projects: await window.desktop.projects.list() }),
-  refreshJobs: async () => set({ jobs: await window.desktop.queue.list() }),
+  refreshJobs: async () => {
+    const jobs = await window.desktop.queue.list();
+    set((state) => ({
+      jobs,
+      notifications: reconcileDiskFullNotifications(state.notifications, jobs)
+    }));
+  },
   refreshTools: async () => set({ tools: await window.desktop.tools.list() }),
   setSettings: (settings) => set({ settings }),
   pushLog: (entry) => set((state) => ({ logs: mergeLogs(state.logs, [entry]) })),
   pushLogs: (entries) => set((state) => ({ logs: mergeLogs(state.logs, entries) })),
-  updateJob: (job) => set((state) => ({ jobs: mergeJobUpdates(state.jobs, [job]) })),
-  updateJobs: (jobs) => set((state) => ({ jobs: mergeJobUpdates(state.jobs, jobs) })),
+  updateJob: (job) =>
+    set((state) => {
+      const jobs = mergeJobUpdates(state.jobs, [job]);
+      return { jobs, notifications: reconcileDiskFullNotifications(state.notifications, jobs) };
+    }),
+  updateJobs: (updates) =>
+    set((state) => {
+      const jobs = mergeJobUpdates(state.jobs, updates);
+      return { jobs, notifications: reconcileDiskFullNotifications(state.notifications, jobs) };
+    }),
   replaceJobs: (jobs) =>
     set((state) => {
-      if (
+      const jobsUnchanged =
         state.jobs.length === jobs.length &&
         jobs.every((job, index) => {
           const current = state.jobs[index];
           return current ? sameJob(current, job) : false;
-        })
-      )
-        return state;
-      return { jobs };
+        });
+      const notifications = reconcileDiskFullNotifications(state.notifications, jobs);
+      if (jobsUnchanged && notifications === state.notifications) return state;
+      return { jobs: jobsUnchanged ? state.jobs : jobs, notifications };
     }),
   setStats: (stats) =>
     set((state) => {
@@ -491,19 +534,20 @@ export const useAppStore = create<State>((set, get) => ({
       const [next, ...rest] = state.attentionQueue;
       return { attention: next ?? null, attentionQueue: rest };
     }),
-  dismissAttentionByCodes: (codes) =>
+  dismissAttentionByCodes: (codes, projectId) =>
     set((state) => {
       const blocked = new Set(codes);
+      const matches = (notice: AttentionNotice): boolean =>
+        Boolean(
+          notice.code &&
+            blocked.has(notice.code) &&
+            (!projectId || notice.projectId === projectId)
+        );
       const remaining = [state.attention, ...state.attentionQueue]
         .filter((notice): notice is AttentionNotice => Boolean(notice))
-        .filter((notice) => !notice.code || !blocked.has(notice.code));
+        .filter((notice) => !matches(notice));
       const [attention, ...attentionQueue] = remaining;
-      const now = new Date().toISOString();
-      const notifications = state.notifications.map((notice) =>
-        notice.code && blocked.has(notice.code) && !notice.readAt
-          ? { ...notice, readAt: now }
-          : notice
-      );
+      const notifications = state.notifications.filter((notice) => !matches(notice));
       persistNotificationHistory(notifications);
       return { attention: attention ?? null, attentionQueue, notifications };
     }),

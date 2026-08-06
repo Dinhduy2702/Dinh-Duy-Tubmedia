@@ -119,6 +119,33 @@ export function initialJobStatus(type: JobType): JobStatus {
   }
 }
 
+// TUBMEDIA RACE SAFE RESUME STATUS R29
+const rememberedResumeStatuses = new Set<JobStatus>([
+  'pending',
+  'analyzing',
+  'downloading',
+  'processing',
+  'normalizing',
+  'verifying',
+  'merging'
+]);
+
+export function resolveResumeStatus(
+  observedStatus: JobStatus,
+  rememberedStatus: unknown,
+  type: JobType
+): JobStatus {
+  // A progress callback can win the race immediately after the OS process resumes.
+  // In that case the repository already contains the correct live phase and must not
+  // be forced back to the job's initial phase.
+  if (observedStatus !== 'paused' && observedStatus !== 'interrupted') return observedStatus;
+  if (observedStatus === 'interrupted') return 'pending';
+  if (typeof rememberedStatus === 'string' && rememberedResumeStatuses.has(rememberedStatus as JobStatus)) {
+    return rememberedStatus as JobStatus;
+  }
+  return initialJobStatus(type);
+}
+
 export function canTransitionJob(from: JobStatus, to: JobStatus): boolean {
   return from === to || allowedTransitions[from].has(to);
 }

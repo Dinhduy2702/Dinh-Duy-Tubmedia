@@ -25,7 +25,7 @@ import type { Logger } from '../logging/logger.js';
 import { InvalidInputError, ProcessingFailedError, type AppError } from '@shared/errors/app-errors.js';
 import { cleanupTemporaryArtifacts } from '../files/temporary-cleanup.js';
 import { sanitizeNullableSeconds, sanitizeProgress } from '@shared/utils/progress-policy.js';
-import { initialJobStatus } from '@shared/utils/job-state-machine.js';
+import { initialJobStatus, resolveResumeStatus } from '@shared/utils/job-state-machine.js';
 
 interface ActiveJob {
   job: QueueJob;
@@ -150,6 +150,9 @@ export class QueueManager {
   private readonly repeatedFailures = new Map<string, number[]>();
   private readonly cleanupInProgress = new Set<string>();
   private readonly blockingNoticeKeys = new Set<string>();
+  // TUBMEDIA DISK SPACE AUTO RECOVERY R28
+  private readonly diskRecoveryChecks = new Map<string, number>();
+  private readonly diskRecoveryInProgress = new Set<string>();
   private readonly progressUpdates = new Map<
     string,
     {
@@ -312,6 +315,167 @@ export class QueueManager {
     this.previousCpu = current;
     return total > 0 ? (1 - idle / total) * 100 : 0;
   }
+  // TUBMEDIA RACE SAFE RESUME R29
+  private pauseResumeInput(job: QueueJob, extra: Record<string, unknown> = {}): Record<string, unknown> {
+    const live = this.repo.get(job.id);
+    const resumeStatus =
+      live && live.status !== 'paused' && live.status !== 'interrupted' ? live.status : job.status;
+    return { ...extra, resumeStatus };
+  }
+
+  private async resumeActiveJobState(
+    current: QueueJob,
+    active: ActiveJob,
+    preserveCookieMarker: boolean
+  ): Promise<QueueJob | null> {
+    await this.processes.resumeByJob(current.id);
+    const observed = this.repo.get(current.id);
+    if (!observed || TERMINAL_STATUSES.has(observed.status)) return observed;
+    const targetStatus = resolveResumeStatus(
+      observed.status,
+      current.input.resumeStatus,
+      active.job.type
+    );
+    return this.repo.update(
+      current.id,
+      {
+        status: targetStatus,
+        errorCode: preserveCookieMarker ? current.errorCode : null,
+        errorMessage: preserveCookieMarker ? current.errorMessage : null,
+        finishedAt: null,
+        speed: null,
+        etaSeconds: null
+      },
+      { resumeStatus: null }
+    );
+  }
+
+  private formatDiskBytes(value: number): string {
+    if (!Number.isFinite(value) || value <= 0) return '0 GB';
+    return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  }
+
+  private async diskSpaceStateForJobs(jobs: QueueJob[]): Promise<{
+    ready: boolean;
+    folder: string | null;
+    freeBytes: number;
+    requiredBytes: number;
+  }> {
+    const checks = new Map<string, number>();
+    for (const job of jobs) {
+      if (!job.projectId) continue;
+      const project = this.projects.get(job.projectId);
+      if (!project) continue;
+      const folder = job.type === 'download' ? project.sourceFolder : project.tempFolder;
+      const required = this.profileFor(job).diskFreeMinimumBytes;
+      checks.set(folder, Math.max(checks.get(folder) ?? 0, required));
+    }
+    for (const [folder, requiredBytes] of checks) {
+      try {
+        const fsInfo = await statfs(folder);
+        const freeBytes = Number(fsInfo.bavail) * Number(fsInfo.bsize);
+        if (freeBytes < requiredBytes) return { ready: false, folder, freeBytes, requiredBytes };
+      } catch {
+        return { ready: false, folder, freeBytes: 0, requiredBytes };
+      }
+    }
+    return { ready: true, folder: null, freeBytes: 0, requiredBytes: 0 };
+  }
+
+  private notifyDiskSpaceRecovered(projectId: string, resumedJobs: number): void {
+    if (!this.window || this.window.isDestroyed()) return;
+    const notice: AttentionNotice = {
+      id: `disk-space-recovered-${projectId}`,
+      severity: 'success',
+      title: 'Dung lượng ổ đĩa đã đủ',
+      message: `Tubmedia đã kiểm tra lại và tự đưa ${resumedJobs} tác vụ về hàng đợi. Cảnh báo hết dung lượng trước đó đã được gỡ.`,
+      code: 'DISK_SPACE_RECOVERED',
+      sticky: false,
+      projectId
+    };
+    this.window.webContents.send(IPC.events.attention, notice);
+  }
+
+  private async recoverDiskFullProjects(all: QueueJob[]): Promise<boolean> {
+    const grouped = new Map<string, QueueJob[]>();
+    for (const job of all) {
+      if (!job.projectId || job.errorCode !== 'DISK_FULL') continue;
+      if (job.status !== 'paused' && job.status !== 'interrupted') continue;
+      const jobs = grouped.get(job.projectId) ?? [];
+      jobs.push(job);
+      grouped.set(job.projectId, jobs);
+    }
+    let changed = false;
+    const now = Date.now();
+    for (const [projectId, blockedJobs] of grouped) {
+      if (this.diskRecoveryInProgress.has(projectId)) continue;
+      const previous = this.diskRecoveryChecks.get(projectId) ?? 0;
+      if (now - previous < 5_000) continue;
+      this.diskRecoveryChecks.set(projectId, now);
+      this.diskRecoveryInProgress.add(projectId);
+      try {
+        const disk = await this.diskSpaceStateForJobs(blockedJobs);
+        if (!disk.ready) continue;
+        let resumedJobs = 0;
+        for (const job of this.repo.list(projectId)) {
+          if (job.errorCode !== 'DISK_FULL') continue;
+          if (job.status !== 'paused' && job.status !== 'interrupted') continue;
+          const active = this.active.get(job.id);
+          let resumed: QueueJob | null;
+          if (active) {
+            try {
+              resumed = await this.resumeActiveJobState(job, active, false);
+            } catch (error) {
+              this.logger.warn(
+                'queue',
+                'DISK_SPACE_ACTIVE_RESUME_RETRY',
+                `Dung lượng đã đủ nhưng tiến trình ${job.id} chưa thể tiếp tục ngay: ${error instanceof Error ? error.message : String(error)}`,
+                { projectId, jobId: job.id }
+              );
+              continue;
+            }
+          } else {
+            resumed = this.repo.update(
+              job.id,
+              {
+                status: 'pending',
+                errorCode: null,
+                errorMessage: null,
+                finishedAt: null,
+                speed: null,
+                etaSeconds: null
+              },
+              {
+                progressStage: 'Dung lượng đã đủ — Tubmedia tự tiếp tục',
+                resumeStatus: null
+              }
+            );
+          }
+          if (!resumed) continue;
+          this.emitProgress(resumed);
+          resumedJobs += 1;
+        }
+        if (resumedJobs > 0) {
+          this.clearBlockingNoticeKeys(projectId);
+          this.repeatedFailures.delete(projectId);
+          this.projects.setStatus(projectId, 'active');
+          this.logger.info(
+            'queue',
+            'DISK_SPACE_RECOVERED',
+            `Ổ đĩa đã đủ dung lượng; ${resumedJobs} tác vụ được tự động tiếp tục.`,
+            { projectId, metadata: { resumedJobs } }
+          );
+          this.notifyDiskSpaceRecovered(projectId, resumedJobs);
+          changed = true;
+        }
+      } finally {
+        this.diskRecoveryInProgress.delete(projectId);
+      }
+    }
+    if (changed) this.emit();
+    return changed;
+  }
+
   private async resourcesAllow(
     job: QueueJob,
     profile: ResourceProfile,
@@ -330,12 +494,16 @@ export class QueueManager {
           const message =
             `Ổ đĩa chứa ${targetFolder} không đủ dung lượng trống để bắt đầu tác vụ. ` +
             `Danh sách đã được tạm dừng để tránh tạo hàng loạt lỗi.`;
-          this.repo.update(job.id, {
-            status: 'paused',
-            errorCode: 'DISK_FULL',
-            errorMessage: message,
-            finishedAt: null
-          });
+          this.repo.update(
+            job.id,
+            {
+              status: 'paused',
+              errorCode: 'DISK_FULL',
+              errorMessage: message,
+              finishedAt: null
+            },
+            this.pauseResumeInput(job)
+          );
           await this.pauseProjectForBlockingError(job, 'DISK_FULL', message);
           this.notifyBlockingError('DISK_FULL', message, job);
           this.logger.warn('queue', 'DISK_FULL', message, { projectId: project.id, jobId: job.id });
@@ -345,12 +513,16 @@ export class QueueManager {
         const message =
           `Không thể kiểm tra thư mục ${targetFolder}: ${error instanceof Error ? error.message : String(error)}. ` +
           'Danh sách đã được tạm dừng để bạn sửa đường dẫn hoặc quyền truy cập.';
-        this.repo.update(job.id, {
-          status: 'paused',
-          errorCode: 'PERMISSION_DENIED',
-          errorMessage: message,
-          finishedAt: null
-        });
+        this.repo.update(
+          job.id,
+          {
+            status: 'paused',
+            errorCode: 'PERMISSION_DENIED',
+            errorMessage: message,
+            finishedAt: null
+          },
+          this.pauseResumeInput(job)
+        );
         await this.pauseProjectForBlockingError(job, 'PERMISSION_DENIED', message);
         this.notifyBlockingError('PERMISSION_DENIED', message, job);
         this.logger.warn('queue', 'PERMISSION_DENIED', message, {
@@ -364,7 +536,8 @@ export class QueueManager {
   }
   private async tick(): Promise<void> {
     if (this.paused || !this.canExecute()) return;
-    const all = this.repo.list();
+    let all = this.repo.list();
+    if (await this.recoverDiskFullProjects(all)) all = this.repo.list();
     const cpuPercent = this.cpuPercent();
     const pending: QueueJob[] = [];
     let stateChanged = false;
@@ -630,11 +803,17 @@ export class QueueManager {
         await this.processes.pauseByJob(active.job.id);
         const current = this.repo.get(active.job.id);
         if (current && !TERMINAL_STATUSES.has(current.status)) {
-          this.repo.update(active.job.id, {
-            status: 'paused',
-            speed: null,
-            etaSeconds: null
-          });
+          this.repo.update(
+            active.job.id,
+            {
+              status: 'paused',
+              errorCode: code,
+              errorMessage: message,
+              speed: null,
+              etaSeconds: null
+            },
+            this.pauseResumeInput(current)
+          );
         }
       } catch (error) {
         const current = this.repo.get(active.job.id);
@@ -658,13 +837,17 @@ export class QueueManager {
     for (const queued of this.repo.list(job.projectId)) {
       if (queued.id === job.id) continue;
       if (queued.status === 'pending' || queued.status === 'retrying') {
-        this.repo.update(queued.id, {
-          status: 'paused',
-          errorCode: code,
-          errorMessage: message,
-          speed: null,
-          etaSeconds: null
-        });
+        this.repo.update(
+          queued.id,
+          {
+            status: 'paused',
+            errorCode: code,
+            errorMessage: message,
+            speed: null,
+            etaSeconds: null
+          },
+          this.pauseResumeInput(queued)
+        );
       }
     }
     this.projects.setStatus(job.projectId, 'paused');
@@ -702,12 +885,10 @@ export class QueueManager {
   }
 
   private notifyBlockingError(code: string, message: string, job?: QueueJob): void {
-    if (isCookieBlockingCode(code)) {
-      const scope = job?.projectId ?? job?.id ?? 'global';
-      const noticeKey = `${scope}:${code}`;
-      if (this.blockingNoticeKeys.has(noticeKey)) return;
-      this.blockingNoticeKeys.add(noticeKey);
-    }
+    const scope = job?.projectId ?? job?.id ?? 'global';
+    const noticeKey = `${scope}:${code}`;
+    if (this.blockingNoticeKeys.has(noticeKey)) return;
+    this.blockingNoticeKeys.add(noticeKey);
     const title =
       code === 'COOKIES_EXPIRED'
         ? 'Cookies đã hết hạn hoặc không còn hợp lệ'
@@ -744,7 +925,7 @@ export class QueueManager {
                   ]
                 : ['Mở mục Công cụ.', 'Chọn Kiểm tra lại hoặc Sửa chữa tất cả.'];
     const notice: AttentionNotice = {
-      id: randomUUID(),
+      id: `blocking-${scope}-${code}`,
       severity:
         code === 'DISK_FULL' || code === 'PERMISSION_DENIED' || code === 'NETWORK_CIRCUIT_OPEN'
           ? 'warning'
@@ -932,12 +1113,15 @@ export class QueueManager {
             speed: null,
             etaSeconds: null
           },
-          cookieBlocking
-            ? {
-                cookieFailureConfirmed: true,
-                cookieRetryRequested: true
-              }
-            : undefined
+          this.pauseResumeInput(
+            job,
+            cookieBlocking
+              ? {
+                  cookieFailureConfirmed: true,
+                  cookieRetryRequested: true
+                }
+              : {}
+          )
         );
         if (!cookieBlocking) await this.pauseProjectForBlockingError(job, code, message);
         this.emitProgress(paused);
@@ -1223,9 +1407,24 @@ export class QueueManager {
     this.emit();
   }
   public async resumeProject(projectId: string): Promise<void> {
+    const projectJobs = this.repo.list(projectId);
+    const diskBlocked = projectJobs.filter(
+      (job) =>
+        job.errorCode === 'DISK_FULL' &&
+        (job.status === 'paused' || job.status === 'interrupted')
+    );
+    if (diskBlocked.length > 0) {
+      const disk = await this.diskSpaceStateForJobs(diskBlocked);
+      if (!disk.ready) {
+        const folder = disk.folder ?? 'thư mục lưu';
+        throw new InvalidInputError(
+          `Ổ đĩa chứa ${folder} vẫn chưa đủ dung lượng. Hiện còn ${this.formatDiskBytes(disk.freeBytes)}, cần tối thiểu ${this.formatDiskBytes(disk.requiredBytes)}.`
+        );
+      }
+    }
     this.clearBlockingNoticeKeys(projectId);
     this.repeatedFailures.delete(projectId);
-    for (const job of this.repo.list(projectId)) {
+    for (const job of projectJobs) {
       if (job.status === 'paused' || job.status === 'interrupted') await this.resume(job.id, false);
     }
     this.projects.setStatus(projectId, 'active');
@@ -1287,7 +1486,11 @@ export class QueueManager {
     if (active) await this.processes.pauseByJob(jobId);
     const current = this.repo.get(jobId);
     if (current && !TERMINAL_STATUSES.has(current.status)) {
-      this.repo.update(jobId, { status: 'paused', speed: null, etaSeconds: null });
+      this.repo.update(
+        jobId,
+        { status: 'paused', speed: null, etaSeconds: null },
+        this.pauseResumeInput(before)
+      );
     }
     if (emitChange) this.emit();
   }
@@ -1301,18 +1504,17 @@ export class QueueManager {
     this.clearBlockingNoticeKeys(current.projectId);
     const preserveCookieMarker = isCookieBlockingCode(current.errorCode);
     if (active) {
-      await this.processes.resumeByJob(jobId);
-      this.repo.update(jobId, {
-        status: initialJobStatus(active.job.type),
-        errorCode: preserveCookieMarker ? current.errorCode : null,
-        errorMessage: preserveCookieMarker ? current.errorMessage : null
-      });
+      await this.resumeActiveJobState(current, active, preserveCookieMarker);
     } else {
-      this.repo.update(jobId, {
-        status: 'pending',
-        errorCode: preserveCookieMarker ? current.errorCode : null,
-        errorMessage: preserveCookieMarker ? current.errorMessage : null
-      });
+      this.repo.update(
+        jobId,
+        {
+          status: 'pending',
+          errorCode: preserveCookieMarker ? current.errorCode : null,
+          errorMessage: preserveCookieMarker ? current.errorMessage : null
+        },
+        { resumeStatus: null }
+      );
     }
     if (emitChange) this.emit();
   }
