@@ -9,16 +9,20 @@ export interface ConcatCompatibility {
 /**
  * Compare stream properties that must be stable for FFmpeg concat stream-copy.
  *
- * videoProfile/videoLevel are intentionally not blockers. They describe decoder
- * capabilities, not a geometry/timing/layout change by themselves.
+ * TUBMEDIA CONCAT SAFETY CONTRACT R34:
+ * H.264/H.265 profile, level, bit depth, nominal FPS and color metadata are
+ * blockers. Even when geometry and codec names match, changing decoder-critical
+ * configuration at a concat boundary can produce local black/flicker/corruption
+ * on some decoders. Tubmedia therefore normalizes those sources instead of
+ * trusting stream-copy.
  *
- * timeBase and channelLayout labels are advisory instead of hard blockers:
- * - MP4/FFmpeg commonly rewrites timestamps at the concat boundary.
- * - encoders often omit or spell the same stereo layout differently while the
+ * timeBase and channelLayout labels remain advisory rather than hard blockers:
+ * - MP4/FFmpeg can safely rewrite timestamps during concat/muxing.
+ * - encoders may omit or spell the same channel layout differently while the
  *   actual codec/sample-rate/channel-count remains identical.
  *
- * Treating those metadata fields as fatal caused Tubmedia to transcode every
- * clip even when the encoded streams were otherwise compatible.
+ * Every merged output is still decoded 0-100% before final commit, so advisory
+ * differences cannot silently escape as a successful output.
  */
 export function compareForConcat(
   reference: MediaInfo,
@@ -26,8 +30,17 @@ export function compareForConcat(
 ): ConcatCompatibility {
   const reasons: string[] = [];
   const advisories: string[] = [];
+  /* TUBMEDIA STRICT CONCAT SAFETY R33 */
   const fields: Array<[string, unknown, unknown]> = [
     ['Codec video', reference.videoCodec, candidate.videoCodec],
+    ['Profile video', reference.videoProfile ?? null, candidate.videoProfile ?? null],
+    ['Level video', reference.videoLevel ?? null, candidate.videoLevel ?? null],
+    ['Bit depth', reference.bitDepth ?? null, candidate.bitDepth ?? null],
+    ['Nominal FPS', reference.nominalFps ?? null, candidate.nominalFps ?? null],
+    ['Color primaries', reference.colorPrimaries ?? null, candidate.colorPrimaries ?? null],
+    ['Color transfer', reference.colorTransfer ?? null, candidate.colorTransfer ?? null],
+    ['Color space', reference.colorSpace ?? null, candidate.colorSpace ?? null],
+    ['Color range', reference.colorRange ?? null, candidate.colorRange ?? null],
     ['Chiều rộng', reference.width, candidate.width],
     ['Chiều cao', reference.height, candidate.height],
     ['FPS', Math.round(reference.fps * 1000), Math.round(candidate.fps * 1000)],

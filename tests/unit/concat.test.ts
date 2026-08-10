@@ -36,13 +36,15 @@ describe('concat compatibility', () => {
     expect(compareForConcat(info, { ...info, fps: 60 }).reasons[0]).toContain('FPS');
   });
 
-  it('does not reject H.264 Main versus High profile metadata', () => {
+  /* TUBMEDIA STRICT CONCAT TEST CONTRACT R34 */
+  it('rejects H.264 Main versus High profile/level changes before stream-copy', () => {
     const result = compareForConcat(info, {
       ...info,
       videoProfile: 'Main',
       videoLevel: '4.0'
     });
-    expect(result.compatible).toBe(true);
-    expect(result.reasons).toEqual([]);
+    expect(result.compatible).toBe(false);
+    expect(result.reasons.some((reason) => reason.includes('Profile video'))).toBe(true);
+    expect(result.reasons.some((reason) => reason.includes('Level video'))).toBe(true);
   });
 });

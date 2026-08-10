@@ -14,6 +14,22 @@ export interface VerificationResult {
   duration: number;
 }
 
+export type VisualIntegrityIssueType = 'decode' | 'black' | 'freeze';
+
+export interface VisualIntegrityIssue {
+  type: VisualIntegrityIssueType;
+  startSeconds: number;
+  endSeconds: number | null;
+  durationSeconds: number | null;
+  message: string;
+}
+
+export interface VisualIntegrityResult {
+  ok: boolean;
+  reasons: string[];
+  issues: VisualIntegrityIssue[];
+}
+
 export interface VerificationOptions {
   jobId?: string;
   expectedStreams?: { video: boolean; audio: boolean };
@@ -68,6 +84,37 @@ function timeBaseSeconds(stream: Record<string, unknown> | undefined): number | 
   }
   const duration = durationTs * (numerator / denominator);
   return Number.isFinite(duration) && duration > 0 ? duration : null;
+}
+
+/* TUBMEDIA MERGED VISUAL INTEGRITY R33 */
+function visualClock(seconds: number): string {
+  const safe = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
+  const whole = Math.floor(safe);
+  const hours = Math.floor(whole / 3600);
+  const minutes = Math.floor((whole % 3600) / 60);
+  const secs = whole % 60;
+  return [hours, minutes, secs].map((value) => String(value).padStart(2, '0')).join(':');
+}
+
+function parseNumberAfter(line: string, key: string): number | null {
+  const pattern = key + ':\\s*([0-9]+(?:\\.[0-9]+)?)';
+  const match = line.match(new RegExp(pattern, 'i'));
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+export function isVisualIssueNearBoundary(
+  issue: Pick<VisualIntegrityIssue, 'startSeconds' | 'endSeconds'>,
+  boundaries: readonly number[],
+  windowSeconds = 2.5
+): boolean {
+  const end = issue.endSeconds ?? issue.startSeconds;
+  return boundaries.some((boundary) =>
+    Math.abs(issue.startSeconds - boundary) <= windowSeconds ||
+    Math.abs(end - boundary) <= windowSeconds ||
+    (issue.startSeconds <= boundary && end >= boundary)
+  );
 }
 
 export class FileVerifier {
@@ -197,6 +244,148 @@ export class FileVerifier {
     if (decode.code === 0) return null;
 
     return `Không giải mã được mẫu ${label} tại ${position}s: ${conciseProcessError(probe.stderrTail, decode.stderrTail) || `ffprobe=${probe.code}, ffmpeg=${decode.code}`}`;
+  }
+
+  public async verifyVisualIntegrity(
+    path: string,
+    expectedDuration: number,
+    boundaries: readonly number[] = [],
+    options: VerificationOptions = {}
+  ): Promise<VisualIntegrityResult> {
+    const reasons: string[] = [];
+    const issues: VisualIntegrityIssue[] = [];
+    const ffmpeg = this.tools.get('ffmpeg');
+    if (!ffmpeg.available || !ffmpeg.executablePath) {
+      return {
+        ok: false,
+        reasons: ['Thiếu FFmpeg để hậu kiểm toàn bộ hình ảnh thành phẩm.'],
+        issues: [{
+          type: 'decode',
+          startSeconds: 0,
+          endSeconds: null,
+          durationSeconds: null,
+          message: 'Thiếu FFmpeg để hậu kiểm toàn bộ hình ảnh thành phẩm.'
+        }]
+      };
+    }
+
+    const verifyJobId = options.jobId ?? ('visual-verify-' + Date.now());
+    let lastProcessedSeconds = 0;
+    let openFreezeStart: number | null = null;
+    const rawBlack: VisualIntegrityIssue[] = [];
+    const rawFreeze: VisualIntegrityIssue[] = [];
+
+    options.onProgress?.(0);
+    const result = await this.processes.run({
+      jobId: verifyJobId + '-full-frame',
+      ...(options.projectId ? { projectId: options.projectId } : {}),
+      tool: 'ffmpeg',
+      executablePath: ffmpeg.executablePath,
+      args: [
+        '-hide_banner',
+        '-nostdin',
+        '-v',
+        'info',
+        '-xerror',
+        '-err_detect',
+        'explode',
+        '-i',
+        path,
+        '-map',
+        '0:v:0',
+        '-an',
+        '-vf',
+        'blackdetect=d=0.08:pix_th=0.02,freezedetect=n=-60dB:d=1',
+        '-progress',
+        'pipe:1',
+        '-nostats',
+        '-f',
+        'null',
+        '-'
+      ],
+      timeoutMs: 48 * 60 * 60 * 1000,
+      priority: 'below_normal',
+      ...(options.signal ? { signal: options.signal } : {}),
+      onStdoutLine: (line) => {
+        if (line.startsWith('out_time_ms=')) {
+          const microseconds = Number(line.slice('out_time_ms='.length));
+          if (Number.isFinite(microseconds)) lastProcessedSeconds = Math.max(0, microseconds / 1_000_000);
+        }
+        const percent = ffmpegProgressPercent(line, expectedDuration);
+        if (percent !== null) options.onProgress?.(percent);
+      },
+      onStderrLine: (line) => {
+        if (line.includes('black_start:')) {
+          const start = parseNumberAfter(line, 'black_start');
+          const end = parseNumberAfter(line, 'black_end');
+          const duration = parseNumberAfter(line, 'black_duration');
+          if (start !== null) {
+            rawBlack.push({
+              type: 'black',
+              startSeconds: start,
+              endSeconds: end,
+              durationSeconds: duration,
+              message: 'Phát hiện đoạn hình đen tại khoảng ' + visualClock(start) + '.'
+            });
+          }
+        }
+        if (line.includes('lavfi.freezedetect.freeze_start:')) {
+          openFreezeStart = parseNumberAfter(line, 'lavfi.freezedetect.freeze_start');
+        }
+        if (line.includes('lavfi.freezedetect.freeze_end:')) {
+          const end = parseNumberAfter(line, 'lavfi.freezedetect.freeze_end');
+          const duration = parseNumberAfter(line, 'lavfi.freezedetect.freeze_duration');
+          const start = openFreezeStart ?? (end !== null && duration !== null ? Math.max(0, end - duration) : null);
+          if (start !== null) {
+            rawFreeze.push({
+              type: 'freeze',
+              startSeconds: start,
+              endSeconds: end,
+              durationSeconds: duration,
+              message: 'Phát hiện hình đứng bất thường tại khoảng ' + visualClock(start) + '.'
+            });
+          }
+          openFreezeStart = null;
+        }
+      }
+    });
+
+    if (openFreezeStart !== null) {
+      const end = Math.max(openFreezeStart, Math.min(expectedDuration, lastProcessedSeconds || expectedDuration));
+      rawFreeze.push({
+        type: 'freeze',
+        startSeconds: openFreezeStart,
+        endSeconds: end,
+        durationSeconds: Math.max(0, end - openFreezeStart),
+        message: 'Phát hiện hình đứng bất thường tại khoảng ' + visualClock(openFreezeStart) + '.'
+      });
+    }
+
+    for (const issue of rawBlack) {
+      const duration = issue.durationSeconds ?? Math.max(0, (issue.endSeconds ?? issue.startSeconds) - issue.startSeconds);
+      if (duration >= 5 || isVisualIssueNearBoundary(issue, boundaries, 1.5)) issues.push(issue);
+    }
+    for (const issue of rawFreeze) {
+      const duration = issue.durationSeconds ?? Math.max(0, (issue.endSeconds ?? issue.startSeconds) - issue.startSeconds);
+      if (duration >= 12 || isVisualIssueNearBoundary(issue, boundaries, 1.5)) issues.push(issue);
+    }
+
+    if (result.code !== 0) {
+      const message = 'Lỗi giải mã hình ảnh khi hậu kiểm toàn bộ thành phẩm, gần ' + visualClock(lastProcessedSeconds) + '.';
+      issues.unshift({
+        type: 'decode',
+        startSeconds: lastProcessedSeconds,
+        endSeconds: null,
+        durationSeconds: null,
+        message
+      });
+      reasons.push(message);
+    }
+    for (const issue of issues) {
+      if (!reasons.includes(issue.message)) reasons.push(issue.message);
+    }
+    options.onProgress?.(100);
+    return { ok: reasons.length === 0, reasons, issues };
   }
 
   public async verify(

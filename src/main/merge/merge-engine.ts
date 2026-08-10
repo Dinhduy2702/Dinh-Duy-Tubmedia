@@ -24,6 +24,7 @@ import { MergeFailedError, ToolNotFoundError } from '@shared/errors/app-errors.j
 import type { ToolManager } from '../tools/tool-manager.js';
 import type { ProcessManager, ProcessResult } from '../processes/process-manager.js';
 import type { MediaAnalyzer } from '../media/media-analyzer.js';
+import { isVisualIssueNearBoundary } from '../media/file-verifier.js';
 import type {
   FileVerifier,
   VerificationOptions,
@@ -93,6 +94,46 @@ async function mapLimit<T, R>(
 
 function escapeConcatPath(path: string): string {
   return path.replaceAll('\\', '/').replaceAll("'", "'\\''");
+}
+
+/* TUBMEDIA MERGE OUTPUT HARDENING R33 */
+function mergeClock(seconds: number): string {
+  const safe = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
+  const whole = Math.floor(safe);
+  const hours = Math.floor(whole / 3600);
+  const minutes = Math.floor((whole % 3600) / 60);
+  const secs = whole % 60;
+  return [hours, minutes, secs].map((value) => String(value).padStart(2, '0')).join(':');
+}
+
+function mergeBoundaries(prepared: readonly PreparedInput[]): number[] {
+  const boundaries: number[] = [];
+  let cursor = 0;
+  for (let index = 0; index < prepared.length - 1; index += 1) {
+    cursor += Math.max(0, prepared[index]?.info.duration ?? 0);
+    boundaries.push(cursor);
+  }
+  return boundaries;
+}
+
+function locateVisualIssue(prepared: readonly PreparedInput[], seconds: number): { index: number; item: PreparedInput } | null {
+  let cursor = 0;
+  for (let index = 0; index < prepared.length; index += 1) {
+    const item = prepared[index];
+    if (!item) continue;
+    const end = cursor + Math.max(0, item.info.duration);
+    if (seconds <= end || index === prepared.length - 1) return { index, item };
+    cursor = end;
+  }
+  return null;
+}
+
+function hasDecoderCriticalMismatch(reference: MediaInfo, candidate: MediaInfo): boolean {
+  const keys: Array<keyof MediaInfo> = [
+    'videoProfile', 'videoLevel', 'bitDepth', 'nominalFps',
+    'colorPrimaries', 'colorTransfer', 'colorSpace', 'colorRange'
+  ];
+  return keys.some((key) => (reference[key] ?? null) !== (candidate[key] ?? null));
 }
 
 export class MergeEngine {
@@ -187,6 +228,7 @@ export class MergeEngine {
 
     const reference = infos[0]!;
     const allCompatible = infos.every((info) => compareForConcat(reference, info).compatible);
+    const forceUniformVideo = infos.some((info) => hasDecoderCriticalMismatch(reference, info));
     const profileRequiresNormalization = [
       'compatible_1080p',
       'smooth_background',
@@ -215,7 +257,7 @@ export class MergeEngine {
         normalizeConcurrency,
         async (current, index): Promise<PreparedInput> => {
           const match = matchNormalizationTarget(current.info, target);
-          if (match.videoMatches && match.audioMatches) {
+          if (match.videoMatches && match.audioMatches && !forceUniformVideo) {
             progressByItem[index] = 100;
             finishedItems += 1;
             const aggregate = progressByItem.reduce((sum, value) => sum + value, 0) / prepared.length;
@@ -248,7 +290,9 @@ export class MergeEngine {
                 }
               );
             },
-            profile
+            profile,
+            undefined,
+            forceUniformVideo
           );
 
           progressByItem[index] = 100;
@@ -480,6 +524,135 @@ export class MergeEngine {
       );
     }
 
+    /* TUBMEDIA FINAL VISUAL GATE R33 */
+    let boundaries = mergeBoundaries(prepared);
+    let integrity = await this.verifier.verifyVisualIntegrity(
+      pending,
+      expectedDuration,
+      boundaries,
+      {
+        ...verifyOptions,
+        onProgress: (percent) => {
+          emit(95 + percent * 0.025, 'Đang hậu kiểm toàn bộ hình ảnh 0–100%', {
+            processedSeconds: (percent / 100) * expectedDuration,
+            totalSeconds: expectedDuration
+          });
+        }
+      }
+    );
+
+    const boundaryCorruption = integrity.issues.some((issue) =>
+      isVisualIssueNearBoundary(issue, boundaries, 2.5)
+    );
+    let visualRepairAttempted = false;
+    if (!integrity.ok && boundaryCorruption) {
+      visualRepairAttempted = true;
+      emit(97.6, 'Phát hiện lỗi gần điểm nối · đang mã hóa lại để tự sửa', {
+        totalSeconds: expectedDuration
+      });
+      await rm(pending, { force: true });
+      const repairTarget: NormalizeTarget = chooseMergeTarget(infos, profile);
+      const repairSource = prepared;
+      const repairProgress = new Array<number>(repairSource.length).fill(0);
+      prepared = await mapLimit(
+        repairSource,
+        Math.max(1, Math.min(resource.normalizeWorkers, repairSource.length)),
+        async (current, index) => {
+          const repairedPath = await this.normalizer.normalizeToTarget(
+            job,
+            current.path,
+            current.info,
+            normalizeCacheFolder,
+            repairTarget,
+            resource,
+            signal,
+            (percent) => {
+              repairProgress[index] = sanitizeProgress(percent);
+              const aggregate = repairProgress.reduce((sum, value) => sum + value, 0) / repairSource.length;
+              emit(97.6 + aggregate * 0.008, 'Tự sửa hình ảnh video ' + (index + 1) + '/' + repairSource.length, {
+                currentItem: index + 1,
+                totalSeconds: expectedDuration
+              });
+            },
+            profile,
+            undefined,
+            true
+          );
+          return {
+            ...current,
+            path: repairedPath,
+            info: await this.analyzer.analyze(repairedPath, job.id)
+          };
+        }
+      );
+      this.assertConcatCompatible(prepared);
+      const visualRepairConcat = await this.concatCopy(
+        job,
+        prepared,
+        workFolder,
+        pending,
+        resource,
+        signal,
+        98.4,
+        emit,
+        98.8
+      );
+      if (visualRepairConcat.code !== 0) {
+        throw new MergeFailedError(
+          visualRepairConcat.stderrTail || 'Tự sửa thành phẩm sau lỗi hình ảnh thất bại.',
+          { phase: 'visual-repair-concat' }
+        );
+      }
+      check = await this.verifyPendingTwice(pending, expectedDuration, verifyOptions);
+      if (check.ok) {
+        boundaries = mergeBoundaries(prepared);
+        integrity = await this.verifier.verifyVisualIntegrity(
+          pending,
+          expectedDuration,
+          boundaries,
+          verifyOptions
+        );
+      } else {
+        integrity = {
+          ok: false,
+          reasons: check.reasons,
+          issues: integrity.issues
+        };
+      }
+    }
+
+    if (!integrity.ok) {
+      const firstIssue = integrity.issues[0];
+      const issueTime = firstIssue?.startSeconds ?? 0;
+      const source = locateVisualIssue(prepared, issueTime);
+      const userReason = firstIssue?.message ?? integrity.reasons[0] ?? 'Phát hiện lỗi hình ảnh trong thành phẩm.';
+      const sourceLabel = source
+        ? ' Video nguồn gần nhất: #' + (source.index + 1) + ' – ' + (source.item.label || source.item.path) + '.'
+        : '';
+      const quarantineReason = integrity.reasons.join('; ') || userReason;
+      const quarantined = await this.quarantine.move(
+        pending,
+        quarantineFolder,
+        quarantineReason,
+        job.id
+      );
+      throw new MergeFailedError(
+        'Tubmedia đã CHẶN thành phẩm vì phát hiện lỗi hình ảnh tại khoảng ' + mergeClock(issueTime) + '. ' +
+          userReason + sourceLabel + ' File lỗi đã được chuyển vào khu cách ly và KHÔNG được xuất làm thành phẩm.',
+        {
+          phase: 'visual-integrity-verification',
+          expectedDuration,
+          problemTimeSeconds: issueTime,
+          problemTime: mergeClock(issueTime),
+          sourceIndex: source ? source.index + 1 : null,
+          sourcePath: source?.item.path ?? null,
+          visualRepairAttempted,
+          visualIssues: integrity.issues,
+          quarantinePath: quarantined
+        }
+      );
+    }
+
     const pendingInfo = await this.analyzer.analyze(pending, job.id);
     const sizeValidation = validateMergeOutputSize(
       infos,
@@ -498,7 +671,7 @@ export class MergeEngine {
       );
     }
 
-    const finalizePercent = timestampRepairAttempted ? 99 : 97;
+    const finalizePercent = 99;
     emit(finalizePercent, 'Thành phẩm hợp lệ, đang ghi tệp cuối', {
       processedSeconds: expectedDuration,
       totalSeconds: expectedDuration

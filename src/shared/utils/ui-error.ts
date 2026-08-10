@@ -381,6 +381,28 @@ export function friendlyIssue(value: unknown): FriendlyIssue {
       tone: 'warning'
     };
   }
+  /* TUBMEDIA VISUAL OUTPUT ISSUE R33 */
+  if (
+    lower.includes('visual-integrity-verification') ||
+    lower.includes('lỗi hình ảnh') ||
+    lower.includes('lỗi giải mã hình ảnh') ||
+    lower.includes('đoạn hình đen') ||
+    lower.includes('hình đứng bất thường')
+  ) {
+    return {
+      title: 'Phát hiện lỗi hình ảnh trong thành phẩm',
+      message:
+        userMessage(cleaned, 'Tubmedia đã chặn file trước khi xuất vì hậu kiểm phát hiện frame lỗi, đoạn đen bất thường hoặc hình đứng kéo dài. File lỗi không được dùng làm thành phẩm.'),
+      steps: [
+        'Xem mốc thời gian và video nguồn gần nhất trong trạng thái chi tiết.',
+        'Kiểm tra clip nguồn quanh mốc đó; Tubmedia đã tự thử mã hóa lại nếu lỗi nằm gần điểm nối.',
+        'Thay clip nguồn nếu cần rồi chạy lại. Chi tiết kỹ thuật đầy đủ vẫn nằm trong Nhật ký.'
+      ],
+      technical,
+      tone: 'error'
+    };
+  }
+
   if (
     lower.includes('thời lượng lệch') ||
     lower.includes('timestamp bất thường') ||

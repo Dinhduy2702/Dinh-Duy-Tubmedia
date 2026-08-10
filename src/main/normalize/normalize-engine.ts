@@ -216,10 +216,12 @@ export class NormalizeEngine {
     signal: AbortSignal,
     onProgress: (percent: number) => void,
     profile?: QualityProfile,
-    existingDecision?: QualityDecision
+    existingDecision?: QualityDecision,
+    forceVideoTranscode = false
   ): Promise<string> {
+    /* TUBMEDIA FORCE VIDEO NORMALIZE R33 */
     const streamMatch = matchNormalizationTarget(source, target);
-    const matches = streamMatch.videoMatches && streamMatch.audioMatches;
+    const matches = streamMatch.videoMatches && streamMatch.audioMatches && !forceVideoTranscode;
 
     if (matches) return input;
 
@@ -231,7 +233,7 @@ export class NormalizeEngine {
       await ensureTubmediaOwnedDirectory(outputFolder, 'normalize-cache');
     }
     const cacheKey = await this.cacheKey(input, {
-      operation: 'normalize-v3',
+      operation: forceVideoTranscode ? 'normalize-v4-force-video' : 'normalize-v3',
       target,
       encoder: profile?.encoder ?? 'cpu_auto',
       crf: profile?.crf ?? 18,
@@ -259,7 +261,7 @@ export class NormalizeEngine {
 
     const caps = ffmpeg.capabilities;
     const requested = profile?.encoder ?? 'cpu_auto';
-    const videoCopy = streamMatch.videoCopy;
+    const videoCopy = streamMatch.videoCopy && !forceVideoTranscode;
     const audioCopy = streamMatch.audioCopy;
     const addSilentAudio = streamMatch.addSilentAudio;
 
