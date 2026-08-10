@@ -100,6 +100,11 @@ export interface MediaInfo {
   pixelFormat: string;
   bitDepth: number | null;
   timeBase: string | null;
+  // TUBMEDIA CORE RESILIENCE R35
+  videoExtradataHash?: string | null;
+  audioExtradataHash?: string | null;
+  videoStreamDuration?: number | null;
+  audioStreamDuration?: number | null;
   nominalFps?: number | null;
   variableFrameRate?: boolean;
   sampleAspectRatio?: string | null;

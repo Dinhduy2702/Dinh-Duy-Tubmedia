@@ -128,12 +128,24 @@ function locateVisualIssue(prepared: readonly PreparedInput[], seconds: number):
   return null;
 }
 
-function hasDecoderCriticalMismatch(reference: MediaInfo, candidate: MediaInfo): boolean {
-  const keys: Array<keyof MediaInfo> = [
-    'videoProfile', 'videoLevel', 'bitDepth', 'nominalFps',
-    'colorPrimaries', 'colorTransfer', 'colorSpace', 'colorRange'
-  ];
+/* TUBMEDIA PROVEN FAST PATH R35 */
+function differs(reference: MediaInfo, candidate: MediaInfo, keys: Array<keyof MediaInfo>): boolean {
   return keys.some((key) => (reference[key] ?? null) !== (candidate[key] ?? null));
+}
+
+function hasVideoBitstreamMismatch(reference: MediaInfo, candidate: MediaInfo): boolean {
+  return differs(reference, candidate, [
+    'videoProfile', 'videoLevel', 'bitDepth', 'nominalFps', 'videoExtradataHash',
+    'colorPrimaries', 'colorTransfer', 'colorSpace', 'colorRange'
+  ]);
+}
+
+function hasAudioBitstreamMismatch(reference: MediaInfo, candidate: MediaInfo): boolean {
+  return differs(reference, candidate, ['audioExtradataHash', 'channelLayout']);
+}
+
+function hasTimeBaseMismatch(reference: MediaInfo, candidate: MediaInfo): boolean {
+  return (reference.timeBase ?? null) !== (candidate.timeBase ?? null);
 }
 
 export class MergeEngine {
@@ -227,8 +239,12 @@ export class MergeEngine {
     });
 
     const reference = infos[0]!;
+    const mergeTarget: NormalizeTarget = chooseMergeTarget(infos, profile);
+    const expectedAudio = mergeTarget.audioCodec !== null;
     const allCompatible = infos.every((info) => compareForConcat(reference, info).compatible);
-    const forceUniformVideo = infos.some((info) => hasDecoderCriticalMismatch(reference, info));
+    const forceUniformVideo = infos.some((info) => hasVideoBitstreamMismatch(reference, info));
+    const forceUniformAudio = infos.some((info) => hasAudioBitstreamMismatch(reference, info));
+    const canonicalizeTimeBase = infos.some((info) => hasTimeBaseMismatch(reference, info));
     const profileRequiresNormalization = [
       'compatible_1080p',
       'smooth_background',
@@ -238,7 +254,7 @@ export class MergeEngine {
     const normalizationRequired = !allCompatible || profileRequiresNormalization;
 
     if (normalizationRequired) {
-      const target: NormalizeTarget = chooseMergeTarget(infos, profile);
+      const target: NormalizeTarget = mergeTarget;
       const progressByItem = new Array<number>(prepared.length).fill(0);
       let finishedItems = 0;
       const normalizeConcurrency = Math.max(
@@ -257,7 +273,36 @@ export class MergeEngine {
         normalizeConcurrency,
         async (current, index): Promise<PreparedInput> => {
           const match = matchNormalizationTarget(current.info, target);
-          if (match.videoMatches && match.audioMatches && !forceUniformVideo) {
+          if (
+            match.videoMatches &&
+            match.audioMatches &&
+            !forceUniformVideo &&
+            !forceUniformAudio
+          ) {
+            if (canonicalizeTimeBase) {
+              const remuxedPath = await this.normalizer.remuxForConcat(
+                job,
+                current.path,
+                remuxCacheFolder,
+                resource,
+                signal,
+                (percent) => {
+                  progressByItem[index] = sanitizeProgress(percent);
+                  const aggregate = progressByItem.reduce((sum, value) => sum + value, 0) / prepared.length;
+                  emit(15 + aggregate * 0.5, `Chuẩn hóa timestamp video ${index + 1}/${prepared.length}`, {
+                    currentItem: Math.max(1, finishedItems + 1),
+                    totalSeconds: knownTotalDuration
+                  });
+                }
+              );
+              progressByItem[index] = 100;
+              finishedItems += 1;
+              return {
+                ...current,
+                path: remuxedPath,
+                info: await this.analyzer.analyze(remuxedPath, job.id)
+              };
+            }
             progressByItem[index] = 100;
             finishedItems += 1;
             const aggregate = progressByItem.reduce((sum, value) => sum + value, 0) / prepared.length;
@@ -281,7 +326,7 @@ export class MergeEngine {
               const aggregate = progressByItem.reduce((sum, value) => sum + value, 0) / prepared.length;
               emit(
                 15 + aggregate * 0.5,
-                match.videoMatches
+                match.videoMatches && !forceUniformVideo
                   ? `Chuẩn hóa âm thanh video ${index + 1}/${prepared.length}`
                   : `Chuẩn hóa video ${index + 1}/${prepared.length}`,
                 {
@@ -292,7 +337,8 @@ export class MergeEngine {
             },
             profile,
             undefined,
-            forceUniformVideo
+            forceUniformVideo,
+            forceUniformAudio
           );
 
           progressByItem[index] = 100;
@@ -314,6 +360,44 @@ export class MergeEngine {
       });
     }
 
+    // TUBMEDIA CORE RESILIENCE R35: any source that bypassed transcoding must
+    // prove it can be decoded end-to-end before concat. Transcoded inputs are
+    // already protected by FFmpeg -xerror/-err_detect explode in NormalizeEngine.
+    const passthroughIndexes = prepared
+      .map((item, index) => item.path === inputs[index]?.path ? index : -1)
+      .filter((index) => index >= 0);
+    if (passthroughIndexes.length) {
+      let verifiedSources = 0;
+      const verifyConcurrency = Math.max(1, Math.min(resource.analyzeWorkers, passthroughIndexes.length));
+      emit(normalizationRequired ? 66 : 16, `Kiểm tra toàn bộ ${passthroughIndexes.length} nguồn stream-copy`, {
+        totalSeconds: knownTotalDuration
+      });
+      await mapLimit(passthroughIndexes, verifyConcurrency, async (sourceIndex) => {
+        const item = prepared[sourceIndex]!;
+        const sourceCheck = await this.verifier.verify(item.path, 'deep', item.info.duration, {
+          jobId: job.id + '-source-' + (sourceIndex + 1),
+          projectId: job.projectId,
+          signal,
+          expectedStreams: { video: true, audio: item.info.audioCodec !== null }
+        });
+        if (!sourceCheck.ok) {
+          throw new MergeFailedError(
+            'Video nguồn #' + (sourceIndex + 1) + ' không vượt qua kiểm tra giải mã toàn bộ: ' +
+              sourceCheck.reasons.join('; '),
+            { phase: 'source-deep-verification', sourceIndex: sourceIndex + 1, sourcePath: item.path }
+          );
+        }
+        verifiedSources += 1;
+        emit(
+          normalizationRequired
+            ? 66 + verifiedSources / passthroughIndexes.length
+            : 16 + (verifiedSources / passthroughIndexes.length) * 4,
+          `Đã kiểm tra nguồn ${verifiedSources}/${passthroughIndexes.length}`,
+          { currentItem: verifiedSources, totalSeconds: knownTotalDuration }
+        );
+        return true;
+      });
+    }
     this.assertConcatCompatible(prepared);
 
     const safeName = sanitizeFilename(finalFileName.replace(/\.mp4$/i, ''), 'Thành phẩm');
@@ -407,10 +491,11 @@ export class MergeEngine {
       processedSeconds: expectedDuration,
       totalSeconds: expectedDuration
     });
-    const verifyOptions = {
+    const verifyOptions: VerificationOptions = {
       jobId: job.id,
       projectId: job.projectId,
-      signal
+      signal,
+      expectedStreams: { video: true, audio: expectedAudio }
     };
     let timestampRepairAttempted = false;
     let check = await this.verifyPendingTwice(
@@ -551,7 +636,7 @@ export class MergeEngine {
         totalSeconds: expectedDuration
       });
       await rm(pending, { force: true });
-      const repairTarget: NormalizeTarget = chooseMergeTarget(infos, profile);
+      const repairTarget: NormalizeTarget = mergeTarget;
       const repairSource = prepared;
       const repairProgress = new Array<number>(repairSource.length).fill(0);
       prepared = await mapLimit(
@@ -654,6 +739,36 @@ export class MergeEngine {
     }
 
     const pendingInfo = await this.analyzer.analyze(pending, job.id);
+    if (expectedAudio) {
+      const videoDuration = pendingInfo.videoStreamDuration ?? pendingInfo.duration;
+      const audioDuration = pendingInfo.audioStreamDuration;
+      if (audioDuration === null || audioDuration === undefined) {
+        const quarantined = await this.quarantine.move(
+          pending,
+          quarantineFolder,
+          'Thành phẩm được yêu cầu có âm thanh nhưng không tìm thấy thời lượng audio stream.',
+          job.id
+        );
+        throw new MergeFailedError(
+          'Tubmedia đã chặn thành phẩm vì luồng âm thanh bị thiếu. File lỗi đã chuyển vào khu cách ly: ' + quarantined
+        );
+      }
+      const avDrift = Math.abs(videoDuration - audioDuration);
+      const avTolerance = Math.max(1.25, Math.min(4, expectedDuration * 0.0015));
+      if (avDrift > avTolerance) {
+        const quarantined = await this.quarantine.move(
+          pending,
+          quarantineFolder,
+          'Lệch thời lượng audio/video ' + avDrift.toFixed(2) + 's.',
+          job.id
+        );
+        throw new MergeFailedError(
+          'Tubmedia đã chặn thành phẩm vì âm thanh và hình ảnh lệch ' + avDrift.toFixed(2) +
+            ' giây (giới hạn ' + avTolerance.toFixed(2) + ' giây). File lỗi đã chuyển vào khu cách ly: ' + quarantined,
+          { phase: 'av-sync-verification', avDriftSeconds: avDrift, toleranceSeconds: avTolerance }
+        );
+      }
+    }
     const sizeValidation = validateMergeOutputSize(
       infos,
       pendingInfo.fileSize,

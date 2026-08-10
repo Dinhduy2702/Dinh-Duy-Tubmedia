@@ -127,7 +127,7 @@ export class NormalizeEngine {
       await ensureTubmediaOwnedDirectory(outputFolder, 'normalize-cache');
     }
     const key = await this.cacheKey(input, {
-      operation: 'remux-v3-timestamp-reset',
+      operation: 'remux-v4-core-resilience',
       format: 'mp4',
       videoCodec: source.videoCodec,
       audioCodec: source.audioCodec
@@ -165,6 +165,7 @@ export class NormalizeEngine {
         '-c', 'copy',
         '-avoid_negative_ts', 'make_zero',
         '-movflags', '+faststart',
+        '-video_track_timescale', '90000',
         '-progress', 'pipe:1',
         '-nostats',
         pending
@@ -185,10 +186,11 @@ export class NormalizeEngine {
       throw new ProcessingFailedError(result.stderrTail || 'Remux video thất bại.');
     }
 
-    const check = await this.verifier.verify(pending, 'fast', source.duration, {
+    const check = await this.verifier.verify(pending, 'standard', source.duration, {
       jobId: job.id,
       projectId: job.projectId,
-      signal
+      signal,
+      expectedStreams: { video: true, audio: source.audioCodec !== null }
     });
     if (!check.ok) {
       const quarantined = await this.quarantine.move(
@@ -217,11 +219,16 @@ export class NormalizeEngine {
     onProgress: (percent: number) => void,
     profile?: QualityProfile,
     existingDecision?: QualityDecision,
-    forceVideoTranscode = false
+    forceVideoTranscode = false,
+    forceAudioTranscode = false
   ): Promise<string> {
     /* TUBMEDIA FORCE VIDEO NORMALIZE R33 */
     const streamMatch = matchNormalizationTarget(source, target);
-    const matches = streamMatch.videoMatches && streamMatch.audioMatches && !forceVideoTranscode;
+    const matches =
+      streamMatch.videoMatches &&
+      streamMatch.audioMatches &&
+      !forceVideoTranscode &&
+      !forceAudioTranscode;
 
     if (matches) return input;
 
@@ -233,7 +240,11 @@ export class NormalizeEngine {
       await ensureTubmediaOwnedDirectory(outputFolder, 'normalize-cache');
     }
     const cacheKey = await this.cacheKey(input, {
-      operation: forceVideoTranscode ? 'normalize-v4-force-video' : 'normalize-v3',
+      operation: forceVideoTranscode
+        ? 'normalize-v6-force-video-core-resilience'
+        : forceAudioTranscode
+          ? 'normalize-v6-force-audio-core-resilience'
+          : 'normalize-v5-core-resilience',
       target,
       encoder: profile?.encoder ?? 'cpu_auto',
       crf: profile?.crf ?? 18,
@@ -262,7 +273,7 @@ export class NormalizeEngine {
     const caps = ffmpeg.capabilities;
     const requested = profile?.encoder ?? 'cpu_auto';
     const videoCopy = streamMatch.videoCopy && !forceVideoTranscode;
-    const audioCopy = streamMatch.audioCopy;
+    const audioCopy = streamMatch.audioCopy && !forceAudioTranscode;
     const addSilentAudio = streamMatch.addSilentAudio;
 
     const filters: string[] = [];
@@ -328,7 +339,7 @@ export class NormalizeEngine {
         : null;
 
     const buildArgs = (encoder: ResolvedVideoEncoder): string[] => {
-      const args = ['-hide_banner', '-nostdin', '-y', '-i', input];
+      const args = ['-hide_banner', '-nostdin', '-y', '-xerror', '-err_detect', 'explode', '-i', input];
       if (addSilentAudio) {
         args.push(
           '-f',
@@ -392,6 +403,7 @@ export class NormalizeEngine {
         '-map_metadata', '-1',
         '-avoid_negative_ts', 'make_zero',
         '-movflags', '+faststart',
+        '-video_track_timescale', '90000',
         '-progress', 'pipe:1',
         '-nostats',
         pending
@@ -475,10 +487,11 @@ export class NormalizeEngine {
       );
     }
 
-    const check = await this.verifier.verify(pending, 'fast', source.duration, {
+    const check = await this.verifier.verify(pending, 'standard', source.duration, {
       jobId: job.id,
       projectId: job.projectId,
-      signal
+      signal,
+      expectedStreams: { video: true, audio: target.audioCodec !== null }
     });
     if (!check.ok) {
       const quarantined = await this.quarantine.move(
@@ -517,9 +530,15 @@ export class NormalizeEngine {
   ): Promise<boolean> {
     try {
       await access(path, constants.R_OK);
+      /* TUBMEDIA VERIFIED CACHE REUSE R35 */
+      const cacheCheck = await this.verifier.verify(path, 'standard', undefined, {
+        jobId,
+        expectedStreams: { video: true, audio: target.audioCodec !== null }
+      });
+      if (!cacheCheck.ok) throw new Error(cacheCheck.reasons.join('; '));
       const info = await this.analyzer.analyze(path, jobId);
       const match = matchNormalizationTarget(info, target);
-      return match.videoMatches && match.audioMatches;
+      return match.videoMatches && match.audioMatches && info.timeBase === '1/90000';
     } catch {
       await rm(path, { force: true }).catch(() => undefined);
       return false;
@@ -529,13 +548,20 @@ export class NormalizeEngine {
   private async validRemuxCache(path: string, source: MediaInfo, jobId: string): Promise<boolean> {
     try {
       await access(path, constants.R_OK);
+      /* TUBMEDIA VERIFIED CACHE REUSE R35 */
+      const cacheCheck = await this.verifier.verify(path, 'standard', source.duration, {
+        jobId,
+        expectedStreams: { video: true, audio: source.audioCodec !== null }
+      });
+      if (!cacheCheck.ok) throw new Error(cacheCheck.reasons.join('; '));
       const info = await this.analyzer.analyze(path, jobId);
       return (
         Math.abs(info.duration - source.duration) <= Math.max(1.5, source.duration * 0.01) &&
         info.videoCodec === source.videoCodec &&
         info.width === source.width &&
         info.height === source.height &&
-        info.audioCodec === source.audioCodec
+        info.audioCodec === source.audioCodec &&
+        info.timeBase === '1/90000'
       );
     } catch {
       await rm(path, { force: true }).catch(() => undefined);

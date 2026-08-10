@@ -36,6 +36,16 @@ describe('concat compatibility', () => {
     expect(compareForConcat(info, { ...info, fps: 60 }).reasons[0]).toContain('FPS');
   });
 
+  it('blocks time-base and codec-extradata changes before stream-copy', () => {
+    const signed = { ...info, videoExtradataHash: 'SHA256:AAA', audioExtradataHash: 'SHA256:BBB' };
+    const timeBaseMismatch = compareForConcat(signed, { ...signed, timeBase: '1/90000' });
+    expect(timeBaseMismatch.compatible).toBe(false);
+    expect(timeBaseMismatch.reasons.some((reason) => reason.includes('Time base'))).toBe(true);
+    const extradataMismatch = compareForConcat(signed, { ...signed, videoExtradataHash: 'SHA256:CCC' });
+    expect(extradataMismatch.compatible).toBe(false);
+    expect(extradataMismatch.reasons.some((reason) => reason.includes('Video extradata'))).toBe(true);
+  });
+
   /* TUBMEDIA STRICT CONCAT TEST CONTRACT R34 */
   it('rejects H.264 Main versus High profile/level changes before stream-copy', () => {
     const result = compareForConcat(info, {

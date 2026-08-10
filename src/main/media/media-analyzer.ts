@@ -127,7 +127,7 @@ export class MediaAnalyzer {
       jobId,
       tool: 'ffprobe',
       executablePath: tool.executablePath,
-      args: ['-v', 'error', '-show_streams', '-show_format', '-of', 'json=compact=1', path],
+      args: ['-v', 'error', '-show_streams', '-show_format', '-show_data_hash', 'sha256', '-of', 'json=compact=1', path],
       timeoutMs: 120_000
     });
     if (result.code !== 0) {
@@ -148,6 +148,8 @@ export class MediaAnalyzer {
     if (!video) throw new VerificationFailedError('Tệp không có luồng video.');
     const audio = data.streams?.find((stream) => stream.codec_type === 'audio');
 
+    const videoStreamDuration = positiveDuration(video.duration) ?? durationFromTimeBase(video);
+    const audioStreamDuration = positiveDuration(audio?.duration) ?? durationFromTimeBase(audio);
     const duration = selectMediaDuration(data.format, video, audio);
     if (duration <= 0) throw new VerificationFailedError('Duration không hợp lệ.');
 
@@ -207,6 +209,10 @@ export class MediaAnalyzer {
       pixelFormat,
       bitDepth: bitDepth > 0 ? bitDepth : null,
       timeBase: stringValue(video.time_base) || null,
+      videoExtradataHash: stringValue(video.extradata_hash) || null,
+      audioExtradataHash: stringValue(audio?.extradata_hash) || null,
+      videoStreamDuration,
+      audioStreamDuration,
       nominalFps: nominalFps > 0 ? nominalFps : null,
       variableFrameRate,
       sampleAspectRatio: stringValue(video.sample_aspect_ratio) || null,

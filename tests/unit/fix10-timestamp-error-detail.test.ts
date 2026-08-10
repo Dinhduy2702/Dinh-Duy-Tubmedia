@@ -13,7 +13,7 @@ describe('FIX10 timestamp repair and in-workflow error details', () => {
     expect(merge).toContain('shouldRepairTimestamps');
     expect(merge).toContain('timestampRepairAttempted');
     expect(merge).toContain('duration ${Math.max(0.001, item.info.duration).toFixed(6)}');
-    expect(normalize).toContain("operation: 'remux-v3-timestamp-reset'");
+    expect(normalize).toContain("operation: 'remux-v4-core-resilience'");
     expect(normalize).toContain("'-copyts'");
     expect(normalize).toContain("'-start_at_zero'");
     expect(verifier).toContain('const sampleDuration = expectedDuration');

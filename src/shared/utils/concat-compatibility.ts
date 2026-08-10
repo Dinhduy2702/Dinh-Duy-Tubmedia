@@ -16,13 +16,11 @@ export interface ConcatCompatibility {
  * on some decoders. Tubmedia therefore normalizes those sources instead of
  * trusting stream-copy.
  *
- * timeBase and channelLayout labels remain advisory rather than hard blockers:
- * - MP4/FFmpeg can safely rewrite timestamps during concat/muxing.
- * - encoders may omit or spell the same channel layout differently while the
- *   actual codec/sample-rate/channel-count remains identical.
- *
- * Every merged output is still decoded 0-100% before final commit, so advisory
- * differences cannot silently escape as a successful output.
+ * TUBMEDIA CORE RESILIENCE R35:
+ * time-base, codec extradata fingerprints and channel layout are also blockers.
+ * FFmpeg concat stream-copy requires identical stream configuration; SPS/PPS/VPS,
+ * AAC configuration or timestamp bases that differ are normalized before concat.
+ * This deliberately trades a little speed on risky boundaries for deterministic output.
  */
 export function compareForConcat(
   reference: MediaInfo,
@@ -33,6 +31,7 @@ export function compareForConcat(
   /* TUBMEDIA STRICT CONCAT SAFETY R33 */
   const fields: Array<[string, unknown, unknown]> = [
     ['Codec video', reference.videoCodec, candidate.videoCodec],
+    ['Video extradata', reference.videoExtradataHash ?? null, candidate.videoExtradataHash ?? null],
     ['Profile video', reference.videoProfile ?? null, candidate.videoProfile ?? null],
     ['Level video', reference.videoLevel ?? null, candidate.videoLevel ?? null],
     ['Bit depth', reference.bitDepth ?? null, candidate.bitDepth ?? null],
@@ -51,22 +50,17 @@ export function compareForConcat(
     ['DAR', reference.displayAspectRatio ?? null, candidate.displayAspectRatio ?? null],
     ['Rotation', reference.rotation ?? 0, candidate.rotation ?? 0],
     ['VFR', reference.variableFrameRate ?? false, candidate.variableFrameRate ?? false],
+    ['Time base', reference.timeBase ?? null, candidate.timeBase ?? null],
     ['Codec audio', reference.audioCodec, candidate.audioCodec],
+    ['Audio extradata', reference.audioExtradataHash ?? null, candidate.audioExtradataHash ?? null],
     ['Sample rate', reference.sampleRate, candidate.sampleRate],
-    ['Số kênh', reference.channels, candidate.channels]
+    ['Số kênh', reference.channels, candidate.channels],
+    ['Channel layout', reference.channelLayout ?? null, candidate.channelLayout ?? null]
   ];
   for (const [name, a, b] of fields) {
     if (a !== b) reasons.push(`${name}: ${String(a)} ≠ ${String(b)}`);
   }
 
-  if (reference.timeBase !== candidate.timeBase) {
-    advisories.push(`Time base: ${String(reference.timeBase)} ≠ ${String(candidate.timeBase)}`);
-  }
-  if (reference.channelLayout !== candidate.channelLayout) {
-    advisories.push(
-      `Channel layout: ${String(reference.channelLayout)} ≠ ${String(candidate.channelLayout)}`
-    );
-  }
 
   return { compatible: reasons.length === 0, reasons, advisories };
 }

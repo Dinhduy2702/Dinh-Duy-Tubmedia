@@ -65,6 +65,22 @@ describe('chooseMergeTarget', () => {
     expect(target).toMatchObject({ width: 2560, height: 1440, fps: 30 });
   });
 
+  it('preserves audio when the duration-dominant source is silent', () => {
+    const silentDominant = {
+      ...media(1920, 1080, 30),
+      duration: 60,
+      audioCodec: null,
+      audioBitrate: null,
+      sampleRate: null,
+      channels: null,
+      channelLayout: null
+    };
+    const audible = { ...media(1920, 1080, 30), duration: 10 };
+    const selected = chooseMergeTarget([silentDominant, audible], profile('smart_merge'));
+    expect(selected.audioCodec).toBe('aac');
+    expect(selected.sampleRate).toBe(48000);
+  });
+
   it('caps the compatibility profile inside 1080p without changing aspect ratio', () => {
     const target = chooseMergeTarget([media(3840, 2160, 60)], profile('compatible_1080p'));
     expect(target).toMatchObject({ width: 1920, height: 1080, fps: 60, hdr: false });

@@ -159,11 +159,16 @@ export function chooseMergeTarget(
 
   const allHdr = infos.every((info) => info.hdr);
   const keepHdr = !compatible && allHdr && (profile.hdrMode === 'keep' || profile.hdrMode === 'auto');
+  // TUBMEDIA CORE RESILIENCE R35
+  const audioInfos = infos.filter((info) => Boolean(info.audioCodec));
+  const hasAnyAudio = audioInfos.length > 0;
   const channels = profile.forceStereo
     ? 2
-    : smart
+    : smart && dominant.audioCodec
       ? dominant.channels ?? 2
-      : Math.min(2, Math.max(...infos.map((info) => info.channels ?? 2)));
+      : audioInfos.length
+        ? Math.min(2, Math.max(...audioInfos.map((info) => info.channels ?? 2)))
+        : 2;
 
   const maxFps = Math.max(...infos.map((info) => info.fps));
   const sourceFps = smart ? dominant.fps : maxFps;
@@ -187,14 +192,19 @@ export function chooseMergeTarget(
   const useDominantAudio =
     smart &&
     profile.audioMode === 'copy_if_compatible' &&
-    (dominant.audioCodec === 'aac' || dominant.audioCodec === null);
-  const audioCodec: 'aac' | null = useDominantAudio
-    ? dominant.audioCodec === 'aac'
+    dominant.audioCodec === 'aac' &&
+    audioInfos.length > 0 &&
+    audioInfos.every((info) =>
+      info.audioCodec === 'aac' &&
+      info.sampleRate === dominant.sampleRate &&
+      info.channels === dominant.channels &&
+      (info.channelLayout ?? null) === (dominant.channelLayout ?? null)
+    );
+  const audioCodec: 'aac' | null = profile.audioMode === 'mute'
+    ? null
+    : hasAnyAudio || profile.audioMode === 'silent'
       ? 'aac'
-      : null
-    : profile.audioMode === 'mute'
-      ? null
-      : 'aac';
+      : null;
   const sampleRate = audioCodec
     ? useDominantAudio
       ? dominant.sampleRate ?? 48000

@@ -22,7 +22,7 @@ export class ClipEngine {
     const outputExtension = muteOnly && sourceExtension ? sourceExtension : '.mp4';
     const final = join(tempFolder, `clip-${item.position}-${item.id}${outputExtension}`);
     const pending = `${final}.pending${outputExtension}`;
-    const args = ['-hide_banner', '-y'];
+    const args = ['-hide_banner', '-y', '-xerror', '-err_detect', 'explode'];
     if (item.timestampStartSeconds !== null) args.push('-ss', String(item.timestampStartSeconds));
     args.push('-i', input);
     if (item.timestampEndSeconds !== null) {
@@ -46,11 +46,24 @@ export class ClipEngine {
       try { await this.quarantine.move(pending, join(tempFolder, '_quarantine'), result.stderrTail || 'Tạo đoạn video thất bại.', job.id); } catch { /* pending chưa tồn tại */ }
       throw new ProcessingFailedError(result.stderrTail || 'Tạo đoạn video thất bại.');
     }
-    const check = await this.verifier.verify(pending, 'standard', expected > 0 ? expected : undefined);
+    const check = await this.verifier.verify(pending, 'standard', expected > 0 ? expected : undefined, { jobId: job.id, projectId: job.projectId, signal, expectedStreams: { video: true, audio: item.audioMode !== 'mute' } });
     if (!check.ok) {
       const quarantined = await this.quarantine.move(pending, join(tempFolder, '_quarantine'), check.reasons.join('; '), job.id);
       throw new ProcessingFailedError(`Đoạn video bị lỗi và đã chuyển vào khu cách ly: ${quarantined}`);
     }
-    await rm(final, { force: true }); await rename(pending, final); onProgress(100); return final;
+    const backup = `${final}.previous-${Date.now()}.bak`;
+    let hadExisting = false;
+    try {
+      await rename(final, backup);
+      hadExisting = true;
+    } catch { /* final chưa tồn tại */ }
+    try {
+      await rename(pending, final);
+    } catch (error) {
+      if (hadExisting) await rename(backup, final).catch(() => undefined);
+      throw error;
+    }
+    if (hadExisting) await rm(backup, { force: true });
+    onProgress(100); return final;
   }
 }
