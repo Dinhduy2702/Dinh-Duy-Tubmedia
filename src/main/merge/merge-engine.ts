@@ -28,7 +28,9 @@ import { isVisualIssueNearBoundary } from '../media/file-verifier.js';
 import type {
   FileVerifier,
   VerificationOptions,
-  VerificationResult
+  VerificationResult,
+  VisualIntegrityIssue,
+  VisualIntegrityResult
 } from '../media/file-verifier.js';
 import type { NormalizeEngine, NormalizeTarget } from '../normalize/normalize-engine.js';
 import type { TimelineArtifact, TimelineService } from './timeline-service.js';
@@ -126,6 +128,48 @@ function locateVisualIssue(prepared: readonly PreparedInput[], seconds: number):
     cursor = end;
   }
   return null;
+}
+
+export interface VisualSourceSegment {
+  index: number;
+  localStartSeconds: number;
+  localEndSeconds: number;
+}
+
+/* TUBMEDIA SOURCE-AWARE VISUAL MAPPING R38 */
+export function mapVisualIssueToSourceSegments(
+  issue: Pick<VisualIntegrityIssue, 'startSeconds' | 'endSeconds' | 'durationSeconds'>,
+  durations: readonly number[],
+  paddingSeconds = 2.5
+): VisualSourceSegment[] {
+  const issueEnd = Math.max(
+    issue.startSeconds,
+    issue.endSeconds ?? issue.startSeconds + Math.max(0, issue.durationSeconds ?? 0)
+  );
+  const expandedStart = Math.max(0, issue.startSeconds - Math.max(0, paddingSeconds));
+  const expandedEnd = issueEnd + Math.max(0, paddingSeconds);
+  const result: VisualSourceSegment[] = [];
+  let cursor = 0;
+  for (let index = 0; index < durations.length; index += 1) {
+    const duration = Math.max(0, durations[index] ?? 0);
+    const sourceStart = cursor;
+    const sourceEnd = sourceStart + duration;
+    if (expandedEnd >= sourceStart && expandedStart <= sourceEnd) {
+      const localStartSeconds = issue.startSeconds < sourceStart
+        ? 0
+        : issue.startSeconds > sourceEnd
+          ? duration
+          : Math.max(0, issue.startSeconds - sourceStart);
+      const localEndSeconds = issueEnd < sourceStart
+        ? 0
+        : issueEnd > sourceEnd
+          ? duration
+          : Math.max(localStartSeconds, issueEnd - sourceStart);
+      result.push({ index, localStartSeconds, localEndSeconds });
+    }
+    cursor = sourceEnd;
+  }
+  return result;
 }
 
 /* TUBMEDIA PROVEN FAST PATH R35 */
@@ -233,6 +277,9 @@ export class MergeEngine {
       ...input,
       info: infos[index]!
     }));
+    // Keep immutable references to the original user/source files. Visual anomalies
+    // are compared against these originals, never against normalized/remux cache files.
+    const visualReferenceInputs: PreparedInput[] = prepared.map((item) => ({ ...item }));
 
     emit(14, 'Đối chiếu codec, kích thước, FPS và âm thanh', {
       totalSeconds: knownTotalDuration
@@ -610,6 +657,14 @@ export class MergeEngine {
     }
 
     /* TUBMEDIA FINAL VISUAL GATE R33 */
+    const visualWarnings: string[] = [];
+    let sourceOriginVisualEvidence: Array<{
+      issue: VisualIntegrityIssue;
+      sourceIndex: number;
+      sourcePath: string;
+      sourceLocalTimeSeconds: number;
+    }> = [];
+    let blockingVisualEvidence: typeof sourceOriginVisualEvidence = [];
     let boundaries = mergeBoundaries(prepared);
     let integrity = await this.verifier.verifyVisualIntegrity(
       pending,
@@ -625,6 +680,24 @@ export class MergeEngine {
         }
       }
     );
+
+    ({ integrity, sourceOriginEvidence: sourceOriginVisualEvidence, blockingEvidence: blockingVisualEvidence } =
+      await this.reconcileVisualIssuesWithOriginalSources(
+        integrity,
+        visualReferenceInputs,
+        job,
+        signal
+      ));
+    for (const evidence of sourceOriginVisualEvidence) {
+      const reference = visualReferenceInputs[evidence.sourceIndex]!;
+      const kind = evidence.issue.type === 'black' ? 'đoạn hình đen/chuyển cảnh' : 'đoạn hình đứng';
+      visualWarnings.push(
+        'Nguồn #' + (evidence.sourceIndex + 1) + ' – ' + (reference.label || reference.path) +
+        ' có sẵn ' + kind + ' quanh ' + mergeClock(evidence.issue.startSeconds) +
+        ' (trong nguồn khoảng ' + mergeClock(evidence.sourceLocalTimeSeconds) +
+        '). Tubmedia đã xác nhận đây là nội dung có sẵn trong nguồn, không phải lỗi do ghép tạo ra.'
+      );
+    }
 
     const boundaryCorruption = integrity.issues.some((issue) =>
       isVisualIssueNearBoundary(issue, boundaries, 2.5)
@@ -697,6 +770,23 @@ export class MergeEngine {
           boundaries,
           verifyOptions
         );
+        ({ integrity, sourceOriginEvidence: sourceOriginVisualEvidence, blockingEvidence: blockingVisualEvidence } =
+          await this.reconcileVisualIssuesWithOriginalSources(
+            integrity,
+            visualReferenceInputs,
+            job,
+            signal
+          ));
+        for (const evidence of sourceOriginVisualEvidence) {
+          const reference = visualReferenceInputs[evidence.sourceIndex]!;
+          const kind = evidence.issue.type === 'black' ? 'đoạn hình đen/chuyển cảnh' : 'đoạn hình đứng';
+          visualWarnings.push(
+            'Nguồn #' + (evidence.sourceIndex + 1) + ' – ' + (reference.label || reference.path) +
+            ' có sẵn ' + kind + ' quanh ' + mergeClock(evidence.issue.startSeconds) +
+            ' (trong nguồn khoảng ' + mergeClock(evidence.sourceLocalTimeSeconds) +
+            '). Tubmedia đã xác nhận đây là nội dung có sẵn trong nguồn, không phải lỗi do ghép tạo ra.'
+          );
+        }
       } else {
         integrity = {
           ok: false,
@@ -709,10 +799,13 @@ export class MergeEngine {
     if (!integrity.ok) {
       const firstIssue = integrity.issues[0];
       const issueTime = firstIssue?.startSeconds ?? 0;
-      const source = locateVisualIssue(prepared, issueTime);
+      const firstEvidence = blockingVisualEvidence.find((entry) => entry.issue === firstIssue) ?? blockingVisualEvidence[0];
+      const source = firstEvidence
+        ? { index: firstEvidence.sourceIndex, item: visualReferenceInputs[firstEvidence.sourceIndex]! }
+        : locateVisualIssue(visualReferenceInputs, issueTime);
       const userReason = firstIssue?.message ?? integrity.reasons[0] ?? 'Phát hiện lỗi hình ảnh trong thành phẩm.';
       const sourceLabel = source
-        ? ' Video nguồn gần nhất: #' + (source.index + 1) + ' – ' + (source.item.label || source.item.path) + '.'
+        ? ' Video nguồn liên quan: #' + (source.index + 1) + ' – ' + (source.item.label || source.item.path) + '.'
         : '';
       const quarantineReason = integrity.reasons.join('; ') || userReason;
       const quarantined = await this.quarantine.move(
@@ -733,6 +826,22 @@ export class MergeEngine {
           sourcePath: source?.item.path ?? null,
           visualRepairAttempted,
           visualIssues: integrity.issues,
+          visualIssueSources: blockingVisualEvidence.map((entry) => ({
+            type: entry.issue.type,
+            outputTimeSeconds: entry.issue.startSeconds,
+            outputTime: mergeClock(entry.issue.startSeconds),
+            sourceIndex: entry.sourceIndex + 1,
+            sourcePath: entry.sourcePath,
+            sourceLocalTimeSeconds: entry.sourceLocalTimeSeconds,
+            sourceLocalTime: mergeClock(entry.sourceLocalTimeSeconds)
+          })),
+          sourceOriginVisualIssues: sourceOriginVisualEvidence.map((entry) => ({
+            type: entry.issue.type,
+            outputTimeSeconds: entry.issue.startSeconds,
+            sourceIndex: entry.sourceIndex + 1,
+            sourcePath: entry.sourcePath,
+            sourceLocalTimeSeconds: entry.sourceLocalTimeSeconds
+          })),
           quarantinePath: quarantined
         }
       );
@@ -807,7 +916,7 @@ export class MergeEngine {
       label: item.label,
       note: item.note
     }));
-    const warnings: string[] = [];
+    const warnings: string[] = [...new Set(visualWarnings)];
     let timeline: TimelineArtifact;
     try {
       timeline = await this.timeline.write(
@@ -842,6 +951,114 @@ export class MergeEngine {
       totalSeconds: expectedDuration
     });
     return { video: committedFinal, timeline, warnings };
+  }
+
+  private async reconcileVisualIssuesWithOriginalSources(
+    integrity: VisualIntegrityResult,
+    visualReferences: readonly PreparedInput[],
+    job: QueueJob,
+    signal: AbortSignal
+  ): Promise<{
+    integrity: VisualIntegrityResult;
+    sourceOriginEvidence: Array<{
+      issue: VisualIntegrityIssue;
+      sourceIndex: number;
+      sourcePath: string;
+      sourceLocalTimeSeconds: number;
+    }>;
+    blockingEvidence: Array<{
+      issue: VisualIntegrityIssue;
+      sourceIndex: number;
+      sourcePath: string;
+      sourceLocalTimeSeconds: number;
+    }>;
+  }> {
+    const sourceOriginEvidence: Array<{
+      issue: VisualIntegrityIssue;
+      sourceIndex: number;
+      sourcePath: string;
+      sourceLocalTimeSeconds: number;
+    }> = [];
+    const blockingEvidence: typeof sourceOriginEvidence = [];
+    const blockingIssues: VisualIntegrityIssue[] = [];
+    const durations = visualReferences.map((item) => item.info.duration);
+
+    for (const issue of integrity.issues) {
+      if (issue.type === 'decode') {
+        blockingIssues.push(issue);
+        const source = locateVisualIssue(visualReferences, issue.startSeconds);
+        if (source) {
+          blockingEvidence.push({
+            issue,
+            sourceIndex: source.index,
+            sourcePath: source.item.path,
+            sourceLocalTimeSeconds: Math.max(
+              0,
+              issue.startSeconds - visualReferences.slice(0, source.index).reduce((sum, item) => sum + item.info.duration, 0)
+            )
+          });
+        }
+        continue;
+      }
+
+      const segments = mapVisualIssueToSourceSegments(issue, durations, 3);
+      let matched: { index: number; localStartSeconds: number } | null = null;
+      for (const segment of segments) {
+        const reference = visualReferences[segment.index];
+        if (!reference) continue;
+        const sourceHasIssue = await this.verifier.sourceContainsVisualIssue(
+          reference.path,
+          issue,
+          segment.localStartSeconds,
+          segment.localEndSeconds,
+          {
+            jobId: job.id + '-visual-reference-' + (segment.index + 1),
+            projectId: job.projectId,
+            signal
+          }
+        );
+        if (sourceHasIssue) {
+          matched = { index: segment.index, localStartSeconds: segment.localStartSeconds };
+          break;
+        }
+      }
+
+      if (matched) {
+        const reference = visualReferences[matched.index]!;
+        sourceOriginEvidence.push({
+          issue,
+          sourceIndex: matched.index,
+          sourcePath: reference.path,
+          sourceLocalTimeSeconds: matched.localStartSeconds
+        });
+        continue;
+      }
+
+      blockingIssues.push(issue);
+      const source = locateVisualIssue(visualReferences, issue.startSeconds);
+      if (source) {
+        const sourceStart = visualReferences
+          .slice(0, source.index)
+          .reduce((sum, item) => sum + item.info.duration, 0);
+        blockingEvidence.push({
+          issue,
+          sourceIndex: source.index,
+          sourcePath: source.item.path,
+          sourceLocalTimeSeconds: Math.max(0, issue.startSeconds - sourceStart)
+        });
+      }
+    }
+
+    const blockingReasons = blockingIssues.map((issue) => issue.message);
+    return {
+      integrity: {
+        ok: blockingIssues.length === 0,
+        reasons: blockingReasons,
+        issues: blockingIssues
+      },
+      sourceOriginEvidence,
+      blockingEvidence
+    };
   }
 
   private assertConcatCompatible(prepared: PreparedInput[]): void {

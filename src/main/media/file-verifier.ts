@@ -246,6 +246,80 @@ export class FileVerifier {
     return `Không giải mã được mẫu ${label} tại ${position}s: ${conciseProcessError(probe.stderrTail, decode.stderrTail) || `ffprobe=${probe.code}, ffmpeg=${decode.code}`}`;
   }
 
+  /* TUBMEDIA SOURCE-AWARE VISUAL BASELINE R38 */
+  public async sourceContainsVisualIssue(
+    path: string,
+    issue: VisualIntegrityIssue,
+    localStartSeconds: number,
+    localEndSeconds: number,
+    options: VerificationOptions = {}
+  ): Promise<boolean> {
+    if (issue.type === 'decode') return false;
+    const ffmpeg = this.tools.get('ffmpeg');
+    if (!ffmpeg.available || !ffmpeg.executablePath) return false;
+
+    const expectedIssueDuration = Math.max(
+      issue.type === 'black' ? 0.08 : 0.5,
+      issue.durationSeconds ?? Math.max(0, (issue.endSeconds ?? issue.startSeconds) - issue.startSeconds)
+    );
+    const padding = Math.max(1.5, Math.min(3, expectedIssueDuration));
+    const seekStart = Math.max(0, localStartSeconds - padding);
+    const requestedEnd = Math.max(localEndSeconds, localStartSeconds + expectedIssueDuration) + padding;
+    const windowDuration = Math.max(2.5, requestedEnd - seekStart);
+    let maxBlackDuration = 0;
+    let openFreezeStart: number | null = null;
+    let maxFreezeDuration = 0;
+    const probeJobId =
+      (options.jobId ?? 'visual-source') +
+      '-source-match-' + Date.now() + '-' + Math.floor(Math.random() * 1_000_000);
+
+    const result = await this.processes.run({
+      jobId: probeJobId,
+      ...(options.projectId ? { projectId: options.projectId } : {}),
+      tool: 'ffmpeg',
+      executablePath: ffmpeg.executablePath,
+      args: [
+        '-hide_banner', '-nostdin', '-v', 'info', '-xerror', '-err_detect', 'explode',
+        '-ss', seekStart.toFixed(3), '-i', path, '-t', windowDuration.toFixed(3),
+        '-map', '0:v:0', '-an',
+        '-vf', 'blackdetect=d=0.08:pix_th=0.02,freezedetect=n=-60dB:d=1',
+        '-f', 'null', '-'
+      ],
+      timeoutMs: Math.max(60_000, Math.min(10 * 60_000, windowDuration * 20_000)),
+      priority: 'below_normal',
+      ...(options.signal ? { signal: options.signal } : {}),
+      onStderrLine: (line) => {
+        if (line.includes('black_start:')) {
+          const duration = parseNumberAfter(line, 'black_duration');
+          if (duration !== null) maxBlackDuration = Math.max(maxBlackDuration, duration);
+        }
+        if (line.includes('lavfi.freezedetect.freeze_start:')) {
+          openFreezeStart = parseNumberAfter(line, 'lavfi.freezedetect.freeze_start');
+        }
+        if (line.includes('lavfi.freezedetect.freeze_end:')) {
+          const end = parseNumberAfter(line, 'lavfi.freezedetect.freeze_end');
+          const reported = parseNumberAfter(line, 'lavfi.freezedetect.freeze_duration');
+          const derived = end !== null && openFreezeStart !== null ? Math.max(0, end - openFreezeStart) : null;
+          const duration = reported ?? derived;
+          if (duration !== null) maxFreezeDuration = Math.max(maxFreezeDuration, duration);
+          openFreezeStart = null;
+        }
+      }
+    });
+    if (result.code !== 0) return false;
+    if (openFreezeStart !== null) {
+      maxFreezeDuration = Math.max(maxFreezeDuration, Math.max(0, windowDuration - openFreezeStart));
+    }
+
+    const minimumComparableDuration = Math.max(
+      issue.type === 'black' ? 0.08 : 0.5,
+      expectedIssueDuration * 0.45
+    );
+    return issue.type === 'black'
+      ? maxBlackDuration >= minimumComparableDuration
+      : maxFreezeDuration >= minimumComparableDuration;
+  }
+
   public async verifyVisualIntegrity(
     path: string,
     expectedDuration: number,

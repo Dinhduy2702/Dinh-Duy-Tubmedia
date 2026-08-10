@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { compareForConcat } from '@shared/utils/concat-compatibility.js';
 import type { MediaInfo } from '@shared/types/domain.js';
 import { isVisualIssueNearBoundary } from '../../src/main/media/file-verifier.js';
+import { mapVisualIssueToSourceSegments } from '../../src/main/merge/merge-engine.js';
 
 const info: MediaInfo = {
   duration: 60,
@@ -49,6 +50,31 @@ describe('merge output integrity hardening', () => {
   it('recognizes a visual anomaly at a concat boundary', () => {
     expect(isVisualIssueNearBoundary({ startSeconds: 2159.2, endSeconds: 2161.1 }, [2160])).toBe(true);
     expect(isVisualIssueNearBoundary({ startSeconds: 2100, endSeconds: 2101 }, [2160])).toBe(false);
+  });
+
+  it('maps output anomalies back to the original source timeline including both sides of a boundary', () => {
+    const segments = mapVisualIssueToSourceSegments(
+      { startSeconds: 59.4, endSeconds: 60.6, durationSeconds: 1.2 },
+      [60, 40],
+      1
+    );
+    expect(segments.map((segment) => segment.index)).toEqual([0, 1]);
+    expect(segments[0]?.localStartSeconds).toBeCloseTo(59.4, 3);
+    expect(segments[1]?.localStartSeconds).toBe(0);
+  });
+
+  it('keeps source-origin anomaly reconciliation before repair and quarantine', async () => {
+    const [merge, verifier] = await Promise.all([
+      readFile(new URL('../../src/main/merge/merge-engine.ts', import.meta.url), 'utf8'),
+      readFile(new URL('../../src/main/media/file-verifier.ts', import.meta.url), 'utf8')
+    ]);
+    expect(merge).toContain('visualReferenceInputs');
+    expect(merge).toContain('reconcileVisualIssuesWithOriginalSources');
+    expect(merge).toContain('sourceOriginVisualIssues');
+    expect(merge).toContain('visualIssueSources');
+    expect(merge.indexOf('reconcileVisualIssuesWithOriginalSources')).toBeLessThan(merge.indexOf('const boundaryCorruption'));
+    expect(verifier).toContain('sourceContainsVisualIssue');
+    expect(verifier).toContain('expectedIssueDuration * 0.45');
   });
 
   it('keeps the mandatory full-frame gate before final commit', async () => {
