@@ -1,3 +1,9 @@
+# Tubmedia 1.3.1
+
+- Phát hành updater thực sự cho user đang dùng 1.3.0.
+- Bao gồm toàn bộ hardening R38: Smart Merge an toàn theo source, full decode, A/V integrity, Quick Download recovery, queue/DISK_FULL recovery, notification center và typography thống nhất.
+- Không thay đổi appId/productName/installer identity; nâng cấp tại chỗ và giữ dữ liệu người dùng.
+
 # Tubmedia 1.3.0
 
 - Thiết kế lại không gian làm việc theo mô hình Editor Studio, nhóm điều hướng rõ ràng và giảm khối giao diện cố định không tương tác.

@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Stop"
 Set-StrictMode -Version 2.0
 
 function Write-Step {
@@ -165,7 +165,9 @@ if ([string]::IsNullOrWhiteSpace($installRegistryKey) -or [string]::IsNullOrWhit
 
 $releaseDir = Join-Path $projectRoot "release"
 $appSource = Join-Path $releaseDir "win-unpacked"
-$installerPath = Join-Path $releaseDir ($productName + "-Setup-" + $productVersion + "-x64.exe")
+$installerAssetName = "Download-video-Tubmedia-Setup-" + $productVersion + "-x64.exe"
+$installerPath = Join-Path $releaseDir $installerAssetName
+$legacyInstallerPath = Join-Path $releaseDir ($productName + "-Setup-" + $productVersion + "-x64.exe")
 $appIcon = Join-Path $projectRoot "resources\icon.ico"
 $electronBuilder = Join-Path $projectRoot "node_modules\.bin\electron-builder.cmd"
 $nsisScript = Join-Path $projectRoot "installer\video-studio-pro.nsi"
@@ -264,6 +266,9 @@ Write-Utf8BomFile -Path $generatedConfig -Content $configText
 
 if (Test-Path -LiteralPath $installerPath) {
   Remove-Item -LiteralPath $installerPath -Force
+}
+if ($legacyInstallerPath -ne $installerPath -and (Test-Path -LiteralPath $legacyInstallerPath)) {
+  Remove-Item -LiteralPath $legacyInstallerPath -Force
 }
 
 Write-Step "Compile installer with NSIS"

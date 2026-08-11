@@ -26,6 +26,6 @@ describe('lưu mốc thời lượng Tải nhanh', () => {
       version: string;
     };
 
-    expect(packageJson.version).toBe('1.3.0');
+    expect(packageJson.version).toBe('1.3.1');
   });
 });

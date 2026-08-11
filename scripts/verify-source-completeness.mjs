@@ -299,6 +299,24 @@ if (identity.appId !== build.appId || identity.productName !== build.productName
   pass('installer identity đồng bộ với package.json');
 }
 
+const installerBuildScript = await readText(join(root, 'scripts/build-installer-windows.ps1'));
+// TUBMEDIA_CANONICAL_UPDATER_ASSET_CONTRACT
+const canonicalInstallerAssetContract = [
+  '$installerAssetName = "Download-video-Tubmedia-Setup-" + $productVersion + "-x64.exe"',
+  '$installerPath = Join-Path $releaseDir $installerAssetName',
+  '  - url: "$($installer.Name)"',
+  'path: "$($installer.Name)"'
+];
+const legacyProductNameInstallerOutput =
+  '$installerPath = Join-Path $releaseDir ($productName + "-Setup-" + $productVersion + "-x64.exe")';
+if (
+  canonicalInstallerAssetContract.some((needle) => !installerBuildScript.includes(needle)) ||
+  installerBuildScript.includes(legacyProductNameInstallerOutput)
+) {
+  fail('build-installer-windows.ps1 không khóa tên asset updater canonical Download-video-Tubmedia-Setup-<version>-x64.exe.');
+} else {
+  pass('installer/updater asset dùng tên canonical ổn định');
+}
 const appConstants = await readText(join(root, 'src/shared/constants/app.ts'));
 if (!appConstants.includes(`v${packageJson.version}`)) {
   fail('APP_VERSION_LABEL không đồng bộ package.json.');
