@@ -17,6 +17,23 @@ import { friendlyIssue } from '../utils/ui-error';
 import { formatReleaseNotesForDisplay } from '../../../shared/release-notes';
 import { compareAppVersions, isNewerAppVersion } from '../../../shared/app-version';
 const channelLabel = (value: string | undefined): string => (value === 'beta' ? 'Thử nghiệm' : 'Ổn định');
+const UPDATE_CHECK_UI_TIMEOUT_MS = 12_000;
+
+/* TUBMEDIA_V132_UPDATE_UI_WATCHDOG_HOTFIX */
+function withUpdateUiTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  return Promise.race([
+    promise,
+    new Promise<T>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error('UPDATE_UI_CHECK_TIMEOUT: kiểm tra cập nhật quá lâu; giao diện đã được mở khóa.'));
+      }, timeoutMs);
+    })
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
 
 function bytes(value: number | undefined): string {
   const safe = value ?? 0;
@@ -67,7 +84,10 @@ export function UpdatesPage(): React.JSX.Element {
         await window.desktop.updates.install();
         return;
       }
-      const result = await window.desktop.updates[kind]();
+      const result =
+        kind === 'check'
+          ? await withUpdateUiTimeout(window.desktop.updates.check(), UPDATE_CHECK_UI_TIMEOUT_MS)
+          : await window.desktop.updates.download();
       setStatus(result);
       if (kind === 'check' && result.state === 'not-available') {
         const relation = result.info?.version
@@ -86,7 +106,22 @@ export function UpdatesPage(): React.JSX.Element {
         });
       }
     } catch (error) {
-      setError(error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+
+      if (kind === 'check' && message.includes('UPDATE_UI_CHECK_TIMEOUT')) {
+        if (status) {
+          setStatus({
+            ...status,
+            state: 'error',
+            checkedAt: new Date().toISOString(),
+            message:
+              'Kiểm tra cập nhật phản hồi quá chậm. Giao diện đã được mở khóa; bạn có thể tiếp tục làm việc.',
+            error: null
+          });
+        }
+      } else {
+        setError(message);
+      }
     } finally {
       setBusy(null);
     }
@@ -192,7 +227,11 @@ export function UpdatesPage(): React.JSX.Element {
               <b>{updateIssue.title}</b>
               <p>{updateIssue.message}</p>
               {updateIssue.steps.length > 0 && (
-                <ol>{updateIssue.steps.map((step) => <li key={step}>{step}</li>)}</ol>
+                <ol>
+                  {updateIssue.steps.map((step) => (
+                    <li key={step}>{step}</li>
+                  ))}
+                </ol>
               )}
             </div>
           )}
@@ -204,8 +243,7 @@ export function UpdatesPage(): React.JSX.Element {
             </button>
             {canDownload && (
               <button className="btn" disabled={busy !== null} onClick={() => void run('download')}>
-                <Download size={17} />
-                {busy === 'download' ? 'Đang tải...' : 'Tải trong nền'}
+                {busy === 'download' ? 'Đang cập nhật Tubmedia...' : 'Cập nhật ngay'}
               </button>
             )}
             {canInstall && (

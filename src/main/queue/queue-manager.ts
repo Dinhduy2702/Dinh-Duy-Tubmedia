@@ -1521,6 +1521,7 @@ export class QueueManager {
   }
   public async pauseProject(projectId: string): Promise<void> {
     /* TUBMEDIA_V132_PAUSE_PROJECT_RACE_SAFE */
+    /* TUBMEDIA_V132_PAUSE_PROJECT_TERMINAL_RACE_HOTFIX */
     let pausedJobs = 0;
 
     for (const snapshot of this.repo.list(projectId)) {
@@ -1539,9 +1540,10 @@ export class QueueManager {
       } catch (error) {
         const latest = this.repo.get(current.id);
 
-        // A worker can finish between the project snapshot and pause().
-        // Terminal/non-pausable jobs are a successful no-op for project pause.
-        if (error instanceof InvalidInputError && (!latest || !PAUSABLE_STATUSES.has(latest.status))) {
+        if (
+          error instanceof InvalidInputError &&
+          (!latest || TERMINAL_STATUSES.has(latest.status) || !PAUSABLE_STATUSES.has(latest.status))
+        ) {
           continue;
         }
 
@@ -1555,12 +1557,11 @@ export class QueueManager {
         projectId
       });
     } else {
-      // Do not turn an already-completed project back into "paused".
       this.syncProjectStatus(projectId);
       this.logger.info(
         'queue',
         'PROJECT_PAUSE_NOOP',
-        'Danh sách không còn tác vụ có thể tạm dừng; trạng thái hiện tại được giữ nguyên.',
+        'Danh sách không còn tác vụ có thể tạm dừng; tác vụ đã hoàn tất/bỏ qua được giữ nguyên.',
         { projectId }
       );
     }
@@ -1611,15 +1612,48 @@ export class QueueManager {
     return removed;
   }
   public async pauseAll(): Promise<void> {
+    /* TUBMEDIA_V132_PAUSE_ALL_TERMINAL_RACE_HOTFIX */
     this.paused = true;
     const projectIds = new Set<string>();
-    for (const job of this.repo.list()) {
-      if (!PAUSABLE_STATUSES.has(job.status)) continue;
-      await this.pause(job.id, false);
-      if (job.projectId) projectIds.add(job.projectId);
+
+    for (const snapshot of this.repo.list()) {
+      const current = this.repo.get(snapshot.id);
+
+      if (!current || !PAUSABLE_STATUSES.has(current.status)) {
+        continue;
+      }
+
+      try {
+        await this.pause(current.id, false);
+        const latest = this.repo.get(current.id);
+
+        if (latest?.status === 'paused' && current.projectId) {
+          projectIds.add(current.projectId);
+        }
+      } catch (error) {
+        const latest = this.repo.get(current.id);
+
+        if (
+          error instanceof InvalidInputError &&
+          (!latest || TERMINAL_STATUSES.has(latest.status) || !PAUSABLE_STATUSES.has(latest.status))
+        ) {
+          continue;
+        }
+
+        throw error;
+      }
     }
-    for (const projectId of projectIds) this.projects.setStatus(projectId, 'paused');
-    this.logger.info('queue', 'ALL_WORKFLOWS_PAUSED', 'Đã tạm dừng tất cả danh sách tải và quy trình ghép.');
+
+    for (const projectId of projectIds) {
+      this.projects.setStatus(projectId, 'paused');
+    }
+
+    this.logger.info(
+      'queue',
+      'ALL_WORKFLOWS_PAUSED',
+      'Đã tạm dừng các tác vụ còn có thể tạm dừng; tác vụ terminal được giữ nguyên.'
+    );
+
     this.emit();
   }
 
@@ -1636,21 +1670,40 @@ export class QueueManager {
     this.emit();
   }
   public async pause(jobId: string, emitChange = true): Promise<void> {
+    /* TUBMEDIA_V132_PAUSE_TERMINAL_NOOP_HOTFIX */
     const before = this.repo.get(jobId);
-    if (!before) throw new InvalidInputError('Tác vụ không tồn tại.');
+
+    if (!before) {
+      throw new InvalidInputError('Tác vụ không tồn tại.');
+    }
+
+    if (TERMINAL_STATUSES.has(before.status)) {
+      if (emitChange) this.emit();
+      return;
+    }
+
     if (!PAUSABLE_STATUSES.has(before.status)) {
       throw new InvalidInputError(`Không thể tạm dừng tác vụ ở trạng thái ${before.status}.`);
     }
+
     const active = this.active.get(jobId);
-    if (active) await this.processes.pauseByJob(jobId);
-    const current = this.repo.get(jobId);
-    if (current && !TERMINAL_STATUSES.has(current.status)) {
-      this.repo.update(
-        jobId,
-        { status: 'paused', speed: null, etaSeconds: null },
-        this.pauseResumeInput(before)
-      );
+    if (active) {
+      await this.processes.pauseByJob(jobId);
     }
+
+    const current = this.repo.get(jobId);
+
+    if (!current || !PAUSABLE_STATUSES.has(current.status)) {
+      if (emitChange) this.emit();
+      return;
+    }
+
+    this.repo.update(
+      jobId,
+      { status: 'paused', speed: null, etaSeconds: null },
+      this.pauseResumeInput(before)
+    );
+
     if (emitChange) this.emit();
   }
   public async resume(jobId: string, emitChange = true): Promise<void> {

@@ -1,3 +1,14 @@
+# Tubmedia 1.3.3
+
+- Cập nhật ngay: tải bản mới với tiến độ hiển thị trực tiếp trong Tubmedia.
+- Cài đặt silent và tự khởi động lại; không hiện wizard Next / Install / Finish.
+- Differential blockmap: ưu tiên tải các block thay đổi giữa 1.3.2 và 1.3.3.
+- Nếu differential không khả dụng, electron-updater fallback an toàn sang full installer.
+- Sửa kiểm tra cập nhật có thể làm giao diện bị kẹt.
+- Sửa Pause khi job đã Skipped/Completed.
+- Dead socket tải video được giới hạn khoảng 30 giây, giữ nguyên R49 retry/resume.
+- Giữ R18 adaptive YouTube fallback và toàn bộ hardening hiện có.
+
 # Tubmedia 1.3.2
 
 - Cải thiện khả năng tải YouTube với default client trước và web_safari fallback, không ép HLS toàn cục.

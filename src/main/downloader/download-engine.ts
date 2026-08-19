@@ -1,3 +1,4 @@
+/* TUBMEDIA_V132_DOWNLOAD_STALL_RECOVERY_R11 */
 import { copyFile, link, readdir, rename, rm, stat } from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { PROGRESS_MARKER } from '@shared/constants/app.js';
@@ -929,7 +930,7 @@ export class DownloadEngine {
       '--no-overwrites',
       '--no-keep-fragments',
       '--socket-timeout',
-      '120',
+      '30',
       '--retries',
       '10',
       '--fragment-retries',

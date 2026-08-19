@@ -85,8 +85,8 @@ export function useDesktopEvents(): void {
         severity: downloaded ? 'success' : 'info',
         title: downloaded ? 'Bản cập nhật đã sẵn sàng' : `Đã có Tubmedia ${version}`,
         message: downloaded
-          ? 'Bản cập nhật đã tải xong. Mở Trung tâm cập nhật để sao lưu và cài đặt khi các tác vụ đã dừng.'
-          : 'Một phiên bản Tubmedia mới hơn đang có sẵn. Bạn có thể tải trong nền và tiếp tục công việc.',
+          ? 'Bản cập nhật đã tải xong. Tubmedia đang chuẩn bị cài đặt và tự khởi động lại.'
+          : 'Một phiên bản Tubmedia mới hơn đang có sẵn. Chọn Cập nhật ngay để tải bản mới. Tiến độ sẽ hiển thị trực tiếp trong Tubmedia; tải xong ứng dụng sẽ tự cài đặt và khởi động lại.',
         sticky: downloaded
       });
     };

@@ -116,6 +116,8 @@ export class AppUpdateService {
 
   private configureRuntime(updater: AutoUpdater): void {
     updater.autoDownload = false;
+    /* TUBMEDIA_V133_DIFFERENTIAL_UPDATE */
+    updater.disableDifferentialDownload = false;
     updater.autoInstallOnAppQuit = true;
     updater.allowDowngrade = false;
   }
@@ -259,6 +261,9 @@ export class AppUpdateService {
   }
 
   public async check(silent = false): Promise<AppUpdateStatus> {
+    /* TUBMEDIA_V132_UPDATE_CHECK_NONBLOCKING_HOTFIX */
+    /* TUBMEDIA_V132_UPDATE_CHECK_ASYNC_CONTRACT */
+    await Promise.resolve();
     if (!app.isPackaged) {
       const status = this.baseStatus('disabled', 'Cập nhật trực tuyến chỉ hoạt động trong bản đã cài đặt.');
       this.emit(status);
@@ -291,14 +296,16 @@ export class AppUpdateService {
         ...this.status,
         message:
           this.status.state === 'checking'
-            ? 'Một lượt kiểm tra cập nhật đang chạy, Tubmedia không gửi yêu cầu trùng lặp.'
+            ? 'Một lượt kiểm tra cập nhật đang chạy nền. Bạn vẫn có thể tiếp tục sử dụng Tubmedia.'
             : this.status.message
       };
+
       if (!silent) this.emit(status);
       return status;
     }
 
     this.silentCheck = silent;
+
     let updater: AutoUpdater;
     try {
       updater = this.getUpdater();
@@ -309,7 +316,12 @@ export class AppUpdateService {
     }
 
     const startedAt = new Date().toISOString();
-    this.emit({ ...this.baseStatus('checking', 'Đang kiểm tra bản cập nhật...'), checkedAt: startedAt });
+    const checkingStatus: AppUpdateStatus = {
+      ...this.baseStatus('checking', 'Đang kiểm tra bản cập nhật trong nền...'),
+      checkedAt: startedAt
+    };
+
+    this.emit(checkingStatus);
 
     let updateRequest: ReturnType<AutoUpdater['checkForUpdates']>;
     try {
@@ -325,27 +337,43 @@ export class AppUpdateService {
         this.handleCheckFailure(error, silent);
       })
       .finally(() => {
+        // A second network check cannot start while networkCheckInFlight points
+        // to this transport, so clearing it on settlement is race-safe.
         this.networkCheckInFlight = null;
         this.silentCheck = false;
       });
+
     this.networkCheckInFlight = transport;
 
     const timeoutMs = silent ? SILENT_UPDATE_CHECK_TIMEOUT_MS : MANUAL_UPDATE_CHECK_TIMEOUT_MS;
-    const completed = await this.waitForNetworkCheck(transport, timeoutMs);
-    if (!completed) {
+
+    // Do NOT await the network promise here. IPC must return immediately so a
+    // slow/hung updater request can never freeze the renderer button/workspace.
+    void this.waitForNetworkCheck(transport, timeoutMs).then((completed) => {
+      if (completed || this.networkCheckInFlight !== transport) {
+        return;
+      }
+
       const seconds = Math.round(timeoutMs / 1_000);
       const status: AppUpdateStatus = {
-        ...this.baseStatus('error', `Máy chủ cập nhật chưa phản hồi sau ${seconds} giây.`),
+        ...this.baseStatus(
+          'error',
+          `Máy chủ cập nhật chưa phản hồi sau ${seconds} giây. Bạn vẫn có thể tiếp tục sử dụng Tubmedia.`
+        ),
         checkedAt: startedAt,
-        error: `UPDATE_CHECK_TIMEOUT: quá ${timeoutMs} ms. Yêu cầu mạng vẫn được theo dõi ở nền và sẽ tự cập nhật trạng thái nếu máy chủ phản hồi muộn.`
+        error: `UPDATE_CHECK_TIMEOUT: quá ${timeoutMs} ms. Yêu cầu mạng vẫn chạy nền nhưng không khóa giao diện.`
       };
-      this.emit(status);
+
+      if (silent) this.status = status;
+      else this.emit(status);
+
       this.logger.warn(
         'update',
-        'APP_UPDATE_CHECK_TIMEOUT',
+        'APP_UPDATE_CHECK_TIMEOUT_NONBLOCKING',
         status.error ?? status.message ?? 'Update timeout'
       );
-    }
+    });
+
     return this.status;
   }
 
@@ -366,7 +394,32 @@ export class AppUpdateService {
       );
     }
 
-    await this.getUpdater().downloadUpdate();
+    await this.getUpdater()
+      .downloadUpdate()
+      .then((downloadResult) => {
+        /* TUBMEDIA_V132_UPDATE_NOW_AUTO_INSTALL_AST */
+        this.logger.info(
+          'update',
+          'APP_UPDATE_NOW_READY_TO_INSTALL',
+          'Cập nhật đã tải xong; Tubmedia sẽ cài đặt im lặng và tự khởi động lại.'
+        );
+
+        setTimeout(() => {
+          try {
+            // electron-updater 6.x positional API:
+            // isSilent=true, isForceRunAfter=true.
+            this.getUpdater().quitAndInstall(true, true);
+          } catch (error) {
+            this.logger.warn(
+              'update',
+              'APP_UPDATE_NOW_INSTALL_START_FAILED',
+              error instanceof Error ? error.message : String(error)
+            );
+          }
+        }, 350);
+
+        return downloadResult;
+      });
     return this.status;
   }
   public async install(): Promise<void> {
@@ -391,7 +444,7 @@ export class AppUpdateService {
     await this.backups.create(undefined, false, 'update');
     await this.prepareForInstall();
     const updater = this.getUpdater();
-    setImmediate(() => updater.quitAndInstall(false, true));
+    setImmediate(() => /* TUBMEDIA_V132_SILENT_INSTALL_FALLBACK_AST */ updater.quitAndInstall(true, true));
   }
   private baseStatus(state: AppUpdateStatus['state'], message: string): AppUpdateStatus {
     return {
@@ -526,6 +579,9 @@ export class AppUpdateService {
     // electron-updater sets allowDowngrade=true whenever channel is assigned.
     // AppUpdateService owns the final policy and always re-locks downgrade safety.
     updater.allowDowngrade = false;
+    /* TUBMEDIA_V132_PROFESSIONAL_UPDATE_POLICY */
+    updater.autoDownload = false;
+    updater.autoInstallOnAppQuit = false;
 
     const feed = settings.appFeedUrl.trim();
     if (!feed || feed === this.configuredFeed) return;

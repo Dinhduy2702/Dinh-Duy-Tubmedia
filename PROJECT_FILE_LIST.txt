@@ -153,6 +153,8 @@ scripts/build-source-update.ps1
 scripts/check-native-build-tools.mjs
 scripts/create-release-config.mjs
 scripts/doctor-windows.ps1
+scripts/ensure-bundled-aria2.ps1
+scripts/generate-installer-blockmap.mjs
 scripts/generate-source-inventory.mjs
 scripts/native-runtime.mjs
 scripts/no-native-rebuild.mjs
@@ -163,9 +165,12 @@ scripts/validate-assets.mjs
 scripts/verify-adaptive-settings-hotfix8.mjs
 scripts/verify-audit-behavior.mjs
 scripts/verify-audit-hardening.mjs
+scripts/verify-bundled-aria2-v133.mjs
 scripts/verify-cleanup-navigation-ui.mjs
 scripts/verify-core-resilience-1.3.0.mjs
+scripts/verify-differential-updater-v133.mjs
 scripts/verify-download-recovery-r49.mjs
+scripts/verify-download-stall-recovery-v132.mjs
 scripts/verify-duration-persistence.mjs
 scripts/verify-editor-workflows-1.3.0.mjs
 scripts/verify-hdr-capcut-hotfix7.mjs
@@ -174,7 +179,9 @@ scripts/verify-js-yaml-security-pre132.mjs
 scripts/verify-merge-visual-boundary-hotfix11.mjs
 scripts/verify-notification-cookie-upgrade.mjs
 scripts/verify-pause-project-race-v132.mjs
+scripts/verify-pause-terminal-noop-hotfix-v132.mjs
 scripts/verify-pre132-user-release.mjs
+scripts/verify-professional-update-now-v132.mjs
 scripts/verify-quick-download-integration.mjs
 scripts/verify-r18-adaptive-download-batch-errors.mjs
 scripts/verify-recovery-upgrade.mjs
@@ -190,6 +197,7 @@ scripts/verify-tool-update-rate-limit.mjs
 scripts/verify-unified-app-updater-hotfix15.mjs
 scripts/verify-unified-download-progress-1.3.0.mjs
 scripts/verify-update-center-ui.mjs
+scripts/verify-update-check-nonblocking-hotfix-v132.mjs
 scripts/verify-update-notification-ux-pre132.mjs
 scripts/verify-updater-metadata-encoding-pre132.mjs
 scripts/verify-v0100.mjs

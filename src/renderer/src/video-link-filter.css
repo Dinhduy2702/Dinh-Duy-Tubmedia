@@ -1,0 +1,340 @@
+.video-filter-page {
+  display: grid;
+  gap: 16px;
+}
+
+.video-filter-hero {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent 42%),
+    var(--panel);
+}
+
+.video-filter-hero-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 13%, var(--panel2));
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+}
+
+.video-filter-hero span,
+.video-filter-result-head > div > span {
+  color: var(--muted);
+  font-size: var(--type-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.video-filter-hero h1,
+.video-filter-result h2,
+.video-filter-section-title h2 {
+  margin: 3px 0 0;
+}
+
+.video-filter-hero p,
+.video-filter-section-title p {
+  margin: 6px 0 0;
+  color: var(--muted);
+}
+
+.video-filter-hero-badges {
+  display: grid;
+  gap: 8px;
+}
+
+.video-filter-hero-badges b {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: var(--type-sm);
+  font-weight: 600;
+}
+
+.video-filter-config,
+.video-filter-result {
+  padding: 18px;
+}
+
+.video-filter-section-title {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.video-filter-section-title > svg {
+  margin-top: 2px;
+  color: var(--accent);
+}
+
+.video-filter-path-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.video-filter-links {
+  min-height: 170px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.video-filter-file-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 9px;
+}
+
+.video-filter-file-row > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-size: var(--type-sm);
+  white-space: nowrap;
+}
+
+.video-filter-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.video-filter-options > label {
+  display: flex;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel2);
+}
+
+.video-filter-options input {
+  margin-top: 3px;
+}
+
+.video-filter-options span {
+  display: grid;
+  gap: 3px;
+}
+
+.video-filter-options b {
+  font-size: var(--type-sm);
+}
+
+.video-filter-options small {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.video-filter-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.video-filter-preview-stale {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--warn);
+  font-size: var(--type-sm);
+}
+
+.video-filter-result-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.video-filter-result-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.video-filter-stats {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.video-filter-stats > div {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--panel2);
+}
+
+.video-filter-stats span {
+  color: var(--muted);
+  font-size: var(--type-xs);
+}
+
+.video-filter-stats b {
+  font-size: var(--type-lg);
+}
+
+.video-filter-warning {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--warn) 38%, var(--border));
+  border-radius: 11px;
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 7%, var(--panel2));
+}
+
+.video-filter-warning p {
+  margin: 0;
+}
+
+.video-filter-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.video-filter-table {
+  min-width: 820px;
+  margin: 0;
+}
+
+.video-filter-table td:first-child {
+  min-width: 320px;
+}
+
+.video-filter-table td:first-child b,
+.video-filter-table td:first-child small,
+.video-filter-error {
+  display: block;
+  max-width: 520px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.video-filter-table td:first-child small,
+.video-filter-error {
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.video-filter-status {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  font-weight: 600;
+}
+
+.video-filter-status.is-moved {
+  color: var(--good);
+}
+
+.video-filter-status.is-failed,
+.video-filter-error {
+  color: var(--bad);
+}
+
+.video-filter-status.is-preview {
+  color: var(--accent);
+}
+
+.video-filter-limit-note {
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--muted);
+  font-size: var(--type-sm);
+}
+
+.video-filter-unmatched {
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel2);
+}
+
+.video-filter-unmatched summary {
+  cursor: pointer;
+  padding: 12px 14px;
+  font-weight: 600;
+}
+
+.video-filter-unmatched > div {
+  max-height: 270px;
+  overflow: auto;
+  padding: 0 14px 12px;
+}
+
+.video-filter-unmatched p {
+  display: grid;
+  grid-template-columns: 150px 110px minmax(0, 1fr);
+  gap: 10px;
+  margin: 0;
+  padding: 7px 0;
+  border-top: 1px solid var(--border);
+  font-size: var(--type-sm);
+}
+
+.video-filter-unmatched p span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1050px) {
+  .video-filter-hero {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .video-filter-hero-badges {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .video-filter-options {
+    grid-template-columns: 1fr;
+  }
+
+  .video-filter-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .video-filter-path-grid,
+  .video-filter-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .video-filter-result-head {
+    flex-direction: column;
+  }
+
+  .video-filter-unmatched p {
+    grid-template-columns: 1fr;
+  }
+}
