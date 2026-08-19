@@ -111,7 +111,7 @@ function progressPhases(
     }
     map.set('finalize', {
       key: 'finalize',
-      label: status === 'skipped' ? 'Đã tải trước đó' : 'Đã hoàn tất',
+      label: status === 'skipped' ? stage || 'Đã dùng lại kết quả hợp lệ' : 'Đã hoàn tất',
       percent: 100,
       state: 'completed'
     });
@@ -331,11 +331,7 @@ export class QueueManager {
     await this.processes.resumeByJob(current.id);
     const observed = this.repo.get(current.id);
     if (!observed || TERMINAL_STATUSES.has(observed.status)) return observed;
-    const targetStatus = resolveResumeStatus(
-      observed.status,
-      current.input.resumeStatus,
-      active.job.type
-    );
+    const targetStatus = resolveResumeStatus(observed.status, current.input.resumeStatus, active.job.type);
     return this.repo.update(
       current.id,
       {
@@ -898,9 +894,11 @@ export class QueueManager {
             ? 'Ổ đĩa không đủ dung lượng'
             : code === 'PERMISSION_DENIED'
               ? 'Không truy cập được thư mục'
-              : code === 'NETWORK_CIRCUIT_OPEN'
-                ? 'Danh sách đã tạm dừng vì mạng không ổn định'
-                : 'Công cụ tải video chưa sẵn sàng';
+              : code === 'SOURCE_RATE_LIMITED'
+                ? 'Nguồn đang giới hạn yêu cầu'
+                : code === 'NETWORK_CIRCUIT_OPEN'
+                  ? 'Danh sách đã tạm dừng vì mạng không ổn định'
+                  : 'Công cụ tải video chưa sẵn sàng';
     const steps =
       code === 'COOKIES_EXPIRED'
         ? [
@@ -918,16 +916,25 @@ export class QueueManager {
             ? ['Giải phóng dung lượng hoặc đổi thư mục lưu.', 'Nhấn Tiếp tục sau khi đã sửa.']
             : code === 'PERMISSION_DENIED'
               ? ['Chọn thư mục khác có quyền ghi.', 'Không chạy ứng dụng bằng thư mục bị Windows bảo vệ.']
-              : code === 'NETWORK_CIRCUIT_OPEN'
+              : code === 'SOURCE_RATE_LIMITED'
                 ? [
-                    'Kiểm tra mạng, máy chủ trung gian hoặc cookies.',
-                    'Nhấn Tiếp tục để thử lại đúng danh sách.'
+                    'Không nhấn thử lại liên tục; hãy chờ để nền tảng gỡ giới hạn.',
+                    'Mở video trong trình duyệt bình thường và hoàn tất xác minh nếu được yêu cầu.',
+                    'Nếu phiên đăng nhập thay đổi, cập nhật cookies trong chính danh sách rồi nhấn Tiếp tục.'
                   ]
-                : ['Mở mục Công cụ.', 'Chọn Kiểm tra lại hoặc Sửa chữa tất cả.'];
+                : code === 'NETWORK_CIRCUIT_OPEN'
+                  ? [
+                      'Kiểm tra mạng, máy chủ trung gian hoặc cookies.',
+                      'Nhấn Tiếp tục để thử lại đúng danh sách.'
+                    ]
+                  : ['Mở mục Công cụ.', 'Chọn Kiểm tra lại hoặc Sửa chữa tất cả.'];
     const notice: AttentionNotice = {
       id: `blocking-${scope}-${code}`,
       severity:
-        code === 'DISK_FULL' || code === 'PERMISSION_DENIED' || code === 'NETWORK_CIRCUIT_OPEN'
+        code === 'DISK_FULL' ||
+        code === 'PERMISSION_DENIED' ||
+        code === 'SOURCE_RATE_LIMITED' ||
+        code === 'NETWORK_CIRCUIT_OPEN'
           ? 'warning'
           : 'error',
       title,
@@ -999,7 +1006,8 @@ export class QueueManager {
             resultMessage: result.resultMessage,
             reusedExistingFile: result.skipped,
             cookieFailureConfirmed: false,
-            cookieRetryRequested: false
+            cookieRetryRequested: false,
+            resumeStatus: null
           });
           break;
         }
@@ -1007,7 +1015,7 @@ export class QueueManager {
           await this.runClip(job, profile, signal);
           break;
         case 'merge':
-          await this.runMerge(job, profile, signal);
+          completionStatus = (await this.runMerge(job, profile, signal)) ? 'skipped' : 'completed';
           break;
         case 'analyze':
         case 'normalize':
@@ -1017,10 +1025,19 @@ export class QueueManager {
           );
       }
       const beforeDone = this.repo.get(job.id) ?? job;
+      /* TUBMEDIA STABLE COMPLETION CONTRACT HOTFIX12R7 */
       const finalStage = completionStatus === 'skipped' ? 'Đã tải trước đó' : 'Đã hoàn tất';
+      const synchronizedFinalStage =
+        job.type === 'merge' && job.input.timelineOnly === true
+          ? 'Timeline đã sẵn sàng'
+          : job.type === 'merge' && beforeDone.input.mergeRecoveryMode === 'verified-final'
+            ? 'Thành phẩm cũ hợp lệ · đã bỏ qua ghép'
+            : job.type === 'merge' && beforeDone.input.mergeRecoveryMode === 'verified-checkpoint'
+              ? 'Đã tiếp tục từ checkpoint hợp lệ'
+              : finalStage;
       this.repo.updateInput(job.id, {
-        progressStage: finalStage,
-        progressPhases: progressPhases(beforeDone, completionStatus, finalStage, 100),
+        progressStage: synchronizedFinalStage,
+        progressPhases: progressPhases(beforeDone, completionStatus, synchronizedFinalStage, 100),
         progressElapsedSeconds:
           typeof beforeDone.input.progressElapsedSeconds === 'number'
             ? beforeDone.input.progressElapsedSeconds
@@ -1036,9 +1053,17 @@ export class QueueManager {
       this.emitProgress(done);
       this.logger.info(
         'queue',
-        completionStatus === 'skipped' ? 'JOB_SKIPPED_EXISTING' : 'JOB_COMPLETED',
+        job.type === 'merge' && beforeDone.input.mergeRecoveryMode === 'verified-final'
+          ? 'MERGE_REUSED_VERIFIED_OUTPUT'
+          : job.type === 'merge' && beforeDone.input.mergeRecoveryMode === 'verified-checkpoint'
+            ? 'MERGE_RESUMED_VERIFIED_CHECKPOINT'
+            : completionStatus === 'skipped'
+              ? 'JOB_SKIPPED_EXISTING'
+              : 'JOB_COMPLETED',
         completionStatus === 'skipped'
-          ? 'Video đã tải trước đó, đã kiểm tra hợp lệ và bỏ qua tải lại.'
+          ? job.type === 'merge'
+            ? synchronizedFinalStage
+            : 'Video đã tải trước đó, đã kiểm tra hợp lệ và bỏ qua tải lại.'
           : `Hoàn tất tác vụ ${JOB_TYPE_TEXT[job.type]}.`,
         {
           jobId: job.id,
@@ -1084,11 +1109,20 @@ export class QueueManager {
         );
         await new Promise((resolve) => setTimeout(resolve, 350));
         if (!signal.aborted) {
-          this.repo.update(job.id, {
-            status: 'pending',
-            errorCode: null,
-            errorMessage: null
-          });
+          this.repo.update(
+            job.id,
+            {
+              status: 'pending',
+              errorCode: null,
+              errorMessage: null
+            },
+            {
+              resumeStatus: null,
+              cookieFailureConfirmed: true,
+              cookieRetryRequested: true,
+              progressStage: 'Đang thử lại bằng cookies đã cấu hình'
+            }
+          );
         }
         return;
       }
@@ -1099,7 +1133,8 @@ export class QueueManager {
         code === 'TOOL_NOT_FOUND' ||
         code === 'TOOL_HEALTH_CHECK_FAILED' ||
         code === 'DISK_FULL' ||
-        code === 'PERMISSION_DENIED'
+        code === 'PERMISSION_DENIED' ||
+        code === 'SOURCE_RATE_LIMITED'
       ) {
         const cookieBlocking = isCookieBlockingCode(code);
         const paused = this.repo.update(
@@ -1146,7 +1181,9 @@ export class QueueManager {
           metadata: { nextAttempt: job.attempts + 2, maxAttempts: job.maxAttempts }
         });
         await new Promise((resolve) => setTimeout(resolve, retryDelayMs(job.attempts + 1)));
-        if (!signal.aborted) this.repo.update(job.id, { status: 'pending' });
+        if (!signal.aborted) {
+          this.repo.update(job.id, { status: 'pending' }, { resumeStatus: null });
+        }
       } else {
         const failed = this.repo.update(job.id, {
           status: 'failed',
@@ -1193,27 +1230,80 @@ export class QueueManager {
     );
     this.items.setClipFile(item.id, path);
   }
-  private async runMerge(job: QueueJob, profile: ResourceProfile, signal: AbortSignal): Promise<void> {
+  private async runMerge(job: QueueJob, profile: ResourceProfile, signal: AbortSignal): Promise<boolean> {
     if (!job.projectId) throw new Error('Tác vụ ghép thiếu thông tin dự án.');
     const project = this.projects.get(job.projectId);
     if (!project) throw new Error('Dự án không tồn tại.');
     const allItems = this.items.list(project.id).filter((x) => x.enabled && x.validity !== 'invalid');
+    const timelineOnly = job.input.timelineOnly === true;
     const inputs = allItems.map((item) => {
       const source = item.sourceId ? this.sources.get(item.sourceId) : null;
-      const path = item.clipFile ?? source?.sourceFile;
+      const path = timelineOnly ? source?.sourceFile : (item.clipFile ?? source?.sourceFile);
       if (!path) throw new Error(`Video vị trí ${item.position} chưa sẵn sàng.`);
       return {
         path,
         label: source?.title ?? `Video_${String(item.position).padStart(3, '0')}`,
-        note: item.note
+        note: item.note,
+        sourcePath: source?.sourceFile ?? path,
+        sourceStartSeconds: item.timestampStartSeconds,
+        sourceEndSeconds: item.timestampEndSeconds,
+        sourceAudioMode: item.audioMode,
+        recoveryIdentity: JSON.stringify([
+          item.normalizedUrl,
+          item.timestampStartSeconds,
+          item.timestampEndSeconds,
+          item.audioMode
+        ])
       };
     });
+    /* TUBMEDIA TIMELINE ONLY QUEUE HOTFIX12 */
+    /* TUBMEDIA LEGAL TIMELINE QUEUE STATE HOTFIX12R8 */
+    if (timelineOnly) {
+      const timeline = await this.merger.createTimelineOnly(job, inputs, profile, signal, (progress) =>
+        this.updateProgress(job.id, progress.percent, progress.speed, progress.etaSeconds, 'merging', false, {
+          progressStage: progress.stage,
+          progressElapsedSeconds: progress.elapsedSeconds,
+          progressProcessedSeconds: progress.processedSeconds,
+          progressTotalSeconds: progress.totalSeconds,
+          progressCurrentItem: progress.currentItem,
+          progressItemCount: progress.itemCount
+        })
+      );
+      this.repo.updateInput(job.id, {
+        timelineOnly: true,
+        productName: project.finalFileName,
+        outputPath: null,
+        timelineTxt: null,
+        exportTimelineTxt: false,
+        resultMessage: 'Timeline đã sẵn sàng. Không có video thành phẩm nào được tạo.',
+        timelineItemCount: timeline.itemCount,
+        totalDuration: timeline.totalDuration,
+        timelineRows: timeline.rows
+      });
+      this.logger.info(
+        'merge',
+        'TIMELINE_ONLY_READY',
+        'Đã tính xong timeline chính xác từ video nguồn; không chạy ghép và không tạo MP4.',
+        {
+          jobId: job.id,
+          projectId: project.id,
+          metadata: { itemCount: timeline.itemCount, totalDuration: timeline.totalDuration }
+        }
+      );
+      this.projects.setStatus(project.id, 'completed');
+      return false;
+    }
     const quality =
       this.settings.profiles().qualities.find((x) => x.id === project.qualityProfileId) ??
       this.settings.profiles().qualities[0]!;
     let previousStage = '';
     let previousBucket = -1;
     const exportTimelineTxt = project.exportTimelineTxt;
+    const trustedOutputPath =
+      typeof job.input.trustedOutputPath === 'string' ? job.input.trustedOutputPath : null;
+    const legacyPendingPaths = Array.isArray(job.input.legacyPendingPaths)
+      ? job.input.legacyPendingPaths.filter((value): value is string => typeof value === 'string')
+      : [];
     const result = await this.merger.merge(
       job,
       inputs,
@@ -1249,25 +1339,53 @@ export class QueueManager {
             }
           });
         }
-      }
+      },
+      { trustedOutputPath, legacyPendingPaths }
     );
     this.repo.updateInput(job.id, {
       productName: project.finalFileName,
       outputPath: result.video,
+      mergeRecoveryMode: result.recoveryMode,
+      reusedExistingOutput: result.reusedExisting,
+      resultMessage:
+        result.recoveryMode === 'verified-final'
+          ? 'Thành phẩm hiện có đã được hậu kiểm đầy đủ và dùng lại; không ghép thêm video.'
+          : result.recoveryMode === 'verified-checkpoint'
+            ? 'Checkpoint hoàn chỉnh đã được xác minh; quy trình tiếp tục từ bước xuất cuối.'
+            : 'Đã ghép mới và hậu kiểm thành phẩm đầy đủ.',
       timelineTxt: result.timeline.txt,
       exportTimelineTxt,
       mergeWarnings: result.warnings,
+      mergeVisualBoundaryTransitions: result.visualBoundaryTransitions,
       timelineItemCount: result.timeline.itemCount,
       totalDuration: result.timeline.totalDuration,
       timelineRows: result.timeline.rows
     });
+    /* TUBMEDIA VISUAL BOUNDARY UX HOTFIX11 */
     for (const warning of result.warnings) {
       this.logger.warn('merge', 'MERGE_COMPLETED_WITH_WARNING', warning, {
         jobId: job.id,
-        projectId: project.id
+        projectId: project.id,
+        metadata: { visualBoundaryTransitions: result.visualBoundaryTransitions }
       });
     }
+    if (result.recoveryMode === 'verified-final') {
+      this.logger.info(
+        'merge',
+        'MERGE_REUSED_VERIFIED_OUTPUT',
+        'Thành phẩm hiện có đã vượt qua hậu kiểm đầy đủ; Tubmedia bỏ qua ghép lại.',
+        { jobId: job.id, projectId: project.id, metadata: { outputPath: result.video } }
+      );
+    } else if (result.recoveryMode === 'verified-checkpoint') {
+      this.logger.info(
+        'merge',
+        'MERGE_RESUMED_VERIFIED_CHECKPOINT',
+        'Checkpoint ghép hoàn chỉnh đã được xác minh; Tubmedia tiếp tục từ bước xuất cuối.',
+        { jobId: job.id, projectId: project.id, metadata: { outputPath: result.video } }
+      );
+    }
     this.projects.setStatus(project.id, 'completed');
+    return result.recoveryMode === 'verified-final';
   }
   public enqueueDownloads(projectId: string): QueueJob[] {
     const project = this.projects.get(projectId);
@@ -1306,7 +1424,18 @@ export class QueueManager {
     );
     return this.repo.list(projectId);
   }
-  public enqueueProject(projectId: string): QueueJob[] {
+  public enqueueProject(
+    projectId: string,
+    options: {
+      timelineOnly?: boolean;
+      requestSignature?: string;
+      trustedOutputPath?: string | null;
+      legacyPendingPaths?: string[];
+    } = {}
+  ): QueueJob[] {
+    /* TUBMEDIA VERIFIED MERGE RECOVERY HOTFIX12 */
+    /* TUBMEDIA TIMELINE ONLY QUEUE HOTFIX12 */
+    const timelineOnly = options.timelineOnly === true;
     const project = this.projects.get(projectId);
     if (!project) throw new Error('Dự án không tồn tại.');
     const items = this.items
@@ -1338,9 +1467,10 @@ export class QueueManager {
     for (const item of items) {
       const download = downloadBySource.get(item.sourceId!)!;
       if (
-        item.timestampStartSeconds !== null ||
-        item.timestampEndSeconds !== null ||
-        item.audioMode === 'mute'
+        !timelineOnly &&
+        (item.timestampStartSeconds !== null ||
+          item.timestampEndSeconds !== null ||
+          item.audioMode === 'mute')
       ) {
         const clip = this.repo.create({
           projectId,
@@ -1362,7 +1492,11 @@ export class QueueManager {
         productName: project.finalFileName,
         outputFolder: project.outputFolder,
         exportTimelineTxt: project.exportTimelineTxt,
-        progressStage: 'Chờ video nguồn',
+        timelineOnly,
+        mergeRequestSignature: options.requestSignature ?? null,
+        trustedOutputPath: options.trustedOutputPath ?? null,
+        legacyPendingPaths: options.legacyPendingPaths ?? [],
+        progressStage: timelineOnly ? 'Chờ video nguồn để tạo timeline' : 'Chờ video nguồn',
         progressElapsedSeconds: 0,
         progressProcessedSeconds: 0,
         progressTotalSeconds: 0,
@@ -1386,32 +1520,57 @@ export class QueueManager {
     this.emit();
   }
   public async pauseProject(projectId: string): Promise<void> {
-    this.projects.setStatus(projectId, 'paused');
-    for (const job of this.repo.list(projectId)) {
-      if (
-        [
-          'pending',
-          'retrying',
-          'analyzing',
-          'downloading',
-          'verifying',
-          'normalizing',
-          'processing',
-          'merging'
-        ].includes(job.status)
-      ) {
-        await this.pause(job.id, false);
+    /* TUBMEDIA_V132_PAUSE_PROJECT_RACE_SAFE */
+    let pausedJobs = 0;
+
+    for (const snapshot of this.repo.list(projectId)) {
+      const current = this.repo.get(snapshot.id);
+
+      if (!current || !PAUSABLE_STATUSES.has(current.status)) {
+        continue;
+      }
+
+      try {
+        await this.pause(current.id, false);
+
+        if (this.repo.get(current.id)?.status === 'paused') {
+          pausedJobs += 1;
+        }
+      } catch (error) {
+        const latest = this.repo.get(current.id);
+
+        // A worker can finish between the project snapshot and pause().
+        // Terminal/non-pausable jobs are a successful no-op for project pause.
+        if (error instanceof InvalidInputError && (!latest || !PAUSABLE_STATUSES.has(latest.status))) {
+          continue;
+        }
+
+        throw error;
       }
     }
-    this.logger.info('queue', 'PROJECT_PAUSED', 'Đã tạm dừng toàn bộ danh sách.', { projectId });
+
+    if (pausedJobs > 0) {
+      this.projects.setStatus(projectId, 'paused');
+      this.logger.info('queue', 'PROJECT_PAUSED', `Đã tạm dừng ${pausedJobs} tác vụ trong danh sách.`, {
+        projectId
+      });
+    } else {
+      // Do not turn an already-completed project back into "paused".
+      this.syncProjectStatus(projectId);
+      this.logger.info(
+        'queue',
+        'PROJECT_PAUSE_NOOP',
+        'Danh sách không còn tác vụ có thể tạm dừng; trạng thái hiện tại được giữ nguyên.',
+        { projectId }
+      );
+    }
+
     this.emit();
   }
   public async resumeProject(projectId: string): Promise<void> {
     const projectJobs = this.repo.list(projectId);
     const diskBlocked = projectJobs.filter(
-      (job) =>
-        job.errorCode === 'DISK_FULL' &&
-        (job.status === 'paused' || job.status === 'interrupted')
+      (job) => job.errorCode === 'DISK_FULL' && (job.status === 'paused' || job.status === 'interrupted')
     );
     if (diskBlocked.length > 0) {
       const disk = await this.diskSpaceStateForJobs(diskBlocked);
@@ -1546,6 +1705,7 @@ export class QueueManager {
         {
           cookieFailureConfirmed: true,
           cookieRetryRequested: true,
+          resumeStatus: null,
           progressStage: 'Cookies mới đã được lưu — đang tự tiếp tục'
         }
       );

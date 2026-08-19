@@ -1,3 +1,11 @@
+# Tubmedia 1.3.2
+
+- Cải thiện khả năng tải YouTube với default client trước và web_safari fallback, không ép HLS toàn cục.
+- Giữ nguyên lựa chọn chất lượng, R49 retry/resume và final media verification.
+- Gom lỗi video theo danh sách để giảm spam thông báo.
+- Sửa race condition khi tạm dừng đúng lúc tác vụ vừa hoàn thành.
+- Sửa metadata cập nhật latest.yml để tương thích electron-updater.
+
 # Tubmedia 1.3.1
 
 - Phát hành updater thực sự cho user đang dùng 1.3.0.

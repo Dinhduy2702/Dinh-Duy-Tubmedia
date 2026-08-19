@@ -8,6 +8,7 @@ import {
   RetryWithConfiguredCookiesError,
   DiskFullError,
   DownloadFailedError,
+  SourceRateLimitedError,
   ToolNotFoundError
 } from '@shared/errors/app-errors.js';
 import type { AppSettings, QueueJob, ResourceProfile, VerificationLevel } from '@shared/types/domain.js';
@@ -24,7 +25,7 @@ import {
   validateSelectedDownloadSize
 } from '@shared/utils/download-quality.js';
 import { FfmpegProgressTracker } from '@shared/utils/ffmpeg-progress.js';
-import { classifyFailure } from '@shared/utils/retry.js';
+import { classifyYtDlpFailure, sanitizeYtDlpDiagnostic } from '@shared/utils/download-failure.js';
 import { hasConfiguredCookies, shouldAttachConfiguredCookies } from '@shared/utils/cookie-policy.js';
 import { cleanExternalText } from '@shared/utils/text-encoding.js';
 import { downloadLinkTag } from '@shared/utils/url.js';
@@ -255,49 +256,50 @@ export class DownloadEngine {
     onProgress: (progress: DownloadProgress) => void,
     forceFaststart: boolean
   ): Promise<string> {
+    // HDR_CAPCUT_HOTFIX7_MASTER_PRESERVED
     const info = await this.analyzer.analyze(input, job.id);
-    const plan = planCapCutCompatibility(appSettings, info);
+    // ADAPTIVE_SETTINGS_HOTFIX8_EDIT_PLAN: source policy stays highest-quality; edit policy is independent.
+    const requestedEditMode = appSettings.downloadEditCopyMode ?? 'off';
+    const editSettings =
+      requestedEditMode === 'off'
+        ? appSettings
+        : { ...appSettings, downloadCompatibilityMode: requestedEditMode };
+    const plan = planCapCutCompatibility(editSettings, info);
     if (!plan.active || !plan.maxHeight) return input;
-    if (info.height < 1080) {
-      throw new DownloadFailedError(
-        `Nguồn chỉ đạt ${info.height}p. Chế độ CapCut trực tiếp yêu cầu tối thiểu 1080p và không phóng lớn ảo.`
-      );
-    }
-
-    const needsProcessing =
-      forceFaststart || plan.needsVideoTranscode || plan.needsAudioTranscode || plan.needsContainerRemux;
-    if (!needsProcessing) return input;
+    if (!forceFaststart && /\.capcut-edit-\d+\.mp4$/i.test(input)) return input;
 
     const ffmpeg = this.tools.get('ffmpeg');
     if (!ffmpeg.available || !ffmpeg.executablePath) {
       throw new ToolNotFoundError('ffmpeg');
     }
-    const capabilities = ffmpeg.capabilities;
-    if (plan.needsVideoTranscode && !capabilities.includes('libx264')) {
+    const capabilities = new Set(ffmpeg.capabilities);
+    if (!capabilities.has('aac')) {
+      throw new DownloadFailedError('FFmpeg hiện tại thiếu bộ mã hóa AAC nên chưa thể tạo bản dựng CapCut.');
+    }
+    if (plan.requiresHdrToneMap && (!capabilities.has('zscale') || !capabilities.has('tonemap'))) {
       throw new DownloadFailedError(
-        'FFmpeg hiện tại thiếu libx264 nên chưa thể tạo video H.264 tương thích CapCut.'
+        'Video master là HDR nhưng FFmpeg thiếu zscale hoặc tonemap. Bản master vẫn được giữ nguyên; hãy vào Trung tâm công cụ và chọn Sửa chữa tất cả rồi thử tạo lại bản edit.'
       );
     }
-    if (plan.needsAudioTranscode && !capabilities.includes('aac')) {
+    if (plan.requiresColorConversion && !capabilities.has('zscale')) {
       throw new DownloadFailedError(
-        'FFmpeg hiện tại thiếu bộ mã hóa AAC nên chưa thể chuẩn hóa âm thanh cho CapCut.'
+        'Video cần chuyển màu BT.709 nhưng FFmpeg thiếu zscale. Bản master vẫn được giữ nguyên.'
       );
     }
-    if (plan.requiresHdrToneMap && (!capabilities.includes('zscale') || !capabilities.includes('tonemap'))) {
+
+    const encoderCandidates = ['h264_nvenc', 'h264_qsv', 'h264_amf', 'libx264'].filter((encoder) =>
+      capabilities.has(encoder)
+    );
+    if (encoderCandidates.length === 0) {
       throw new DownloadFailedError(
-        'Video là HDR/10-bit nhưng FFmpeg thiếu zscale hoặc tonemap. Ứng dụng không tự đổi màu sai; hãy vào Trung tâm công cụ và chọn Sửa chữa tất cả.'
+        'FFmpeg không có bộ mã hóa H.264 phù hợp. Bản master vẫn được giữ nguyên; hãy sửa chữa bộ công cụ FFmpeg.'
       );
-    }
-    if (plan.requiresColorConversion && !capabilities.includes('zscale')) {
-      throw new DownloadFailedError('Video cần chuyển không gian màu sang BT.709 nhưng FFmpeg thiếu zscale.');
     }
 
     const extension = extname(input);
-    const desiredOutput = input.slice(0, -extension.length) + '.mp4';
-    const replacesInput = resolve(desiredOutput) === resolve(input);
-    const output = replacesInput ? desiredOutput : await nonConflictingPath(desiredOutput);
-    const pending = output.replace(/\.mp4$/i, `.tubmedia-${job.id}.capcut.pending.mp4`);
-    const backup = output.replace(/\.mp4$/i, `.capcut-source-${Date.now()}.bak`);
+    const stem = extension ? input.slice(0, -extension.length) : input;
+    const output = `${stem}.capcut-edit-${Date.now()}.mp4`;
+    const pending = output.replace(/\.mp4$/i, '.pending.mp4');
     await rm(pending, { force: true });
 
     const filters: string[] = [];
@@ -318,68 +320,11 @@ export class DownloadEngine {
       );
     }
     if (info.fps > 60.5) filters.push('fps=60');
-    if (plan.needsVideoTranscode) filters.push('setsar=1', 'format=yuv420p');
+    filters.push('setsar=1', 'format=yuv420p');
 
-    const args = ['-hide_banner', '-y', '-i', input, '-map', '0:v:0', '-map', '0:a:0?'];
-    if (plan.needsVideoTranscode) {
-      if (filters.length) args.push('-vf', filters.join(','));
-      args.push(
-        '-c:v',
-        'libx264',
-        '-preset',
-        'fast',
-        '-crf',
-        '18',
-        '-profile:v',
-        'high',
-        '-pix_fmt',
-        'yuv420p',
-        '-tag:v',
-        'avc1',
-        '-threads',
-        String(resource.ffmpegThreads),
-        '-filter_threads',
-        String(resource.filterThreads),
-        '-filter_complex_threads',
-        String(resource.filterComplexThreads)
-      );
-    } else {
-      args.push('-c:v', 'copy');
-    }
-    if (!info.audioCodec) {
-      args.push('-an');
-    } else if (plan.needsAudioTranscode) {
-      args.push('-c:a', 'aac', '-b:a', '256k', '-ar', '48000');
-      if ((info.channels ?? 2) > 2) args.push('-ac', '2');
-    } else {
-      args.push('-c:a', 'copy');
-    }
-    args.push(
-      '-color_primaries',
-      'bt709',
-      '-color_trc',
-      'bt709',
-      '-colorspace',
-      'bt709',
-      '-color_range',
-      'tv',
-      '-movflags',
-      '+faststart',
-      '-max_muxing_queue_size',
-      '2048',
-      '-progress',
-      'pipe:1',
-      '-nostats',
-      pending
-    );
-
-    const stageLabel = plan.needsVideoTranscode
-      ? plan.requiresHdrToneMap
-        ? 'Đang chuyển HDR/10-bit sang SDR BT.709 cho CapCut'
-        : 'Đang chuẩn hóa H.264 8-bit để dựng trực tiếp trong CapCut'
-      : plan.needsAudioTranscode
-        ? 'Đang chuẩn hóa âm thanh AAC 48 kHz cho CapCut'
-        : 'Đang đóng gói MP4 faststart cho CapCut';
+    const stageLabel = plan.requiresHdrToneMap
+      ? 'Đang giữ bản master HDR và tạo bản edit SDR BT.709 mượt cho CapCut'
+      : 'Đang giữ bản master và tạo bản edit H.264 CFR mượt cho CapCut';
     onProgress({
       percent: 0,
       speed: null,
@@ -388,45 +333,139 @@ export class DownloadEngine {
       stageLabel,
       elapsedSeconds: 0
     });
-    this.logger.info('download', 'CAPCUT_COMPATIBILITY_STARTED', `${stageLabel}. Không tạo tệp Proxy.`, {
-      jobId: job.id,
-      ...(job.projectId ? { projectId: job.projectId } : {}),
-      metadata: {
-        input,
-        mode: plan.mode,
-        reasons: plan.reasons,
-        videoTranscode: plan.needsVideoTranscode,
-        audioTranscode: plan.needsAudioTranscode
+    this.logger.info(
+      'download',
+      'CAPCUT_EDIT_COPY_STARTED',
+      `${stageLabel}. Video tải gốc không bị thay thế hoặc xóa.`,
+      {
+        jobId: job.id,
+        ...(job.projectId ? { projectId: job.projectId } : {}),
+        metadata: {
+          master: input,
+          output,
+          mode: plan.mode,
+          reasons: plan.reasons,
+          hdrToneMap: plan.requiresHdrToneMap,
+          encoderCandidates
+        }
       }
-    });
+    );
 
-    const tracker = new FfmpegProgressTracker(info.duration);
-    const result = await this.processes.run({
-      jobId: job.id,
-      projectId: job.projectId,
-      tool: 'ffmpeg',
-      executablePath: ffmpeg.executablePath,
-      args,
-      priority: resource.processPriority,
-      signal,
-      timeoutMs: 48 * 60 * 60 * 1000,
-      onStdoutLine: (line) => {
-        const snapshot = tracker.update(line);
-        if (!snapshot) return;
-        onProgress({
-          percent: snapshot.percent,
-          speed: snapshot.speed,
-          etaSeconds: snapshot.etaSeconds,
-          stage: 'processing',
-          stageLabel,
-          elapsedSeconds: snapshot.elapsedSeconds
-        });
+    let completed = false;
+    let usedEncoder = '';
+    let lastError = '';
+    for (const encoder of encoderCandidates) {
+      await rm(pending, { force: true });
+      const args = [
+        '-hide_banner',
+        '-y',
+        '-i',
+        input,
+        '-map',
+        '0:v:0',
+        '-map',
+        '0:a:0?',
+        '-vf',
+        filters.join(','),
+        '-c:v',
+        encoder
+      ];
+      if (encoder === 'h264_nvenc') {
+        args.push('-preset', 'p5', '-cq', '17', '-b:v', '0');
+      } else if (encoder === 'h264_qsv') {
+        args.push('-preset', 'medium', '-global_quality', '17');
+      } else if (encoder === 'h264_amf') {
+        args.push('-quality', 'quality', '-qp_i', '17', '-qp_p', '19');
+      } else {
+        args.push('-preset', 'veryfast', '-crf', '17');
       }
-    });
-    if (result.code !== 0) {
+      args.push(
+        '-profile:v',
+        'high',
+        '-pix_fmt',
+        'yuv420p',
+        '-tag:v',
+        'avc1',
+        '-fps_mode',
+        'cfr',
+        '-force_key_frames',
+        'expr:gte(t,n_forced*1)',
+        '-threads',
+        String(resource.ffmpegThreads),
+        '-filter_threads',
+        String(resource.filterThreads),
+        '-filter_complex_threads',
+        String(resource.filterComplexThreads)
+      );
+      if (!info.audioCodec) {
+        args.push('-an');
+      } else {
+        args.push('-c:a', 'aac', '-b:a', '256k', '-ar', '48000');
+        if ((info.channels ?? 2) > 2) args.push('-ac', '2');
+      }
+      args.push(
+        '-color_primaries',
+        'bt709',
+        '-color_trc',
+        'bt709',
+        '-colorspace',
+        'bt709',
+        '-color_range',
+        'tv',
+        '-movflags',
+        '+faststart',
+        '-max_muxing_queue_size',
+        '2048',
+        '-progress',
+        'pipe:1',
+        '-nostats',
+        pending
+      );
+
+      const tracker = new FfmpegProgressTracker(info.duration);
+      const result = await this.processes.run({
+        jobId: job.id,
+        projectId: job.projectId,
+        tool: 'ffmpeg',
+        executablePath: ffmpeg.executablePath,
+        args,
+        priority: resource.processPriority,
+        signal,
+        timeoutMs: 48 * 60 * 60 * 1000,
+        onStdoutLine: (line) => {
+          const snapshot = tracker.update(line);
+          if (!snapshot) return;
+          onProgress({
+            percent: snapshot.percent,
+            speed: snapshot.speed,
+            etaSeconds: snapshot.etaSeconds,
+            stage: 'processing',
+            stageLabel,
+            elapsedSeconds: snapshot.elapsedSeconds
+          });
+        }
+      });
+      if (result.code === 0) {
+        completed = true;
+        usedEncoder = encoder;
+        break;
+      }
+      lastError = result.stderrTail || `FFmpeg encoder ${encoder} thất bại.`;
+      this.logger.warn(
+        'download',
+        'CAPCUT_ENCODER_ATTEMPT_FAILED',
+        `Bộ mã hóa ${encoder} không khởi động được; Tubmedia sẽ tự thử bộ mã hóa tiếp theo.`,
+        {
+          jobId: job.id,
+          ...(job.projectId ? { projectId: job.projectId } : {}),
+          metadata: { encoder, master: input }
+        }
+      );
+    }
+    if (!completed) {
       await rm(pending, { force: true });
       throw new DownloadFailedError(
-        `Không thể chuẩn hóa video cho CapCut: ${result.stderrTail || 'FFmpeg thất bại.'}`
+        `Không thể tạo bản edit CapCut sau khi đã thử GPU và CPU. Bản master vẫn an toàn: ${lastError || 'FFmpeg thất bại.'}`
       );
     }
 
@@ -437,39 +476,23 @@ export class DownloadEngine {
     });
     if (!checked.ok) {
       await rm(pending, { force: true });
-      throw new DownloadFailedError(`Tệp CapCut sau xử lý không hợp lệ: ${checked.reasons.join('; ')}`);
+      throw new DownloadFailedError(
+        `Bản edit CapCut không hợp lệ; video master vẫn được giữ nguyên: ${checked.reasons.join('; ')}`
+      );
     }
 
-    if (replacesInput) {
-      await rename(input, backup);
-    }
-    let committedOutput = output;
-    try {
-      if (replacesInput) await rename(pending, output);
-      else committedOutput = await commitFileWithoutOverwrite(pending, output);
-    } catch (error) {
-      if (replacesInput) {
-        await rename(backup, input).catch(() => undefined);
-      }
-      throw error;
-    }
-    if (replacesInput) {
-      await rm(backup, { force: true });
-    } else {
-      await rm(input, { force: true });
-    }
-
+    await rename(pending, output);
     this.logger.info(
       'download',
-      'CAPCUT_COMPATIBILITY_COMPLETED',
-      `Đã tạo MP4 H.264 SDR BT.709 dùng trực tiếp trong CapCut, không cần Proxy: ${basename(committedOutput)}.`,
+      'CAPCUT_EDIT_COPY_COMPLETED',
+      `Đã giữ nguyên video master ${basename(input)} và tạo bản edit mượt ${basename(output)} bằng ${usedEncoder}.`,
       {
         jobId: job.id,
         ...(job.projectId ? { projectId: job.projectId } : {}),
-        metadata: { output: committedOutput, mode: plan.mode }
+        metadata: { master: input, output, encoder: usedEncoder, mode: plan.mode }
       }
     );
-    return committedOutput;
+    return output;
   }
 
   private async prepareDownloadedFile(
@@ -481,7 +504,11 @@ export class DownloadEngine {
     onProgress: (progress: DownloadProgress) => void,
     forceFaststart = false
   ): Promise<string> {
-    if (isCapCutDownloadMode(appSettings.downloadCompatibilityMode)) {
+    // ADAPTIVE_SETTINGS_HOTFIX8_PREPARE
+    if (
+      isCapCutDownloadMode(appSettings.downloadCompatibilityMode) ||
+      (appSettings.downloadEditCopyMode ?? 'off') !== 'off'
+    ) {
       return this.makeCapCutCompatible(job, input, appSettings, resource, signal, onProgress, forceFaststart);
     }
     return this.remuxToPreferredContainer(job, input, appSettings, resource, signal, onProgress);
@@ -904,17 +931,26 @@ export class DownloadEngine {
       '--socket-timeout',
       '120',
       '--retries',
-      '60',
+      '10',
       '--fragment-retries',
-      '60',
+      '20',
       '--extractor-retries',
-      '30',
+      '5',
+      '--file-access-retries',
+      '5',
       '--retry-sleep',
-      'http:3',
+      'http:exp=1:20',
       '--retry-sleep',
-      'fragment:3',
+      'fragment:exp=1:20',
+      '--retry-sleep',
+      'extractor:exp=1:10',
+      '--retry-sleep',
+      'file_access:exp=1:10',
+      '--abort-on-unavailable-fragments',
+      '--extractor-args',
+      'youtube:player_client=default,web_safari',
       '--concurrent-fragments',
-      String(Math.max(1, Math.min(8, appSettings.downloadConcurrentFragments))),
+      String(Math.max(1, Math.min(job.attempts > 0 ? 1 : 8, appSettings.downloadConcurrentFragments))),
       '--http-chunk-size',
       '10M',
       '--no-mtime',
@@ -1141,78 +1177,150 @@ export class DownloadEngine {
     });
     if (result.code !== 0 || !finalPath) {
       const text = `${result.stderrTail}\n${result.stdoutTail}`;
-      const kind = classifyFailure(text);
-      const lines = [
-        ...new Set(
-          text
-            .split(/\r?\n/)
-            .map((line) => line.trim())
-            .filter(Boolean)
-        )
-      ];
-      const summary = lines.slice(-5).join(' | ') || `yt-dlp trả về mã thoát ${result.code}`;
-      const lower = text.toLowerCase();
-      const requestedFormatUnavailable =
-        lower.includes('requested format is not available') ||
-        lower.includes('requested format is not available, use --list-formats');
-      if (isCapCutDownloadMode(appSettings.downloadCompatibilityMode) && requestedFormatUnavailable) {
-        throw new DownloadFailedError(
-          'Nguồn không có định dạng video từ 1080p đến mức CapCut đã chọn. Ứng dụng không tải 720p và không phóng lớn giả.'
-        );
-      }
-      const browserCookieDatabaseLocked =
-        attachConfiguredCookies &&
-        (lower.includes('could not copy chrome cookie database') ||
-          lower.includes('could not copy edge cookie database') ||
-          lower.includes('cookie database is locked') ||
-          (lower.includes('could not copy') && lower.includes('cookie database')) ||
-          (lower.includes('permission denied') && appSettings.cookiesBrowser !== 'none'));
-      if (browserCookieDatabaseLocked) {
-        throw new BrowserCookieLockedError(
-          appSettings.cookiesBrowser === 'none' ? 'trình duyệt Chromium' : appSettings.cookiesBrowser,
-          appSettings.cookiesBrowserProfile
-        );
-      }
-      if (kind === 'authentication') {
-        this.cookieRequiredJobs.add(job.id);
-        if (!attachConfiguredCookies && hasConfiguredCookies(appSettings)) {
-          throw new RetryWithConfiguredCookiesError();
-        }
-        if (attachConfiguredCookies) {
-          throw new CookiesExpiredError();
-        }
-        throw new AuthenticationRequiredError(
-          'Video đang tải vừa yêu cầu đăng nhập hoặc cookies hợp lệ. Chỉ video này được tạm dừng; các video phía sau và các danh sách khác vẫn tiếp tục. ' +
-            'Mở khung Cookies của chính danh sách này và chọn một trong ba cách: trình duyệt, dán trực tiếp hoặc chọn tệp cookies. Sau khi lưu, video này sẽ tự tiếp tục.'
-        );
-      }
-      this.logger.error(
-        'download',
-        'YTDLP_DOWNLOAD_FAILED',
-        'yt-dlp không hoàn tất được video. Chi tiết kỹ thuật đã được giữ trong nhật ký chẩn đoán.',
-        {
-          jobId: job.id,
-          projectId: project.id,
-          metadata: { exitCode: result.code, failureClass: kind, technicalSummary: summary }
-        }
-      );
-      if (kind === 'disk') {
-        throw new DiskFullError(project.sourceFolder);
-      }
-      if (kind === 'tool') {
-        throw new ToolNotFoundError('yt-dlp hoặc công cụ tải phụ trợ');
-      }
-      if (kind === 'retryable') {
-        throw new DownloadFailedError(
-          'Kết nối mạng hoặc máy chủ video đang không ổn định. Ứng dụng sẽ tự thử lại theo thời gian chờ; nếu lỗi lặp lại, danh sách sẽ tạm dừng để tránh lặp thông báo.',
-          true
-        );
-      }
-      throw new DownloadFailedError(
-        'Video không khả dụng, URL không được hỗ trợ hoặc nền tảng đang từ chối truy cập. Mở Nhật ký riêng của danh sách để xem mã chẩn đoán rồi kiểm tra lại liên kết.'
-      );
-    }
+      const failure = classifyYtDlpFailure(text);
+      const technicalSummary = sanitizeYtDlpDiagnostic(text);
+      const failureDetails = {
+        exitCode: result.code,
+        failureCategory: failure.category,
+        failureSubtype: failure.subtype,
+        httpStatus: failure.httpStatus,
+        progressPercent: latestProgress.percent,
+        technicalSummary,
+        clientPolicy: 'youtube-adaptive-r18-default-first-web-safari-fallback',
+        recovery: result.code !== 0 ? 'verify-existing-final-before-retry' : 'locate-final-file-before-retry'
+      };
 
+      let recoveredPath: string | null = null;
+      if (finalPath) {
+        const existsOnDisk = await stat(finalPath)
+          .then((entry) => entry.isFile())
+          .catch(() => false);
+        if (existsOnDisk) {
+          const directCheck = await this.verifier
+            .verify(finalPath, 'fast', undefined, {
+              jobId: job.id,
+              projectId: project.id,
+              signal
+            })
+            .catch(() => ({ ok: false }));
+          if (directCheck.ok) recoveredPath = finalPath;
+        }
+      }
+
+      if (!recoveredPath) {
+        const recoveredByLink = await this.findExistingByLinkTag(
+          project.sourceFolder,
+          linkTag,
+          job,
+          workflow
+        );
+        recoveredPath =
+          recoveredByLink ??
+          (await this.findExistingByMediaId(
+            project.sourceFolder,
+            resolvedId ?? source.mediaId,
+            job,
+            workflow
+          ));
+      }
+
+      if (recoveredPath) {
+        finalPath = recoveredPath;
+        this.logger.warn(
+          'download',
+          'YTDLP_EXIT_RECOVERED_VALID_FILE',
+          'yt-dlp kết thúc không sạch nhưng Tubmedia đã tìm thấy tệp final hợp lệ. Tệp vẫn phải vượt qua toàn bộ kiểm tra sâu/chất lượng trước khi được coi là hoàn tất.',
+          {
+            jobId: job.id,
+            projectId: project.id,
+            metadata: {
+              ...failureDetails,
+              recoveredPath,
+              recovery: 'verified-final-file'
+            }
+          }
+        );
+      } else {
+        const lower = text.toLowerCase();
+        const requestedFormatUnavailable =
+          lower.includes('requested format is not available') ||
+          lower.includes('requested format is not available, use --list-formats');
+        if (isCapCutDownloadMode(appSettings.downloadCompatibilityMode) && requestedFormatUnavailable) {
+          throw new DownloadFailedError(
+            'Nguồn không có định dạng video từ 1080p đến mức CapCut đã chọn. Ứng dụng không tải 720p và không phóng lớn giả.',
+            false,
+            failureDetails
+          );
+        }
+
+        const browserCookieDatabaseLocked =
+          attachConfiguredCookies &&
+          (lower.includes('could not copy chrome cookie database') ||
+            lower.includes('could not copy edge cookie database') ||
+            lower.includes('cookie database is locked') ||
+            (lower.includes('could not copy') && lower.includes('cookie database')) ||
+            (lower.includes('permission denied') && appSettings.cookiesBrowser !== 'none'));
+        if (browserCookieDatabaseLocked) {
+          throw new BrowserCookieLockedError(
+            appSettings.cookiesBrowser === 'none' ? 'trình duyệt Chromium' : appSettings.cookiesBrowser,
+            appSettings.cookiesBrowserProfile
+          );
+        }
+
+        if (failure.category === 'authentication') {
+          this.cookieRequiredJobs.add(job.id);
+          if (!attachConfiguredCookies && hasConfiguredCookies(appSettings)) {
+            throw new RetryWithConfiguredCookiesError(failureDetails);
+          }
+          if (attachConfiguredCookies) {
+            throw new CookiesExpiredError(failureDetails);
+          }
+          throw new AuthenticationRequiredError(
+            'Video đang tải vừa yêu cầu đăng nhập hoặc cookies hợp lệ. Chỉ video này được tạm dừng; các video phía sau và các danh sách khác vẫn tiếp tục. ' +
+              'Mở khung Cookies của chính danh sách này và chọn một trong ba cách: trình duyệt, dán trực tiếp hoặc chọn tệp cookies. Sau khi lưu, video này sẽ tự tiếp tục.',
+            failureDetails
+          );
+        }
+
+        this.logger.error(
+          'download',
+          'YTDLP_DOWNLOAD_FAILED',
+          'yt-dlp không hoàn tất được video. Nguyên nhân đã được phân loại và chi tiết kỹ thuật an toàn được giữ trong nhật ký chẩn đoán.',
+          {
+            jobId: job.id,
+            projectId: project.id,
+            metadata: failureDetails
+          }
+        );
+
+        if (failure.category === 'disk') {
+          throw new DiskFullError(project.sourceFolder);
+        }
+        if (failure.category === 'tool') {
+          throw new ToolNotFoundError('yt-dlp hoặc công cụ tải phụ trợ');
+        }
+        if (failure.category === 'rate_limit') {
+          throw new SourceRateLimitedError(failureDetails);
+        }
+        if (failure.retryable) {
+          throw new DownloadFailedError(
+            failure.subtype === 'http_403'
+              ? 'Máy chủ video từ chối tạm thời một yêu cầu (HTTP 403). Tubmedia sẽ giảm tải song song, làm mới lần tải và tiếp tục từ tệp .part nếu có; nếu lỗi lặp lại, danh sách sẽ tạm dừng.'
+              : failure.subtype === 'fragment'
+                ? 'Một phần dữ liệu video bị gián đoạn. Tubmedia sẽ làm mới manifest/client, loại luồng YouTube web_safari dễ lỗi, giảm còn một fragment song song và tiếp tục an toàn từ tệp .part.'
+                : 'Kết nối mạng hoặc máy chủ video đang không ổn định. Tubmedia sẽ thử lại với thời gian chờ tăng dần; nếu lỗi lặp lại, danh sách sẽ tạm dừng.',
+            true,
+            failureDetails
+          );
+        }
+
+        throw new DownloadFailedError(
+          'Video không khả dụng, URL không được hỗ trợ hoặc nền tảng đang từ chối truy cập. Mở Nhật ký riêng của danh sách để xem loại lỗi đã được phân loại.',
+          false,
+          failureDetails
+        );
+      }
+    }
     const initialCheck = await this.verifier.verify(finalPath, 'fast', undefined, {
       jobId: job.id,
       projectId: project.id,
@@ -1250,7 +1358,10 @@ export class DownloadEngine {
     const info = await this.analyzer.analyze(finalPath, job.id);
     const selectedSize = validateSelectedDownloadSize(
       info.fileSize,
-      isCapCutDownloadMode(appSettings.downloadCompatibilityMode) ? null : selectedExpectedBytes
+      isCapCutDownloadMode(appSettings.downloadCompatibilityMode) ||
+        (appSettings.downloadEditCopyMode ?? 'off') !== 'off'
+        ? null
+        : selectedExpectedBytes
     );
     if (!selectedSize.ok) {
       const quarantined = await this.quarantine.move(
@@ -1404,7 +1515,9 @@ export class DownloadEngine {
         }
       }
     );
-    const capCutReady = isCapCutDownloadMode(appSettings.downloadCompatibilityMode);
+    const capCutReady =
+      isCapCutDownloadMode(appSettings.downloadCompatibilityMode) ||
+      (appSettings.downloadEditCopyMode ?? 'off') !== 'off';
     const acceptedMinimumFallback =
       appSettings.downloadAllowBelowMinimum &&
       appSettings.downloadMinHeight > 0 &&
@@ -1413,7 +1526,7 @@ export class DownloadEngine {
       outputPath: finalPath,
       skipped: false,
       resultMessage: capCutReady
-        ? `Đã tải và chuẩn hóa để dựng trực tiếp trong CapCut, không cần Proxy: ${finalPath}`
+        ? `Đã giữ nguyên video master chất lượng cao và tạo riêng bản edit mượt cho CapCut: ${finalPath}`
         : workflow === 'download-merge'
           ? `Đã tải nguồn tốt nhất mà ${source.platform || 'nền tảng'} cung cấp để ghép, chưa mã hóa giảm chất lượng: ${finalPath}`
           : acceptedMinimumFallback

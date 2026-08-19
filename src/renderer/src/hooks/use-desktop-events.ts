@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import type { AppUpdateStatus, LogEntry, QueueJob } from '@shared/types/domain';
 import { useAppStore } from '../stores/app-store';
 import { isNewerAppVersion } from '../../../shared/app-version';
+import { coalesceBatchJobFailureAttention } from '../../../shared/batch-error-notification-aggregator.js';
 
 const JOB_FLUSH_MS = 150;
 const LOG_FLUSH_MS = 280;
@@ -68,10 +69,7 @@ export function useDesktopEvents(): void {
 
       const version = status.info?.version ?? '';
       const remoteIsNewer = isNewerAppVersion(version, status.currentVersion);
-      if (
-        !remoteIsNewer ||
-        (status.state !== 'available' && status.state !== 'downloaded')
-      ) {
+      if (!remoteIsNewer || (status.state !== 'available' && status.state !== 'downloaded')) {
         return;
       }
 
@@ -113,7 +111,11 @@ export function useDesktopEvents(): void {
         if (notice.code === 'DISK_SPACE_RECOVERED') {
           store.dismissAttentionByCodes(['DISK_FULL'], notice.projectId);
         }
-        store.setAttention(notice);
+        /* TUBMEDIA_R18_R10_CENTRAL_ATTENTION_AGGREGATION */
+        const aggregatedNotice = coalesceBatchJobFailureAttention(notice);
+        if (aggregatedNotice) {
+          store.setAttention(aggregatedNotice);
+        }
       }),
       window.desktop.events.onToolsChanged((tools) => useAppStore.setState({ tools }))
     ];
