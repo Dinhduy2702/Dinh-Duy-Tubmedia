@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { Readable } from 'node:stream';
 import { finished } from 'node:stream/promises';
 import { setTimeout as delay } from 'node:timers/promises';
-import extract from 'extract-zip';
+import extract from '@tubmedia/safe-extract-zip';
 import { UpdateFailedError, RollbackFailedError } from '@shared/errors/app-errors.js';
 import type { ToolStatus, ToolUpdateCheck } from '@shared/types/domain.js';
 import type { ToolManager, ToolName } from '../tools/tool-manager.js';

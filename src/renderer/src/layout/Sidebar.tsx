@@ -7,6 +7,7 @@ import {
   History,
   Home,
   Info,
+  ListFilter,
   RefreshCcw,
   Settings,
   Sparkles,
@@ -33,6 +34,12 @@ const groups: Array<{ label: string; items: SidebarItem[] }> = [
         label: 'Tải xuống',
         hint: 'Một video, nhiều URL và danh sách',
         icon: Download
+      },
+      {
+        id: 'filter-by-links',
+        label: 'Lọc video theo link',
+        hint: 'Đối chiếu link với video đã tải',
+        icon: ListFilter
       },
       { id: 'download-merge', label: 'Tải & Ghép', hint: 'Cắt, chuẩn hóa và Smart Merge', icon: Sparkles },
       { id: 'activity', label: 'Hàng đợi', hint: 'Điều khiển mọi tác vụ', icon: Activity },

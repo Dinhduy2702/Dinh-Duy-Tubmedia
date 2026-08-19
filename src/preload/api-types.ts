@@ -26,6 +26,7 @@ import type {
 
 import type { SystemCleanupRequest, SystemCleanupStatus } from '@shared/system-cleanup.js';
 import type { QuickDownloadRequest, QuickDownloadStatus } from '@shared/quick-download.js';
+import type { VideoLinkFilterRequest, VideoLinkFilterResult } from '@shared/video-link-filter.js';
 export interface DesktopApi {
   workbench: {
     state(): Promise<WorkbenchState>;
@@ -176,6 +177,15 @@ export interface DesktopApi {
     resume(taskId: string): Promise<QuickDownloadStatus | null>;
     cancel(taskId: string): Promise<QuickDownloadStatus | null>;
     revealOutput(taskId: string): Promise<boolean>;
+  };
+  videoFilter: {
+    chooseLinksFile(): Promise<{ path: string; text: string } | null>;
+    run(input: VideoLinkFilterRequest): Promise<VideoLinkFilterResult>;
+    saveReport(input: {
+      defaultName: string;
+      content: string;
+      defaultFolder?: string;
+    }): Promise<string | null>;
   };
   updates: {
     status(): Promise<AppUpdateStatus>;

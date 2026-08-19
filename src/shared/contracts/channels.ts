@@ -116,6 +116,11 @@ export const IPC = {
     cancel: 'quick-download:cancel',
     revealOutput: 'quick-download:reveal-output'
   },
+  videoFilter: {
+    chooseLinksFile: 'video-filter:choose-links-file',
+    run: 'video-filter:run',
+    saveReport: 'video-filter:save-report'
+  },
   updates: {
     status: 'updates:status',
     check: 'updates:check',

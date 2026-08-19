@@ -36,6 +36,7 @@ import {
   workbenchSlotSchema,
   systemCleanupRequestSchema,
   systemCleanupRunSchema,
+  videoLinkFilterRequestSchema,
   quickDownloadRequestSchema,
   quickDownloadTaskSchema
 } from '@shared/schemas/ipc.js';
@@ -47,11 +48,13 @@ import { redactSecrets } from '@shared/utils/secret-redaction.js';
 import type { AppContext } from '../app/app-context.js';
 
 import { SystemCleanupService } from '../system/system-cleanup-service.js';
+import { VideoLinkFilterService } from '../media/video-link-filter-service.js';
 type MaybePromise<T> = T | Promise<T>;
 
 export function registerIpc(ctx: AppContext): void {
   // TUBMEDIA_FEATURE_SERVICES
   const systemCleanup = new SystemCleanupService();
+  const videoLinkFilter = new VideoLinkFilterService(ctx.tools, ctx.logger);
 
   const handle = <Input, Output>(
     channel: string,
@@ -380,6 +383,47 @@ export function registerIpc(ctx: AppContext): void {
   handle(IPC.systemCleanup.status, systemCleanupRunSchema, ({ runId }) => systemCleanup.status(runId));
   handle(IPC.systemCleanup.cancel, systemCleanupRunSchema, ({ runId }) => systemCleanup.cancel(runId));
 
+  // TUBMEDIA_VIDEO_LINK_FILTER_HANDLERS
+  noArgs(IPC.videoFilter.chooseLinksFile, async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [
+        {
+          name: 'Danh sách link',
+          extensions: ['txt', 'csv', 'log', 'md', 'json', 'url', 'list']
+        }
+      ]
+    });
+    const selected = result.filePaths[0];
+    if (result.canceled || !selected) return null;
+    const text = await readFile(selected, 'utf8');
+    if (Buffer.byteLength(text, 'utf8') > 10_000_000) {
+      throw new InvalidInputError('File danh sách link vượt quá giới hạn 10 MB.');
+    }
+    return { path: selected, text };
+  });
+  handle(IPC.videoFilter.run, videoLinkFilterRequestSchema, (request) => {
+    if (
+      request.mode === 'move' &&
+      (ctx.queue.activeCount() > 0 || ctx.processes.count() > 0 || ctx.quickDownload.isActive())
+    ) {
+      throw new InvalidInputError(
+        'Không thể chuyển video khi Tubmedia còn tác vụ tải, cắt, chuẩn hóa, ghép hoặc Tải nhanh đang chạy. Xem trước vẫn có thể dùng.'
+      );
+    }
+    return videoLinkFilter.run(request);
+  });
+  handle(IPC.videoFilter.saveReport, saveTextFileSchema, async ({ defaultName, content, defaultFolder }) => {
+    const suggested = defaultName.toLowerCase().endsWith('.json') ? defaultName : `${defaultName}.json`;
+    const result = await dialog.showSaveDialog({
+      defaultPath: defaultFolder ? join(defaultFolder, suggested) : suggested,
+      filters: [{ name: 'Báo cáo JSON', extensions: ['json'] }]
+    });
+    if (result.canceled || !result.filePath) return null;
+    const filePath = result.filePath.toLowerCase().endsWith('.json') ? result.filePath : `${result.filePath}.json`;
+    await writeFile(filePath, content, 'utf8');
+    return filePath;
+  });
   // TUBMEDIA_QUICK_DOWNLOAD_HANDLERS
   noArgs(IPC.quickDownload.defaults, () => ({
     outputDirectory: ctx.quickDownload.defaultOutputDirectory()

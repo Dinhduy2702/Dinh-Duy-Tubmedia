@@ -1,4 +1,5 @@
-import { rename, rm } from 'node:fs/promises';
+import { readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { extname, join } from 'node:path';
 import { sanitizeProgress } from '@shared/utils/progress-policy.js';
 import type { ProjectItem, QueueJob, ResourceProfile } from '@shared/types/domain.js';
@@ -22,6 +23,49 @@ export class ClipEngine {
     const outputExtension = muteOnly && sourceExtension ? sourceExtension : '.mp4';
     const final = join(tempFolder, `clip-${item.position}-${item.id}${outputExtension}`);
     const pending = `${final}.pending${outputExtension}`;
+    /* TUBMEDIA VERIFIED CLIP CHECKPOINT HOTFIX12 */
+    const rangeStart = item.timestampStartSeconds ?? 0;
+    if (
+      (item.timestampStartSeconds !== null && (!Number.isFinite(item.timestampStartSeconds) || item.timestampStartSeconds < 0)) ||
+      (item.timestampEndSeconds !== null && (!Number.isFinite(item.timestampEndSeconds) || item.timestampEndSeconds <= rangeStart))
+    ) {
+      throw new ProcessingFailedError('Mốc cắt không hợp lệ: thời điểm kết thúc phải lớn hơn thời điểm bắt đầu và các mốc không được âm.');
+    }
+    const expected = item.timestampEndSeconds !== null
+      ? item.timestampEndSeconds - (item.timestampStartSeconds ?? 0)
+      : 0;
+    const receiptPath = `${final}.tubmedia-checkpoint.json`;
+    const inputFile = await stat(input);
+    const checkpointSignature = createHash('sha256')
+      .update(JSON.stringify([
+        input.replaceAll('\\', '/').toLowerCase(),
+        inputFile.size,
+        Math.round(inputFile.mtimeMs),
+        item.timestampStartSeconds,
+        item.timestampEndSeconds,
+        item.audioMode
+      ]), 'utf8')
+      .digest('hex');
+    let checkpointMatches = false;
+    try {
+      const receipt = JSON.parse(await readFile(receiptPath, 'utf8')) as { signature?: unknown };
+      checkpointMatches = receipt.signature === checkpointSignature;
+    } catch {
+      checkpointMatches = false;
+    }
+    if (checkpointMatches) {
+      const existingCheck = await this.verifier.verify(
+        final, 'standard', expected > 0 ? expected : undefined,
+        {
+          jobId: job.id + '-clip-checkpoint', projectId: job.projectId, signal,
+          expectedStreams: { video: true, audio: item.audioMode !== 'mute' }
+        }
+      );
+      if (existingCheck.ok) {
+        onProgress(100);
+        return final;
+      }
+    }
     const args = ['-hide_banner', '-y', '-xerror', '-err_detect', 'explode'];
     if (item.timestampStartSeconds !== null) args.push('-ss', String(item.timestampStartSeconds));
     args.push('-i', input);
@@ -40,7 +84,6 @@ export class ClipEngine {
       args.push('-movflags', '+faststart');
     }
     args.push('-progress', 'pipe:1', '-nostats', pending);
-    const expected = item.timestampEndSeconds !== null ? item.timestampEndSeconds - (item.timestampStartSeconds ?? 0) : 0;
     const result = await this.processes.run({ jobId: job.id, projectId: job.projectId, tool: 'ffmpeg', executablePath: ffmpeg.executablePath, args, priority: resource.processPriority, signal, timeoutMs: 24 * 60 * 60 * 1000, onStdoutLine: line => { if (!line.startsWith('out_time_ms=') || !Number.isFinite(expected) || expected <= 0) return; const microseconds=Number(line.slice(12)); if (!Number.isFinite(microseconds)) return; onProgress(sanitizeProgress(microseconds / 1_000_000 / expected * 100)); } });
     if (result.code !== 0) {
       try { await this.quarantine.move(pending, join(tempFolder, '_quarantine'), result.stderrTail || 'Tạo đoạn video thất bại.', job.id); } catch { /* pending chưa tồn tại */ }
@@ -64,6 +107,11 @@ export class ClipEngine {
       throw error;
     }
     if (hadExisting) await rm(backup, { force: true });
+    await writeFile(
+      receiptPath,
+      JSON.stringify({ version: 1, signature: checkpointSignature, createdAt: new Date().toISOString() }, null, 2) + '\n',
+      'utf8'
+    ).catch(() => undefined);
     onProgress(100); return final;
   }
 }

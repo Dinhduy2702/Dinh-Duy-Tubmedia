@@ -352,24 +352,15 @@ export class AppUpdateService {
   public async download(): Promise<AppUpdateStatus> {
     const currentVersion = app.getVersion();
 
-    if (
-      this.status.state === 'downloaded' &&
-      isNewerAppVersion(this.status.info?.version, currentVersion)
-    ) {
+    if (this.status.state === 'downloaded' && isNewerAppVersion(this.status.info?.version, currentVersion)) {
       return this.status;
     }
 
-    if (
-      this.status.state !== 'available' ||
-      !isNewerAppVersion(this.status.info?.version, currentVersion)
-    ) {
+    if (this.status.state !== 'available' || !isNewerAppVersion(this.status.info?.version, currentVersion)) {
       await this.check(false);
     }
 
-    if (
-      this.status.state !== 'available' ||
-      !isNewerAppVersion(this.status.info?.version, currentVersion)
-    ) {
+    if (this.status.state !== 'available' || !isNewerAppVersion(this.status.info?.version, currentVersion)) {
       throw new Error(
         this.status.message ?? 'Không có phiên bản mới hơn để tải. Tubmedia không cho phép hạ cấp.'
       );
@@ -532,6 +523,9 @@ export class AppUpdateService {
     const channel = settings.appUpdateChannel === 'beta' ? 'beta' : 'latest';
     updater.allowPrerelease = settings.appUpdateChannel === 'beta';
     updater.channel = channel;
+    // electron-updater sets allowDowngrade=true whenever channel is assigned.
+    // AppUpdateService owns the final policy and always re-locks downgrade safety.
+    updater.allowDowngrade = false;
 
     const feed = settings.appFeedUrl.trim();
     if (!feed || feed === this.configuredFeed) return;

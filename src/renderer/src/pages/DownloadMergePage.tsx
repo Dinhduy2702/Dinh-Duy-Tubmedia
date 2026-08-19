@@ -69,6 +69,8 @@ interface MergeForm {
   qualityProfileId: string;
   resourceProfileId: string;
   exportTimelineTxt: boolean;
+  /** TUBMEDIA TIMELINE ONLY UI HOTFIX12 */
+  timelineOnly: boolean;
 }
 
 type MergeMap<T> = Record<MergeLaneId, T>;
@@ -129,6 +131,14 @@ function clampCount(value: number): 1 | 2 | 3 | 4 {
 function mapOf<T>(factory: (slot: MergeLaneId) => T): MergeMap<T> {
   return Object.fromEntries(MERGE_IDS.map((slot) => [slot, factory(slot)])) as MergeMap<T>;
 }
+function loadTimelineOnlyMode(slot: MergeLaneId): boolean {
+  try { return window.localStorage.getItem('tubmedia.merge.timelineOnly.' + slot) === '1'; }
+  catch { return false; }
+}
+function saveTimelineOnlyMode(slot: MergeLaneId, enabled: boolean): void {
+  try { window.localStorage.setItem('tubmedia.merge.timelineOnly.' + slot, enabled ? '1' : '0'); }
+  catch { /* renderer storage is best-effort */ }
+}
 function childFolder(base: string, name: string): string {
   return base ? `${base.replace(/[\\/]+$/, '')}\\${name}` : '';
 }
@@ -162,7 +172,8 @@ function emptyMerge(
     finalFileName,
     qualityProfileId: settings?.defaultQualityProfileId ?? qualities[0]?.id ?? 'quality-source-size',
     resourceProfileId: settings?.defaultResourceProfileId ?? resources[0]?.id ?? 'resource-interactive',
-    exportTimelineTxt: false
+    exportTimelineTxt: false,
+    timelineOnly: loadTimelineOnlyMode(slot)
   };
 }
 function recommendedMergeLimit(hardware: HardwareProfile | null): { pipelines: 1 | 2 | 3 | 4; note: string } {
@@ -302,7 +313,7 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(digits)} ${units[unit]}`;
 }
 
-function MergeDetailedProgress({ jobs }: { jobs: QueueJob[] }): React.JSX.Element {
+function MergeDetailedProgress({ jobs, timelineOnly }: { jobs: QueueJob[]; timelineOnly: boolean }): React.JSX.Element {
   const job = jobs.find((item) => item.type === 'merge');
   const stage = jobInputText(job, 'progressStage') ?? (job ? statusLabel(job.status) : 'Chờ tạo tác vụ ghép');
   const elapsed = numberFromJob(job, 'progressElapsedSeconds');
@@ -317,7 +328,7 @@ function MergeDetailedProgress({ jobs }: { jobs: QueueJob[] }): React.JSX.Elemen
     <section className="merge-detailed-progress">
       <header>
         <div>
-          <span>TIẾN TRÌNH GHÉP RIÊNG</span>
+          <span>{timelineOnly ? 'TIẾN TRÌNH TIMELINE' : 'TIẾN TRÌNH GHÉP RIÊNG'}</span>
           <b>{stage}</b>
         </div>
         <Gauge size={19} />
@@ -384,6 +395,10 @@ function MergeProductionPanel({
   const downloadJobs = jobs.filter((job) => job.type === 'download');
   const clipJobs = jobs.filter((job) => job.type === 'clip' || job.type === 'normalize');
   const mergeJob = jobs.find((job) => job.type === 'merge');
+  const timelineOnly = form.timelineOnly || mergeJob?.input.timelineOnly === true;
+  /* TUBMEDIA VERIFIED MERGE RECOVERY HOTFIX12 */
+  const recoveryMode = jobInputText(mergeJob, 'mergeRecoveryMode');
+  const resultMessage = jobInputText(mergeJob, 'resultMessage');
   const timelineRows = timelineRowsOf(mergeJob);
   const hasActualTimeline = timelineRows.length > 0;
   const safeName = sanitizeFilename(form.finalFileName.replace(/\.mp4$/i, ''), 'Thành phẩm');
@@ -392,34 +407,20 @@ function MergeProductionPanel({
     ['completed', 'skipped'].includes(job.status)
   ).length;
   const completedClips = clipJobs.filter((job) => ['completed', 'skipped'].includes(job.status)).length;
-  const mergeCompleted = mergeJob?.status === 'completed';
+  const mergeCompleted = Boolean(mergeJob && ['completed', 'skipped'].includes(mergeJob.status));
 
-  const stages = [
-    {
-      label: 'Tải nguồn',
-      value: downloadJobs.length ? `${completedDownloads}/${downloadJobs.length}` : 'Chờ bắt đầu',
-      active: downloadJobs.some((job) => ACTIVE.includes(job.status)),
-      done: downloadJobs.length > 0 && completedDownloads === downloadJobs.length
-    },
-    {
-      label: 'Cắt / chuẩn hóa',
-      value: clipJobs.length ? `${completedClips}/${clipJobs.length}` : 'Tự động khi cần',
-      active: clipJobs.some((job) => ACTIVE.includes(job.status)),
-      done: clipJobs.length > 0 && completedClips === clipJobs.length
-    },
-    {
-      label: 'Ghép thành phẩm',
-      value: mergeJob ? `${statusLabel(mergeJob.status)} · ${mergeJob.progress.toFixed(1)}%` : 'Chờ nguồn',
-      active: Boolean(mergeJob && ACTIVE.includes(mergeJob.status)),
-      done: mergeCompleted
-    },
-    {
-      label: 'Timeline TXT',
-      value: mergeCompleted ? 'Sẵn sàng chọn nơi lưu' : 'Xuất thủ công sau khi ghép',
-      active: false,
-      done: mergeCompleted
-    }
-  ];
+  const stages = timelineOnly
+    ? [
+        { label: 'Tải hoặc dùng lại nguồn', value: downloadJobs.length ? `${completedDownloads}/${downloadJobs.length}` : 'Chờ bắt đầu', active: downloadJobs.some((job) => ACTIVE.includes(job.status)), done: downloadJobs.length > 0 && completedDownloads === downloadJobs.length },
+        { label: 'Đọc thời lượng', value: mergeJob ? `${statusLabel(mergeJob.status)} · ${mergeJob.progress.toFixed(1)}%` : 'Không chạy ghép video', active: Boolean(mergeJob && ACTIVE.includes(mergeJob.status)), done: mergeCompleted },
+        { label: 'Timeline TXT', value: mergeCompleted ? 'Sẵn sàng xem và xuất' : 'Đang chờ metadata nguồn', active: false, done: mergeCompleted }
+      ]
+    : [
+        { label: 'Tải nguồn', value: downloadJobs.length ? `${completedDownloads}/${downloadJobs.length}` : 'Chờ bắt đầu', active: downloadJobs.some((job) => ACTIVE.includes(job.status)), done: downloadJobs.length > 0 && completedDownloads === downloadJobs.length },
+        { label: 'Cắt / chuẩn hóa', value: clipJobs.length ? `${completedClips}/${clipJobs.length}` : 'Tự động khi cần', active: clipJobs.some((job) => ACTIVE.includes(job.status)), done: clipJobs.length > 0 && completedClips === clipJobs.length },
+        { label: 'Ghép thành phẩm', value: recoveryMode === 'verified-final' ? 'Đã hậu kiểm và dùng lại' : recoveryMode === 'verified-checkpoint' ? 'Đã tiếp tục từ checkpoint' : mergeJob ? `${statusLabel(mergeJob.status)} · ${mergeJob.progress.toFixed(1)}%` : 'Chờ nguồn', active: Boolean(mergeJob && ACTIVE.includes(mergeJob.status)), done: mergeCompleted },
+        { label: 'Timeline TXT', value: mergeCompleted ? 'Sẵn sàng chọn nơi lưu' : 'Xuất thủ công sau khi ghép', active: false, done: mergeCompleted }
+      ];
   const copyTimelineMark = async (row: TimelineRow): Promise<void> => {
     const text = formatTimelineCopyText(row.start);
     try {
@@ -454,10 +455,7 @@ function MergeProductionPanel({
   return (
     <section className="merge-production-panel">
       <header>
-        <div>
-          <span>ĐẦU RA SẢN PHẨM</span>
-          <b>Thành phẩm nằm trực tiếp trong thư mục đã chọn</b>
-        </div>
+        <div><span>{timelineOnly ? 'TIMELINE ĐỘC LẬP' : 'ĐẦU RA SẢN PHẨM'}</span><b>{timelineOnly ? 'Không tạo MP4; kiểm tra toàn bộ video nguồn rồi hiển thị timeline chính xác để xuất TXT' : resultMessage ?? 'Thành phẩm nằm trực tiếp trong thư mục đã chọn'}</b></div>
         <button
           className="icon-action"
           type="button"
@@ -469,7 +467,10 @@ function MergeProductionPanel({
           <FileDown size={17} />
         </button>
       </header>
-      <div className="merge-stage-grid">
+      {resultMessage && !timelineOnly && <div className={`merge-recovery-notice ${recoveryMode === 'verified-final' || recoveryMode === 'verified-checkpoint' ? 'is-reused' : ''}`}>
+      <ShieldCheck size={17}/><span><b>{recoveryMode === 'verified-final' ? 'Không ghép trùng thành phẩm' : recoveryMode === 'verified-checkpoint' ? 'Đã tiếp tục đúng checkpoint' : 'Đã hậu kiểm thành phẩm'}</b><small>{resultMessage}</small></span>
+    </div>}
+    <div className="merge-stage-grid">
         {stages.map((stage, index) => (
           <div
             className={`merge-stage ${stage.active ? 'is-active' : ''} ${stage.done ? 'is-done' : ''}`}
@@ -495,10 +496,7 @@ function MergeProductionPanel({
       </div>
       <div className="merge-timeline-preview">
         <div className="merge-timeline-heading">
-          <div>
-            <b>Timeline theo định dạng dựng</b>
-            <small>Copy từng mốc hoặc nhấn biểu tượng Lưu để chọn nơi xuất TXT</small>
-          </div>
+          <div><b>Timeline theo định dạng dựng</b><small>{timelineOnly ? 'Timeline được tính từ nguồn mà không ghép video; copy từng mốc hoặc chọn Xuất TXT' : 'Copy từng mốc hoặc nhấn biểu tượng Lưu để chọn nơi xuất TXT'}</small></div>
           <span>
             {hasActualTimeline
               ? `${timelineRows.length} mốc thời gian thực`
@@ -601,11 +599,7 @@ function MergeProductionPanel({
         )}
       </div>
       <div className="merge-output-grid">
-        <div>
-          <FileVideo2 size={16} />
-          <span>Video MP4</span>
-          <b title={video}>{video}</b>
-        </div>
+        <div><FileVideo2 size={16}/><span>Video MP4</span><b title={timelineOnly ? 'Không tạo video' : video}>{timelineOnly ? 'Không tạo video trong chế độ timeline-only' : video}</b></div>
         <div>
           <FileText size={16} />
           <span>Timeline TXT</span>
@@ -677,6 +671,7 @@ export function DownloadMergePage(): React.JSX.Element {
               finalFileName: current.project.finalFileName,
               qualityProfileId: current.project.qualityProfileId,
               resourceProfileId: current.project.resourceProfileId,
+              timelineOnly: current.jobs.some((job) => job.type === 'merge' && job.input.timelineOnly === true) || loadTimelineOnlyMode(slot),
               exportTimelineTxt: false
             };
           }
@@ -738,9 +733,10 @@ export function DownloadMergePage(): React.JSX.Element {
   const start = async (slot: MergeLaneId): Promise<void> => {
     setBusy(slot);
     try {
+      const timelineOnly = forms[slot].timelineOnly;
       notify(
-        `Đang chuẩn bị quy trình ghép ${mergeNumber(slot)}`,
-        'Ứng dụng đang kiểm tra công cụ, thư mục và danh sách liên kết.',
+        timelineOnly ? `Đang chuẩn bị timeline ${mergeNumber(slot)}` : `Đang chuẩn bị quy trình ghép ${mergeNumber(slot)}`,
+        timelineOnly ? 'Ứng dụng sẽ tải hoặc dùng lại nguồn, đọc thời lượng và không tạo video MP4.' : 'Ứng dụng đang kiểm tra công cụ, thư mục và danh sách liên kết.',
         'info'
       );
       const next = await window.desktop.workbench.startMerge({
@@ -752,8 +748,8 @@ export function DownloadMergePage(): React.JSX.Element {
       setStates((current) => ({ ...current, [slot]: next }));
       await Promise.all([refreshJobs(), refreshProjects()]);
       notify(
-        `Quy trình ghép ${mergeNumber(slot)} đã bắt đầu`,
-        'Tiến trình, lỗi và nhật ký chỉ hiển thị trong đúng quy trình này.'
+        timelineOnly ? `Đã bắt đầu tạo timeline ${mergeNumber(slot)}` : `Quy trình ghép ${mergeNumber(slot)} đã bắt đầu`,
+        timelineOnly ? 'Tubmedia không tạo MP4; timeline sẽ hiện ngay trong bảng chi tiết khi đọc xong nguồn.' : 'Tiến trình, lỗi và nhật ký chỉ hiển thị trong đúng quy trình này.'
       );
     } catch (error) {
       setError(messageOf(error));
@@ -1285,12 +1281,12 @@ function MergeLaneCard({
     }
   };
 
-  const primary =
-    state === 'running'
-      ? { label: 'Tạm dừng quy trình', icon: Pause, action: () => onControl('pause') }
-      : state === 'paused'
-        ? { label: 'Tiếp tục quy trình', icon: RotateCcw, action: () => onControl('resume') }
-        : { label: failed.length ? 'Chạy lại quy trình' : 'Bắt đầu tải & ghép', icon: Play, action: onStart };
+  const hasCompletedMerge = jobs.some((job) => job.type === 'merge' && ['completed', 'skipped'].includes(job.status));
+  const primary = state === 'running'
+    ? { label: 'Tạm dừng quy trình', icon: Pause, action: () => onControl('pause') }
+    : state === 'paused'
+      ? { label: 'Tiếp tục quy trình', icon: RotateCcw, action: () => onControl('resume') }
+      : { label: failed.length ? (form.timelineOnly ? 'Tạo lại timeline' : 'Chạy lại quy trình') : form.timelineOnly ? 'Tạo và hiển thị timeline' : hasCompletedMerge ? 'Kiểm tra và dùng lại thành phẩm' : 'Bắt đầu tải & ghép', icon: form.timelineOnly ? ListOrdered : hasCompletedMerge ? ShieldCheck : Play, action: onStart };
   const PrimaryIcon = primary.icon;
   const canStart = Boolean(
     form.linksText.trim() &&
@@ -1418,8 +1414,7 @@ function MergeLaneCard({
             <span className="label">Chất lượng thành phẩm ghép</span>
             <select
               className="select"
-              disabled={locked}
-              value={form.qualityProfileId}
+              disabled={locked || form.timelineOnly} value={form.qualityProfileId}
               onChange={(event: ChangeEvent<HTMLSelectElement>) =>
                 update((current) => ({ ...current, qualityProfileId: event.target.value }))
               }
@@ -1449,6 +1444,10 @@ function MergeLaneCard({
             </select>
           </label>
         </div>
+        <label className={`merge-timeline-only-option ${form.timelineOnly ? 'is-active' : ''}`}>
+          <input type="checkbox" checked={form.timelineOnly} disabled={locked} onChange={(event: ChangeEvent<HTMLInputElement>) => { saveTimelineOnlyMode(slot, event.target.checked); update((current) => ({ ...current, timelineOnly: event.target.checked })); }}/>
+          <span><b>Chỉ tạo timeline (không ghép video)</b><small><em>Không tạo MP4.</em> Tubmedia tải khi cần hoặc dùng lại video sẵn có, kiểm tra giải mã từng tệp từ đầu đến cuối, rồi tính mốc chính xác. Bạn tự chọn nơi lưu khi bấm Xuất TXT.</small></span>
+        </label>
         <InfoDisclosure
           className="merge-quality-disclosure"
           icon={Settings2}
@@ -1525,16 +1524,10 @@ function MergeLaneCard({
             <span>{progressDetail}</span>
           </div>
         </div>
-        <details className="workflow-detail-disclosure">
-          <summary>
-            <span>
-              <ListOrdered size={16} />
-              Chi tiết đầu ra, dung lượng và timeline
-            </span>
-            <ChevronDown size={16} />
-          </summary>
+        <details className="workflow-detail-disclosure" open={form.timelineOnly}>
+          <summary><span><ListOrdered size={16}/>{form.timelineOnly ? 'Timeline không ghép video' : 'Chi tiết đầu ra, dung lượng và timeline'}</span><ChevronDown size={16}/></summary>
           <div className="workflow-detail-body">
-            <MergeDetailedProgress jobs={jobs} />
+            <MergeDetailedProgress jobs={jobs} timelineOnly={form.timelineOnly}/>
             <MergeProductionPanel
               form={form}
               jobs={jobs}

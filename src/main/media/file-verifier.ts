@@ -117,6 +117,67 @@ export function isVisualIssueNearBoundary(
   );
 }
 
+/* TUBMEDIA STRICT VISUAL BOUNDARY POLICY HOTFIX11 */
+export interface ShortVisualBoundaryTransition {
+  classification: 'boundary-transition';
+  boundaryIndex: number;
+  boundarySeconds: number;
+  durationSeconds: number;
+  distanceSeconds: number;
+}
+
+const SHORT_BOUNDARY_EDGE_WINDOW_SECONDS = 0.35;
+const SHORT_BOUNDARY_BLACK_MAX_SECONDS = 0.35;
+const SHORT_BOUNDARY_FREEZE_MAX_SECONDS = 1.25;
+
+export function classifyShortVisualBoundaryTransition(
+  issue: Pick<VisualIntegrityIssue, 'type' | 'startSeconds' | 'endSeconds' | 'durationSeconds'>,
+  boundaries: readonly number[]
+): ShortVisualBoundaryTransition | null {
+  if (issue.type !== 'black' && issue.type !== 'freeze') return null;
+  if (!Number.isFinite(issue.startSeconds) || issue.startSeconds < 0) return null;
+
+  const reportedDuration = issue.durationSeconds;
+  const derivedDuration = issue.endSeconds === null
+    ? null
+    : Math.max(0, issue.endSeconds - issue.startSeconds);
+  const durationSeconds = reportedDuration ?? derivedDuration;
+  if (durationSeconds === null || !Number.isFinite(durationSeconds) || durationSeconds <= 0) return null;
+
+  const maximumDuration = issue.type === 'black'
+    ? SHORT_BOUNDARY_BLACK_MAX_SECONDS
+    : SHORT_BOUNDARY_FREEZE_MAX_SECONDS;
+  if (durationSeconds - maximumDuration > 0.000_001) return null;
+
+  const issueEnd = Math.max(
+    issue.startSeconds,
+    issue.endSeconds ?? issue.startSeconds + durationSeconds
+  );
+  let best: ShortVisualBoundaryTransition | null = null;
+  for (let boundaryIndex = 0; boundaryIndex < boundaries.length; boundaryIndex += 1) {
+    const boundarySeconds = boundaries[boundaryIndex];
+    if (boundarySeconds === undefined || !Number.isFinite(boundarySeconds)) continue;
+    const crossesBoundary = issue.startSeconds <= boundarySeconds && issueEnd >= boundarySeconds;
+    const distanceSeconds = crossesBoundary
+      ? 0
+      : Math.min(
+          Math.abs(issue.startSeconds - boundarySeconds),
+          Math.abs(issueEnd - boundarySeconds)
+        );
+    if (distanceSeconds - SHORT_BOUNDARY_EDGE_WINDOW_SECONDS > 0.000_001) continue;
+    if (best === null || distanceSeconds < best.distanceSeconds) {
+      best = {
+        classification: 'boundary-transition',
+        boundaryIndex,
+        boundarySeconds,
+        durationSeconds,
+        distanceSeconds
+      };
+    }
+  }
+  return best;
+}
+
 export class FileVerifier {
   public constructor(
     private readonly analyzer: MediaAnalyzer,

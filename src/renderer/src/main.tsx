@@ -1,3 +1,4 @@
+import './update-awareness.js'; // TUBMEDIA_STARTUP_UPDATE_AWARENESS_RENDERER
 import ReactDOM from 'react-dom/client';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import { App } from './app/App';
@@ -6,6 +7,7 @@ import './styles.css';
 import './tubmedia-theme.css';
 import './system-cleanup.css';
 import './quick-download.css';
+import './video-link-filter.css';
 import './typography.css';
 
 const rootElement = document.getElementById('root');
@@ -30,7 +32,9 @@ if (typeof window.desktop === 'undefined') {
       }}
     >
       <div style={{ maxWidth: 720, textAlign: 'center' }}>
-        <h1 style={{ margin: 0, fontSize: 'var(--type-2xl)', fontWeight: 700, lineHeight: 1.2 }}>Download video Tubmedia chưa thể khởi động</h1>
+        <h1 style={{ margin: 0, fontSize: 'var(--type-2xl)', fontWeight: 700, lineHeight: 1.2 }}>
+          Download video Tubmedia chưa thể khởi động
+        </h1>
         <p style={{ marginTop: 14, fontSize: 'var(--type-body)', lineHeight: 1.5, color: '#9ca8b9' }}>
           Cầu nối bảo mật không hoạt động nên giao diện không thể kết nối với phần xử lý chính của ứng dụng.
           Hãy đóng ứng dụng, chạy lại lệnh xây dựng rồi mở ứng dụng lại.

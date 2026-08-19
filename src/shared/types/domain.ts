@@ -271,6 +271,8 @@ export interface AppSettings {
   mergeLaneCount: 1 | 2 | 3 | 4;
   maxGlobalMergeJobs: 1 | 2 | 3 | 4;
   downloadCompatibilityMode: DownloadCompatibilityMode;
+  /** ADAPTIVE_SETTINGS_HOTFIX8_CONTRACT: optional for backward-compatible saved settings. */
+  downloadEditCopyMode?: 'off' | 'capcut_sdr_1080p' | 'capcut_sdr_2k';
   downloadMinHeight: number;
   downloadMaxHeight: number;
   downloadMinFps: number;
@@ -469,6 +471,8 @@ export interface DownloadMergeInput {
   qualityProfileId: string;
   resourceProfileId: string;
   exportTimelineTxt: boolean;
+  /** TUBMEDIA TIMELINE ONLY CONTRACT HOTFIX12 */
+  timelineOnly?: boolean;
 }
 
 export interface WorkbenchSlotState {

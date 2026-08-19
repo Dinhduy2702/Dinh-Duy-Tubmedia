@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import type {
   DownloadLaneDraftInput,
   DownloadLaneId,
@@ -293,13 +294,83 @@ export class WorkbenchService {
     return this.slotState(value.slot);
   }
 
+  /* TUBMEDIA VERIFIED MERGE RECOVERY HOTFIX12 */
+  private canonicalMergeLinks(text: string): string {
+    return text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  private mergeRequestSignature(value: DownloadMergeInput): string {
+    return createHash('sha256')
+      .update(JSON.stringify([
+        this.canonicalMergeLinks(value.linksText),
+        value.sourceFolder, value.tempFolder, value.outputFolder, value.finalFileName,
+        value.qualityProfileId, value.resourceProfileId, value.timelineOnly === true
+      ]), 'utf8')
+      .digest('hex');
+  }
+
+  private mergeRequestUnchanged(project: Project, value: DownloadMergeInput): boolean {
+    const storedLinks = this.input.list(project.id)
+      .sort((left, right) => left.position - right.position)
+      .map((item) => item.originalText)
+      .join('\n');
+    return this.canonicalMergeLinks(storedLinks) === this.canonicalMergeLinks(value.linksText) &&
+      project.sourceFolder === value.sourceFolder &&
+      project.tempFolder === value.tempFolder &&
+      project.outputFolder === value.outputFolder &&
+      project.finalFileName === value.finalFileName &&
+      project.qualityProfileId === value.qualityProfileId &&
+      project.resourceProfileId === value.resourceProfileId;
+  }
   public async startMerge(value: DownloadMergeInput): Promise<WorkbenchSlotState> {
     await this.assertDownloadReady();
     const existing = this.getProject(value.slot);
+    const unchanged = existing ? this.mergeRequestUnchanged(existing, value) : false;
+    const requestSignature = this.mergeRequestSignature(value);
+    const allPreviousMergeJobs = existing
+      ? this.queue.list(existing.id).filter((job) => job.type === 'merge')
+      : [];
+    const previousMergeJobs = unchanged && existing
+      ? allPreviousMergeJobs.filter((job) => {
+          if (job.input.mergeRequestSignature === requestSignature) return true;
+          if (typeof job.input.mergeRequestSignature === 'string') return false;
+          const projectUpdatedAt = Date.parse(existing.updatedAt);
+          const jobTerminalAt = Date.parse(job.finishedAt ?? job.updatedAt);
+          return Number.isFinite(projectUpdatedAt) && Number.isFinite(jobTerminalAt) &&
+            projectUpdatedAt <= jobTerminalAt + 2_000;
+        })
+      : [];
+    const completedOutput = !value.timelineOnly
+      ? [...previousMergeJobs].reverse().find((job) => {
+          const output = job.input.outputPath;
+          return ['completed', 'skipped'].includes(job.status) && typeof output === 'string' && output.trim();
+        })?.input.outputPath
+      : null;
+    const safeName = existing
+      ? sanitizeFilename(existing.finalFileName.replace(/\.mp4$/i, ''), 'Thành phẩm')
+      : 'Thành phẩm';
+    const trustedOutputPath = !value.timelineOnly && unchanged && existing
+      ? (typeof completedOutput === 'string' ? completedOutput : null)
+      : null;
+    const legacyPendingPaths = unchanged && existing
+      ? previousMergeJobs.map((job) =>
+          join(existing.outputFolder, `${safeName}.tubmedia-${job.id}.pending.mp4`)
+        )
+      : [];
     if (existing) this.queue.prepareProject(existing.id);
     const project = await this.upsertMerge(value);
-    this.input.import(project.id, value.linksText, 'replace');
-    this.queue.enqueueProject(project.id);
+    if (!unchanged) this.input.import(project.id, value.linksText, 'replace');
+    /* TUBMEDIA TIMELINE ONLY WORKBENCH HOTFIX12 */
+    this.queue.enqueueProject(project.id, {
+      timelineOnly: value.timelineOnly === true,
+      requestSignature,
+      trustedOutputPath: typeof trustedOutputPath === 'string' ? trustedOutputPath : null,
+      legacyPendingPaths
+    });
     return this.slotState(value.slot);
   }
 

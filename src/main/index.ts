@@ -1,3 +1,5 @@
+﻿import './runtime/electron-security-guard.js'; // TUBMEDIA_ELECTRON_SECURITY_GUARD
+import './update/startup-update-awareness.js'; // TUBMEDIA_STARTUP_UPDATE_AWARENESS_MAIN
 import {
   app,
   BrowserWindow,

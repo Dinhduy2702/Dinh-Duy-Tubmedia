@@ -188,6 +188,16 @@ export class SettingsService {
       this.repo.saveAppSettings(next);
       this.repo.set('smart_merge_performance_v1200', true);
     }
+    // ADAPTIVE_SETTINGS_HOTFIX8_MIGRATION: preserve master quality and wait for explicit user acceptance.
+    if (!this.repo.get<boolean>('adaptive_master_edit_recommendation_v131_hotfix8', false)) {
+      const current = this.repo.getAppSettings(defaultAppSettings);
+      this.repo.saveAppSettings({
+        ...current,
+        downloadCompatibilityMode: 'source',
+        downloadEditCopyMode: 'off'
+      });
+      this.repo.set('adaptive_master_edit_recommendation_v131_hotfix8', true);
+    }
     app.setLoginItemSettings({ openAtLogin: this.get().startWithWindows });
   }
 

@@ -1,3 +1,10 @@
+import {
+  basename as hotfix13Basename,
+  isAbsolute as hotfix13IsAbsolute,
+  relative as hotfix13Relative,
+  resolve as hotfix13Resolve,
+  sep as hotfix13Sep
+} from 'node:path';
 import { readFile, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -5,16 +12,17 @@ import { z } from 'zod';
 import { ensureDirectory } from './ensure-directory.js';
 
 const OWNERSHIP_FILE = '.tubmedia-owned.json';
-const RESERVED_DIRECTORY_NAMES = new Set([
-  '_yt_tmp',
-  '_normalized',
-  '_normalized-cache',
-  '_remux-cache'
-]);
+const RESERVED_DIRECTORY_NAMES = new Set(['_yt_tmp', '_normalized', '_normalized-cache', '_remux-cache']);
 
 const ownershipSchema = z.object({
   owner: z.literal('Tubmedia'),
-  purpose: z.enum(['download-temp', 'normalize-cache', 'remux-cache', 'legacy-normalized']),
+  purpose: z.enum([
+    'download-temp',
+    'normalize-cache',
+    'remux-cache',
+    'legacy-normalized',
+    'merge-checkpoints'
+  ]),
   createdAt: z.string().datetime(),
   version: z.literal(1)
 });
@@ -25,11 +33,45 @@ export function isReservedTubmediaDirectory(path: string): boolean {
   return RESERVED_DIRECTORY_NAMES.has(basename(resolve(path)).toLowerCase());
 }
 
+function isExplicitMergeCheckpointNamespaceAllowed(
+  candidatePath: string,
+  kind: string,
+  explicitNamespaceRoot?: string
+): boolean {
+  if (kind !== 'merge-checkpoints' || !explicitNamespaceRoot) {
+    return false;
+  }
+
+  const resolvedRoot = hotfix13Resolve(explicitNamespaceRoot);
+  if (hotfix13Basename(resolvedRoot).toLowerCase() !== 'tubmedia') {
+    return false;
+  }
+
+  const resolvedCandidate = hotfix13Resolve(candidatePath);
+  const relativeCandidate = hotfix13Relative(resolvedRoot, resolvedCandidate);
+
+  if (
+    relativeCandidate === '' ||
+    hotfix13IsAbsolute(relativeCandidate) ||
+    relativeCandidate === '..' ||
+    relativeCandidate.startsWith('..' + hotfix13Sep)
+  ) {
+    return false;
+  }
+
+  const firstSegment = relativeCandidate.split(/[\\/]+/, 1)[0];
+  return firstSegment === 'merge-checkpoints';
+}
+
 export async function ensureTubmediaOwnedDirectory(
   path: string,
-  purpose: TubmediaDirectoryPurpose
+  purpose: TubmediaDirectoryPurpose,
+  explicitNamespaceRoot?: string
 ): Promise<void> {
-  if (!isReservedTubmediaDirectory(path)) {
+  if (
+    !isReservedTubmediaDirectory(path) &&
+    !isExplicitMergeCheckpointNamespaceAllowed(path, purpose, explicitNamespaceRoot)
+  ) {
     throw new Error(`Từ chối đánh dấu ownership cho thư mục không thuộc namespace Tubmedia: ${path}`);
   }
   await ensureDirectory(path);

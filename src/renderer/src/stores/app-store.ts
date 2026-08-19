@@ -18,6 +18,7 @@ import type {
 export type PageId =
   | 'editor-home'
   | 'download-workbench'
+  | 'filter-by-links'
   | 'download-merge'
   | 'activity'
   | 'history'

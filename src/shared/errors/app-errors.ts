@@ -25,25 +25,28 @@ export class InvalidInputError extends AppError {
   }
 }
 export class AuthenticationRequiredError extends AppError {
-  public constructor(message: string) {
-    super('AUTHENTICATION_REQUIRED', message);
+  public constructor(message: string, details?: Record<string, unknown>) {
+    super('AUTHENTICATION_REQUIRED', message, false, details);
   }
 }
 export class CookiesExpiredError extends AppError {
-  public constructor() {
+  public constructor(details?: Record<string, unknown>) {
     super(
       'COOKIES_EXPIRED',
       'Cookies đã cấu hình không còn được nền tảng chấp nhận, có thể đã hết hạn hoặc phiên đăng nhập đã bị thu hồi. ' +
-        'Video liên quan đã được tạm dừng an toàn; hãy đăng nhập lại và lưu cookies mới. Ứng dụng sẽ tự tiếp tục ngay sau khi cấu hình được cập nhật.'
+        'Video liên quan đã được tạm dừng an toàn; hãy đăng nhập lại và lưu cookies mới. Ứng dụng sẽ tự tiếp tục ngay sau khi cấu hình được cập nhật.',
+      false,
+      details
     );
   }
 }
 export class RetryWithConfiguredCookiesError extends AppError {
-  public constructor() {
+  public constructor(details?: Record<string, unknown>) {
     super(
       'RETRY_WITH_CONFIGURED_COOKIES',
       'Video vừa yêu cầu đăng nhập. Ứng dụng sẽ tự thử lại một lần bằng cookies đã cấu hình, không làm phiền người dùng.',
-      true
+      true,
+      details
     );
   }
 }
@@ -62,9 +65,19 @@ export class NetworkError extends AppError {
     super('NETWORK_ERROR', message, true);
   }
 }
+export class SourceRateLimitedError extends AppError {
+  public constructor(details?: Record<string, unknown>) {
+    super(
+      'SOURCE_RATE_LIMITED',
+      'Nền tảng đang giới hạn số yêu cầu (HTTP 429). Tubmedia đã tạm dừng đúng danh sách để không tiếp tục gửi yêu cầu dồn dập. Hãy chờ một lúc, mở video trong trình duyệt bình thường và hoàn tất xác minh nếu nền tảng yêu cầu; sau đó nhấn Tiếp tục.',
+      false,
+      details
+    );
+  }
+}
 export class DownloadFailedError extends AppError {
-  public constructor(message: string, retryable = false) {
-    super('DOWNLOAD_FAILED', message, retryable);
+  public constructor(message: string, retryable = false, details?: Record<string, unknown>) {
+    super('DOWNLOAD_FAILED', message, retryable, details);
   }
 }
 export class VerificationFailedError extends AppError {

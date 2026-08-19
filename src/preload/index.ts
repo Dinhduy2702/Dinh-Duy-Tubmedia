@@ -1,3 +1,4 @@
+import './update-awareness-bridge.js'; // TUBMEDIA_STARTUP_UPDATE_AWARENESS_PRELOAD
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import { IPC } from '@shared/contracts/channels.js';
 import type { DesktopApi } from './api-types.js';
@@ -126,6 +127,11 @@ const api: DesktopApi = {
     resume: (taskId) => invoke(IPC.quickDownload.resume, { taskId }),
     cancel: (taskId) => invoke(IPC.quickDownload.cancel, { taskId }),
     revealOutput: (taskId) => invoke(IPC.quickDownload.revealOutput, { taskId })
+  },
+  videoFilter: {
+    chooseLinksFile: () => invoke(IPC.videoFilter.chooseLinksFile),
+    run: (input) => invoke(IPC.videoFilter.run, input),
+    saveReport: (input) => invoke(IPC.videoFilter.saveReport, input)
   },
   updates: {
     status: () => invoke(IPC.updates.status),

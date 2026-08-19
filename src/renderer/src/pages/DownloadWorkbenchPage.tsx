@@ -76,6 +76,7 @@ const BLOCKING_CODES = [
   'TOOL_HEALTH_CHECK_FAILED',
   'DISK_FULL',
   'PERMISSION_DENIED',
+  'SOURCE_RATE_LIMITED',
   'NETWORK_CIRCUIT_OPEN'
 ] as const;
 
@@ -119,6 +120,15 @@ function emptyLane(
 }
 function qualityLabel(settings: AppSettings | null): string {
   if (!settings) return 'Chưa đọc cấu hình';
+  // ADAPTIVE_SETTINGS_HOTFIX10_QUALITY_LABEL: explain the safe default before acceptance.
+  const editCopyMode = settings.downloadEditCopyMode ?? 'off';
+  if (settings.downloadCompatibilityMode === 'source') {
+    if (editCopyMode === 'off') {
+      return "Master cao nhất theo nguồn · Chọn 'Theo máy' để tạo bản edit CapCut phù hợp";
+    }
+    const editResolution = editCopyMode === 'capcut_sdr_2k' ? '2K' : '1080p';
+    return `Master cao nhất theo nguồn + bản edit CapCut SDR ${editResolution}`;
+  }
   if (settings.downloadCompatibilityMode === 'capcut_sdr_1080p') {
     return 'CapCut trực tiếp · SDR 1080p · H.264/AAC · không Proxy';
   }
@@ -490,6 +500,13 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
       const recommendation = recommendDownloadConcurrency(detected);
       const plan = planForListCount(recommendation, laneCount, settings?.downloadVerifyEntireFile ?? false);
       const base = await window.desktop.settings.recommend();
+      // ADAPTIVE_SETTINGS_HOTFIX8_RECOMMENDATION
+      const recommendedEditMode: AppSettings['downloadEditCopyMode'] =
+        base.gpuJobs >= 2 &&
+        recommendation.recommendedConcurrentFragments >= 4 &&
+        recommendation.recommendedAria2Connections >= 24
+          ? 'capcut_sdr_2k'
+          : 'capcut_sdr_1080p';
       const saved = await window.desktop.settings.saveResourceProfile({
         ...base,
         downloadWorkers: plan.workersPerList,
@@ -497,6 +514,19 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
       });
       const nextSettings = await window.desktop.settings.update({
         defaultResourceProfileId: saved.id,
+        downloadCompatibilityMode: 'source',
+        downloadEditCopyMode: recommendedEditMode,
+        downloadMinHeight: 0,
+        downloadMaxHeight: 0,
+        downloadMinFps: 0,
+        downloadMaxFps: 0,
+        downloadCodecPreference: 'auto',
+        downloadContainerPreference: 'auto',
+        downloadMinVideoBitrateKbps: 0,
+        downloadVideoBitrateKbps: 0,
+        downloadMinAudioBitrateKbps: 0,
+        downloadAudioBitrateKbps: 0,
+        downloadAllowBelowMinimum: false,
         maxGlobalDownloadWorkers: plan.globalWorkers,
         downloadConcurrentFragments: recommendation.recommendedConcurrentFragments,
         aria2Connections: recommendation.recommendedAria2Connections
@@ -517,10 +547,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
           downloadWorkers: plan.workersPerList
         }))
       );
-      notify(
-        'Đã áp dụng cấu hình khuyến nghị',
-        `${laneCount} danh sách độc lập · ${plan.workersPerList} luồng tải mỗi danh sách · tối đa ${laneCount * plan.workersPerList} video có thể chạy song song.`
-      );
+      notify('Đã áp dụng đề xuất theo máy', `Giữ master cao nhất theo nguồn + tạo bản edit CapCut ${recommendedEditMode === 'capcut_sdr_2k' ? '2K' : '1080p'}; ${plan.workersPerList} luồng/danh sách, ${plan.globalWorkers} luồng toàn ứng dụng.`);
     } catch (error) {
       setError(messageOf(error));
     } finally {
@@ -532,6 +559,8 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
     try {
       const next = await window.desktop.settings.update({
         downloadCompatibilityMode: 'source',
+        // ADAPTIVE_SETTINGS_HOTFIX8_REFERENCE_OFF
+        downloadEditCopyMode: 'off',
         downloadMinHeight: 720,
         downloadMaxHeight: 1080,
         downloadMinFps: 0,
@@ -767,7 +796,7 @@ function PreflightPanel({
       </div>
       {recommendation && plan && (
         <div className="recommend-strip">
-          <b>{recommendation.summary}</b> {plan.note}
+          <b>{/* ADAPTIVE_SETTINGS_HOTFIX10_OPTIONAL_NOTE */}{recommendation.summary} · Master cao nhất + edit {recommendation.recommendedConcurrentFragments >= 4 && recommendation.recommendedAria2Connections >= 24 ? 'tối đa 2K nếu GPU phù hợp' : '1080p'}</b> {plan.note}
         </div>
       )}
     </InfoDisclosure>

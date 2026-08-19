@@ -101,7 +101,7 @@ check(
 );
 check(
   'size validation uses pre-normalize merge inputs',
-  has('src/main/merge/merge-engine.ts', 'validateMergeOutputSize(\n      infos,')
+  has('src/main/merge/merge-engine.ts', 'validateMergeOutputSize(infos,')
 );
 check(
   'blocking pause awaits process control before persisting paused',

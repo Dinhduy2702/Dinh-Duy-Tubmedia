@@ -12,7 +12,7 @@ export const defaultAppSettings: AppSettings = {
   appUpdateChannel: 'stable', toolUpdateChannel: 'stable', autoCheckAppUpdates: false, autoCheckToolUpdates: false,
   toolManifestUrl: '', appFeedUrl: '', ytdlpPath: '', ffmpegPath: '', ffprobePath: '', aria2cPath: '', cookiesFilePath: '',
   cookiesBrowser: 'none', cookiesBrowserProfile: '', proxy: '', rateLimit: '', useAria2c: true, aria2Connections: 16, maxGlobalDownloadWorkers: 2, downloadConcurrentFragments: 2,
-  downloadLaneCount: 2, mergeLaneCount: 2, maxGlobalMergeJobs: 2, downloadCompatibilityMode: 'source', downloadMinHeight: 0, downloadMaxHeight: 0, downloadMinFps: 0, downloadMaxFps: 0,
+  downloadLaneCount: 2, mergeLaneCount: 2, maxGlobalMergeJobs: 2, downloadCompatibilityMode: 'source', /* ADAPTIVE_SETTINGS_HOTFIX8_DEFAULT */ downloadEditCopyMode: 'off', downloadMinHeight: 0, downloadMaxHeight: 0, downloadMinFps: 0, downloadMaxFps: 0,
   downloadCodecPreference: 'auto', downloadContainerPreference: 'auto', downloadMinVideoBitrateKbps: 0, downloadVideoBitrateKbps: 0,
   downloadMinAudioBitrateKbps: 0, downloadAudioBitrateKbps: 0,
   downloadAllowBelowMinimum: false, downloadVerifyEntireFile: false, progressRefreshMs: 300

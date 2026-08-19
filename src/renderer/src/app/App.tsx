@@ -16,6 +16,9 @@ const EditorHomePage = lazy(() =>
 const DownloadWorkbenchPage = lazy(() =>
   import('../pages/DownloadWorkbenchPage').then((module) => ({ default: module.DownloadWorkbenchPage }))
 );
+const VideoLinkFilterPage = lazy(() =>
+  import('../pages/VideoLinkFilterPage').then((module) => ({ default: module.VideoLinkFilterPage }))
+);
 const DownloadMergePage = lazy(() =>
   import('../pages/DownloadMergePage').then((module) => ({ default: module.DownloadMergePage }))
 );
@@ -187,6 +190,7 @@ export function App(): React.JSX.Element {
           <Suspense fallback={<PageLoader />}>
             {page === 'editor-home' && <EditorHomePage />}
             {page === 'download-workbench' && <DownloadWorkbenchPage />}
+            {page === 'filter-by-links' && <VideoLinkFilterPage />}
             {page === 'download-merge' && <DownloadMergePage />}
             {page === 'activity' && <QueuePage mode="all" />}
             {page === 'history' && <HistoryPage />}

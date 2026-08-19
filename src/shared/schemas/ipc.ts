@@ -66,6 +66,8 @@ export const appSettingsSchema = z
     mergeLaneCount: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
     maxGlobalMergeJobs: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
     downloadCompatibilityMode: z.enum(['source', 'capcut_sdr_1080p', 'capcut_sdr_2k']),
+  // ADAPTIVE_SETTINGS_HOTFIX8_SCHEMA
+  downloadEditCopyMode: z.enum(['off', 'capcut_sdr_1080p', 'capcut_sdr_2k']).default('off'),
     downloadMinHeight: z.number().int().min(0).max(4320),
     downloadMaxHeight: z.number().int().min(0).max(4320),
     downloadMinFps: z.number().min(0).max(240),
@@ -184,7 +186,9 @@ export const downloadMergeDraftSchema = z.object({
   finalFileName: z.string().trim().max(220),
   qualityProfileId: z.string().max(160),
   resourceProfileId: z.string().max(160),
-  exportTimelineTxt: z.boolean()
+  exportTimelineTxt: z.boolean(),
+  /** TUBMEDIA TIMELINE ONLY IPC HOTFIX12 */
+  timelineOnly: z.boolean().default(false)
 });
 export const downloadMergeSchema = z.object({
   slot: mergeLaneIdSchema,
@@ -196,7 +200,8 @@ export const downloadMergeSchema = z.object({
   finalFileName: z.string().trim().min(1).max(220),
   qualityProfileId: z.string().min(1).max(160),
   resourceProfileId: z.string().min(1).max(160),
-  exportTimelineTxt: z.boolean()
+  exportTimelineTxt: z.boolean(),
+  timelineOnly: z.boolean().default(false)
 });
 
 export const cookieTextSchema = z.object({ text: z.string().min(1).max(20_000_000) });
@@ -241,6 +246,17 @@ export const systemCleanupRunSchema = z
   })
   .strict();
 
+export const videoLinkFilterRequestSchema = z
+  .object({
+    sourceFolder: pathSchema,
+    destinationFolder: pathSchema,
+    linksText: z.string().min(1).max(10_000_000),
+    mode: z.enum(['preview', 'move']),
+    flatten: z.boolean().default(false),
+    titleMatch: z.boolean().default(true),
+    useYtDlp: z.boolean().default(true)
+  })
+  .strict();
 export const quickDownloadRequestSchema = z
   .object({
     url: z.string().trim().min(1).max(4096),
