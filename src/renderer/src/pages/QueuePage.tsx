@@ -87,7 +87,8 @@ function quickPhaseLabel(phase: QuickDownloadStatus['phase']): string {
     cancelling: 'Đang hủy',
     cancelled: 'Đã hủy',
     failed: 'Tải thất bại',
-    interrupted: 'Bị gián đoạn'
+    interrupted: 'Bị gián đoạn',
+    skipped: 'Bỏ qua'
   };
   return labels[phase];
 }
@@ -512,7 +513,10 @@ function QuickDownloadAccordion({
           progress={status.progress}
           completed={completed ? 1 : 0}
           total={1}
-          detail={status.speed || (status.eta ? `Còn ${status.eta}` : safeUiText(status.message, quickPhaseLabel(status.phase)))}
+          detail={
+            status.speed ||
+            (status.eta ? `Còn ${status.eta}` : safeUiText(status.message, quickPhaseLabel(status.phase)))
+          }
           secondary="Một video độc lập · có thể chạy song song với mọi danh sách tải"
           outputPath={status.outputPath}
           actions={
@@ -600,15 +604,16 @@ function QuickDownloadAccordion({
                 <dd>{status.eta || '—'}</dd>
               </div>
             </dl>
-            {status.error && (() => {
-              const issue = friendlyIssue(status.error);
-              return (
-                <div className={`queue-detail-error queue-detail-${issue.tone}`}>
-                  <b>{issue.title}</b>
-                  <p>{issue.message}</p>
-                </div>
-              );
-            })()}
+            {status.error &&
+              (() => {
+                const issue = friendlyIssue(status.error);
+                return (
+                  <div className={`queue-detail-error queue-detail-${issue.tone}`}>
+                    <b>{issue.title}</b>
+                    <p>{issue.message}</p>
+                  </div>
+                );
+              })()}
           </div>
         </div>
       </div>
@@ -1170,20 +1175,23 @@ export function QueuePage({ mode }: { mode: 'downloads' | 'processing' | 'all' }
                 <dd>{new Date(detailJob.updatedAt).toLocaleString('vi-VN')}</dd>
               </div>
             </dl>
-            {detailJob.errorMessage && (() => {
-              const issue = friendlyIssue(detailJob.errorMessage);
-              return (
-                <div className={`queue-detail-error queue-detail-${issue.tone}`}>
-                  <b>{issue.title}</b>
-                  <p>{issue.message}</p>
-                  {issue.steps.length > 0 && (
-                    <ol>
-                      {issue.steps.map((step) => <li key={step}>{step}</li>)}
-                    </ol>
-                  )}
-                </div>
-              );
-            })()}
+            {detailJob.errorMessage &&
+              (() => {
+                const issue = friendlyIssue(detailJob.errorMessage);
+                return (
+                  <div className={`queue-detail-error queue-detail-${issue.tone}`}>
+                    <b>{issue.title}</b>
+                    <p>{issue.message}</p>
+                    {issue.steps.length > 0 && (
+                      <ol>
+                        {issue.steps.map((step) => (
+                          <li key={step}>{step}</li>
+                        ))}
+                      </ol>
+                    )}
+                  </div>
+                );
+              })()}
             {!ACTIVE.has(detailJob.status) && (
               <button className="btn btn-danger" title="Xóa tác vụ" onClick={() => setConfirm('remove-one')}>
                 <Trash2 size={15} />
@@ -1196,7 +1204,9 @@ export function QueuePage({ mode }: { mode: 'downloads' | 'processing' | 'all' }
                 {inputText(detailJob, 'url') && (
                   <div>
                     <dt>Nguồn</dt>
-                    <dd title={inputText(detailJob, 'url')}>{inputText(detailJob, 'displayName') || inputText(detailJob, 'url')}</dd>
+                    <dd title={inputText(detailJob, 'url')}>
+                      {inputText(detailJob, 'displayName') || inputText(detailJob, 'url')}
+                    </dd>
                   </div>
                 )}
                 {inputText(detailJob, 'progressStage') && (

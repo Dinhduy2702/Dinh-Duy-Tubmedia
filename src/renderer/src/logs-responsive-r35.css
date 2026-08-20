@@ -1,0 +1,361 @@
+/*
+ * TUBMEDIA v1.3.3 R35.1 - Logs responsive UI
+ * No clipped icons, no overlapping columns, no lost log characters.
+ */
+
+.logs-responsive-page {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+  container-type: inline-size;
+}
+
+.logs-responsive-page,
+.logs-responsive-page *,
+.logs-responsive-page *::before,
+.logs-responsive-page *::after {
+  box-sizing: border-box;
+}
+
+.logs-responsive-page > *,
+.logs-responsive-page section,
+.logs-responsive-page form,
+.logs-responsive-page fieldset,
+.logs-responsive-page article,
+.logs-responsive-page header,
+.logs-responsive-page footer,
+.logs-responsive-page div {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Icons stay fully visible and never collapse because adjacent text is long. */
+.logs-responsive-page svg,
+.logs-responsive-page [role='img'] {
+  flex: 0 0 auto;
+  max-width: none;
+  overflow: visible;
+}
+
+.logs-responsive-page button,
+.logs-responsive-page [role='button'] {
+  min-width: 0;
+  max-width: 100%;
+  gap: 0.5rem;
+}
+
+.logs-responsive-page button > svg,
+.logs-responsive-page [role='button'] > svg {
+  flex-shrink: 0;
+}
+
+/* Controls shrink inside the available width instead of forcing overflow. */
+.logs-responsive-page input,
+.logs-responsive-page select,
+.logs-responsive-page textarea {
+  min-width: 0 !important;
+  max-width: 100%;
+}
+
+/* Common toolbar/action containers may wrap on smaller widths. */
+.logs-responsive-page :where(.toolbar, .actions, .page-actions, .header-actions, .button-row, .action-row) {
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  row-gap: 0.65rem;
+}
+
+/* Main log table: hard 100% width budget, no column may invade a neighbor. */
+.logs-responsive-page table {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  table-layout: fixed !important;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.logs-responsive-page thead,
+.logs-responsive-page tbody,
+.logs-responsive-page tr {
+  width: 100%;
+  min-width: 0;
+}
+
+.logs-responsive-page th,
+.logs-responsive-page td {
+  min-width: 0 !important;
+  max-width: none !important;
+  padding-inline: clamp(0.5rem, 0.8vw, 0.85rem);
+  vertical-align: top;
+}
+
+/* Desktop width budget = 100%. Content receives the largest share. */
+.logs-responsive-page th:nth-child(1),
+.logs-responsive-page td:nth-child(1) {
+  width: 12%;
+}
+
+.logs-responsive-page th:nth-child(2),
+.logs-responsive-page td:nth-child(2) {
+  width: 11%;
+}
+
+.logs-responsive-page th:nth-child(3),
+.logs-responsive-page td:nth-child(3) {
+  width: 12%;
+}
+
+.logs-responsive-page th:nth-child(4),
+.logs-responsive-page td:nth-child(4) {
+  width: 18%;
+}
+
+.logs-responsive-page th:nth-child(5),
+.logs-responsive-page td:nth-child(5) {
+  width: 35%;
+}
+
+.logs-responsive-page th:nth-child(6),
+.logs-responsive-page td:nth-child(6) {
+  width: 12%;
+}
+
+/* Do not hide characters behind ellipsis/overflow. */
+.logs-responsive-page td {
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.42;
+}
+
+.logs-responsive-page th {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.logs-responsive-page td:nth-child(1),
+.logs-responsive-page td:nth-child(2) {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+/* Message/content: natural Vietnamese wrapping, full text retained. */
+.logs-responsive-page td:nth-child(5) {
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+  word-break: normal;
+  line-height: 1.5;
+}
+
+/* Long task/job IDs cannot paint over the content column. */
+.logs-responsive-page td:nth-child(6) {
+  overflow-wrap: anywhere !important;
+  word-break: break-all;
+}
+
+.logs-responsive-page td > *,
+.logs-responsive-page th > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.logs-responsive-page td > :where(div, span, p),
+.logs-responsive-page th > :where(div, span, p) {
+  overflow-wrap: anywhere;
+}
+
+/* Keep level/status pill and its icon together. */
+.logs-responsive-page td:nth-child(2) > * {
+  width: fit-content;
+  max-width: 100%;
+}
+
+/* Laptop-size window: favor content while keeping all six columns. */
+@container (max-width: 1180px) {
+  .logs-responsive-page th:nth-child(1),
+  .logs-responsive-page td:nth-child(1) {
+    width: 11%;
+  }
+
+  .logs-responsive-page th:nth-child(2),
+  .logs-responsive-page td:nth-child(2) {
+    width: 10%;
+  }
+
+  .logs-responsive-page th:nth-child(3),
+  .logs-responsive-page td:nth-child(3) {
+    width: 11%;
+  }
+
+  .logs-responsive-page th:nth-child(4),
+  .logs-responsive-page td:nth-child(4) {
+    width: 17%;
+  }
+
+  .logs-responsive-page th:nth-child(5),
+  .logs-responsive-page td:nth-child(5) {
+    width: 39%;
+  }
+
+  .logs-responsive-page th:nth-child(6),
+  .logs-responsive-page td:nth-child(6) {
+    width: 12%;
+  }
+
+  .logs-responsive-page th,
+  .logs-responsive-page td {
+    padding-inline: 0.55rem;
+    font-size: 0.92em;
+  }
+}
+
+/* Narrow window: table becomes cards. Every original cell stays present. */
+@container (max-width: 960px) {
+  .logs-responsive-page table,
+  .logs-responsive-page tbody {
+    display: block;
+    width: 100% !important;
+  }
+
+  .logs-responsive-page thead {
+    display: none;
+  }
+
+  .logs-responsive-page tbody {
+    display: grid;
+    gap: 0.7rem;
+  }
+
+  .logs-responsive-page tbody tr {
+    display: grid;
+    grid-template-columns:
+      minmax(8rem, 0.85fr)
+      minmax(8rem, 0.85fr)
+      minmax(0, 1.5fr);
+    grid-template-areas:
+      'time level component'
+      'code code task'
+      'message message message';
+    width: 100%;
+    min-width: 0;
+    padding: 0.7rem 0.8rem;
+    border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+    border-radius: 0.75rem;
+    background: color-mix(in srgb, currentColor 2.5%, transparent);
+  }
+
+  .logs-responsive-page tbody td {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.45rem;
+    width: auto !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    padding: 0.25rem 0.35rem !important;
+    border: 0 !important;
+  }
+
+  .logs-responsive-page tbody td::before {
+    flex: 0 0 auto;
+    font-size: 0.72em;
+    font-weight: 700;
+    letter-spacing: 0.035em;
+    opacity: 0.58;
+  }
+
+  .logs-responsive-page tbody td:nth-child(1) {
+    grid-area: time;
+  }
+
+  .logs-responsive-page tbody td:nth-child(1)::before {
+    content: 'THỜI GIAN';
+  }
+
+  .logs-responsive-page tbody td:nth-child(2) {
+    grid-area: level;
+  }
+
+  .logs-responsive-page tbody td:nth-child(2)::before {
+    content: 'MỨC';
+  }
+
+  .logs-responsive-page tbody td:nth-child(3) {
+    grid-area: component;
+  }
+
+  .logs-responsive-page tbody td:nth-child(3)::before {
+    content: 'THÀNH PHẦN';
+  }
+
+  .logs-responsive-page tbody td:nth-child(4) {
+    grid-area: code;
+  }
+
+  .logs-responsive-page tbody td:nth-child(4)::before {
+    content: 'MÃ';
+  }
+
+  .logs-responsive-page tbody td:nth-child(5) {
+    grid-area: message;
+    padding-top: 0.55rem !important;
+    border-top: 1px solid color-mix(in srgb, currentColor 9%, transparent) !important;
+  }
+
+  .logs-responsive-page tbody td:nth-child(5)::before {
+    content: 'NỘI DUNG';
+  }
+
+  .logs-responsive-page tbody td:nth-child(6) {
+    grid-area: task;
+  }
+
+  .logs-responsive-page tbody td:nth-child(6)::before {
+    content: 'TÁC VỤ';
+  }
+}
+
+/* Very narrow window: single-column cards. */
+@container (max-width: 680px) {
+  .logs-responsive-page {
+    overflow-x: hidden;
+  }
+
+  .logs-responsive-page tbody tr {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'time'
+      'level'
+      'component'
+      'code'
+      'message'
+      'task';
+    padding: 0.65rem;
+  }
+
+  .logs-responsive-page tbody td {
+    display: grid;
+    grid-template-columns: minmax(5.3rem, auto) minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .logs-responsive-page button {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
+/* Final paint-containment safety. */
+.logs-responsive-page td,
+.logs-responsive-page th {
+  position: relative;
+  isolation: isolate;
+}
+
+.logs-responsive-page td svg {
+  position: relative;
+  z-index: 1;
+}

@@ -75,6 +75,17 @@ export class SourceRateLimitedError extends AppError {
     );
   }
 }
+export class SourceRemovedError extends AppError {
+  public constructor(details?: Record<string, unknown>) {
+    super(
+      'SOURCE_REMOVED',
+      'Video này đã bị xóa khỏi YouTube nên không thể tải. Tubmedia đã bỏ qua video này.',
+      false,
+      details
+    );
+  }
+}
+
 export class DownloadFailedError extends AppError {
   public constructor(message: string, retryable = false, details?: Record<string, unknown>) {
     super('DOWNLOAD_FAILED', message, retryable, details);

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { AlertTriangle, CheckCircle2, Info, XCircle, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Info, XCircle, X, Cookie } from 'lucide-react';
 import { isAttentionNoticeResolved, notificationDuration } from '@shared/utils/notification-policy';
 import { useAppStore } from '../stores/app-store';
 import { friendlyIssue } from '../utils/ui-error';
 
+import { CookieManagerDialog } from './CookieManagerDialog';
 type Phase = 'entering' | 'visible' | 'leaving';
 
 const EXIT_DURATION_MS = 280;
@@ -18,6 +19,7 @@ export function AttentionCenter(): React.JSX.Element | null {
   const dismissAttention = useAppStore((state) => state.dismissAttention);
   const [phase, setPhase] = useState<Phase>('entering');
   const [paused, setPaused] = useState(false);
+  const [cookieOpen, setCookieOpen] = useState(false);
   const closeTimer = useRef<number | null>(null);
   const removeTimer = useRef<number | null>(null);
   const remainingMs = useRef(0);
@@ -30,6 +32,12 @@ export function AttentionCenter(): React.JSX.Element | null {
       ? `attention:${attention.id}`
       : '';
   const attentionResolved = attention ? isAttentionNoticeResolved(attention, jobs) : false;
+  /* TUBMEDIA_R31N_NOTIFICATION_SPAM_COOKIE_ACTION: cookie blocker is directly actionable from the notification */
+  const cookieAttention =
+    !error &&
+    ['AUTHENTICATION_REQUIRED', 'COOKIES_EXPIRED', 'BROWSER_COOKIE_DATABASE_LOCKED'].includes(
+      attention?.code ?? ''
+    );
   // Chỉ giữ cố định khi nguyên nhân vẫn đang chặn tác vụ.
   const sticky = Boolean(error || (attention?.sticky && !attentionResolved));
   const duration = notificationDuration(tone);
@@ -107,42 +115,51 @@ export function AttentionCenter(): React.JSX.Element | null {
   const style = { '--attention-duration': `${duration}ms` } as CSSProperties;
 
   return (
-    <div
-      className={`attention-center attention-${tone} attention-${phase}`}
-      style={style}
-      role={tone === 'error' || tone === 'warning' ? 'alert' : 'status'}
-      aria-live={tone === 'error' || tone === 'warning' ? 'assertive' : 'polite'}
-      aria-atomic="true"
-      onMouseEnter={() => setPaused(true)}
-      onMouseLeave={() => setPaused(false)}
-      onFocusCapture={() => setPaused(true)}
-      onBlurCapture={() => setPaused(false)}
-    >
-      <div className="attention-accent" aria-hidden="true" />
-      <div className="attention-icon">
-        <Icon size={23} />
-      </div>
-      <div className="attention-copy min-w-0 flex-1" key={key}>
-        <div className="attention-heading">
-          <div className="text-sm font-black">{title}</div>
-          {sticky && <span className="attention-sticky-label">Cần xử lý</span>}
-          {queued > 0 && <span className="attention-queue-label">+{queued}</span>}
+    <>
+      <div
+        className={`attention-center attention-${tone} attention-${phase}`}
+        style={style}
+        role={tone === 'error' || tone === 'warning' ? 'alert' : 'status'}
+        aria-live={tone === 'error' || tone === 'warning' ? 'assertive' : 'polite'}
+        aria-atomic="true"
+        onMouseEnter={() => setPaused(true)}
+        onMouseLeave={() => setPaused(false)}
+        onFocusCapture={() => setPaused(true)}
+        onBlurCapture={() => setPaused(false)}
+      >
+        <div className="attention-accent" aria-hidden="true" />
+        <div className="attention-icon">
+          <Icon size={23} />
         </div>
-        <div className="mt-1 text-sm leading-5">{message}</div>
-        {steps.length > 0 && (
-          <ol className="mt-2 grid gap-1 text-xs">
-            {steps.map((step, index) => (
-              <li key={`${index}-${step}`}>
-                <b>{index + 1}.</b> {step}
-              </li>
-            ))}
-          </ol>
-        )}
+        <div className="attention-copy min-w-0 flex-1" key={key}>
+          <div className="attention-heading">
+            <div className="text-sm font-black">{title}</div>
+            {sticky && <span className="attention-sticky-label">Cần xử lý</span>}
+            {queued > 0 && <span className="attention-queue-label">+{queued}</span>}
+          </div>
+          <div className="mt-1 text-sm leading-5">{message}</div>
+          {cookieAttention && (
+            <button className="btn btn-primary mt-3" onClick={() => setCookieOpen(true)}>
+              <Cookie size={16} />
+              {'Thêm Cookies'}
+            </button>
+          )}
+          {steps.length > 0 && (
+            <ol className="mt-2 grid gap-1 text-xs">
+              {steps.map((step, index) => (
+                <li key={`${index}-${step}`}>
+                  <b>{index + 1}.</b> {step}
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+        <button className="attention-close" aria-label="Đóng thông báo" onClick={beginClose}>
+          <X size={18} />
+        </button>
+        {!sticky && <div className={`attention-life ${paused ? 'is-paused' : ''}`} aria-hidden="true" />}
       </div>
-      <button className="attention-close" aria-label="Đóng thông báo" onClick={beginClose}>
-        <X size={18} />
-      </button>
-      {!sticky && <div className={`attention-life ${paused ? 'is-paused' : ''}`} aria-hidden="true" />}
-    </div>
+      <CookieManagerDialog open={cookieOpen} onClose={() => setCookieOpen(false)} />
+    </>
   );
 }

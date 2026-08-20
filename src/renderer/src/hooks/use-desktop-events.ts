@@ -20,6 +20,13 @@ function claimUpdateNotice(state: 'available' | 'downloaded', version: string): 
   return true;
 }
 
+/* TUBMEDIA_R31N_NOTIFICATION_SPAM_COOKIE_ACTION */
+const COOKIE_BLOCKING_CODES_R31N = [
+  'AUTHENTICATION_REQUIRED',
+  'COOKIES_EXPIRED',
+  'BROWSER_COOKIE_DATABASE_LOCKED'
+];
+
 export function useDesktopEvents(): void {
   useEffect(() => {
     const pendingJobs = new Map<string, QueueJob>();
@@ -107,6 +114,23 @@ export function useDesktopEvents(): void {
       window.desktop.events.onSystemStats((stats) => useAppStore.getState().setStats(stats)),
       window.desktop.events.onUpdateStatus(updateStatus),
       window.desktop.events.onAttention((notice) => {
+        /* TUBMEDIA_R31N_NOTIFICATION_SPAM_COOKIE_ACTION: one actionable cookie blocker for the whole app */
+        if (COOKIE_BLOCKING_CODES_R31N.includes(notice.code ?? '')) {
+          const store = useAppStore.getState();
+          store.dismissAttentionByCodes(COOKIE_BLOCKING_CODES_R31N);
+          store.setAttention({
+            id: 'cookie-blocker:global',
+            severity: 'warning',
+            title: 'Cần thêm Cookies',
+            message:
+              'Một hoặc nhiều video cần đăng nhập hoặc xác minh. Nhấn “Thêm Cookies” một lần; sau khi lưu, các video bị chặn sẽ tự tiếp tục.',
+            code: 'AUTHENTICATION_REQUIRED',
+            sticky: true,
+            ...(notice.steps?.length ? { steps: notice.steps } : {})
+          });
+          return;
+        }
+
         const store = useAppStore.getState();
         if (notice.code === 'DISK_SPACE_RECOVERED') {
           store.dismissAttentionByCodes(['DISK_FULL'], notice.projectId);

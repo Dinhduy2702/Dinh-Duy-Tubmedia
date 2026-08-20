@@ -1,3 +1,4 @@
+import { malformedYouTubeVideoUrlMessage } from '@shared/utils/youtube-url-validation.js';
 import { type BrowserWindow } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { cpus, freemem } from 'node:os';
@@ -995,6 +996,11 @@ export class QueueManager {
     try {
       switch (job.type) {
         case 'download': {
+          /* TUBMEDIA_R34_QUEUE_YOUTUBE_VALIDATION */
+          const malformedYouTubeMessage = malformedYouTubeVideoUrlMessage(job.input.url);
+          if (malformedYouTubeMessage) {
+            throw new InvalidInputError(malformedYouTubeMessage);
+          }
           const result = await this.downloader.run(job, profile, signal, (progress) =>
             this.updateDownloadProgress(job.id, progress)
           );
@@ -1167,6 +1173,85 @@ export class QueueManager {
         });
         return;
       }
+      if (code === 'SOURCE_REMOVED') {
+        this.repo.updateInput(job.id, {
+          progressStage: 'Video đã bị xóa khỏi YouTube',
+          resultMessage: message,
+          sourceRemoved: true,
+          resumeStatus: null
+        });
+        const skipped = this.repo.update(job.id, {
+          status: 'skipped',
+          progress: 100,
+          errorCode: null,
+          errorMessage: null,
+          finishedAt: new Date().toISOString(),
+          speed: null,
+          etaSeconds: 0
+        });
+        this.emitProgress(skipped);
+        this.logger.warn('queue', 'JOB_SKIPPED_SOURCE_REMOVED', message, {
+          jobId: job.id,
+          ...(job.projectId ? { projectId: job.projectId } : {}),
+          metadata: {
+            sourceRemoved: true,
+            originalErrorCode: code
+          }
+        });
+
+        if (job.projectId) {
+          const projectJobs = this.repo.list(job.projectId);
+          const blocked = new Set<string>([job.id]);
+          let discovered = true;
+
+          while (discovered) {
+            discovered = false;
+            for (const dependent of projectJobs) {
+              if (blocked.has(dependent.id)) continue;
+              if (['completed', 'skipped', 'cancelled', 'failed'].includes(dependent.status)) continue;
+
+              const dependsOn = Array.isArray(dependent.input.dependsOn)
+                ? dependent.input.dependsOn.filter((value): value is string => typeof value === 'string')
+                : [];
+
+              if (!dependsOn.some((id) => blocked.has(id))) continue;
+
+              this.repo.updateInput(dependent.id, {
+                progressStage: 'Bỏ qua vì video nguồn đã bị xóa',
+                resultMessage:
+                  'Không thể tiếp tục xử lý tác vụ này vì một video nguồn đã bị xóa khỏi YouTube.',
+                sourceRemovedDependency: true,
+                resumeStatus: null
+              });
+              const dependentSkipped = this.repo.update(dependent.id, {
+                status: 'skipped',
+                progress: 100,
+                errorCode: null,
+                errorMessage: null,
+                finishedAt: new Date().toISOString(),
+                speed: null,
+                etaSeconds: 0
+              });
+              blocked.add(dependent.id);
+              discovered = true;
+              this.emitProgress(dependentSkipped);
+              this.logger.warn(
+                'queue',
+                'JOB_SKIPPED_SOURCE_REMOVED_DEPENDENCY',
+                'Bỏ qua tác vụ phụ thuộc vì video nguồn đã bị xóa khỏi YouTube.',
+                {
+                  jobId: dependent.id,
+                  projectId: job.projectId,
+                  metadata: { removedSourceJobId: job.id }
+                }
+              );
+            }
+          }
+        }
+
+        return;
+      }
+
       const retryable = appError.retryable === true && job.attempts + 1 < job.maxAttempts;
       if (retryable) {
         const retrying = this.repo.update(job.id, {

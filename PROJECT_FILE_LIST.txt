@@ -1,3 +1,4 @@
+_r35-css-existed.txt
 .gitignore
 .prettierignore
 .prettierrc.json
@@ -177,10 +178,12 @@ scripts/verify-hdr-capcut-hotfix7.mjs
 scripts/verify-independent-workflow-accordion-1.3.0.mjs
 scripts/verify-js-yaml-security-pre132.mjs
 scripts/verify-merge-visual-boundary-hotfix11.mjs
+scripts/verify-notification-cookie-action-r31n.mjs
 scripts/verify-notification-cookie-upgrade.mjs
 scripts/verify-pause-project-race-v132.mjs
 scripts/verify-pause-terminal-noop-hotfix-v132.mjs
 scripts/verify-pre132-user-release.mjs
+scripts/verify-professional-passive-update-center-v133.mjs
 scripts/verify-professional-update-now-v132.mjs
 scripts/verify-quick-download-integration.mjs
 scripts/verify-r18-adaptive-download-batch-errors.mjs
@@ -204,6 +207,8 @@ scripts/verify-v0100.mjs
 scripts/verify-v0101.mjs
 scripts/verify-validation-gate-fixes.mjs
 scripts/verify-video-link-filter.mjs
+scripts/verify-youtube-source-removed-r36.mjs
+scripts/verify-youtube-url-validation-r34.mjs
 scripts/write-updater-metadata-utf8nobom.mjs
 SECURITY.md
 SOURCE_UPDATE_OVERWRITE_VI.md
@@ -293,6 +298,7 @@ src/renderer/src/features/projects/ImportLinksDialog.tsx
 src/renderer/src/hooks/use-desktop-events.ts
 src/renderer/src/layout/Sidebar.tsx
 src/renderer/src/layout/Topbar.tsx
+src/renderer/src/logs-responsive-r35.css
 src/renderer/src/main.tsx
 src/renderer/src/pages/AboutPage.tsx
 src/renderer/src/pages/CachePage.tsx
@@ -357,6 +363,7 @@ src/shared/utils/timestamp.ts
 src/shared/utils/ui-error.ts
 src/shared/utils/url.ts
 src/shared/utils/video-link-filter.ts
+src/shared/utils/youtube-url-validation.ts
 src/shared/video-link-filter.ts
 TEST_RESULTS.md
 tests/e2e/app.spec.ts
@@ -444,6 +451,8 @@ tests/unit/video-duration-persistence.test.ts
 tests/unit/video-link-filter.test.ts
 tests/unit/windows-process-control.test.ts
 tests/unit/workbench-storage.test.ts
+tests/unit/youtube-source-removed-r36.test.ts
+tests/unit/youtube-url-validation-r34.test.ts
 tests/unit/ytdlp-progress.test.ts
 TOOL_UPDATE.md
 tool/.vdmsp-tool-metadata.json

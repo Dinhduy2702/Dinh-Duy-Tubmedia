@@ -126,10 +126,14 @@ export class AppUpdateService {
     updater.on('checking-for-update', () => {
       this.feedUnavailableForSession = false;
       this.feedUnavailableLogged = false;
-      this.emit({
-        ...this.baseStatus('checking', 'Đang kiểm tra bản cập nhật...'),
-        checkedAt: new Date().toISOString()
-      });
+      // TUBMEDIA_V133_PASSIVE_UPDATE_CENTER
+      // "Checking" is transport state. Professional UI keeps the last stable
+      // product state visible while automatic polling runs in the background.
+      this.logger.debug(
+        'update',
+        'APP_UPDATE_BACKGROUND_CHECK_STARTED',
+        'Tubmedia đang đồng bộ thông tin phiên bản trong nền.'
+      );
     });
     updater.on('update-available', (info: UpdateInfo) => {
       const currentVersion = app.getVersion();
@@ -184,7 +188,7 @@ export class AppUpdateService {
       this.emit({
         ...this.status,
         state: 'downloading',
-        message: 'Đang tải bản cập nhật trong nền...',
+        message: 'Đang tải bản cập nhật...',
         progress: updateProgress(progress),
         error: null
       });
@@ -213,8 +217,9 @@ export class AppUpdateService {
     });
     updater.on('error', (error: Error) => {
       const message = error.message;
+
       if (isExpectedDowngradeBlock(message)) {
-        this.emit({
+        const next = {
           ...this.baseStatus(
             'not-available',
             'Bạn đang dùng phiên bản mới nhất hoặc mới hơn phiên bản trên máy chủ.'
@@ -222,16 +227,36 @@ export class AppUpdateService {
           checkedAt: new Date().toISOString(),
           info: this.status.info,
           error: null
-        });
+        } satisfies AppUpdateStatus;
+
+        if (this.silentCheck) {
+          this.status = next;
+        } else {
+          this.emit(next);
+        }
         return;
       }
+
       if (isRemoteUpdateMetadataMissing(message)) {
         this.handleMetadataUnavailable(this.silentCheck);
         return;
       }
 
       const missingSource = isLocalUpdateSourceMissing(message);
-      const next: AppUpdateStatus = {
+
+      this.logger.warn(
+        'update',
+        missingSource ? 'APP_UPDATE_FEED_NOT_CONFIGURED' : 'APP_UPDATE_ERROR',
+        missingSource ? 'Không tìm thấy cấu hình máy chủ cập nhật trong bản cài đặt.' : message
+      );
+
+      if (this.silentCheck) {
+        // Automatic polling errors belong to logs/diagnostics. Never replace
+        // a stable Update Center screen with a network/transport error.
+        return;
+      }
+
+      this.emit({
         ...this.baseStatus(
           missingSource ? 'disabled' : 'error',
           missingSource
@@ -240,14 +265,7 @@ export class AppUpdateService {
         ),
         checkedAt: new Date().toISOString(),
         error: missingSource ? null : message
-      };
-      this.logger.warn(
-        'update',
-        missingSource ? 'APP_UPDATE_FEED_NOT_CONFIGURED' : 'APP_UPDATE_ERROR',
-        missingSource ? 'Không tìm thấy cấu hình máy chủ cập nhật trong bản cài đặt.' : message
-      );
-      if (this.silentCheck && missingSource) this.status = next;
-      else this.emit(next);
+      });
     });
   }
 
@@ -261,19 +279,16 @@ export class AppUpdateService {
   }
 
   public async check(silent = false): Promise<AppUpdateStatus> {
-    /* TUBMEDIA_V132_UPDATE_CHECK_NONBLOCKING_HOTFIX */
-    /* TUBMEDIA_V132_UPDATE_CHECK_ASYNC_CONTRACT */
-    await Promise.resolve();
     if (!app.isPackaged) {
       const status = this.baseStatus('disabled', 'Cập nhật trực tuyến chỉ hoạt động trong bản đã cài đặt.');
-      this.emit(status);
-      return status;
+      if (!silent) this.emit(status);
+      return silent ? this.status : status;
     }
 
     if (this.feedUnavailableForSession) {
+      if (silent) return this.status;
       const status = this.metadataUnavailableStatus();
-      if (silent) this.status = status;
-      else this.emit(status);
+      this.emit(status);
       return status;
     }
 
@@ -282,31 +297,26 @@ export class AppUpdateService {
         ...this.baseStatus('disabled', 'Phiên bản này chưa được liên kết với máy chủ cập nhật.'),
         checkedAt: new Date().toISOString()
       };
-      this.emit(status);
+
       this.logger.info(
         'update',
         'APP_UPDATE_FEED_NOT_CONFIGURED_FAST',
         'Bỏ qua kiểm tra mạng vì không có app-update.yml hoặc URL máy chủ cập nhật.'
       );
-      return status;
+
+      if (!silent) this.emit(status);
+      return silent ? this.status : status;
     }
 
     if (this.networkCheckInFlight) {
-      const status = {
-        ...this.status,
-        message:
-          this.status.state === 'checking'
-            ? 'Một lượt kiểm tra cập nhật đang chạy nền. Bạn vẫn có thể tiếp tục sử dụng Tubmedia.'
-            : this.status.message
-      };
-
-      if (!silent) this.emit(status);
-      return status;
+      // Coalesce duplicate checks. Never turn an in-flight background request
+      // into a visible "checking" state.
+      return this.status;
     }
 
     this.silentCheck = silent;
-
     let updater: AutoUpdater;
+
     try {
       updater = this.getUpdater();
       this.configure(updater);
@@ -314,16 +324,14 @@ export class AppUpdateService {
       this.silentCheck = false;
       return this.handleCheckFailure(error, silent);
     }
-
-    const startedAt = new Date().toISOString();
-    const checkingStatus: AppUpdateStatus = {
-      ...this.baseStatus('checking', 'Đang kiểm tra bản cập nhật trong nền...'),
-      checkedAt: startedAt
-    };
-
-    this.emit(checkingStatus);
+    this.logger.debug(
+      'update',
+      silent ? 'APP_UPDATE_BACKGROUND_CHECK' : 'APP_UPDATE_CHECK',
+      silent ? 'Đang đồng bộ phiên bản trong nền.' : 'Đang kiểm tra thông tin phiên bản.'
+    );
 
     let updateRequest: ReturnType<AutoUpdater['checkForUpdates']>;
+
     try {
       updateRequest = updater.checkForUpdates();
     } catch (error) {
@@ -337,8 +345,6 @@ export class AppUpdateService {
         this.handleCheckFailure(error, silent);
       })
       .finally(() => {
-        // A second network check cannot start while networkCheckInFlight points
-        // to this transport, so clearing it on settlement is race-safe.
         this.networkCheckInFlight = null;
         this.silentCheck = false;
       });
@@ -347,36 +353,24 @@ export class AppUpdateService {
 
     const timeoutMs = silent ? SILENT_UPDATE_CHECK_TIMEOUT_MS : MANUAL_UPDATE_CHECK_TIMEOUT_MS;
 
-    // Do NOT await the network promise here. IPC must return immediately so a
-    // slow/hung updater request can never freeze the renderer button/workspace.
-    void this.waitForNetworkCheck(transport, timeoutMs).then((completed) => {
-      if (completed || this.networkCheckInFlight !== transport) {
-        return;
-      }
+    const completed = await this.waitForNetworkCheck(transport, timeoutMs);
 
+    if (!completed) {
       const seconds = Math.round(timeoutMs / 1_000);
-      const status: AppUpdateStatus = {
-        ...this.baseStatus(
-          'error',
-          `Máy chủ cập nhật chưa phản hồi sau ${seconds} giây. Bạn vẫn có thể tiếp tục sử dụng Tubmedia.`
-        ),
-        checkedAt: startedAt,
-        error: `UPDATE_CHECK_TIMEOUT: quá ${timeoutMs} ms. Yêu cầu mạng vẫn chạy nền nhưng không khóa giao diện.`
-      };
-
-      if (silent) this.status = status;
-      else this.emit(status);
 
       this.logger.warn(
         'update',
-        'APP_UPDATE_CHECK_TIMEOUT_NONBLOCKING',
-        status.error ?? status.message ?? 'Update timeout'
+        'APP_UPDATE_CHECK_TIMEOUT',
+        'Máy chủ cập nhật chưa phản hồi sau ' + seconds + ' giây. Yêu cầu mạng tiếp tục chạy nền.'
       );
-    });
+
+      // Do not emit error/checking state. A delayed update-available or
+      // update-not-available event will update the UI when transport returns.
+      return this.status;
+    }
 
     return this.status;
   }
-
   public async download(): Promise<AppUpdateStatus> {
     const currentVersion = app.getVersion();
 
@@ -500,7 +494,13 @@ export class AppUpdateService {
         info: this.status.info,
         error: null
       };
-      this.emit(status);
+
+      if (silent) {
+        this.status = status;
+      } else {
+        this.emit(status);
+      }
+
       return status;
     }
 
@@ -510,6 +510,18 @@ export class AppUpdateService {
     }
 
     const missingSource = isLocalUpdateSourceMissing(message);
+
+    this.logger.warn(
+      'update',
+      missingSource ? 'APP_UPDATE_FEED_NOT_CONFIGURED' : 'APP_UPDATE_CHECK_FAILED',
+      missingSource ? 'Không tìm thấy cấu hình máy chủ cập nhật trong bản cài đặt.' : message
+    );
+
+    if (silent) {
+      // Fail passive: keep the last stable update state.
+      return this.status;
+    }
+
     const status: AppUpdateStatus = {
       ...this.baseStatus(
         missingSource ? 'disabled' : 'error',
@@ -520,16 +532,10 @@ export class AppUpdateService {
       checkedAt: new Date().toISOString(),
       error: missingSource ? null : message
     };
-    this.status = status;
-    if (!silent || !missingSource) this.emit(status);
-    this.logger.warn(
-      'update',
-      missingSource ? 'APP_UPDATE_FEED_NOT_CONFIGURED' : 'APP_UPDATE_CHECK_FAILED',
-      missingSource ? 'Không tìm thấy cấu hình máy chủ cập nhật trong bản cài đặt.' : message
-    );
+
+    this.emit(status);
     return status;
   }
-
   private metadataUnavailableStatus(): AppUpdateStatus {
     return {
       ...this.baseStatus('disabled', UPDATE_METADATA_UNAVAILABLE_MESSAGE),
@@ -541,7 +547,6 @@ export class AppUpdateService {
   private handleMetadataUnavailable(silent: boolean): AppUpdateStatus {
     this.feedUnavailableForSession = true;
     const status = this.metadataUnavailableStatus();
-    this.status = status;
 
     if (!this.feedUnavailableLogged) {
       this.feedUnavailableLogged = true;
@@ -552,10 +557,14 @@ export class AppUpdateService {
       );
     }
 
-    if (!silent) this.emit(status);
+    if (silent) {
+      // Missing background metadata must not overwrite a last known-good state.
+      return this.status;
+    }
+
+    this.emit(status);
     return status;
   }
-
   private async waitForNetworkCheck(check: Promise<void>, timeoutMs: number): Promise<boolean> {
     let timer: NodeJS.Timeout | null = null;
     try {

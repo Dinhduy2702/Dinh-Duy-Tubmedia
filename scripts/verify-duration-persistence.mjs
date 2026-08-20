@@ -16,7 +16,7 @@ function check(label, condition) {
   console.log(`PASS: ${label}`);
 }
 
-check('version remains 1.3.3', packageJson.version === '1.3.3');
+check('version remains 1.3.4', packageJson.version === '1.3.4');
 
 check(
   'start duration is restored',

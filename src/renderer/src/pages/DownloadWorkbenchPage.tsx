@@ -547,7 +547,10 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
           downloadWorkers: plan.workersPerList
         }))
       );
-      notify('Đã áp dụng đề xuất theo máy', `Giữ master cao nhất theo nguồn + tạo bản edit CapCut ${recommendedEditMode === 'capcut_sdr_2k' ? '2K' : '1080p'}; ${plan.workersPerList} luồng/danh sách, ${plan.globalWorkers} luồng toàn ứng dụng.`);
+      notify(
+        'Đã áp dụng đề xuất theo máy',
+        `Giữ master cao nhất theo nguồn + tạo bản edit CapCut ${recommendedEditMode === 'capcut_sdr_2k' ? '2K' : '1080p'}; ${plan.workersPerList} luồng/danh sách, ${plan.globalWorkers} luồng toàn ứng dụng.`
+      );
     } catch (error) {
       setError(messageOf(error));
     } finally {
@@ -796,7 +799,15 @@ function PreflightPanel({
       </div>
       {recommendation && plan && (
         <div className="recommend-strip">
-          <b>{/* ADAPTIVE_SETTINGS_HOTFIX10_OPTIONAL_NOTE */}{recommendation.summary} · Master cao nhất + edit {recommendation.recommendedConcurrentFragments >= 4 && recommendation.recommendedAria2Connections >= 24 ? 'tối đa 2K nếu GPU phù hợp' : '1080p'}</b> {plan.note}
+          <b>
+            {/* ADAPTIVE_SETTINGS_HOTFIX10_OPTIONAL_NOTE */}
+            {recommendation.summary} · Master cao nhất + edit{' '}
+            {recommendation.recommendedConcurrentFragments >= 4 &&
+            recommendation.recommendedAria2Connections >= 24
+              ? 'tối đa 2K nếu GPU phù hợp'
+              : '1080p'}
+          </b>{' '}
+          {plan.note}
         </div>
       )}
     </InfoDisclosure>

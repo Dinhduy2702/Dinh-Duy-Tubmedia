@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  classifyYtDlpFailure,
-  sanitizeYtDlpDiagnostic
-} from '../../src/shared/utils/download-failure.js';
+import { classifyYtDlpFailure, sanitizeYtDlpDiagnostic } from '../../src/shared/utils/download-failure.js';
 
 describe('download recovery R49', () => {
   it('classifies 429 as an immediate source rate limit blocker', () => {
@@ -41,10 +38,10 @@ describe('download recovery R49', () => {
     });
   });
 
-  it('keeps unavailable/deleted video failures non-retryable', () => {
+  it('keeps explicitly removed video failures non-retryable', () => {
     expect(classifyYtDlpFailure('ERROR: Video unavailable. This video has been removed')).toMatchObject({
       category: 'non_retryable',
-      subtype: 'unavailable',
+      subtype: 'removed',
       retryable: false
     });
   });

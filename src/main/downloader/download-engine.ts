@@ -10,7 +10,8 @@ import {
   DiskFullError,
   DownloadFailedError,
   SourceRateLimitedError,
-  ToolNotFoundError
+  ToolNotFoundError,
+  SourceRemovedError
 } from '@shared/errors/app-errors.js';
 import type { AppSettings, QueueJob, ResourceProfile, VerificationLevel } from '@shared/types/domain.js';
 import {
@@ -1266,6 +1267,10 @@ export class DownloadEngine {
             appSettings.cookiesBrowser === 'none' ? 'trình duyệt Chromium' : appSettings.cookiesBrowser,
             appSettings.cookiesBrowserProfile
           );
+        }
+
+        if (failure.subtype === 'removed') {
+          throw new SourceRemovedError(failureDetails);
         }
 
         if (failure.category === 'authentication') {

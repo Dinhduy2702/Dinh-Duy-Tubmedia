@@ -1,3 +1,4 @@
+import { malformedYouTubeVideoUrlMessage } from '@shared/utils/youtube-url-validation.js';
 import { app, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { access, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
@@ -18,6 +19,8 @@ import type { ProcessManager } from '../processes/process-manager.js';
 import type { SettingsService } from '../settings/settings-service.js';
 import type { ToolManager } from '../tools/tool-manager.js';
 import { buildQuickDownloadArguments } from './quick-download-command.js';
+
+import { isExplicitlyRemovedYoutubeSource } from '@shared/utils/download-failure.js';
 
 interface PersistedQuickDownloadState {
   version: 1;
@@ -42,6 +45,7 @@ const TERMINAL_PHASES = new Set<QuickDownloadStatus['phase']>([
   'completed',
   'cancelled',
   'failed',
+  'skipped',
   'interrupted'
 ]);
 
@@ -280,6 +284,12 @@ export class QuickDownloadService {
 
     if (this.isActive()) {
       throw new Error('Một video đang được tải nhanh. Hãy chờ hoàn tất hoặc hủy tác vụ hiện tại.');
+    }
+
+    /* TUBMEDIA_R34_QUICK_YOUTUBE_VALIDATION */
+    const malformedYouTubeMessage = malformedYouTubeVideoUrlMessage(request.url);
+    if (malformedYouTubeMessage) {
+      throw new Error(malformedYouTubeMessage);
     }
 
     await this.assertWritableDirectory(request.outputDirectory);
@@ -536,6 +546,12 @@ export class QuickDownloadService {
             return;
           }
 
+          if (isExplicitlyRemovedYoutubeSource(active.recentLines.join('\n'))) {
+            this.skipRemovedTask(active);
+            await this.cleanupActive(active, true);
+            return;
+          }
+
           if (classifyOutputPathFailure(active.recentLines)) {
             if (!active.compactFilename) {
               active.compactFilename = true;
@@ -743,6 +759,21 @@ export class QuickDownloadService {
     this.cookieBlockedRequest = null;
     this.publish(active);
     await this.cleanupActive(active, true);
+  }
+
+  private skipRemovedTask(active: ActiveQuickTask): void {
+    if (TERMINAL_PHASES.has(active.status.phase)) return;
+    active.status.phase = 'skipped';
+    active.status.progress = 100;
+    active.status.error = null;
+    active.status.errorCode = null;
+    active.status.message =
+      'Video này đã bị xóa khỏi YouTube nên Tubmedia đã bỏ qua, không coi đây là lỗi tải.';
+    active.status.completedAt = new Date().toISOString();
+    this.publish(active);
+    this.logger.warn('quick-download', 'QUICK_DOWNLOAD_SOURCE_REMOVED', active.status.message, {
+      jobId: active.status.taskId
+    });
   }
 
   private failTask(active: ActiveQuickTask, message: string, errorCode: QuickDownloadErrorCode | null): void {

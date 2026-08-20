@@ -1,5 +1,16 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
-import { AlertTriangle, Copy, Cookie, ExternalLink, Pause, Play, RotateCcw, ShieldAlert, Square, Wrench } from 'lucide-react';
+import {
+  AlertTriangle,
+  Copy,
+  Cookie,
+  ExternalLink,
+  Pause,
+  Play,
+  RotateCcw,
+  ShieldAlert,
+  Square,
+  Wrench
+} from 'lucide-react';
 import type {
   QuickDownloadMediaMode,
   QuickDownloadQuality,
@@ -35,7 +46,8 @@ function quickPhaseLabel(phase: QuickDownloadStatus['phase']): string {
     cancelling: 'Đang hủy',
     cancelled: 'Đã hủy',
     failed: 'Tải chưa thành công',
-    interrupted: 'Tác vụ bị gián đoạn'
+    interrupted: 'Tác vụ bị gián đoạn',
+    skipped: 'Bỏ qua'
   };
   return labels[phase];
 }
@@ -44,6 +56,7 @@ const TERMINAL_PHASES = new Set<QuickDownloadStatus['phase']>([
   'completed',
   'cancelled',
   'failed',
+  'skipped',
   'interrupted'
 ]);
 
@@ -139,10 +152,9 @@ export function QuickDownloadPanel(): ReactElement {
   const unsupportedLink = status?.errorCode === UNSUPPORTED_LINK_CODE;
   const outputPathBlocked = status?.errorCode === OUTPUT_PATH_CODE;
 
-  const displayStatusMessage = status
-    ? safeUiText(status.message, quickPhaseLabel(status.phase))
-    : '';
-  const displayWarnings = status?.warnings.map((warning) => safeUiText(warning, 'Có một cảnh báo cần kiểm tra.')) ?? [];
+  const displayStatusMessage = status ? safeUiText(status.message, quickPhaseLabel(status.phase)) : '';
+  const displayWarnings =
+    status?.warnings.map((warning) => safeUiText(warning, 'Có một cảnh báo cần kiểm tra.')) ?? [];
 
   const progressText = useMemo(() => {
     if (!status) return '';
@@ -536,8 +548,8 @@ export function QuickDownloadPanel(): ReactElement {
               <strong>Không thể tạo tệp trong đường dẫn đã chọn</strong>
               <p>{displayStatusMessage}</p>
               <small>
-                Tubmedia đã tự thử lại bằng tên tệp ngắn. Hãy chọn thư mục có đường dẫn ngắn hơn, còn dung lượng
-                và có quyền ghi rồi thử lại.
+                Tubmedia đã tự thử lại bằng tên tệp ngắn. Hãy chọn thư mục có đường dẫn ngắn hơn, còn dung
+                lượng và có quyền ghi rồi thử lại.
               </small>
             </div>
             <div className="quick-download-recovery-actions">
@@ -656,7 +668,11 @@ export function QuickDownloadPanel(): ReactElement {
         {displayWarnings.length ? (
           <details className="quick-download-warnings quick-download-unified-warnings">
             <summary>{displayWarnings.length} cảnh báo</summary>
-            <ul>{displayWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+            <ul>
+              {displayWarnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
           </details>
         ) : null}
 
@@ -664,8 +680,8 @@ export function QuickDownloadPanel(): ReactElement {
           {useTimeline
             ? 'Timeline đang bật: Tubmedia chỉ tải đoạn đã chọn. Cắt nhanh có thể lệch nhẹ quanh keyframe; bật Cắt chính xác khi cần mốc sát hơn.'
             : mediaMode === 'audio-only'
-                ? 'Timeline đang tắt: Tubmedia tải toàn bộ tệp âm thanh. Tên file vẫn có ID nguồn và mã tác vụ để tránh ghi đè.'
-                : 'Timeline đang tắt: Tubmedia tải toàn bộ video. File luôn có Video ID và mã tác vụ để không bỏ qua nhầm video trùng tên.'}
+              ? 'Timeline đang tắt: Tubmedia tải toàn bộ tệp âm thanh. Tên file vẫn có ID nguồn và mã tác vụ để tránh ghi đè.'
+              : 'Timeline đang tắt: Tubmedia tải toàn bộ video. File luôn có Video ID và mã tác vụ để không bỏ qua nhầm video trùng tên.'}
         </div>
       </section>
       <CookieManagerDialog

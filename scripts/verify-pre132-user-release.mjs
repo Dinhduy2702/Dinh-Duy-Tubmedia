@@ -95,7 +95,7 @@ const preloadSources = preloadFiles.map(read).join('\n');
 
 const applicationSources = `${mainSources}\n${rendererSources}\n${preloadSources}`;
 
-check(pkg.version === '1.3.3', 'v1.3.3 audit keeps application version 1.3.3');
+check(pkg.version === '1.3.4', 'v1.3.4 audit keeps application version 1.3.4');
 
 check(pkg.devDependencies?.electron === '43.2.0', 'Electron is pinned to 43.2.0');
 
@@ -270,12 +270,12 @@ check(
 
 check(
   pkg.scripts?.['verify:pre132-user-release'] === 'node scripts/verify-pre132-user-release.mjs',
-  'v1.3.3 user release verifier is registered'
+  'v1.3.4 user release verifier is registered'
 );
 
 check(
   typeof pkg.scripts?.check === 'string' && pkg.scripts.check.includes('npm run verify:pre132-user-release'),
-  'v1.3.3 user release verification is permanent in npm run check'
+  'v1.3.4 user release verification is permanent in npm run check'
 );
 
 check(
@@ -285,7 +285,7 @@ check(
 );
 
 if (failures > 0) {
-  throw new Error(`Pre-1.3.3 user release verification failed: ${failures}/${checks} checks failed.`);
+  throw new Error(`Pre-1.3.4 user release verification failed: ${failures}/${checks} checks failed.`);
 }
 
-console.log(`Tubmedia v1.3.3 user release verification OK: ${checks} checks.`);
+console.log(`Tubmedia v1.3.4 user release verification OK: ${checks} checks.`);

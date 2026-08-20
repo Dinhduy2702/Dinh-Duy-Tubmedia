@@ -42,7 +42,8 @@ export type QuickDownloadPhase =
   | 'cancelling'
   | 'cancelled'
   | 'interrupted'
-  | 'failed';
+  | 'failed'
+  | 'skipped';
 
 export interface QuickDownloadStatus {
   taskId: string;

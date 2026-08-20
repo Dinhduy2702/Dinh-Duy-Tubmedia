@@ -1,3 +1,12 @@
+# Tubmedia 1.3.4
+
+- Nhận diện riêng video YouTube đã bị xóa/removed và hiển thị thông báo chính xác.
+- Video đã bị xóa được bỏ qua an toàn, không retry và không tạo JOB_FAILED giả.
+- Tác vụ cắt/ghép phụ thuộc vào nguồn đã bị xóa cũng được bỏ qua để tránh lỗi dây chuyền.
+- Tải nhanh hỗ trợ trạng thái bỏ qua cho nguồn đã bị xóa.
+- Giữ R18, R34, R49, R31N và toàn bộ cơ chế phục hồi/cập nhật hiện có.
+- Giao diện Nhật ký responsive, không che icon/ký tự và nội dung tự co theo cửa sổ.
+
 # Tubmedia 1.3.3
 
 - Cập nhật ngay: tải bản mới với tiến độ hiển thị trực tiếp trong Tubmedia.

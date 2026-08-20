@@ -1,39 +1,12 @@
-import {
-  CheckCircle2,
-  Download,
-  ExternalLink,
-  RefreshCcw,
-  Rocket,
-  Server,
-  Settings,
-  ShieldCheck
-} from 'lucide-react';
-import { useState } from 'react';
-import type { AppUpdateStatus } from '@shared/types/domain';
+import { CheckCircle2, Download, Rocket, Server, Settings, ShieldCheck } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import type { AppUpdateReleaseInfo, AppUpdateStatus } from '@shared/types/domain';
 import { useAppStore } from '../stores/app-store';
-import { createUiEventId } from '../utils/ui-id';
-import { friendlyIssue } from '../utils/ui-error';
-
 import { formatReleaseNotesForDisplay } from '../../../shared/release-notes';
-import { compareAppVersions, isNewerAppVersion } from '../../../shared/app-version';
+
+const LAST_KNOWN_RELEASE_KEY = 'tubmedia:last-known-app-release';
+
 const channelLabel = (value: string | undefined): string => (value === 'beta' ? 'Thử nghiệm' : 'Ổn định');
-const UPDATE_CHECK_UI_TIMEOUT_MS = 12_000;
-
-/* TUBMEDIA_V132_UPDATE_UI_WATCHDOG_HOTFIX */
-function withUpdateUiTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-
-  return Promise.race([
-    promise,
-    new Promise<T>((_resolve, reject) => {
-      timer = setTimeout(() => {
-        reject(new Error('UPDATE_UI_CHECK_TIMEOUT: kiểm tra cập nhật quá lâu; giao diện đã được mở khóa.'));
-      }, timeoutMs);
-    })
-  ]).finally(() => {
-    if (timer) clearTimeout(timer);
-  });
-}
 
 function bytes(value: number | undefined): string {
   const safe = value ?? 0;
@@ -43,124 +16,112 @@ function bytes(value: number | undefined): string {
   return `${(safe / 1024 ** 3).toFixed(2)} GB`;
 }
 
-function stateLabel(status: AppUpdateStatus | null): string {
-  if (!status) return 'Chưa đọc trạng thái';
-
-  const relation = status.info?.version
-    ? compareAppVersions(status.info.version, status.currentVersion)
-    : null;
-
-  if (status.state === 'not-available' && relation === -1) {
-    return 'Đang dùng bản mới hơn';
+function readLastKnownRelease(): AppUpdateReleaseInfo | null {
+  try {
+    const raw = window.localStorage.getItem(LAST_KNOWN_RELEASE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as AppUpdateReleaseInfo;
+    return typeof parsed?.version === 'string' && parsed.version.trim() ? parsed : null;
+  } catch {
+    return null;
   }
-
-  const labels: Record<AppUpdateStatus['state'], string> = {
-    idle: 'Sẵn sàng',
-    disabled: 'Chưa liên kết máy chủ',
-    checking: 'Đang kiểm tra',
-    available: relation === 1 ? 'Có phiên bản mới' : 'Không có bản mới',
-    'not-available': 'Đang dùng bản mới nhất',
-    downloading: 'Đang tải trong nền',
-    downloaded: 'Sẵn sàng cài đặt',
-    installing: 'Đang chuẩn bị cài đặt',
-    error: 'Cập nhật gặp sự cố'
-  };
-
-  return labels[status.state];
 }
+
+function stableState(status: AppUpdateStatus | null): AppUpdateStatus['state'] {
+  if (!status) return 'idle';
+  if (status.state === 'checking' || status.state === 'error') return 'idle';
+  return status.state;
+}
+
+function badgeLabel(state: AppUpdateStatus['state']): string {
+  if (state === 'available') return 'Có phiên bản mới';
+  if (state === 'downloading') return 'Đang tải cập nhật';
+  if (state === 'downloaded') return 'Sẵn sàng cài đặt';
+  if (state === 'installing') return 'Đang cài đặt';
+  if (state === 'disabled') return 'Cập nhật tự động chưa sẵn sàng';
+  return 'Đang dùng bản mới nhất';
+}
+
+// TUBMEDIA_V133_PROFESSIONAL_PASSIVE_UPDATE_CENTER
 export function UpdatesPage(): React.JSX.Element {
   const settings = useAppStore((state) => state.settings);
   const status = useAppStore((state) => state.updateStatus);
   const setStatus = useAppStore((state) => state.setUpdateStatus);
   const setError = useAppStore((state) => state.setError);
-  const setAttention = useAppStore((state) => state.setAttention);
   const setPage = useAppStore((state) => state.setPage);
-  const [busy, setBusy] = useState<'check' | 'download' | 'install' | null>(null);
+  const [busy, setBusy] = useState<'update' | 'install' | null>(null);
+  const [lastKnownRelease, setLastKnownRelease] = useState<AppUpdateReleaseInfo | null>(() =>
+    readLastKnownRelease()
+  );
 
-  const run = async (kind: 'check' | 'download' | 'install'): Promise<void> => {
+  useEffect(() => {
+    if (!status?.info?.version) return;
+    setLastKnownRelease(status.info);
+    try {
+      window.localStorage.setItem(LAST_KNOWN_RELEASE_KEY, JSON.stringify(status.info));
+    } catch {
+      // Cache is optional. Update UX must stay usable when storage is unavailable.
+    }
+  }, [status?.info]);
+
+  const state = stableState(status);
+  const currentVersion = status?.currentVersion ?? '—';
+  const latestInfo = status?.info ?? lastKnownRelease;
+  const latestVersion = latestInfo?.version ?? currentVersion;
+  const hasNewRelease =
+    state === 'available' || state === 'downloading' || state === 'downloaded' || state === 'installing';
+  const downloading = state === 'downloading';
+  const progress = status?.progress?.percent ?? 0;
+  const feedConfigured =
+    Boolean(settings?.appFeedUrl) || Boolean(status?.supported && status?.state !== 'disabled');
+
+  const headline = useMemo(() => {
+    if (state === 'available') return `Đã có phiên bản mới ${latestVersion}`;
+    if (state === 'downloading') return `Đang tải Tubmedia ${latestVersion}`;
+    if (state === 'downloaded') return `Tubmedia ${latestVersion} đã sẵn sàng cài đặt`;
+    if (state === 'installing') return `Đang cài đặt Tubmedia ${latestVersion}`;
+    if (state === 'disabled') return 'Cập nhật tự động hiện chưa sẵn sàng';
+    return `Bạn đang dùng phiên bản mới nhất ${latestVersion}`;
+  }, [latestVersion, state]);
+
+  const runUpdate = async (): Promise<void> => {
+    if (state !== 'available' && state !== 'downloaded') return;
+    const kind = state === 'downloaded' ? 'install' : 'update';
     setBusy(kind);
     try {
-      if (kind === 'install') {
+      if (state === 'downloaded') {
         await window.desktop.updates.install();
         return;
       }
-      const result =
-        kind === 'check'
-          ? await withUpdateUiTimeout(window.desktop.updates.check(), UPDATE_CHECK_UI_TIMEOUT_MS)
-          : await window.desktop.updates.download();
+      const result = await window.desktop.updates.download();
       setStatus(result);
-      if (kind === 'check' && result.state === 'not-available') {
-        const relation = result.info?.version
-          ? compareAppVersions(result.info.version, result.currentVersion)
-          : null;
-        const ahead = relation === -1;
-
-        setAttention({
-          id: createUiEventId('update-current'),
-          severity: 'success',
-          title: ahead ? 'Bạn đang dùng bản mới hơn máy chủ' : 'Tubmedia đã được cập nhật',
-          message: ahead
-            ? `Máy này đang chạy ${result.currentVersion}; máy chủ hiện có ${result.info?.version ?? 'không xác định'}.`
-            : `Bạn đang dùng phiên bản ${result.currentVersion}.`,
-          sticky: false
-        });
-      }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-
-      if (kind === 'check' && message.includes('UPDATE_UI_CHECK_TIMEOUT')) {
-        if (status) {
-          setStatus({
-            ...status,
-            state: 'error',
-            checkedAt: new Date().toISOString(),
-            message:
-              'Kiểm tra cập nhật phản hồi quá chậm. Giao diện đã được mở khóa; bạn có thể tiếp tục làm việc.',
-            error: null
-          });
-        }
-      } else {
-        setError(message);
-      }
+      setError(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(null);
     }
   };
 
-  const downloading = status?.state === 'downloading';
-  const progress = status?.progress?.percent ?? 0;
-  const remoteVersion = status?.info?.version ?? null;
-  const versionRelation =
-    remoteVersion && status?.currentVersion ? compareAppVersions(remoteVersion, status.currentVersion) : null;
-  const remoteIsNewer = versionRelation === 1;
-  const remoteIsOlder = versionRelation === -1;
-  const canDownload =
-    status?.state === 'available' && isNewerAppVersion(remoteVersion, status.currentVersion);
-  const canInstall =
-    status?.state === 'downloaded' && isNewerAppVersion(remoteVersion, status.currentVersion);
-  const feedConfigured =
-    Boolean(settings?.appFeedUrl) || Boolean(status?.supported && status?.state !== 'disabled');
-  const updateIssue = status?.error ? friendlyIssue(status.error) : null;
   return (
     <div className="page-shell updates-page">
       <div className="page-heading-row">
         <div>
           <h1 className="text-2xl font-black">Trung tâm cập nhật</h1>
           <p className="mt-1 text-sm" style={{ color: 'var(--muted)' }}>
-            Tải phiên bản mới trong nền, sao lưu dữ liệu và nâng cấp ngay trên thư mục cài đặt hiện tại.
+            Tubmedia tự đồng bộ phiên bản mới trong nền. Trang này chỉ hiển thị thông tin và hành động khi có
+            bản cập nhật thực sự.
           </p>
         </div>
-        <span className={`update-state-badge update-state-${status?.state ?? 'idle'}`}>
-          {status?.state === 'not-available' || status?.state === 'downloaded' ? (
-            <CheckCircle2 size={15} />
-          ) : status?.state === 'downloading' ? (
+
+        <span className={`update-state-badge update-state-${state}`}>
+          {state === 'available' || state === 'downloading' ? (
             <Download size={15} />
-          ) : status?.state === 'installing' ? (
+          ) : state === 'downloaded' || state === 'installing' ? (
             <Rocket size={15} />
           ) : (
-            <RefreshCcw size={15} />
+            <CheckCircle2 size={15} />
           )}
-          {stateLabel(status)}
+          {badgeLabel(state)}
         </span>
       </div>
 
@@ -170,24 +131,26 @@ export function UpdatesPage(): React.JSX.Element {
             <div className="update-version-icon">
               <Rocket size={24} />
             </div>
+
             <div className="min-w-0 flex-1">
               <span>PHIÊN BẢN HIỆN TẠI</span>
-              <b>{status?.currentVersion ?? '—'}</b>
+              <b>{currentVersion}</b>
               <small>Kênh {channelLabel(settings?.appUpdateChannel)}</small>
             </div>
-            {status?.info?.version && (
-              <div className="update-next-version">
-                <span>{remoteIsNewer ? 'PHIÊN BẢN MỚI' : 'PHIÊN BẢN TRÊN MÁY CHỦ'}</span>
-                <b>{status.info.version}</b>
-              </div>
-            )}
+
+            <div className="update-next-version">
+              <span>PHIÊN BẢN MỚI NHẤT</span>
+              <b>{latestVersion}</b>
+            </div>
           </div>
 
           <div className="update-message mt-4">
             <div>
-              <b>{status?.message ?? 'Chưa kiểm tra bản cập nhật.'}</b>
-              {status?.checkedAt && (
-                <small>Kiểm tra lúc {new Date(status.checkedAt).toLocaleString('vi-VN')}</small>
+              <b>{headline}</b>
+              {status?.checkedAt && status.state !== 'checking' && (
+                <small>
+                  Thông tin phiên bản cập nhật lúc {new Date(status.checkedAt).toLocaleString('vi-VN')}
+                </small>
               )}
             </div>
           </div>
@@ -207,56 +170,29 @@ export function UpdatesPage(): React.JSX.Element {
             </div>
           )}
 
-          {status?.info?.releaseNotes && (
-            <details
-              className="update-notes mt-4"
-              open={remoteIsNewer && (status.state === 'available' || status.state === 'downloaded')}
-            >
-              <summary>
-                {remoteIsNewer ? 'Điểm mới trong phiên bản' : 'Thông tin phiên bản trên máy chủ'}{' '}
-                {status.info.version}
-              </summary>
+          {latestInfo?.releaseNotes && (
+            <details className="update-notes mt-4" open={hasNewRelease}>
+              <summary>Thông tin phiên bản {latestVersion}</summary>
               <div style={{ whiteSpace: 'pre-line', overflowWrap: 'anywhere' }}>
-                {formatReleaseNotesForDisplay(status.info.releaseNotes)}
+                {formatReleaseNotesForDisplay(latestInfo.releaseNotes)}
               </div>
             </details>
           )}
 
-          {updateIssue && status?.state === 'error' && (
-            <div className={`update-user-issue update-user-${updateIssue.tone} mt-4`} role="alert">
-              <b>{updateIssue.title}</b>
-              <p>{updateIssue.message}</p>
-              {updateIssue.steps.length > 0 && (
-                <ol>
-                  {updateIssue.steps.map((step) => (
-                    <li key={step}>{step}</li>
-                  ))}
-                </ol>
-              )}
+          {(state === 'available' || state === 'downloaded') && (
+            <div className="mt-5 flex flex-wrap gap-2">
+              <button className="btn btn-primary" disabled={busy !== null} onClick={() => void runUpdate()}>
+                {state === 'downloaded' ? <Rocket size={17} /> : <Download size={17} />}
+                {busy
+                  ? state === 'downloaded'
+                    ? 'Đang chuẩn bị...'
+                    : 'Đang bắt đầu tải...'
+                  : state === 'downloaded'
+                    ? 'Cài đặt & khởi động lại'
+                    : 'Cập nhật ngay'}
+              </button>
             </div>
           )}
-
-          <div className="mt-5 flex flex-wrap gap-2">
-            <button className="btn" disabled={busy !== null || downloading} onClick={() => void run('check')}>
-              <RefreshCcw size={17} />
-              {busy === 'check' ? 'Đang kiểm tra...' : 'Kiểm tra ngay'}
-            </button>
-            {canDownload && (
-              <button className="btn" disabled={busy !== null} onClick={() => void run('download')}>
-                {busy === 'download' ? 'Đang cập nhật Tubmedia...' : 'Cập nhật ngay'}
-              </button>
-            )}
-            {canInstall && (
-              <button
-                className="btn btn-primary"
-                disabled={busy !== null}
-                onClick={() => void run('install')}
-              >
-                <Rocket size={17} />
-                {busy === 'install' ? 'Đang chuẩn bị...' : 'Sao lưu và cài đặt'}
-              </button>
-            )}
-          </div>
         </section>
 
         <div className="grid gap-4">
@@ -268,19 +204,19 @@ export function UpdatesPage(): React.JSX.Element {
             <ol className="update-safety-list mt-4">
               <li>
                 <b>1</b>
-                <span>Tải gói cập nhật trong nền, không chặn công việc đang chạy.</span>
+                <span>Thông tin bản mới được đồng bộ tự động, không chặn công việc đang chạy.</span>
               </li>
               <li>
                 <b>2</b>
-                <span>Chỉ cài khi hàng đợi đã dừng để không làm hỏng tệp đang xử lý.</span>
+                <span>Chỉ tải khi người dùng bấm Cập nhật ngay.</span>
               </li>
               <li>
                 <b>3</b>
-                <span>Tự sao lưu cơ sở dữ liệu trước khi khởi động lại.</span>
+                <span>Chỉ cài khi hàng đợi đã an toàn để không làm hỏng tệp đang xử lý.</span>
               </li>
               <li>
                 <b>4</b>
-                <span>Giữ nguyên thư mục cài đặt, dự án, cookies và cấu hình người dùng.</span>
+                <span>Giữ nguyên dự án, cookies, cấu hình và dữ liệu người dùng.</span>
               </li>
             </ol>
           </section>
@@ -291,35 +227,19 @@ export function UpdatesPage(): React.JSX.Element {
                 <Server size={20} />
               </div>
               <div className="min-w-0 flex-1">
-                <b>
-                  {feedConfigured
-                    ? remoteIsOlder
-                      ? 'Đã kết nối — máy chủ đang có bản cũ hơn'
-                      : 'Đã kết nối máy chủ cập nhật'
-                    : 'Chưa liên kết máy chủ cập nhật'}
-                </b>
+                <b>{feedConfigured ? 'Cập nhật tự động đã sẵn sàng' : 'Chưa liên kết máy chủ cập nhật'}</b>
                 <p>
                   {feedConfigured
-                    ? remoteIsOlder
-                      ? `Máy chủ: ${remoteVersion}. Máy này: ${status?.currentVersion}. Các nút tải và cài đã bị khóa để tránh hạ cấp.`
-                      : 'Ứng dụng chỉ kiểm tra khi người dùng bấm Kiểm tra ngay; không chạy vòng xoay cập nhật nền.'
-                    : 'Bản phát hành phải được build với URL HTTPS hoặc nhập URL nâng cao trong Cài đặt.'}
+                    ? 'Tubmedia kiểm tra phiên bản khi khởi động và định kỳ trong nền. Không cần thao tác kiểm tra thủ công.'
+                    : 'Bản cài đặt chưa có nguồn cập nhật hợp lệ.'}
                 </p>
               </div>
             </div>
+
             {!feedConfigured && (
               <button className="btn mt-4" onClick={() => setPage('settings')}>
                 <Settings size={16} />
                 Mở cài đặt cập nhật
-              </button>
-            )}
-            {feedConfigured && settings?.appFeedUrl && (
-              <button
-                className="btn btn-ghost mt-3 px-0"
-                onClick={() => void window.desktop.app.writeClipboard(settings.appFeedUrl)}
-              >
-                <ExternalLink size={15} />
-                Sao chép URL máy chủ
               </button>
             )}
           </section>

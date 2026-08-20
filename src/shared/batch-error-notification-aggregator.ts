@@ -38,6 +38,8 @@ function isBatchableFinalJobFailure(notice: BatchAttentionNotice): boolean {
   if (
     code === 'DISK_FULL' ||
     code === 'DISK_SPACE_RECOVERED' ||
+    code === 'SOURCE_REMOVED' ||
+    code.startsWith('JOB_SKIPPED_SOURCE_REMOVED') ||
     code.includes('RATE_LIMIT') ||
     code.includes('COOKIE') ||
     code.includes('AUTH_REQUIRED')

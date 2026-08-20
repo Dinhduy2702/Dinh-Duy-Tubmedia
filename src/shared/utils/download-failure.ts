@@ -1,16 +1,12 @@
 export type YtDlpFailureCategory =
-  | 'disk'
-  | 'tool'
-  | 'rate_limit'
-  | 'authentication'
-  | 'non_retryable'
-  | 'retryable';
+  'disk' | 'tool' | 'rate_limit' | 'authentication' | 'non_retryable' | 'retryable';
 
 export type YtDlpFailureSubtype =
   | 'disk_full'
   | 'tool_missing'
   | 'http_429'
   | 'authentication'
+  | 'removed'
   | 'unavailable'
   | 'http_403'
   | 'fragment'
@@ -29,17 +25,36 @@ function includesAny(text: string, needles: readonly string[]): boolean {
   return needles.some((needle) => text.includes(needle));
 }
 
+export function isExplicitlyRemovedYoutubeSource(text: string): boolean {
+  const lower = text.toLowerCase();
+  return includesAny(lower, [
+    'this video has been removed',
+    'video has been removed',
+    'removed by the uploader',
+    'removed for violating youtube',
+    "removed for violating youtube's",
+    'removed due to',
+    'video has been deleted',
+    'this video was removed',
+    'account associated with this video has been terminated',
+    'this video is no longer available because the youtube account',
+    'this video is no longer available because the account'
+  ]);
+}
+
 export function classifyYtDlpFailure(text: string): YtDlpFailureDetail {
   const lower = text.toLowerCase();
 
-  if (
-    includesAny(lower, [
-      'no space left on device',
-      'disk full',
-      'not enough space',
-      'enospc'
-    ])
-  ) {
+  if (isExplicitlyRemovedYoutubeSource(lower)) {
+    return {
+      category: 'non_retryable',
+      subtype: 'removed',
+      httpStatus: null,
+      retryable: false
+    };
+  }
+
+  if (includesAny(lower, ['no space left on device', 'disk full', 'not enough space', 'enospc'])) {
     return { category: 'disk', subtype: 'disk_full', httpStatus: null, retryable: false };
   }
 
@@ -56,12 +71,7 @@ export function classifyYtDlpFailure(text: string): YtDlpFailureDetail {
   }
 
   if (
-    includesAny(lower, [
-      'http error 429',
-      'status code 429',
-      'too many requests',
-      '429 too many requests'
-    ])
+    includesAny(lower, ['http error 429', 'status code 429', 'too many requests', '429 too many requests'])
   ) {
     return { category: 'rate_limit', subtype: 'http_429', httpStatus: 429, retryable: false };
   }
@@ -113,14 +123,7 @@ export function classifyYtDlpFailure(text: string): YtDlpFailureDetail {
     };
   }
 
-  if (
-    includesAny(lower, [
-      'http error 403',
-      'status code 403',
-      '403 forbidden',
-      'forbidden'
-    ])
-  ) {
+  if (includesAny(lower, ['http error 403', 'status code 403', '403 forbidden', 'forbidden'])) {
     return { category: 'retryable', subtype: 'http_403', httpStatus: 403, retryable: true };
   }
 
@@ -211,7 +214,9 @@ export function sanitizeYtDlpDiagnostic(text: string, maxLength = 1_600): string
     )
   ];
   const important = lines.filter((line) =>
-    /error|failed|unable|forbidden|429|403|fragment|timeout|cookie|sign in|bot|unavailable|extract/i.test(line)
+    /error|failed|unable|forbidden|429|403|fragment|timeout|cookie|sign in|bot|unavailable|extract/i.test(
+      line
+    )
   );
   const chosen = (important.length ? important : lines).slice(-8).join(' | ');
   if (!chosen) return 'yt-dlp không cung cấp thêm chi tiết.';

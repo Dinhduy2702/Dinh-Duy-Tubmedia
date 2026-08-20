@@ -15,7 +15,7 @@ function check(ok, label) {
   if (!ok) failures += 1;
 }
 
-check(pkg.version === '1.3.3', 'package version is 1.3.3');
+check(pkg.version === '1.3.4', 'package version is 1.3.4');
 check(prepare.includes('ensure-bundled-aria2.ps1'), 'prepare:aria2 owns the bundled aria2 bootstrap');
 check(dist.includes('npm run prepare:aria2'), 'official NSIS build prepares aria2 before packaging');
 check(
