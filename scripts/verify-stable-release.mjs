@@ -10,7 +10,7 @@ const base = spawnSync(process.execPath, ['scripts/verify-release-candidate.mjs'
 });
 if (base.status !== 0) process.exit(base.status ?? 1);
 
-const expectedVersion = '1.3.4';
+const expectedVersion = '1.3.5';
 const packageJson = JSON.parse(await read('package.json'));
 const packageLock = JSON.parse(await read('package-lock.json'));
 const constants = await read('src/shared/constants/app.ts');
@@ -30,18 +30,24 @@ const confirmDialog = await read('src/renderer/src/components/ConfirmDialog.tsx'
 const preloadApi = await read('src/preload/index.ts');
 
 const checks = [
-  ['package version 1.3.4', packageJson.version === expectedVersion],
+  ['package version 1.3.5', packageJson.version === expectedVersion],
   [
-    'package-lock version 1.3.4',
+    'package-lock version 1.3.5',
     packageLock.version === expectedVersion && packageLock.packages?.['']?.version === expectedVersion
   ],
-  ['renderer label v1.3.4', constants.includes("APP_VERSION_LABEL = 'v1.3.4'")],
-  ['changelog 1.3.4 first', changelog.startsWith('# Tubmedia 1.3.4')],
+  ['renderer label v1.3.5', constants.includes("APP_VERSION_LABEL = 'v1.3.5'")],
+  ['changelog 1.3.5 first', changelog.startsWith('# Tubmedia 1.3.5')],
   [
     'official build derives canonical installer name from package version',
     buildScript.includes('$Version = [string]$Package.version') &&
       buildScript.includes('Download-video-Tubmedia-Setup-') &&
       buildScript.includes('$Version + "-x64.exe"')
+  ],
+  [
+    'official build requires and publishes differential blockmap',
+    buildScript.includes('$Blockmap = $Installer + ".blockmap"') &&
+      buildScript.includes('Differential updater blockmap was not created') &&
+      buildScript.includes('Upload the EXE, blockmap, SHA256 file and latest.yml')
   ],
   [
     'GitHub updater configured',
@@ -131,8 +137,8 @@ const checks = [
 ];
 const failed = checks.filter(([, ok]) => !ok);
 if (failed.length) {
-  console.error('Tubmedia 1.3.4 stable verification failed:');
+  console.error('Tubmedia 1.3.5 stable verification failed:');
   for (const [name] of failed) console.error(`- ${name}`);
   process.exit(1);
 }
-console.log(`Tubmedia 1.3.4 stable verification OK: ${checks.length} checks.`);
+console.log(`Tubmedia 1.3.5 stable verification OK: ${checks.length} checks.`);

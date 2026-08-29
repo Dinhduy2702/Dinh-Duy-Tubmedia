@@ -90,9 +90,13 @@ Run-Step "Build official Windows installer" {
 }
 
 $Installer = Join-Path $ProjectRoot ("release\Download-video-Tubmedia-Setup-" + $Version + "-x64.exe")
+$Blockmap = $Installer + ".blockmap"
 $LatestYml = Join-Path $ProjectRoot "release\latest.yml"
 if (-not (Test-Path -LiteralPath $Installer)) {
   throw ("Official installer was not created: " + $Installer)
+}
+if (-not (Test-Path -LiteralPath $Blockmap)) {
+  throw ("Differential updater blockmap was not created: " + $Blockmap)
 }
 if (-not (Test-Path -LiteralPath $LatestYml)) {
   throw ("Updater metadata was not created: " + $LatestYml)
@@ -115,5 +119,6 @@ Write-Host ("Size     : " + [math]::Round((Get-Item -LiteralPath $Installer).Len
 Write-Host ("SHA-256  : " + $Hash.Hash)
 Write-Host ("Hash file : " + $HashFile)
 Write-Host ("Update yml: " + $LatestYml)
+Write-Host ("Blockmap  : " + $Blockmap)
 Write-Host ""
-Write-Host "Upload the EXE, SHA256 file and latest.yml to the same GitHub Release." -ForegroundColor Yellow
+Write-Host "Upload the EXE, blockmap, SHA256 file and latest.yml to the same GitHub Release." -ForegroundColor Yellow
