@@ -1,4 +1,3 @@
-import './update-awareness-bridge.js'; // TUBMEDIA_STARTUP_UPDATE_AWARENESS_PRELOAD
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import { IPC } from '@shared/contracts/channels.js';
 import type { DesktopApi } from './api-types.js';

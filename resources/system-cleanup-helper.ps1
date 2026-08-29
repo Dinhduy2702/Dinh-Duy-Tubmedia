@@ -22,11 +22,13 @@ $AllowedCategories = @(
     "browserCache",
     "capcutCache",
     "zaloCache",
+    "tubmediaResidue",
     "recycleBin",
     "windowsTemp",
     "windowsUpdate",
     "deliveryOptimization",
     "componentStore",
+    "diskInventory",
     "disableHibernate"
 )
 
@@ -55,6 +57,27 @@ if ($Scope -notin @("currentUser", "wholeMachine")) {
     throw "Phạm vi quét không hợp lệ."
 }
 
+$TubmediaRoots = @{
+    sourceFolders = @()
+    tempFolders = @()
+    trackedTempFiles = @()
+    quickOutputFolders = @()
+    quickTempRoots = @()
+}
+
+if ($Request.PSObject.Properties.Name -contains "tubmediaRoots" -and $null -ne $Request.tubmediaRoots) {
+    foreach ($Name in @("sourceFolders", "tempFolders", "trackedTempFiles", "quickOutputFolders", "quickTempRoots")) {
+        if ($Request.tubmediaRoots.PSObject.Properties.Name -contains $Name) {
+            $TubmediaRoots[$Name] = @(
+                $Request.tubmediaRoots.$Name |
+                    ForEach-Object { [string]$_ } |
+                    Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+                    Select-Object -First 256
+            )
+        }
+    }
+}
+
 $Status = Get-Content -LiteralPath $StatusPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $Results = New-Object System.Collections.ArrayList
 $GlobalErrors = New-Object System.Collections.ArrayList
@@ -78,18 +101,48 @@ function Save-Status {
     $removed = 0L
     $removedItems = 0
     $skippedItems = 0
+    $safeToDeleteBytes = 0L
+    $reviewBytes = 0L
+    $protectedBytes = 0L
+    $Findings = New-Object System.Collections.ArrayList
 
     foreach ($Result in @($Results)) {
         $estimated += [int64]$Result.estimatedBytes
         $removed += [int64]$Result.removedBytes
         $removedItems += [int]$Result.removedItems
         $skippedItems += [int]$Result.skippedItems
+
+        if ([string]$Result.id -eq "diskInventory") {
+            foreach ($Finding in @($Result.findings)) {
+                switch ([string]$Finding.classification) {
+                    "safe-to-delete" { $safeToDeleteBytes += [int64]$Finding.bytes }
+                    "review" { $reviewBytes += [int64]$Finding.bytes }
+                    "protected" { $protectedBytes += [int64]$Finding.bytes }
+                }
+            }
+        }
+        elseif ([string]$Result.id -eq "recycleBin") {
+            # Thùng rác phải được xem lại vì thao tác xóa là vĩnh viễn.
+            $reviewBytes += [int64]$Result.estimatedBytes
+        }
+        else {
+            # Các hạng mục còn lại đều đi qua allowlist và Assert-SafeTarget.
+            $safeToDeleteBytes += [int64]$Result.estimatedBytes
+        }
+
+        foreach ($Finding in @($Result.findings)) {
+            [void]$Findings.Add($Finding)
+        }
     }
 
     $Status.estimatedBytes = $estimated
     $Status.removedBytes = $removed
     $Status.removedItems = $removedItems
     $Status.skippedItems = $skippedItems
+    $Status.findings = @($Findings)
+    $Status.safeToDeleteBytes = $safeToDeleteBytes
+    $Status.reviewBytes = $reviewBytes
+    $Status.protectedBytes = $protectedBytes
 
     $Json = $Status | ConvertTo-Json -Depth 10
     [System.IO.File]::WriteAllText(
@@ -169,7 +222,52 @@ function Assert-SafeTarget {
         throw "Đã chặn Zalo Received Files."
     }
 
+    if (Test-Path -LiteralPath $Resolved) {
+        $RootItem = Get-Item -LiteralPath $Resolved -Force -ErrorAction Stop
+        if (($RootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Đã chặn đường dẫn liên kết/reparse point: $Resolved"
+        }
+    }
+
     return $Resolved
+}
+
+function Test-PathInsideRoot {
+    param(
+        [string]$Path,
+        [string]$Root
+    )
+
+    $ResolvedPath = Normalize-Path -Path $Path
+    $ResolvedRoot = Normalize-Path -Path $Root
+    if ([string]::IsNullOrWhiteSpace($ResolvedPath) -or [string]::IsNullOrWhiteSpace($ResolvedRoot)) {
+        return $false
+    }
+
+    return (
+        $ResolvedPath.Equals($ResolvedRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        $ResolvedPath.StartsWith($ResolvedRoot + "\", [StringComparison]::OrdinalIgnoreCase)
+    )
+}
+
+function Test-TubmediaOwnershipMarker {
+    param([string]$Root)
+
+    $MarkerPath = Join-Path $Root ".tubmedia-owned.json"
+    if (-not (Test-Path -LiteralPath $MarkerPath -PathType Leaf)) {
+        return $false
+    }
+
+    try {
+        $Marker = Get-Content -LiteralPath $MarkerPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        return (
+            [string]$Marker.owner -eq "Tubmedia" -and
+            [int]$Marker.version -eq 1
+        )
+    }
+    catch {
+        return $false
+    }
 }
 
 function Get-UserProfileRoots {
@@ -243,6 +341,23 @@ function New-CleanupTarget {
         Path = $Path
         Patterns = $Patterns
         DeleteSubdirectories = $DeleteSubdirectories
+    }
+}
+
+function New-CleanupFinding {
+    param(
+        [string]$Path,
+        [int64]$Bytes,
+        [ValidateSet("safe-to-delete", "review", "protected")]
+        [string]$Classification,
+        [string]$Reason
+    )
+
+    return [pscustomobject]@{
+        path = $Path
+        bytes = [Math]::Max(0L, $Bytes)
+        classification = $Classification
+        reason = $Reason
     }
 }
 
@@ -546,6 +661,7 @@ function Process-Target {
             removedItems = 0
             skippedItems = 0
             errors = @()
+            findings = @()
         }
     }
 
@@ -556,13 +672,27 @@ function Process-Target {
     $Errors = New-Object System.Collections.ArrayList
 
     if ($Patterns.Count -eq 1 -and $Patterns[0] -eq "*") {
-        foreach ($File in @(Get-ChildItem -LiteralPath $SafePath -Force -File -Recurse -ErrorAction SilentlyContinue)) {
+        foreach ($File in @(
+            Get-ChildItem `
+                -LiteralPath $SafePath `
+                -Force `
+                -File `
+                -Recurse `
+                -Attributes !ReparsePoint `
+                -ErrorAction SilentlyContinue
+        )) {
             [void]$Files.Add($File)
         }
 
         if ($DeleteSubdirectories) {
             foreach ($Directory in @(
-                Get-ChildItem -LiteralPath $SafePath -Force -Directory -Recurse -ErrorAction SilentlyContinue |
+                Get-ChildItem `
+                    -LiteralPath $SafePath `
+                    -Force `
+                    -Directory `
+                    -Recurse `
+                    -Attributes !ReparsePoint `
+                    -ErrorAction SilentlyContinue |
                     Sort-Object FullName -Descending
             )) {
                 [void]$Directories.Add($Directory)
@@ -584,6 +714,19 @@ function Process-Target {
     $RemovedItems = 0
     $SkippedItems = 0
     $Index = 0
+
+    $Findings = @(
+        $Files |
+            Sort-Object Length -Descending |
+            Select-Object -First 20 |
+            ForEach-Object {
+                New-CleanupFinding `
+                    -Path $_.FullName `
+                    -Bytes ([int64]$_.Length) `
+                    -Classification "safe-to-delete" `
+                    -Reason "Nằm trong vị trí cache hoặc tệp tạm đã được Tubmedia cho phép."
+            }
+    )
 
     foreach ($File in @($Files)) {
         $Index++
@@ -633,6 +776,7 @@ function Process-Target {
         removedItems = $RemovedItems
         skippedItems = $SkippedItems
         errors = @($Errors)
+        findings = @($Findings)
     }
 }
 
@@ -648,6 +792,7 @@ function Invoke-CacheCategory {
         removedItems = 0
         skippedItems = 0
         errors = New-Object System.Collections.ArrayList
+        findings = New-Object System.Collections.ArrayList
     }
 
     foreach ($Target in @(Get-CategoryTargets -Category $Category)) {
@@ -662,6 +807,12 @@ function Invoke-CacheCategory {
 
             foreach ($ErrorText in @($Result.errors)) {
                 [void]$Summary.errors.Add([string]$ErrorText)
+            }
+
+            foreach ($Finding in @($Result.findings)) {
+                if ($Summary.findings.Count -lt 60) {
+                    [void]$Summary.findings.Add($Finding)
+                }
             }
         }
         catch {
@@ -681,6 +832,7 @@ function Invoke-RecycleBinCleanup {
         removedItems = 0
         skippedItems = 0
         errors = New-Object System.Collections.ArrayList
+        findings = New-Object System.Collections.ArrayList
     }
 
     $DriveRoots = if ($Scope -eq "wholeMachine") {
@@ -697,6 +849,12 @@ function Invoke-RecycleBinCleanup {
         try {
             $Result = Process-Target -Target $Target -Delete $false
             $Summary.estimatedBytes += [int64]$Result.estimatedBytes
+            foreach ($Finding in @($Result.findings)) {
+                if ($Summary.findings.Count -ge 60) { break }
+                $Finding.classification = "review"
+                $Finding.reason = "Tệp đang nằm trong Thùng rác; hãy xem lại trước khi xóa vĩnh viễn."
+                [void]$Summary.findings.Add($Finding)
+            }
         }
         catch {
             [void]$Summary.errors.Add($_.Exception.Message)
@@ -753,6 +911,296 @@ function Invoke-WindowsUpdateCleanup {
     }
 }
 
+function Test-TubmediaResidueName {
+    param(
+        [string]$Name,
+        [ValidateSet("download", "temp", "quick-temp")]
+        [string]$Kind
+    )
+
+    if ($Kind -eq "quick-temp") {
+        return $true
+    }
+
+    if (
+        $Name -match '(?i)\[(?:LINK_[A-F0-9]{12}|QD-[A-F0-9-]+)\].*\.(?:part|ytdl|aria2)$' -or
+        $Name -match '(?i)\[(?:LINK_[A-F0-9]{12}|QD-[A-F0-9-]+)\].*\.frag\d+$'
+    ) {
+        return $true
+    }
+
+    if ($Kind -eq "temp") {
+        return (
+            $Name -match '(?i)^clip-\d+-[a-z0-9-]+\.mp4(?:\.pending\.mp4)?$' -or
+            $Name -match '(?i)^concat-[a-f0-9-]+\.txt$' -or
+            $Name -match '(?i)\.pending(?:\.[a-z0-9]+)?$'
+        )
+    }
+
+    return $false
+}
+
+function Invoke-TubmediaResidueCleanup {
+    param([bool]$Delete)
+
+    $Summary = @{
+        estimatedBytes = 0L
+        removedBytes = 0L
+        removedItems = 0
+        skippedItems = 0
+        errors = New-Object System.Collections.ArrayList
+        findings = New-Object System.Collections.ArrayList
+    }
+    $Seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $Cutoff = [DateTime]::UtcNow.AddDays(-7)
+    $RootSpecs = New-Object System.Collections.ArrayList
+
+    foreach ($Path in @($TubmediaRoots.sourceFolders) + @($TubmediaRoots.quickOutputFolders)) {
+        [void]$RootSpecs.Add([pscustomobject]@{ Path = [string]$Path; Kind = "download" })
+    }
+    foreach ($Path in @($TubmediaRoots.tempFolders)) {
+        [void]$RootSpecs.Add([pscustomobject]@{ Path = [string]$Path; Kind = "temp" })
+    }
+    foreach ($Path in @($TubmediaRoots.quickTempRoots)) {
+        [void]$RootSpecs.Add([pscustomobject]@{ Path = [string]$Path; Kind = "quick-temp" })
+    }
+
+    foreach ($Spec in @($RootSpecs)) {
+        Test-Cancelled
+
+        try {
+            $SafeRoot = Assert-SafeTarget -Path ([string]$Spec.Path)
+        }
+        catch {
+            [void]$Summary.errors.Add($_.Exception.Message)
+            continue
+        }
+
+        if (-not (Test-Path -LiteralPath $SafeRoot -PathType Container)) {
+            continue
+        }
+
+        $Kind = [string]$Spec.Kind
+        if ($Kind -eq "temp" -and -not (Test-TubmediaOwnershipMarker -Root $SafeRoot)) {
+            # Thư mục tạm tùy chọn của dự án có thể chứa file cá nhân. Chỉ quét rộng
+            # khi namespace có ownership marker hợp lệ; file đã được DB theo dõi xử lý riêng bên dưới.
+            continue
+        }
+        $Index = 0
+
+        Get-ChildItem `
+            -LiteralPath $SafeRoot `
+            -Force `
+            -File `
+            -Recurse `
+            -Attributes !ReparsePoint `
+            -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                $Index++
+                if (($Index % 200) -eq 0) { Test-Cancelled }
+
+                $File = $_
+                if ($File.LastWriteTimeUtc -gt $Cutoff) { return }
+
+                if ($Kind -eq "quick-temp") {
+                    $RelativePath = $File.FullName.Substring($SafeRoot.Length).TrimStart("\")
+                    $FirstSegment = @($RelativePath -split '\\')[0]
+                    if ($FirstSegment -notmatch '^[a-f0-9]{12}$') { return }
+                }
+                elseif (-not (Test-TubmediaResidueName -Name $File.Name -Kind $Kind)) {
+                    return
+                }
+
+                if (-not $Seen.Add($File.FullName)) { return }
+
+                $Length = 0L
+                try { $Length = [int64]$File.Length } catch {}
+                $Summary.estimatedBytes += $Length
+
+                if ($Summary.findings.Count -lt 80) {
+                    $Reason = if ($Kind -eq "quick-temp") {
+                        "Thư mục tạm Tải nhanh do Tubmedia tạo đã quá 7 ngày."
+                    }
+                    elseif ($Kind -eq "temp") {
+                        "Clip/checkpoint tạm do Tubmedia tạo đã quá 7 ngày."
+                    }
+                    else {
+                        "Phần tải dở có dấu nhận diện LINK/QD của Tubmedia đã quá 7 ngày."
+                    }
+                    [void]$Summary.findings.Add(
+                        (New-CleanupFinding -Path $File.FullName -Bytes $Length -Classification "safe-to-delete" -Reason $Reason)
+                    )
+                }
+
+                if (-not $Delete) { return }
+
+                try {
+                    Remove-Item -LiteralPath $File.FullName -Force -ErrorAction Stop
+                    $Summary.removedBytes += $Length
+                    $Summary.removedItems++
+                }
+                catch {
+                    $Summary.skippedItems++
+                }
+            }
+
+        if ($Delete -and $Kind -eq "quick-temp") {
+            Get-ChildItem -LiteralPath $SafeRoot -Force -Directory -Recurse -ErrorAction SilentlyContinue |
+                Sort-Object FullName -Descending |
+                ForEach-Object {
+                    try { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction Stop } catch {}
+                }
+        }
+    }
+
+    foreach ($TrackedPath in @($TubmediaRoots.trackedTempFiles)) {
+        Test-Cancelled
+        $ResolvedFile = Normalize-Path -Path ([string]$TrackedPath)
+        if ([string]::IsNullOrWhiteSpace($ResolvedFile) -or -not (Test-Path -LiteralPath $ResolvedFile -PathType Leaf)) {
+            continue
+        }
+
+        $InsideKnownTempRoot = $false
+        foreach ($TempRoot in @($TubmediaRoots.tempFolders)) {
+            if (Test-PathInsideRoot -Path $ResolvedFile -Root ([string]$TempRoot)) {
+                $InsideKnownTempRoot = $true
+                break
+            }
+        }
+        if (-not $InsideKnownTempRoot -or -not $Seen.Add($ResolvedFile)) {
+            continue
+        }
+
+        try {
+            $File = Get-Item -LiteralPath $ResolvedFile -Force -ErrorAction Stop
+            if (($File.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+            if ($File.LastWriteTimeUtc -gt $Cutoff) { continue }
+            $Length = [int64]$File.Length
+            $Summary.estimatedBytes += $Length
+            if ($Summary.findings.Count -lt 80) {
+                [void]$Summary.findings.Add(
+                    (New-CleanupFinding `
+                        -Path $File.FullName `
+                        -Bytes $Length `
+                        -Classification "safe-to-delete" `
+                        -Reason "Clip tạm cũ vẫn được cơ sở dữ liệu Tubmedia theo dõi chính xác.")
+                )
+            }
+            if ($Delete) {
+                Remove-Item -LiteralPath $File.FullName -Force -ErrorAction Stop
+                $Summary.removedBytes += $Length
+                $Summary.removedItems++
+            }
+        }
+        catch {
+            if ($Delete) { $Summary.skippedItems++ }
+        }
+    }
+
+    return $Summary
+}
+
+function Get-LargeFileClassification {
+    param([string]$Path)
+
+    $Resolved = Normalize-Path -Path $Path
+    $Leaf = [System.IO.Path]::GetFileName($Resolved)
+    $ProtectedRoots = @(
+        (Normalize-Path $env:WINDIR),
+        (Normalize-Path $env:ProgramFiles),
+        (Normalize-Path ${env:ProgramFiles(x86)}),
+        (Normalize-Path $env:ProgramData)
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+    if ($Leaf -match '(?i)^(?:pagefile|swapfile|hiberfil)\.sys$') {
+        return @{
+            classification = "protected"
+            reason = "Tệp hệ thống do Windows quản lý; tuyệt đối không xóa thủ công."
+        }
+    }
+
+    foreach ($Root in $ProtectedRoots) {
+        if (
+            $Resolved.Equals($Root, [StringComparison]::OrdinalIgnoreCase) -or
+            $Resolved.StartsWith($Root + "\", [StringComparison]::OrdinalIgnoreCase)
+        ) {
+            return @{
+                classification = "protected"
+                reason = "Nằm trong vùng Windows/chương trình được bảo vệ; không xóa bằng công cụ dọn file."
+            }
+        }
+    }
+
+    if ($Resolved -match '(?i)\\(?:System Volume Information|Recovery|WindowsApps)\\') {
+        return @{
+            classification = "protected"
+            reason = "Nằm trong vùng khôi phục hoặc dữ liệu hệ thống được bảo vệ."
+        }
+    }
+
+    return @{
+        classification = "review"
+        reason = "File lớn không phải cache đã cho phép; Tubmedia chỉ báo cáo để người dùng tự xem, không tự xóa."
+    }
+}
+
+function Invoke-DiskInventory {
+    $Summary = @{
+        estimatedBytes = 0L
+        removedBytes = 0L
+        removedItems = 0
+        skippedItems = 0
+        errors = New-Object System.Collections.ArrayList
+        findings = New-Object System.Collections.ArrayList
+    }
+    $Candidates = New-Object System.Collections.ArrayList
+    $MinimumBytes = 256MB
+    $Index = 0
+
+    foreach ($DriveRoot in @(Get-FixedDriveRoots)) {
+        Test-Cancelled
+
+        Get-ChildItem `
+            -LiteralPath $DriveRoot `
+            -Force `
+            -File `
+            -Recurse `
+            -Attributes !ReparsePoint `
+            -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                $Index++
+                if (($Index % 250) -eq 0) { Test-Cancelled }
+
+                $Length = 0L
+                try { $Length = [int64]$_.Length } catch { return }
+                if ($Length -lt $MinimumBytes) { return }
+
+                [void]$Candidates.Add([pscustomobject]@{
+                    Path = $_.FullName
+                    Bytes = $Length
+                })
+
+                if ($Candidates.Count -gt 120) {
+                    $Smallest = $Candidates | Sort-Object Bytes | Select-Object -First 1
+                    [void]$Candidates.Remove($Smallest)
+                }
+            }
+    }
+
+    foreach ($Candidate in @($Candidates | Sort-Object Bytes -Descending | Select-Object -First 80)) {
+        $Classification = Get-LargeFileClassification -Path $Candidate.Path
+        [void]$Summary.findings.Add(
+            (New-CleanupFinding `
+                -Path $Candidate.Path `
+                -Bytes ([int64]$Candidate.Bytes) `
+                -Classification ([string]$Classification.classification) `
+                -Reason ([string]$Classification.reason))
+        )
+    }
+
+    return $Summary
+}
+
 function New-CategoryResult {
     param(
         [string]$Id,
@@ -766,6 +1214,7 @@ function New-CategoryResult {
         removedItems = [int]$Summary.removedItems
         skippedItems = [int]$Summary.skippedItems
         errors = @($Summary.errors)
+        findings = @($Summary.findings)
     }
 }
 
@@ -792,6 +1241,15 @@ try {
         $Delete = $Request.mode -eq "clean"
 
         switch ($Category) {
+            "tubmediaResidue" {
+                $Summary = Invoke-TubmediaResidueCleanup -Delete $Delete
+            }
+
+            "diskInventory" {
+                # Inspection-only by policy. Even in a clean request this branch never deletes.
+                $Summary = Invoke-DiskInventory
+            }
+
             "windowsUpdate" {
                 $Summary = Invoke-WindowsUpdateCleanup -Delete $Delete
             }
@@ -807,6 +1265,7 @@ try {
                     removedItems = 0
                     skippedItems = 0
                     errors = @()
+                    findings = @()
                 }
 
                 if ($Delete) {
@@ -837,6 +1296,7 @@ try {
                     removedItems = 0
                     skippedItems = 0
                     errors = @()
+                    findings = @()
                 }
 
                 if ($Delete) {

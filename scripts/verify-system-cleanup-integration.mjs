@@ -164,7 +164,7 @@ const checks = [
   ['cache page renders cleanup panel', /<SystemCleanupPanel\b/.test(cachePage)],
   [
     'cleanup UI exposes an explicit whole-machine scan',
-    cleanupPanel.includes('Quét thông minh toàn bộ máy') &&
+    cleanupPanel.includes('Quét và phân loại toàn bộ máy') &&
       cleanupPanel.includes('scope: requestScope') &&
       cleanupSource.includes("'wholeMachine'")
   ],
@@ -179,6 +179,18 @@ const checks = [
     helper.includes('Assert-SafeTarget') && helper.includes('Đã chặn đường dẫn quá rộng/nguy hiểm')
   ],
   ['helper protects Zalo Received Files', helper.includes('Zalo Received Files')],
+  [
+    'whole-machine inventory never participates in deletion',
+    cleanupSource.includes("return id === 'diskInventory'") &&
+      helper.includes('Inspection-only by policy') &&
+      cleanupPanel.includes('Không tự xóa')
+  ],
+  [
+    'Tubmedia residue cleanup requires internal identity',
+    helper.includes('Test-TubmediaOwnershipMarker') &&
+      helper.includes('trackedTempFiles') &&
+      helper.includes('LastWriteTimeUtc')
+  ],
   [
     'irreversible cleanup is disabled by default',
     irreversible.length >= 2 &&

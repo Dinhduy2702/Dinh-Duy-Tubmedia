@@ -313,7 +313,9 @@ if (
   canonicalInstallerAssetContract.some((needle) => !installerBuildScript.includes(needle)) ||
   installerBuildScript.includes(legacyProductNameInstallerOutput)
 ) {
-  fail('build-installer-windows.ps1 không khóa tên asset updater canonical Download-video-Tubmedia-Setup-<version>-x64.exe.');
+  fail(
+    'build-installer-windows.ps1 không khóa tên asset updater canonical Download-video-Tubmedia-Setup-<version>-x64.exe.'
+  );
 } else {
   pass('installer/updater asset dùng tên canonical ổn định');
 }
@@ -323,8 +325,12 @@ if (!appConstants.includes(`v${packageJson.version}`)) {
 }
 
 const officialBuild = await readText(join(root, 'BUILD_INSTALLER_CHINH_THUC.ps1'));
-if (!officialBuild.includes(packageJson.version)) {
-  fail('BUILD_INSTALLER_CHINH_THUC.ps1 không chứa phiên bản hiện tại.');
+if (
+  !officialBuild.includes('$Version = [string]$Package.version') ||
+  !officialBuild.includes('Download-video-Tubmedia-Setup-') ||
+  !officialBuild.includes('$Version + "-x64.exe"')
+) {
+  fail('BUILD_INSTALLER_CHINH_THUC.ps1 không lấy tên installer canonical từ package.json.');
 }
 
 const quickService = await readText(join(root, 'src/main/download/quick-download-service.ts'));

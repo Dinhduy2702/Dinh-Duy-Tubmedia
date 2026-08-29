@@ -15,11 +15,10 @@ function check(ok, label) {
 
 const quitInstallMatches = main.match(/quitAndInstall\s*\(\s*true\s*,\s*true\s*\)/g) ?? [];
 
-const automaticInstallMarkers = main.match(/TUBMEDIA_V132_UPDATE_NOW_AUTO_INSTALL_AST/g) ?? [];
-
 check(
-  quitInstallMatches.length >= 1 && quitInstallMatches.length <= 2 && automaticInstallMarkers.length === 1,
-  'professional silent install/relaunch contract has one owned wrapper and bounded install paths'
+  quitInstallMatches.length === 1 &&
+    /public async install\(\)[\s\S]*?quitAndInstall\(true, true\)/.test(main),
+  'professional silent install/relaunch contract has one explicit owned path'
 );
 
 check(
@@ -31,7 +30,7 @@ check(main.includes('downloadUpdate()'), 'explicit update action uses the real e
 
 check(
   main.includes('quitAndInstall(true, true)'),
-  'download completion performs silent NSIS install and force relaunch'
+  'explicit install performs silent NSIS install and force relaunch'
 );
 
 check(
@@ -42,9 +41,9 @@ check(
 
 check(
   page.includes('TUBMEDIA_V133_PROFESSIONAL_PASSIVE_UPDATE_CENTER') &&
-    !page.includes('Kiểm tra ngay') &&
-    !page.includes('updates.check()'),
-  'Update Center intentionally exposes no manual check action'
+    page.includes('Thử kiểm tra lại') &&
+    page.includes('updates.check()'),
+  'Update Center exposes a manual check/retry action without auto-installing'
 );
 
 check(page.includes('Cập nhật ngay'), 'Update Center exposes the exact Cập nhật ngay CTA');

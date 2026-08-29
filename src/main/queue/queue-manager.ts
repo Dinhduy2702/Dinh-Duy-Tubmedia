@@ -1,7 +1,6 @@
 import { malformedYouTubeVideoUrlMessage } from '@shared/utils/youtube-url-validation.js';
 import { type BrowserWindow } from 'electron';
-import { randomUUID } from 'node:crypto';
-import { cpus, freemem } from 'node:os';
+import { cpus, freemem, totalmem } from 'node:os';
 import { rm, stat, statfs } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AttentionNotice, JobType, QueueJob, ResourceProfile } from '@shared/types/domain.js';
@@ -27,6 +26,11 @@ import { InvalidInputError, ProcessingFailedError, type AppError } from '@shared
 import { cleanupTemporaryArtifacts } from '../files/temporary-cleanup.js';
 import { sanitizeNullableSeconds, sanitizeProgress } from '@shared/utils/progress-policy.js';
 import { initialJobStatus, resolveResumeStatus } from '@shared/utils/job-state-machine.js';
+import {
+  exhaustedDownloadFailureMessage,
+  isCircuitEligibleDownloadFailure
+} from '@shared/utils/download-failure.js';
+import { effectiveMemoryReserveBytes } from '@shared/utils/resource-memory.js';
 
 interface ActiveJob {
   job: QueueJob;
@@ -154,6 +158,7 @@ export class QueueManager {
   // TUBMEDIA DISK SPACE AUTO RECOVERY R28
   private readonly diskRecoveryChecks = new Map<string, number>();
   private readonly diskRecoveryInProgress = new Set<string>();
+  private lastActiveDiskCheckAt = 0;
   private readonly progressUpdates = new Map<
     string,
     {
@@ -352,6 +357,25 @@ export class QueueManager {
     return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
   }
 
+  private diskFoldersForJob(job: QueueJob): string[] {
+    if (!job.projectId) return [];
+    const project = this.projects.get(job.projectId);
+    if (!project) return [];
+
+    const folders =
+      job.type === 'download'
+        ? [project.sourceFolder]
+        : job.type === 'clip'
+          ? [project.tempFolder]
+          : job.type === 'merge' && job.input.timelineOnly !== true
+            ? [project.tempFolder, project.outputFolder]
+            : job.type === 'normalize'
+              ? [project.outputFolder]
+              : [];
+
+    return [...new Set(folders.filter((folder) => folder.trim().length > 0))];
+  }
+
   private async diskSpaceStateForJobs(jobs: QueueJob[]): Promise<{
     ready: boolean;
     folder: string | null;
@@ -361,11 +385,10 @@ export class QueueManager {
     const checks = new Map<string, number>();
     for (const job of jobs) {
       if (!job.projectId) continue;
-      const project = this.projects.get(job.projectId);
-      if (!project) continue;
-      const folder = job.type === 'download' ? project.sourceFolder : project.tempFolder;
       const required = this.profileFor(job).diskFreeMinimumBytes;
-      checks.set(folder, Math.max(checks.get(folder) ?? 0, required));
+      for (const folder of this.diskFoldersForJob(job)) {
+        checks.set(folder, Math.max(checks.get(folder) ?? 0, required));
+      }
     }
     for (const [folder, requiredBytes] of checks) {
       try {
@@ -377,6 +400,82 @@ export class QueueManager {
       }
     }
     return { ready: true, folder: null, freeBytes: 0, requiredBytes: 0 };
+  }
+
+  private async guardActiveDiskSpace(): Promise<boolean> {
+    const now = Date.now();
+    if (this.active.size === 0 || now - this.lastActiveDiskCheckAt < 5_000) return false;
+    this.lastActiveDiskCheckAt = now;
+
+    for (const active of this.active.values()) {
+      const current = this.repo.get(active.job.id);
+      if (!current || !PAUSABLE_STATUSES.has(current.status)) continue;
+      const requiredBytes = this.profileFor(current).diskFreeMinimumBytes;
+
+      for (const folder of this.diskFoldersForJob(current)) {
+        let freeBytes = 0;
+        try {
+          const fsInfo = await statfs(folder);
+          freeBytes = Number(fsInfo.bavail) * Number(fsInfo.bsize);
+        } catch (error) {
+          const message =
+            `Không thể tiếp tục ghi vào ${folder}: ${error instanceof Error ? error.message : String(error)}. ` +
+            'Tubmedia đã dừng an toàn tác vụ đang chạy để tránh mất dữ liệu.';
+          this.repo.update(
+            current.id,
+            {
+              status: 'paused',
+              errorCode: 'PERMISSION_DENIED',
+              errorMessage: message,
+              speed: null,
+              etaSeconds: null
+            },
+            this.pauseResumeInput(current)
+          );
+          const pausedProcesses = await this.processes.pauseByJob(current.id).catch(() => 0);
+          if (pausedProcesses === 0) active.controller.abort();
+          await this.pauseProjectForBlockingError(current, 'PERMISSION_DENIED', message);
+          this.notifyBlockingError('PERMISSION_DENIED', message, current);
+          this.logger.warn('queue', 'ACTIVE_WRITE_PATH_UNAVAILABLE', message, {
+            jobId: current.id,
+            ...(current.projectId ? { projectId: current.projectId } : {})
+          });
+          this.emit();
+          return true;
+        }
+
+        if (freeBytes >= requiredBytes) continue;
+
+        const message =
+          `Ổ đĩa chứa ${folder} chỉ còn ${this.formatDiskBytes(freeBytes)}, thấp hơn mức an toàn ` +
+          `${this.formatDiskBytes(requiredBytes)}. Tubmedia đã tạm dừng ngay tác vụ đang chạy để tránh đầy ổ; ` +
+          'hãy dọn dung lượng rồi nhấn Tiếp tục.';
+        this.repo.update(
+          current.id,
+          {
+            status: 'paused',
+            errorCode: 'DISK_FULL',
+            errorMessage: message,
+            speed: null,
+            etaSeconds: null
+          },
+          this.pauseResumeInput(current)
+        );
+        const pausedProcesses = await this.processes.pauseByJob(current.id).catch(() => 0);
+        if (pausedProcesses === 0) active.controller.abort();
+        await this.pauseProjectForBlockingError(current, 'DISK_FULL', message);
+        this.notifyBlockingError('DISK_FULL', message, current);
+        this.logger.warn('queue', 'ACTIVE_DISK_GUARD_PAUSED', message, {
+          jobId: current.id,
+          ...(current.projectId ? { projectId: current.projectId } : {}),
+          metadata: { folder, freeBytes, requiredBytes }
+        });
+        this.emit();
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private notifyDiskSpaceRecovered(projectId: string, resumedJobs: number): void {
@@ -478,61 +577,63 @@ export class QueueManager {
     profile: ResourceProfile,
     cpuPercent: number
   ): Promise<boolean> {
-    if (freemem() < profile.memoryFreeMinimumBytes) return false;
+    const memoryReserve = effectiveMemoryReserveBytes(profile.memoryFreeMinimumBytes, totalmem());
+    if (freemem() < memoryReserve) return false;
     if (['clip', 'normalize', 'merge'].includes(job.type) && cpuPercent > profile.cpuSoftLimitPercent)
       return false;
-    const project = job.projectId ? this.projects.get(job.projectId) : null;
-    if (project) {
-      const targetFolder = job.type === 'download' ? project.sourceFolder : project.tempFolder;
-      try {
-        const fs = await statfs(targetFolder);
-        const free = Number(fs.bavail) * Number(fs.bsize);
-        if (free < profile.diskFreeMinimumBytes) {
+    if (job.projectId) {
+      for (const targetFolder of this.diskFoldersForJob(job)) {
+        try {
+          const fs = await statfs(targetFolder);
+          const free = Number(fs.bavail) * Number(fs.bsize);
+          if (free < profile.diskFreeMinimumBytes) {
+            const message =
+              `Ổ đĩa chứa ${targetFolder} không đủ dung lượng trống để bắt đầu tác vụ. ` +
+              `Danh sách đã được tạm dừng để tránh tạo hàng loạt lỗi.`;
+            this.repo.update(
+              job.id,
+              {
+                status: 'paused',
+                errorCode: 'DISK_FULL',
+                errorMessage: message,
+                finishedAt: null
+              },
+              this.pauseResumeInput(job)
+            );
+            await this.pauseProjectForBlockingError(job, 'DISK_FULL', message);
+            this.notifyBlockingError('DISK_FULL', message, job);
+            this.logger.warn('queue', 'DISK_FULL', message, { projectId: job.projectId, jobId: job.id });
+            return false;
+          }
+        } catch (error) {
           const message =
-            `Ổ đĩa chứa ${targetFolder} không đủ dung lượng trống để bắt đầu tác vụ. ` +
-            `Danh sách đã được tạm dừng để tránh tạo hàng loạt lỗi.`;
+            `Không thể kiểm tra thư mục ${targetFolder}: ${error instanceof Error ? error.message : String(error)}. ` +
+            'Danh sách đã được tạm dừng để bạn sửa đường dẫn hoặc quyền truy cập.';
           this.repo.update(
             job.id,
             {
               status: 'paused',
-              errorCode: 'DISK_FULL',
+              errorCode: 'PERMISSION_DENIED',
               errorMessage: message,
               finishedAt: null
             },
             this.pauseResumeInput(job)
           );
-          await this.pauseProjectForBlockingError(job, 'DISK_FULL', message);
-          this.notifyBlockingError('DISK_FULL', message, job);
-          this.logger.warn('queue', 'DISK_FULL', message, { projectId: project.id, jobId: job.id });
+          await this.pauseProjectForBlockingError(job, 'PERMISSION_DENIED', message);
+          this.notifyBlockingError('PERMISSION_DENIED', message, job);
+          this.logger.warn('queue', 'PERMISSION_DENIED', message, {
+            projectId: job.projectId,
+            jobId: job.id
+          });
           return false;
         }
-      } catch (error) {
-        const message =
-          `Không thể kiểm tra thư mục ${targetFolder}: ${error instanceof Error ? error.message : String(error)}. ` +
-          'Danh sách đã được tạm dừng để bạn sửa đường dẫn hoặc quyền truy cập.';
-        this.repo.update(
-          job.id,
-          {
-            status: 'paused',
-            errorCode: 'PERMISSION_DENIED',
-            errorMessage: message,
-            finishedAt: null
-          },
-          this.pauseResumeInput(job)
-        );
-        await this.pauseProjectForBlockingError(job, 'PERMISSION_DENIED', message);
-        this.notifyBlockingError('PERMISSION_DENIED', message, job);
-        this.logger.warn('queue', 'PERMISSION_DENIED', message, {
-          projectId: project.id,
-          jobId: job.id
-        });
-        return false;
       }
     }
     return true;
   }
   private async tick(): Promise<void> {
     if (this.paused || !this.canExecute()) return;
+    if (await this.guardActiveDiskSpace()) return;
     let all = this.repo.list();
     if (await this.recoverDiskFullProjects(all)) all = this.repo.list();
     const cpuPercent = this.cpuPercent();
@@ -862,7 +963,7 @@ export class QueueManager {
     if (recent.length < 3) return false;
 
     const circuitMessage =
-      `Ba tác vụ liên tiếp gặp lỗi mạng hoặc máy chủ phân phối sau khi đã tự thử lại. Danh sách được tạm dừng để tránh tạo hàng loạt lỗi. ` +
+      `Ba video liên tiếp không thể tải do mạng hoặc máy chủ phân phối sau khi đã tự thử lại. Danh sách được tạm dừng để tránh tạo hàng loạt lỗi. ` +
       `Kiểm tra mạng, máy chủ trung gian, cookies hoặc trạng thái nền tảng rồi nhấn Tiếp tục. Lỗi gần nhất: ${message}`;
     await this.pauseProjectForBlockingError(job, 'NETWORK_CIRCUIT_OPEN', circuitMessage);
     this.notifyBlockingError('NETWORK_CIRCUIT_OPEN', circuitMessage, job);
@@ -944,7 +1045,7 @@ export class QueueManager {
       steps,
       sticky: true,
       ...(job?.projectId ? { projectId: job.projectId } : {}),
-      ...(job ? { jobId: job.id } : {})
+      ...(job && code !== 'NETWORK_CIRCUIT_OPEN' ? { jobId: job.id } : {})
     };
     if (this.window && !this.window.isDestroyed()) {
       this.window.webContents.send(IPC.events.attention, notice);
@@ -954,24 +1055,38 @@ export class QueueManager {
       this.window.focus();
     }
   }
-  private notifyJobFailure(code: string, message: string, job: QueueJob): void {
+  private notifyJobFailure(
+    code: string,
+    message: string,
+    job: QueueJob,
+    recoverableExternalFailure = false
+  ): void {
     if (!this.window || this.window.isDestroyed()) return;
+    const scope = job.projectId ?? job.id;
     const notice: AttentionNotice = {
-      id: randomUUID(),
-      severity: 'error',
+      id: `job-failure-${scope}-${code}`,
+      severity: recoverableExternalFailure ? 'warning' : 'error',
       title:
-        job.type === 'merge'
-          ? 'Ghép video gặp sự cố'
-          : job.type === 'download'
-            ? 'Không thể tải video'
-            : `Tác vụ ${JOB_TYPE_TEXT[job.type]} gặp sự cố`,
+        recoverableExternalFailure && job.type === 'download'
+          ? 'Video chưa tải được sau nhiều lần thử'
+          : job.type === 'merge'
+            ? 'Ghép video gặp sự cố'
+            : job.type === 'download'
+              ? 'Không thể tải video'
+              : `Tác vụ ${JOB_TYPE_TEXT[job.type]} gặp sự cố`,
       message,
       code,
-      steps: [
-        'Xem đúng dòng tác vụ trong trang Tiến trình.',
-        'Mở nhật ký riêng để xem chi tiết nếu lỗi lặp lại.',
-        'Sửa nguyên nhân rồi chọn Thử lại đúng tác vụ.'
-      ],
+      steps: recoverableExternalFailure
+        ? [
+            'Không xóa tệp .part; Tubmedia sẽ dùng lại phần đã tải khi thử lại.',
+            'Chờ mạng hoặc máy chủ nguồn ổn định rồi chọn Thử lại đúng video.',
+            'Nếu nhiều video cùng lỗi, kiểm tra cookies/proxy rồi nhấn Tiếp tục cho danh sách.'
+          ]
+        : [
+            'Xem đúng dòng tác vụ trong trang Tiến trình.',
+            'Mở nhật ký riêng để xem chi tiết nếu lỗi lặp lại.',
+            'Sửa nguyên nhân rồi chọn Thử lại đúng tác vụ.'
+          ],
       sticky: false,
       ...(job.projectId ? { projectId: job.projectId } : {}),
       jobId: job.id
@@ -1056,6 +1171,9 @@ export class QueueManager {
         speed: null,
         etaSeconds: 0
       });
+      if (job.type === 'download' && job.projectId) {
+        this.repeatedFailures.delete(job.projectId);
+      }
       this.emitProgress(done);
       this.logger.info(
         'queue',
@@ -1079,7 +1197,7 @@ export class QueueManager {
     } catch (error) {
       if (signal.aborted) {
         const current = this.repo.get(job.id);
-        if (current?.status === 'interrupted') {
+        if (current?.status === 'interrupted' || current?.status === 'paused') {
           this.emitProgress(current);
           return;
         }
@@ -1142,6 +1260,9 @@ export class QueueManager {
         code === 'PERMISSION_DENIED' ||
         code === 'SOURCE_RATE_LIMITED'
       ) {
+        if (job.type === 'download' && job.projectId) {
+          this.repeatedFailures.delete(job.projectId);
+        }
         const cookieBlocking = isCookieBlockingCode(code);
         const paused = this.repo.update(
           job.id,
@@ -1174,6 +1295,9 @@ export class QueueManager {
         return;
       }
       if (code === 'SOURCE_REMOVED') {
+        if (job.type === 'download' && job.projectId) {
+          this.repeatedFailures.delete(job.projectId);
+        }
         this.repo.updateInput(job.id, {
           progressStage: 'Video đã bị xóa khỏi YouTube',
           resultMessage: message,
@@ -1270,10 +1394,14 @@ export class QueueManager {
           this.repo.update(job.id, { status: 'pending' }, { resumeStatus: null });
         }
       } else {
+        const circuitEligible = isCircuitEligibleDownloadFailure(job.type, appError);
+        const finalMessage = circuitEligible
+          ? exhaustedDownloadFailureMessage(message, appError.details, job.attempts + 1)
+          : message;
         const failed = this.repo.update(job.id, {
           status: 'failed',
           errorCode: code,
-          errorMessage: message,
+          errorMessage: finalMessage,
           finishedAt: new Date().toISOString()
         });
         this.emitProgress(failed);
@@ -1290,9 +1418,14 @@ export class QueueManager {
             input: job.input
           }
         });
-        this.notifyJobFailure(code, message, job);
-        if (appError.retryable) {
-          await this.openCircuitAfterRepeatedFailure(job, message);
+        if (circuitEligible) {
+          const circuitOpened = await this.openCircuitAfterRepeatedFailure(job, finalMessage);
+          if (!circuitOpened) this.notifyJobFailure(code, finalMessage, job, true);
+        } else {
+          if (job.type === 'download' && job.projectId) {
+            this.repeatedFailures.delete(job.projectId);
+          }
+          this.notifyJobFailure(code, finalMessage, job);
         }
       }
     }

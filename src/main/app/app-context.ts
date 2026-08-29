@@ -145,7 +145,8 @@ export class AppContext {
       this.queue,
       this.backups,
       this.logger,
-      prepareForAppUpdate
+      prepareForAppUpdate,
+      () => this.queue.activeCount() > 0 || this.processes.count() > 0 || this.quickDownload.isActive()
     );
   }
   public initialize(): void {

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { friendlyIssue, safeUiText } from '../utils/ui-error';
+import { shouldRouteIssueToAttention } from '@shared/utils/notification-policy';
 import type {
   AppSettings,
   AppUpdateStatus,
@@ -102,7 +103,6 @@ const RETENTION_MS: Record<AttentionSeverity, number> = {
 function optionalText(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
-
 
 function outputPathFromUnknown(value: unknown): string | null {
   let candidate = value;
@@ -256,10 +256,10 @@ function addNotification(
       createdAt: sameId.createdAt,
       ...(replacementOutputPath ? { outputPath: replacementOutputPath } : {})
     });
-    const next = trimNotificationHistory([
-      replacement,
-      ...current.filter((item) => item.id !== notice.id)
-    ], now);
+    const next = trimNotificationHistory(
+      [replacement, ...current.filter((item) => item.id !== notice.id)],
+      now
+    );
     persistNotificationHistory(next);
     return next;
   }
@@ -285,18 +285,18 @@ function addNotification(
       createdAt: duplicate.createdAt,
       ...(groupedOutputPath ? { outputPath: groupedOutputPath } : {})
     });
-    const next = trimNotificationHistory([
-      grouped,
-      ...current.filter((item) => item.id !== duplicate.id)
-    ], now);
+    const next = trimNotificationHistory(
+      [grouped, ...current.filter((item) => item.id !== duplicate.id)],
+      now
+    );
     persistNotificationHistory(next);
     return next;
   }
 
-  const next = trimNotificationHistory([
-    notificationFromNotice(notice, timestamp, { ...(outputPath ? { outputPath } : {}) }),
-    ...current
-  ], now);
+  const next = trimNotificationHistory(
+    [notificationFromNotice(notice, timestamp, { ...(outputPath ? { outputPath } : {}) }), ...current],
+    now
+  );
   persistNotificationHistory(next);
   return next;
 }
@@ -340,17 +340,13 @@ function reconcileDiskFullNotifications(
   const activeProjects = new Set(
     jobs
       .filter(
-        (job) =>
-          job.errorCode === 'DISK_FULL' &&
-          (job.status === 'paused' || job.status === 'interrupted')
+        (job) => job.errorCode === 'DISK_FULL' && (job.status === 'paused' || job.status === 'interrupted')
       )
       .map((job) => job.projectId)
       .filter((projectId): projectId is string => Boolean(projectId))
   );
   const anyActiveDiskBlock = jobs.some(
-    (job) =>
-      job.errorCode === 'DISK_FULL' &&
-      (job.status === 'paused' || job.status === 'interrupted')
+    (job) => job.errorCode === 'DISK_FULL' && (job.status === 'paused' || job.status === 'interrupted')
   );
   const next = notifications.filter((notice) => {
     if (notice.code !== 'DISK_FULL') return true;
@@ -496,15 +492,12 @@ export const useAppStore = create<State>((set, get) => ({
         Date.now(),
         outputPathFromUnknown(error) ?? undefined
       );
-      if (issue.tone === 'success' || issue.tone === 'info') {
+      if (shouldRouteIssueToAttention(issue.tone)) {
         if (!state.attention) return { error: null, attention: notice, notifications };
         return {
           error: null,
           notifications,
-          attentionQueue: [
-            ...state.attentionQueue.filter((item) => item.id !== notice.id),
-            notice
-          ].slice(-5)
+          attentionQueue: [...state.attentionQueue.filter((item) => item.id !== notice.id), notice].slice(-5)
         };
       }
       return { error, notifications };
@@ -539,11 +532,7 @@ export const useAppStore = create<State>((set, get) => ({
     set((state) => {
       const blocked = new Set(codes);
       const matches = (notice: AttentionNotice): boolean =>
-        Boolean(
-          notice.code &&
-            blocked.has(notice.code) &&
-            (!projectId || notice.projectId === projectId)
-        );
+        Boolean(notice.code && blocked.has(notice.code) && (!projectId || notice.projectId === projectId));
       const remaining = [state.attention, ...state.attentionQueue]
         .filter((notice): notice is AttentionNotice => Boolean(notice))
         .filter((notice) => !matches(notice));
@@ -554,8 +543,7 @@ export const useAppStore = create<State>((set, get) => ({
     }),
   openNotificationCenter: () => set({ notificationCenterOpen: true }),
   closeNotificationCenter: () => set({ notificationCenterOpen: false }),
-  toggleNotificationCenter: () =>
-    set((state) => ({ notificationCenterOpen: !state.notificationCenterOpen })),
+  toggleNotificationCenter: () => set((state) => ({ notificationCenterOpen: !state.notificationCenterOpen })),
   markNotificationRead: (id) =>
     set((state) => {
       const now = new Date().toISOString();

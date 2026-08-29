@@ -1,5 +1,6 @@
 import type { AttentionNotice, QueueJob } from '../types/domain.js';
 import { isCookieBlockingCode } from './cookie-policy.js';
+import type { UiTone } from './ui-error.js';
 
 /**
  * Thông báo thường cần đủ lâu để đọc nhưng không được chiếm giao diện quá lâu.
@@ -13,6 +14,10 @@ export function notificationDuration(severity: AttentionNotice['severity'] | 'er
   if (severity === 'success') return SUCCESS_NOTIFICATION_DURATION_MS;
   if (severity === 'warning' || severity === 'error') return WARNING_NOTIFICATION_DURATION_MS;
   return TRANSIENT_NOTIFICATION_DURATION_MS;
+}
+
+export function shouldRouteIssueToAttention(tone: UiTone): boolean {
+  return tone !== 'error';
 }
 
 const INLINE_BLOCKING_STATUSES: ReadonlySet<QueueJob['status']> = new Set([

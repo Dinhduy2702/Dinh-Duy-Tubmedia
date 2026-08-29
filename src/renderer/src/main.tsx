@@ -1,4 +1,3 @@
-import './update-awareness.js'; // TUBMEDIA_STARTUP_UPDATE_AWARENESS_RENDERER
 import ReactDOM from 'react-dom/client';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import { App } from './app/App';

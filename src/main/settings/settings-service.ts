@@ -1,35 +1,20 @@
 import { app } from 'electron';
-import type {
-  AppSettings,
-  HardwareProfile,
-  QualityProfile,
-  ResourceProfile
-} from '@shared/types/domain.js';
+import type { AppSettings, HardwareProfile, QualityProfile, ResourceProfile } from '@shared/types/domain.js';
 import { InvalidInputError } from '@shared/errors/app-errors.js';
 import type { SettingsRepository } from '../database/repositories/settings-repository.js';
-import {
-  builtInQualityProfiles,
-  builtInResourceProfiles,
-  defaultAppSettings
-} from './defaults.js';
+import { builtInQualityProfiles, builtInResourceProfiles, defaultAppSettings } from './defaults.js';
 import type { HardwareService } from './hardware-service.js';
 
 function validateDownloadRanges(settings: AppSettings): void {
   if (settings.downloadCompatibilityMode !== 'source') return;
 
-  if (
-    settings.downloadMaxHeight > 0 &&
-    settings.downloadMinHeight > settings.downloadMaxHeight
-  ) {
+  if (settings.downloadMaxHeight > 0 && settings.downloadMinHeight > settings.downloadMaxHeight) {
     throw new InvalidInputError(
       `Độ phân giải tối thiểu (${settings.downloadMinHeight}p) không được lớn hơn tối đa (${settings.downloadMaxHeight}p).`
     );
   }
 
-  if (
-    settings.downloadMaxFps > 0 &&
-    settings.downloadMinFps > settings.downloadMaxFps
-  ) {
+  if (settings.downloadMaxFps > 0 && settings.downloadMinFps > settings.downloadMaxFps) {
     throw new InvalidInputError(
       `FPS tối thiểu (${settings.downloadMinFps}) không được lớn hơn tối đa (${settings.downloadMaxFps}).`
     );
@@ -172,6 +157,16 @@ export class SettingsService {
         autoCheckAppUpdates: false
       });
       this.repo.set('app_update_manual_v1200_fix6', true);
+    }
+    if (!this.repo.get<boolean>('app_update_in_app_silent_v1350', false)) {
+      const current = this.repo.getAppSettings(defaultAppSettings);
+      // v1.2.0 từng ép tắt tự kiểm tra để né bộ cài cũ. Updater mới chỉ tải khi
+      // người dùng chọn, hiển thị tiến độ trong app và chỉ cài im lặng sau xác nhận.
+      this.repo.saveAppSettings({
+        ...current,
+        autoCheckAppUpdates: true
+      });
+      this.repo.set('app_update_in_app_silent_v1350', true);
     }
     if (!this.repo.get<boolean>('smart_merge_performance_v1200', false)) {
       const current = this.repo.getAppSettings(defaultAppSettings);

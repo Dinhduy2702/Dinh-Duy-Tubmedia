@@ -33,7 +33,11 @@ check(
   'delete is locked until a matching scan completes',
   panel.includes('lastScannedKey === currentScanKey')
 );
-check('whole-machine scan remains explicit', panel.includes('Quét thông minh toàn bộ máy'));
+check('whole-machine scan remains explicit', panel.includes('Quét và phân loại toàn bộ máy'));
+check(
+  'large-file inventory is visibly report-only',
+  panel.includes('Không tự xóa') && panel.includes('Cần người dùng xem lại')
+);
 check('dangerous user folders remain documented as protected', panel.includes('Zalo Received Files'));
 check('cleanup safety styles exist', css.includes('.cleanup-safety-guide'));
 check('helper still blocks broad roots', helper.includes('Assert-SafeTarget'));

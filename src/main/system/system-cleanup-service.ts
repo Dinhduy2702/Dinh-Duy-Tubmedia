@@ -11,6 +11,14 @@ import {
   type SystemCleanupStatus
 } from '@shared/system-cleanup.js';
 
+export interface TubmediaCleanupRoots {
+  sourceFolders: string[];
+  tempFolders: string[];
+  trackedTempFiles: string[];
+  quickOutputFolders: string[];
+  quickTempRoots: string[];
+}
+
 const TERMINAL_PHASES = new Set(['completed', 'cancelled', 'failed']);
 
 function quotePowerShellLiteral(value: string): string {
@@ -37,6 +45,10 @@ function initialStatus(runId: string, request: SystemCleanupRequest): SystemClea
     driveBefore: null,
     driveAfter: null,
     results: [],
+    findings: [],
+    safeToDeleteBytes: 0,
+    reviewBytes: 0,
+    protectedBytes: 0,
     errors: []
   };
 }
@@ -45,6 +57,16 @@ export class SystemCleanupService {
   private activeRunId: string | null = null;
   private activeProcess: ChildProcess | null = null;
   private readonly runRoot = join(app.getPath('userData'), 'system-cleanup-runs');
+
+  public constructor(
+    private readonly cleanupRoots: () => TubmediaCleanupRoots = () => ({
+      sourceFolders: [],
+      tempFolders: [],
+      trackedTempFiles: [],
+      quickOutputFolders: [],
+      quickTempRoots: []
+    })
+  ) {}
 
   public isActive(): boolean {
     if (!this.activeRunId) return false;
@@ -78,7 +100,11 @@ export class SystemCleanupService {
     const helperPath = await this.resolveHelperPath();
 
     await mkdir(runDirectory, { recursive: true });
-    await writeFile(requestPath, JSON.stringify(request, null, 2), 'utf8');
+    const helperRequest = {
+      ...request,
+      tubmediaRoots: this.normalizeCleanupRoots(this.cleanupRoots())
+    };
+    await writeFile(requestPath, JSON.stringify(helperRequest, null, 2), 'utf8');
 
     const status = initialStatus(runId, request);
     await writeFile(statusPath, JSON.stringify(status, null, 2), 'utf8');
@@ -306,5 +332,25 @@ export class SystemCleanupService {
     } catch {
       // Dọn stale là best-effort.
     }
+  }
+
+  private normalizeCleanupRoots(roots: TubmediaCleanupRoots): TubmediaCleanupRoots {
+    const normalize = (values: readonly string[]): string[] => {
+      const unique = new Map<string, string>();
+      for (const value of values.slice(0, 256)) {
+        const clean = typeof value === 'string' ? value.trim() : '';
+        if (!clean) continue;
+        unique.set(clean.toLocaleLowerCase('en-US'), clean);
+      }
+      return [...unique.values()];
+    };
+
+    return {
+      sourceFolders: normalize(roots.sourceFolders),
+      tempFolders: normalize(roots.tempFolders),
+      trackedTempFiles: normalize(roots.trackedTempFiles),
+      quickOutputFolders: normalize(roots.quickOutputFolders),
+      quickTempRoots: normalize(roots.quickTempRoots)
+    };
   }
 }

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { classifyYtDlpFailure, sanitizeYtDlpDiagnostic } from '../../src/shared/utils/download-failure.js';
+import {
+  classifyYtDlpFailure,
+  exhaustedDownloadFailureMessage,
+  isCircuitEligibleDownloadFailure,
+  sanitizeYtDlpDiagnostic
+} from '../../src/shared/utils/download-failure.js';
 
 describe('download recovery R49', () => {
   it('classifies 429 as an immediate source rate limit blocker', () => {
@@ -61,5 +66,33 @@ describe('download recovery R49', () => {
     const escape = String.fromCharCode(27);
     const colored = escape + '[31mERROR: HTTP Error 403: Forbidden' + escape + '[0m';
     expect(sanitizeYtDlpDiagnostic(colored)).toBe('ERROR: HTTP Error 403: Forbidden');
+  });
+
+  it('only counts genuine exhausted download transport failures for the project circuit', () => {
+    const download403 = {
+      code: 'DOWNLOAD_FAILED',
+      retryable: true,
+      details: { failureSubtype: 'http_403' }
+    };
+    expect(isCircuitEligibleDownloadFailure('download', download403)).toBe(true);
+    expect(isCircuitEligibleDownloadFailure('merge', download403)).toBe(false);
+    expect(
+      isCircuitEligibleDownloadFailure('download', {
+        code: 'PROCESS_SPAWN_FAILED',
+        retryable: true,
+        details: { failureSubtype: 'unknown' }
+      })
+    ).toBe(false);
+  });
+
+  it('does not promise another retry after the final attempt is exhausted', () => {
+    const message = exhaustedDownloadFailureMessage(
+      'Máy chủ video tạm thời từ chối yêu cầu (HTTP 403).',
+      { failureSubtype: 'http_403' },
+      3
+    );
+    expect(message).toContain('sau 3 lần thử');
+    expect(message).toContain('giữ tệp .part');
+    expect(message).not.toContain('sẽ thử lại');
   });
 });

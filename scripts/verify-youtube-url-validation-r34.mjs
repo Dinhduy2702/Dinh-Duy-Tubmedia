@@ -48,9 +48,10 @@ check(
 );
 check(test.includes('dash and underscore'), 'regression tests preserve dash/underscore ids');
 check(
-  engine.includes('youtube-adaptive-r18-default-first-web-safari-fallback') &&
-    engine.includes('verify-existing-final-before-retry'),
-  'R18 and R49 downloader contracts remain untouched'
+  engine.includes('verify-existing-final-before-retry') &&
+    engine.includes("job.attempts > 0 ? ['--no-cache-dir'] : []") &&
+    !engine.includes('youtube-adaptive-r18-default-first-web-safari-fallback'),
+  'R49 verification and refreshed retry contracts remain intact'
 );
 check(
   attention.includes('TUBMEDIA_R31N_NOTIFICATION_SPAM_COOKIE_ACTION'),

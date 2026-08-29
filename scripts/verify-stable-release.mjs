@@ -37,7 +37,12 @@ const checks = [
   ],
   ['renderer label v1.3.4', constants.includes("APP_VERSION_LABEL = 'v1.3.4'")],
   ['changelog 1.3.4 first', changelog.startsWith('# Tubmedia 1.3.4')],
-  ['official build targets 1.3.4', buildScript.includes('Download video Tubmedia-Setup-1.3.4-x64.exe')],
+  [
+    'official build derives canonical installer name from package version',
+    buildScript.includes('$Version = [string]$Package.version') &&
+      buildScript.includes('Download-video-Tubmedia-Setup-') &&
+      buildScript.includes('$Version + "-x64.exe"')
+  ],
   [
     'GitHub updater configured',
     Array.isArray(packageJson.build?.publish) && packageJson.build.publish[0]?.provider === 'github'

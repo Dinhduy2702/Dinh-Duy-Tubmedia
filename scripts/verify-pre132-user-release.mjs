@@ -69,14 +69,14 @@ const pkg = JSON.parse(read(path.join(cwd, 'package.json')));
 
 const mainIndexPath = path.join(cwd, 'src', 'main', 'index.ts');
 const servicePath = path.join(cwd, 'src', 'main', 'updates', 'app-update-service.ts');
-const awarenessPath = path.join(cwd, 'src', 'main', 'update', 'startup-update-awareness.ts');
+const updateEventsPath = path.join(cwd, 'src', 'renderer', 'src', 'hooks', 'use-desktop-events.ts');
 const rendererHtmlPath = path.join(cwd, 'src', 'renderer', 'index.html');
 const securityGuardPath = path.join(cwd, 'src', 'main', 'runtime', 'electron-security-guard.ts');
 const downloadEnginePath = path.join(cwd, 'src', 'main', 'downloader', 'download-engine.ts');
 
 const mainIndex = read(mainIndexPath);
 const service = read(servicePath);
-const awareness = read(awarenessPath);
+const updateEvents = read(updateEventsPath);
 const rendererHtml = read(rendererHtmlPath);
 const securityGuard = read(securityGuardPath);
 const downloadEngine = read(downloadEnginePath);
@@ -222,30 +222,32 @@ check(
 );
 
 check(
-  !/autoUpdater\s*\.\s*(?:channel|allowDowngrade|allowPrerelease|autoDownload)\s*=/.test(awareness),
-  'startup awareness remains observer/UX only'
+  !fs.existsSync(path.join(cwd, 'src', 'main', 'update', 'startup-update-awareness.ts')) &&
+    !fs.existsSync(path.join(cwd, 'src', 'preload', 'update-awareness-bridge.ts')) &&
+    !fs.existsSync(path.join(cwd, 'src', 'renderer', 'src', 'update-awareness.ts')),
+  'legacy parallel startup updater remains removed'
 );
 
 check(
-  /checkInFlight/.test(awareness) &&
-    /downloadInFlight/.test(awareness) &&
-    /lastNotifiedVersion/.test(awareness),
-  'update checks/downloads are coalesced and notifications are deduplicated'
+  /networkCheckInFlight/.test(service) &&
+    /claimUpdateNotice/.test(updateEvents) &&
+    /lastUpdateNotice/.test(updateEvents),
+  'update checks are coalesced and version notices are deduplicated'
 );
 
 check(
-  /app\.isPackaged/.test(awareness) &&
-    /\b1800\b/.test(awareness) &&
-    /6\s*\*\s*60\s*\*\s*60\s*\*\s*1000/.test(awareness),
-  'update checks are packaged-only at startup plus bounded periodic cadence'
+  /app\.isPackaged/.test(service) &&
+    /startUpdateScheduler/.test(mainIndex) &&
+    /6\s*\*\s*60\s*\*\s*60\s*\*\s*1_000/.test(mainIndex),
+  'update checks are packaged-only with bounded startup and periodic cadence'
 );
 
 check(
-  /youtube-adaptive-r18-default-first-web-safari-fallback/.test(downloadEngine) &&
-    /youtube:player[_-]client\s*=\s*default,web_safari/.test(downloadEngine) &&
-    !/youtube:player[_-]client\s*=\s*web_safari(?:['"\s,])/.test(downloadEngine) &&
+  !/youtube:player[_-]client\s*=\s*web_safari/.test(downloadEngine) &&
+    /--concurrent-fragments/.test(downloadEngine) &&
+    /--no-cache-dir/.test(downloadEngine) &&
     !/['"]--format-sort['"][\s\S]{0,100}?['"]proto:m3u8['"]/.test(downloadEngine),
-  'resilient YouTube adaptive format fallback remains present'
+  'YouTube recovery avoids unstable web_safari and reduces fragment pressure on retry'
 );
 
 const requiredTests = [

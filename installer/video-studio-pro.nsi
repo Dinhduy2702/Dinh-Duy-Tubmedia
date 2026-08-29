@@ -21,6 +21,7 @@ VIAddVersionKey /LANG=1033 "CompanyName" "${COMPANY_NAME}"
 VIAddVersionKey /LANG=1033 "FileDescription" "${PRODUCT_DESCRIPTION}"
 
 Var IsUpgrade
+Var IsAppUpdate
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "..\LICENSE.txt"
@@ -35,7 +36,19 @@ Var IsUpgrade
 
 Function .onInit
   StrCpy $IsUpgrade "0"
+  StrCpy $IsAppUpdate "0"
   StrCpy $0 ""
+
+  ; electron-updater always passes --updated. Force the update path to be
+  ; silent even if a caller or a future updater version omits /S. A normal
+  ; first-time installer still keeps the assisted wizard.
+  ${GetParameters} $1
+  ClearErrors
+  ${GetOptions} $1 "--updated" $2
+  ${IfNot} ${Errors}
+    StrCpy $IsAppUpdate "1"
+    SetSilent silent
+  ${EndIf}
 
   ; Permanent Tubmedia registry key used by current installers.
   ReadRegStr $0 HKCU "${INSTALL_REGISTRY_KEY}" "InstallLocation"
@@ -72,9 +85,13 @@ Section "Install" SEC_MAIN
   SetOutPath "$INSTDIR"
   File /r "${APP_SOURCE}\*.*"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
-  CreateDirectory "$SMPROGRAMS\${PRODUCT_NAME}"
-  CreateShortcut "$SMPROGRAMS\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk" "$INSTDIR\${APP_EXE}"
-  CreateShortcut "$DESKTOP\${PRODUCT_NAME}.lnk" "$INSTDIR\${APP_EXE}"
+  ; Do not recreate shortcuts a user intentionally removed during an in-app
+  ; update. A first install or a manually launched upgrade keeps normal setup behavior.
+  ${If} $IsAppUpdate != "1"
+    CreateDirectory "$SMPROGRAMS\${PRODUCT_NAME}"
+    CreateShortcut "$SMPROGRAMS\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk" "$INSTDIR\${APP_EXE}"
+    CreateShortcut "$DESKTOP\${PRODUCT_NAME}.lnk" "$INSTDIR\${APP_EXE}"
+  ${EndIf}
 
   WriteRegStr HKCU "${INSTALL_REGISTRY_KEY}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "${INSTALL_REGISTRY_KEY}" "AppId" "${APP_ID}"
@@ -89,11 +106,14 @@ SectionEnd
 
 Function .onInstSuccess
   ${GetParameters} $0
+  ClearErrors
   ${GetOptions} $0 "--force-run" $1
+  ${IfNot} ${Errors}
+    Exec '"$INSTDIR\${APP_EXE}" --force-run'
+    Return
+  ${EndIf}
   ${IfNot} ${Silent}
     Exec '"$INSTDIR\${APP_EXE}"'
-  ${ElseIf} $1 != ""
-    Exec '"$INSTDIR\${APP_EXE}" --force-run'
   ${EndIf}
 FunctionEnd
 

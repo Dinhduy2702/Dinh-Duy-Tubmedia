@@ -18,12 +18,13 @@ function Run-Step {
 }
 
 $Package = Get-Content -LiteralPath (Join-Path $ProjectRoot "package.json") -Raw | ConvertFrom-Json
-if ([string]$Package.version -ne "1.3.4") {
-  throw ("Official installer requires package version 1.3.4, found " + [string]$Package.version)
+if ([string]::IsNullOrWhiteSpace([string]$Package.version)) {
+  throw "Official installer requires a non-empty package version."
 }
+$Version = [string]$Package.version
 
 Write-Host "============================================================" -ForegroundColor Red
-Write-Host "  DOWNLOAD VIDEO TUBMEDIA 1.3.4 - OFFICIAL BUILD" -ForegroundColor Red
+Write-Host ("  DOWNLOAD VIDEO TUBMEDIA " + $Version + " - OFFICIAL BUILD") -ForegroundColor Red
 Write-Host "============================================================" -ForegroundColor Red
 
 Run-Step "Verify clean source completeness" {
@@ -39,7 +40,7 @@ Run-Step "Verify installed workspace completeness" {
 Run-Step "Verify release architecture" {
   & npm.cmd run verify:release
 }
-Run-Step "Verify stable 1.3.4 identity" {
+Run-Step ("Verify stable " + $Version + " identity") {
   & npm.cmd run verify:stable
 }
 Run-Step "Verify audit, Quick Download and cleanup gates" {
@@ -88,7 +89,7 @@ Run-Step "Build official Windows installer" {
   & npm.cmd run dist:nsis-safe
 }
 
-$Installer = Join-Path $ProjectRoot "release\Download video Tubmedia-Setup-1.3.4-x64.exe"
+$Installer = Join-Path $ProjectRoot ("release\Download-video-Tubmedia-Setup-" + $Version + "-x64.exe")
 $LatestYml = Join-Path $ProjectRoot "release\latest.yml"
 if (-not (Test-Path -LiteralPath $Installer)) {
   throw ("Official installer was not created: " + $Installer)
@@ -98,9 +99,9 @@ if (-not (Test-Path -LiteralPath $LatestYml)) {
 }
 
 $Hash = Get-FileHash -LiteralPath $Installer -Algorithm SHA256
-$HashFile = Join-Path $ProjectRoot "release\Download-video-Tubmedia-1.3.4-SHA256.txt"
+$HashFile = Join-Path $ProjectRoot ("release\Download-video-Tubmedia-" + $Version + "-SHA256.txt")
 $HashContent = @(
-  "TUBMEDIA 1.3.4",
+  "TUBMEDIA " + $Version,
   "File: " + (Split-Path -Leaf $Installer),
   "SHA-256: " + $Hash.Hash
 ) -join [Environment]::NewLine

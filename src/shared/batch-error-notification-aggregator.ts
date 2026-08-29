@@ -56,6 +56,12 @@ function isBatchableFinalJobFailure(notice: BatchAttentionNotice): boolean {
     return true;
   }
 
+  // Lỗi nguồn/mạng đã thử hết lượt nhưng vẫn có thể phục hồi được gửi với mức
+  // warning. Gom theo dự án để không bật một popup cho từng video.
+  if (notice.severity === 'warning') {
+    return true;
+  }
+
   // Keep a conservative fallback for final job errors whose producer has no code.
   return notice.severity === 'error';
 }
@@ -101,15 +107,21 @@ export function coalesceBatchJobFailureAttention<T extends BatchAttentionNotice>
   bucket.jobIds.add(jobId);
 
   const count = bucket.jobIds.size;
+  const recoverableWarning = notice.severity === 'warning';
 
   return {
     ...notice,
     id: `batch-job-failures:${projectId}`,
-    title:
-      count === 1
+    title: recoverableWarning
+      ? count === 1
+        ? 'Có 1 video chưa tải được sau khi tự thử lại'
+        : `Có ${count} video chưa tải được sau khi tự thử lại`
+      : count === 1
         ? 'Có 1 video gặp lỗi trong danh sách này'
         : `Có ${count} video gặp lỗi trong danh sách này`,
-    message: 'Các lỗi được gom vào một thông báo. Mở Nhật ký riêng của danh sách để xem chi tiết từng video.',
+    message: recoverableWarning
+      ? 'Tubmedia đã gom các cảnh báo phục hồi vào một thông báo. Tệp .part vẫn được giữ để thử lại đúng video khi nguồn ổn định.'
+      : 'Các lỗi được gom vào một thông báo. Mở Nhật ký riêng của danh sách để xem chi tiết từng video.',
     sticky: false
   };
 }

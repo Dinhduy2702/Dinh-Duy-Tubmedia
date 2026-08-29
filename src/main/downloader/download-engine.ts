@@ -921,6 +921,7 @@ export class DownloadEngine {
     const args = [
       source.originalUrl,
       '--no-playlist',
+      ...(job.attempts > 0 ? ['--no-cache-dir'] : []),
       ...YTDLP_PROGRESS_FLAGS,
       ...YTDLP_UTF8_FLAGS,
       '--windows-filenames',
@@ -949,8 +950,6 @@ export class DownloadEngine {
       '--retry-sleep',
       'file_access:exp=1:10',
       '--abort-on-unavailable-fragments',
-      '--extractor-args',
-      'youtube:player_client=default,web_safari',
       '--concurrent-fragments',
       String(Math.max(1, Math.min(job.attempts > 0 ? 1 : 8, appSettings.downloadConcurrentFragments))),
       '--http-chunk-size',
@@ -1188,7 +1187,11 @@ export class DownloadEngine {
         httpStatus: failure.httpStatus,
         progressPercent: latestProgress.percent,
         technicalSummary,
-        clientPolicy: 'youtube-adaptive-r18-default-first-web-safari-fallback',
+        clientPolicy: 'yt-dlp-dynamic-default-no-manual-web-safari',
+        recoveryMode:
+          job.attempts > 0
+            ? 'fresh-extractor-data-single-fragment-internal-downloader'
+            : 'initial-adaptive-download',
         recovery: result.code !== 0 ? 'verify-existing-final-before-retry' : 'locate-final-file-before-retry'
       };
 
@@ -1311,10 +1314,10 @@ export class DownloadEngine {
         if (failure.retryable) {
           throw new DownloadFailedError(
             failure.subtype === 'http_403'
-              ? 'Máy chủ video từ chối tạm thời một yêu cầu (HTTP 403). Tubmedia sẽ giảm tải song song, làm mới lần tải và tiếp tục từ tệp .part nếu có; nếu lỗi lặp lại, danh sách sẽ tạm dừng.'
+              ? 'Máy chủ video tạm thời từ chối yêu cầu (HTTP 403).'
               : failure.subtype === 'fragment'
-                ? 'Một phần dữ liệu video bị gián đoạn. Tubmedia sẽ làm mới manifest/client, loại luồng YouTube web_safari dễ lỗi, giảm còn một fragment song song và tiếp tục an toàn từ tệp .part.'
-                : 'Kết nối mạng hoặc máy chủ video đang không ổn định. Tubmedia sẽ thử lại với thời gian chờ tăng dần; nếu lỗi lặp lại, danh sách sẽ tạm dừng.',
+                ? 'Một phần dữ liệu video bị gián đoạn.'
+                : 'Kết nối mạng hoặc máy chủ video đang không ổn định.',
             true,
             failureDetails
           );
