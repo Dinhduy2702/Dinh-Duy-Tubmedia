@@ -1,4 +1,5 @@
 _r35-css-existed.txt
+.gitattributes
 .gitignore
 .prettierignore
 .prettierrc.json
@@ -161,6 +162,8 @@ scripts/native-runtime.mjs
 scripts/no-native-rebuild.mjs
 scripts/prepare-public-v131-feed-repair.mjs
 scripts/run-integration-tests.mjs
+scripts/source-inventory-hash.d.mts
+scripts/source-inventory-hash.mjs
 scripts/tools-windows.ps1
 scripts/validate-assets.mjs
 scripts/verify-adaptive-settings-hotfix8.mjs

@@ -1,7 +1,7 @@
-import { createHash } from 'node:crypto';
 import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
+import { sourceSha256 } from './source-inventory-hash.mjs';
 
 const rootArgument = process.argv.includes('--root')
   ? process.argv[process.argv.indexOf('--root') + 1]
@@ -62,10 +62,7 @@ await writeFile(join(root, 'PROJECT_FILE_LIST.txt'), `${list.join('\n')}\n`, 'ut
 
 const checksumLines = [];
 for (const file of files) {
-  const digest = createHash('sha256')
-    .update(await readFile(file))
-    .digest('hex')
-    .toUpperCase();
+  const digest = sourceSha256(await readFile(file));
   checksumLines.push(`${digest}  ${posix(relative(root, file))}`);
 }
 await writeFile(join(root, 'SOURCE_INVENTORY.sha256'), `${checksumLines.join('\n')}\n`, 'utf8');

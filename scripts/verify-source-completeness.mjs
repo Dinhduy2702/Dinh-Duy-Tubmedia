@@ -3,6 +3,11 @@ import { createHash } from 'node:crypto';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { dirname, extname, join, normalize, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
+import {
+  canonicalizeSourceBytesForHash,
+  isRootGitMetadataPath,
+  sourceSha256
+} from './source-inventory-hash.mjs';
 
 const explicitRoot = process.argv.includes('--root')
   ? process.argv[process.argv.indexOf('--root') + 1]
@@ -89,7 +94,9 @@ const packageJson = JSON.parse(await readText(packagePath));
 const packageLock = JSON.parse(await readText(packageLockPath));
 
 if (strictClean) {
-  const forbiddenDirectories = await findForbiddenDirectories(root, forbiddenDirectoryNames);
+  const forbiddenDirectories = (await findForbiddenDirectories(root, forbiddenDirectoryNames)).filter(
+    (directory) => !isRootGitMetadataPath(posix(relative(root, directory)))
+  );
   for (const directory of forbiddenDirectories) {
     fail(`Source sạch chứa thư mục sinh tự động: ${posix(relative(root, directory))}/`);
   }
@@ -119,7 +126,9 @@ for (const file of manifest.requiredFiles) {
 }
 if (!errors.length) pass('đủ thư mục và file bắt buộc trong source manifest');
 
-const discoveredFiles = await walk(root, forbiddenDirectoryNames);
+const discoveredFiles = (await walk(root, forbiddenDirectoryNames)).filter(
+  (path) => !isRootGitMetadataPath(posix(relative(root, path)))
+);
 const allFiles = strictClean
   ? discoveredFiles
   : discoveredFiles.filter((path) => !isWorkspaceGeneratedPath(posix(relative(root, path))));
@@ -161,10 +170,7 @@ if (await fileExists(inventoryPath)) {
       fail(`Source inventory thiếu file: ${relativePath}`);
       continue;
     }
-    const actualHash = createHash('sha256')
-      .update(await readFile(join(root, relativePath)))
-      .digest('hex')
-      .toUpperCase();
+    const actualHash = sourceSha256(await readFile(join(root, relativePath)));
     if (actualHash !== expectedHash) {
       fail(`Source inventory sai SHA-256: ${relativePath}`);
     }
@@ -404,7 +410,7 @@ for (const file of allFiles.sort()) {
   if (relativePath === 'SOURCE_INVENTORY.sha256') continue;
   hash.update(relativePath);
   hash.update('\0');
-  hash.update(await readFile(file));
+  hash.update(canonicalizeSourceBytesForHash(await readFile(file)));
   hash.update('\0');
 }
 const inventoryHash = hash.digest('hex').toUpperCase();
