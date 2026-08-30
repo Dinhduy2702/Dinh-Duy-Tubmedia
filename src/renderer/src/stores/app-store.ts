@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { friendlyIssue, safeUiText } from '../utils/ui-error';
-import { shouldRouteIssueToAttention } from '@shared/utils/notification-policy';
+import { isJobNoticeStillBlocking, shouldRouteIssueToAttention } from '@shared/utils/notification-policy';
 import type {
   AppSettings,
   AppUpdateStatus,
@@ -332,25 +332,20 @@ function mergeJobUpdates(current: QueueJob[], updates: QueueJob[]): QueueJob[] {
   return changed ? next : current;
 }
 
-// TUBMEDIA STALE DISK NOTICE RECONCILIATION R28
-function reconcileDiskFullNotifications(
+// Persisted job errors are history, not permanent startup blockers. Keep a
+// notification actionable only while its queue row is still paused/failed.
+function reconcileJobNotifications(
   notifications: NotificationRecord[],
   jobs: QueueJob[]
 ): NotificationRecord[] {
-  const activeProjects = new Set(
-    jobs
-      .filter(
-        (job) => job.errorCode === 'DISK_FULL' && (job.status === 'paused' || job.status === 'interrupted')
-      )
-      .map((job) => job.projectId)
-      .filter((projectId): projectId is string => Boolean(projectId))
-  );
-  const anyActiveDiskBlock = jobs.some(
-    (job) => job.errorCode === 'DISK_FULL' && (job.status === 'paused' || job.status === 'interrupted')
-  );
   const next = notifications.filter((notice) => {
-    if (notice.code !== 'DISK_FULL') return true;
-    return notice.projectId ? activeProjects.has(notice.projectId) : anyActiveDiskBlock;
+    if (notice.pinned) return true;
+    const followsJobLifecycle = Boolean(
+      (notice.jobId || notice.projectId) &&
+      (notice.sticky || notice.severity === 'warning' || notice.severity === 'error')
+    );
+    if (!followsJobLifecycle) return true;
+    return isJobNoticeStillBlocking(notice, jobs);
   });
   if (next.length !== notifications.length) persistNotificationHistory(next);
   return next.length === notifications.length ? notifications : next;
@@ -402,7 +397,7 @@ export const useAppStore = create<State>((set, get) => ({
         loading: false,
         projects: data.projects,
         jobs: data.jobs,
-        notifications: reconcileDiskFullNotifications(initialNotifications, data.jobs),
+        notifications: reconcileJobNotifications(initialNotifications, data.jobs),
         tools: data.tools,
         settings: data.settings,
         resources: data.profiles.resources,
@@ -432,7 +427,7 @@ export const useAppStore = create<State>((set, get) => ({
     const jobs = await window.desktop.queue.list();
     set((state) => ({
       jobs,
-      notifications: reconcileDiskFullNotifications(state.notifications, jobs)
+      notifications: reconcileJobNotifications(state.notifications, jobs)
     }));
   },
   refreshTools: async () => set({ tools: await window.desktop.tools.list() }),
@@ -442,12 +437,12 @@ export const useAppStore = create<State>((set, get) => ({
   updateJob: (job) =>
     set((state) => {
       const jobs = mergeJobUpdates(state.jobs, [job]);
-      return { jobs, notifications: reconcileDiskFullNotifications(state.notifications, jobs) };
+      return { jobs, notifications: reconcileJobNotifications(state.notifications, jobs) };
     }),
   updateJobs: (updates) =>
     set((state) => {
       const jobs = mergeJobUpdates(state.jobs, updates);
-      return { jobs, notifications: reconcileDiskFullNotifications(state.notifications, jobs) };
+      return { jobs, notifications: reconcileJobNotifications(state.notifications, jobs) };
     }),
   replaceJobs: (jobs) =>
     set((state) => {
@@ -457,7 +452,7 @@ export const useAppStore = create<State>((set, get) => ({
           const current = state.jobs[index];
           return current ? sameJob(current, job) : false;
         });
-      const notifications = reconcileDiskFullNotifications(state.notifications, jobs);
+      const notifications = reconcileJobNotifications(state.notifications, jobs);
       if (jobsUnchanged && notifications === state.notifications) return state;
       return { jobs: jobsUnchanged ? state.jobs : jobs, notifications };
     }),

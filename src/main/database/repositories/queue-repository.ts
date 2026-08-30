@@ -296,6 +296,56 @@ export class QueueRepository {
       );
     return legacy.length;
   }
+  public recoverLegacyVerifiedMergeTransitionFailures(): {
+    jobs: number;
+    projectIds: string[];
+  } {
+    const transitionMessage = /^Không thể chuyển tác vụ từ merging sang skipped\.?$/i;
+    const legacy = this.list().filter((job) => {
+      const outputPath = job.input.outputPath;
+      return (
+        job.type === 'merge' &&
+        job.status === 'failed' &&
+        job.errorCode === 'INVALID_INPUT' &&
+        transitionMessage.test((job.errorMessage ?? '').trim()) &&
+        job.input.mergeRecoveryMode === 'verified-final' &&
+        job.input.reusedExistingOutput === true &&
+        typeof outputPath === 'string' &&
+        outputPath.trim().length > 0
+      );
+    });
+    const recoveredProjectIds = new Set<string>();
+    let recoveredJobs = 0;
+
+    for (const job of legacy) {
+      const now = new Date().toISOString();
+      const resultMessage =
+        typeof job.input.resultMessage === 'string' && job.input.resultMessage.trim()
+          ? job.input.resultMessage
+          : 'Thành phẩm hiện có đã được hậu kiểm đầy đủ và dùng lại; không ghép thêm video.';
+      const input = {
+        ...job.input,
+        progressStage: 'Thành phẩm cũ hợp lệ · đã tự khôi phục trạng thái',
+        resultMessage,
+        legacyMergeTransitionRecovered: true
+      };
+      const result = this.db
+        .prepare(
+          `UPDATE queue_jobs
+           SET status='skipped',progress=100,speed=NULL,eta_seconds=0,
+               error_code=NULL,error_message=NULL,input_json=?,updated_at=?,
+               finished_at=COALESCE(finished_at,?)
+           WHERE id=? AND type='merge' AND status='failed'
+             AND error_code='INVALID_INPUT' AND error_message=?`
+        )
+        .run(JSON.stringify(input), now, now, job.id, job.errorMessage);
+      if (Number(result.changes) !== 1) continue;
+      recoveredJobs += 1;
+      if (job.projectId) recoveredProjectIds.add(job.projectId);
+    }
+
+    return { jobs: recoveredJobs, projectIds: [...recoveredProjectIds] };
+  }
   public clearProject(projectId: string): number {
     return Number(this.db.prepare('DELETE FROM queue_jobs WHERE project_id=?').run(projectId).changes);
   }

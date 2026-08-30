@@ -9,6 +9,7 @@ const check = (name, ok) => {
 
 const queue = read('src/main/queue/queue-manager.ts');
 const queueRepository = read('src/main/database/repositories/queue-repository.ts');
+const appContext = read('src/main/app/app-context.ts');
 const cookiePolicy = read('src/shared/utils/cookie-policy.ts');
 const cookieDialog = read('src/renderer/src/components/CookieManagerDialog.tsx');
 const store = read('src/renderer/src/stores/app-store.ts');
@@ -56,6 +57,19 @@ check(
   queue.includes('recoverLegacySizeEstimateFailures()') &&
     /recoverLegacySizeEstimateFailures\(\)\s*:\s*number/.test(queueRepository) &&
     queueRepository.includes('Tệp tải về có dung lượng thấp bất thường')
+);
+check(
+  'legacy verified merge transition failures reconcile before renderer bootstrap',
+  appContext.includes('recoverLegacyVerifiedMergeTransitionFailures()') &&
+    appContext.includes('LEGACY_VERIFIED_MERGE_TRANSITION_RECONCILED') &&
+    /recoverLegacyVerifiedMergeTransitionFailures\(\)/.test(queueRepository) &&
+    queueRepository.includes("job.input.mergeRecoveryMode === 'verified-final'") &&
+    queueRepository.includes('job.input.reusedExistingOutput === true') &&
+    queueRepository.includes("status='skipped'")
+);
+check(
+  'persisted job notifications stop being actionable after reconciliation',
+  store.includes('reconcileJobNotifications') && store.includes('isJobNoticeStillBlocking(notice, jobs)')
 );
 check(
   'selected-size metadata is advisory after verification',

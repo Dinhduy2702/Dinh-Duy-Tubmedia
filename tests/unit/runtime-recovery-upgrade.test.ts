@@ -35,6 +35,17 @@ describe('runtime recovery upgrade', () => {
     expect(repository).toContain('Tệp tải về có dung lượng thấp bất thường');
   });
 
+  it('reconciles the legacy verified merge transition before renderer bootstrap', async () => {
+    const context = await source('src/main/app/app-context.ts');
+    const repository = await source('src/main/database/repositories/queue-repository.ts');
+    expect(context).toContain('recoverLegacyVerifiedMergeTransitionFailures()');
+    expect(context).toContain('LEGACY_VERIFIED_MERGE_TRANSITION_RECONCILED');
+    expect(repository).toMatch(/recoverLegacyVerifiedMergeTransitionFailures\(\)/);
+    expect(repository).toContain("job.input.mergeRecoveryMode === 'verified-final'");
+    expect(repository).toContain('job.input.reusedExistingOutput === true');
+    expect(repository).toContain("status='skipped'");
+  });
+
   it('keeps verified media when platform size metadata is inaccurate', async () => {
     const engine = await source('src/main/downloader/download-engine.ts');
     expect(engine).toContain('DOWNLOAD_SIZE_ESTIMATE_MISMATCH');

@@ -21,9 +21,9 @@ describe('disk-full automatic recovery', () => {
   it('removes stale DISK_FULL notifications when the queue no longer has a disk block', () => {
     const store = source('src/renderer/src/stores/app-store.ts');
     const events = source('src/renderer/src/hooks/use-desktop-events.ts');
-    expect(store).toContain('TUBMEDIA STALE DISK NOTICE RECONCILIATION R28');
-    expect(store).toContain('reconcileDiskFullNotifications');
-    expect(store).toContain('notifications.filter((notice) => !matches(notice))');
+    expect(store).toContain('reconcileJobNotifications');
+    expect(store).toContain('isJobNoticeStillBlocking(notice, jobs)');
+    expect(store).toContain('if (notice.pinned) return true;');
     expect(events).toContain("notice.code === 'DISK_SPACE_RECOVERED'");
     expect(events).toContain("dismissAttentionByCodes(['DISK_FULL'], notice.projectId)");
   });

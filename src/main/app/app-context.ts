@@ -151,6 +151,21 @@ export class AppContext {
   }
   public initialize(): void {
     this.settings.initialize();
+    const recoveredMergeTransitions = this.queueRepo.recoverLegacyVerifiedMergeTransitionFailures();
+    for (const projectId of recoveredMergeTransitions.projectIds) {
+      const jobs = this.queueRepo.list(projectId);
+      if (jobs.length > 0 && jobs.every((job) => ['completed', 'skipped'].includes(job.status))) {
+        this.projectRepo.setStatus(projectId, 'completed');
+      }
+    }
+    if (recoveredMergeTransitions.jobs > 0) {
+      this.logger.info(
+        'queue',
+        'LEGACY_VERIFIED_MERGE_TRANSITION_RECONCILED',
+        `Đã tự hòa giải ${recoveredMergeTransitions.jobs} tác vụ ghép cũ: thành phẩm đã được hậu kiểm hợp lệ nên không còn hiển thị như lỗi mới khi mở ứng dụng.`,
+        { metadata: { projectIds: recoveredMergeTransitions.projectIds } }
+      );
+    }
     void this.quickDownload.recover().catch((error: unknown) => {
       this.logger.warn(
         'quick-download',

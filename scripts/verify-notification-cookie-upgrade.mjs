@@ -16,6 +16,8 @@ const queue = read('src/main/queue/queue-manager.ts');
 const ipc = read('src/main/ipc/register-ipc.ts');
 const downloadPage = read('src/renderer/src/pages/DownloadWorkbenchPage.tsx');
 const mergePage = read('src/renderer/src/pages/DownloadMergePage.tsx');
+const notificationCenter = read('src/renderer/src/components/NotificationCenter.tsx');
+const store = read('src/renderer/src/stores/app-store.ts');
 
 check(
   'fixed diagnostic dock only keeps currently blocking job issues',
@@ -35,6 +37,13 @@ check(
   notificationPolicy.includes('isAttentionNoticeResolved') &&
     attentionCenter.includes('isAttentionNoticeResolved(attention, jobs)') &&
     attentionCenter.includes('if (!attentionResolved')
+);
+check(
+  'persisted queue notices follow the current job lifecycle',
+  notificationPolicy.includes('isJobNoticeStillBlocking') &&
+    store.includes('reconcileJobNotifications') &&
+    store.includes('isJobNoticeStillBlocking(notice, jobs)') &&
+    notificationCenter.includes('isJobNoticeStillBlocking(notification, jobs)')
 );
 check(
   'queue has a cookie-only automatic resume operation',

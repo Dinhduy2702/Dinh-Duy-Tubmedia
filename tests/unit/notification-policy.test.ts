@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   isAttentionNoticeResolved,
+  isJobNoticeStillBlocking,
   notificationDuration,
   shouldRouteIssueToAttention,
   shouldShowInlineBlockingIssue,
@@ -115,5 +116,58 @@ describe('notification policy', () => {
         ]
       )
     ).toBe(true);
+  });
+
+  it('expires a persisted job error as soon as its queue row is reconciled', () => {
+    const notice = {
+      jobId: 'merge-1',
+      projectId: 'project-1',
+      code: 'INVALID_INPUT'
+    };
+    expect(
+      isJobNoticeStillBlocking(notice, [
+        {
+          id: 'merge-1',
+          projectId: 'project-1',
+          status: 'failed',
+          errorCode: 'INVALID_INPUT'
+        }
+      ])
+    ).toBe(true);
+    expect(
+      isJobNoticeStillBlocking(notice, [
+        {
+          id: 'merge-1',
+          projectId: 'project-1',
+          status: 'skipped',
+          errorCode: null
+        }
+      ])
+    ).toBe(false);
+    expect(isJobNoticeStillBlocking(notice, [])).toBe(false);
+  });
+
+  it('keeps a project-level failure actionable only while a matching job is blocked', () => {
+    const notice = { projectId: 'project-1', code: 'JOB_FAILED' };
+    expect(
+      isJobNoticeStillBlocking(notice, [
+        {
+          id: 'download-1',
+          projectId: 'project-1',
+          status: 'failed',
+          errorCode: 'DOWNLOAD_FAILED'
+        }
+      ])
+    ).toBe(true);
+    expect(
+      isJobNoticeStillBlocking(notice, [
+        {
+          id: 'download-1',
+          projectId: 'project-1',
+          status: 'completed',
+          errorCode: null
+        }
+      ])
+    ).toBe(false);
   });
 });

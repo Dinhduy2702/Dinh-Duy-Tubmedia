@@ -497,6 +497,71 @@ describe('cơ sở dữ liệu và lưu trạng thái bền vững', () => {
     database.close();
   });
 
+  it('hòa giải đúng lỗi merging sang skipped cũ mà không che lỗi ghép thật', () => {
+    const { database, projects } = createDatabase();
+    const project = createProject(projects);
+    const queue = new QueueRepository(database.db);
+    const outputPath = join(project.outputFolder, 'thanh-pham.mp4');
+    const legacy = queue.create({
+      projectId: project.id,
+      type: 'merge',
+      input: {
+        outputPath,
+        mergeRecoveryMode: 'verified-final',
+        reusedExistingOutput: true,
+        resultMessage: 'Thành phẩm đã được hậu kiểm đầy đủ.'
+      }
+    });
+    const unrelated = queue.create({
+      projectId: project.id,
+      type: 'merge',
+      input: { outputPath: join(project.outputFolder, 'chua-xac-minh.mp4') }
+    });
+    const exactLegacyMessage = 'Không thể chuyển tác vụ từ merging sang skipped.';
+
+    queue.update(legacy.id, { status: 'merging', progress: 100, attempts: 1 });
+    queue.update(legacy.id, {
+      status: 'failed',
+      errorCode: 'INVALID_INPUT',
+      errorMessage: exactLegacyMessage,
+      finishedAt: '2026-08-26T10:39:25.000Z'
+    });
+    queue.update(unrelated.id, { status: 'merging', progress: 100, attempts: 1 });
+    queue.update(unrelated.id, {
+      status: 'failed',
+      errorCode: 'INVALID_INPUT',
+      errorMessage: exactLegacyMessage
+    });
+
+    expect(queue.recoverLegacyVerifiedMergeTransitionFailures()).toEqual({
+      jobs: 1,
+      projectIds: [project.id]
+    });
+    expect(queue.get(legacy.id)).toMatchObject({
+      status: 'skipped',
+      progress: 100,
+      speed: null,
+      etaSeconds: 0,
+      errorCode: null,
+      errorMessage: null,
+      finishedAt: '2026-08-26T10:39:25.000Z'
+    });
+    expect(queue.get(legacy.id)?.input).toMatchObject({
+      outputPath,
+      mergeRecoveryMode: 'verified-final',
+      reusedExistingOutput: true,
+      legacyMergeTransitionRecovered: true,
+      progressStage: 'Thành phẩm cũ hợp lệ · đã tự khôi phục trạng thái'
+    });
+    expect(queue.get(unrelated.id)).toMatchObject({
+      status: 'failed',
+      errorCode: 'INVALID_INPUT',
+      errorMessage: exactLegacyMessage
+    });
+    expect(queue.recoverLegacyVerifiedMergeTransitionFailures()).toEqual({ jobs: 0, projectIds: [] });
+    database.close();
+  });
+
   it('gỡ lỗi cookies bị sao chép từ bản cũ nhưng giữ đúng video đã xác nhận lỗi', () => {
     const { database, projects } = createDatabase();
     const project = createProject(projects);

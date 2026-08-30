@@ -18,20 +18,11 @@ import {
   X,
   XCircle
 } from 'lucide-react';
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent as ReactKeyboardEvent
-} from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { Project, QueueJob } from '@shared/types/domain';
+import { isJobNoticeStillBlocking } from '@shared/utils/notification-policy';
 import { useShallow } from 'zustand/react/shallow';
-import {
-  useAppStore,
-  type NotificationRecord,
-  type PageId
-} from '../stores/app-store';
+import { useAppStore, type NotificationRecord, type PageId } from '../stores/app-store';
 
 const FILTERS = [
   { id: 'all', label: 'Tất cả' },
@@ -61,11 +52,12 @@ function relativeTime(value: string): string {
   });
 }
 
-function isActionRequired(notification: NotificationRecord): boolean {
+function isActionRequired(notification: NotificationRecord, jobs: readonly QueueJob[]): boolean {
+  if (notification.jobId || notification.projectId) {
+    return isJobNoticeStillBlocking(notification, jobs);
+  }
   return Boolean(
-    notification.sticky ||
-      notification.severity === 'warning' ||
-      notification.severity === 'error'
+    notification.sticky || notification.severity === 'warning' || notification.severity === 'error'
   );
 }
 
@@ -80,17 +72,9 @@ function outputPathFromJob(
   projects: readonly Project[]
 ): string | null {
   if (notification.outputPath) return notification.outputPath;
-  const job = notification.jobId
-    ? jobs.find((candidate) => candidate.id === notification.jobId)
-    : null;
+  const job = notification.jobId ? jobs.find((candidate) => candidate.id === notification.jobId) : null;
   if (job) {
-    for (const key of [
-      'outputPath',
-      'outputFile',
-      'outputFolder',
-      'destinationPath',
-      'destinationFolder'
-    ]) {
+    for (const key of ['outputPath', 'outputFile', 'outputFolder', 'destinationPath', 'destinationFolder']) {
       const path = textField(job.input, key);
       if (path) return path;
     }
@@ -179,23 +163,24 @@ export function NotificationCenter(): React.JSX.Element | null {
   const counts = useMemo(
     () => ({
       unread: notifications.filter((notification) => !notification.readAt).length,
-      action: notifications.filter(isActionRequired).length,
-      read: notifications.filter((notification) => Boolean(notification.readAt) && !notification.pinned).length
+      action: notifications.filter((notification) => isActionRequired(notification, jobs)).length,
+      read: notifications.filter((notification) => Boolean(notification.readAt) && !notification.pinned)
+        .length
     }),
-    [notifications]
+    [jobs, notifications]
   );
 
   const visible = useMemo(() => {
     const filtered = notifications.filter((notification) => {
       if (filter === 'unread') return !notification.readAt;
-      if (filter === 'action') return isActionRequired(notification);
+      if (filter === 'action') return isActionRequired(notification, jobs);
       return true;
     });
     return [...filtered].sort((left, right) => {
       if (left.pinned !== right.pinned) return left.pinned ? -1 : 1;
       return Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
     });
-  }, [filter, notifications]);
+  }, [filter, jobs, notifications]);
 
   useEffect(() => {
     if (!open) return;
@@ -282,13 +267,15 @@ export function NotificationCenter(): React.JSX.Element | null {
             <div>
               <h2 id="notification-center-title">Trung tâm thông báo</h2>
               <p>
-                {counts.unread > 0
-                  ? `${counts.unread} thông báo chưa đọc`
-                  : 'Bạn đã xem tất cả thông báo'}
+                {counts.unread > 0 ? `${counts.unread} thông báo chưa đọc` : 'Bạn đã xem tất cả thông báo'}
               </p>
             </div>
           </div>
-          <button className="notification-center-close" aria-label="Đóng Trung tâm thông báo" onClick={closeAndRead}>
+          <button
+            className="notification-center-close"
+            aria-label="Đóng Trung tâm thông báo"
+            onClick={closeAndRead}
+          >
             <X size={19} />
           </button>
         </header>
@@ -296,7 +283,12 @@ export function NotificationCenter(): React.JSX.Element | null {
         <div className="notification-center-toolbar">
           <div className="notification-center-filters" role="tablist" aria-label="Bộ lọc thông báo">
             {FILTERS.map((item) => {
-              const count = item.id === 'unread' ? counts.unread : item.id === 'action' ? counts.action : notifications.length;
+              const count =
+                item.id === 'unread'
+                  ? counts.unread
+                  : item.id === 'action'
+                    ? counts.action
+                    : notifications.length;
               return (
                 <button
                   key={item.id}
@@ -312,11 +304,19 @@ export function NotificationCenter(): React.JSX.Element | null {
             })}
           </div>
           <div className="notification-center-bulk-actions">
-            <button disabled={counts.unread === 0} onClick={markAllNotificationsRead} title="Đánh dấu tất cả đã đọc">
+            <button
+              disabled={counts.unread === 0}
+              onClick={markAllNotificationsRead}
+              title="Đánh dấu tất cả đã đọc"
+            >
               <CheckCheck size={16} />
               <span>Đã đọc</span>
             </button>
-            <button disabled={counts.read === 0} onClick={clearReadNotifications} title="Xóa thông báo đã đọc">
+            <button
+              disabled={counts.read === 0}
+              onClick={clearReadNotifications}
+              title="Xóa thông báo đã đọc"
+            >
               <Trash2 size={16} />
               <span>Xóa đã đọc</span>
             </button>
@@ -366,10 +366,14 @@ export function NotificationCenter(): React.JSX.Element | null {
                     >
                       <div className="notification-item-title-row">
                         <b>{notification.title}</b>
-                        {notification.count > 1 && <span className="notification-count">×{notification.count}</span>}
+                        {notification.count > 1 && (
+                          <span className="notification-count">×{notification.count}</span>
+                        )}
                         {notification.sticky && <span className="notification-action-label">Cần xử lý</span>}
                         {notification.pinned && <Pin size={13} aria-label="Đã ghim" />}
-                        {!notification.readAt && <i className="notification-unread-dot" aria-label="Chưa đọc" />}
+                        {!notification.readAt && (
+                          <i className="notification-unread-dot" aria-label="Chưa đọc" />
+                        )}
                       </div>
                       <p>{notification.message}</p>
                       {notification.steps && notification.steps.length > 0 && (
@@ -389,7 +393,12 @@ export function NotificationCenter(): React.JSX.Element | null {
                             {pathLooksLikeFile(path) ? <ExternalLink size={15} /> : <FolderOpen size={15} />}
                             {pathLooksLikeFile(path) ? 'Mở tệp' : 'Mở thư mục'}
                           </button>
-                          <button className="is-icon" onClick={() => void copyOutput(notification)} title="Sao chép đường dẫn" aria-label="Sao chép đường dẫn">
+                          <button
+                            className="is-icon"
+                            onClick={() => void copyOutput(notification)}
+                            title="Sao chép đường dẫn"
+                            aria-label="Sao chép đường dẫn"
+                          >
                             <Copy size={15} />
                           </button>
                         </>
@@ -415,7 +424,12 @@ export function NotificationCenter(): React.JSX.Element | null {
                         </button>
                       )}
                       {!notification.readAt && (
-                        <button className="is-icon" onClick={() => markNotificationRead(notification.id)} title="Đánh dấu đã đọc" aria-label="Đánh dấu đã đọc">
+                        <button
+                          className="is-icon"
+                          onClick={() => markNotificationRead(notification.id)}
+                          title="Đánh dấu đã đọc"
+                          aria-label="Đánh dấu đã đọc"
+                        >
                           <Check size={15} />
                         </button>
                       )}
@@ -427,7 +441,12 @@ export function NotificationCenter(): React.JSX.Element | null {
                       >
                         {notification.pinned ? <PinOff size={15} /> : <Pin size={15} />}
                       </button>
-                      <button className="is-icon is-danger" onClick={() => removeNotification(notification.id)} title="Xóa thông báo" aria-label="Xóa thông báo">
+                      <button
+                        className="is-icon is-danger"
+                        onClick={() => removeNotification(notification.id)}
+                        title="Xóa thông báo"
+                        aria-label="Xóa thông báo"
+                      >
                         <Trash2 size={15} />
                       </button>
                     </div>
