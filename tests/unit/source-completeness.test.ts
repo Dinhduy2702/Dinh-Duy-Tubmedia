@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -45,5 +46,13 @@ ${result.stderr}`
     expect(isRootGitMetadataPath('.git/objects/pack')).toBe(true);
     expect(isRootGitMetadataPath('.git\\HEAD')).toBe(true);
     expect(isRootGitMetadataPath('nested/.git')).toBe(false);
+  });
+
+  it('keeps the official build retry-safe without weakening tracked-source checks', () => {
+    const buildScript = readFileSync(join(process.cwd(), 'BUILD_INSTALLER_CHINH_THUC.ps1'), 'utf8');
+
+    expect(buildScript).toContain('Verify build workspace source completeness');
+    expect(buildScript).toContain('git status --porcelain --untracked-files=no');
+    expect(buildScript).not.toContain('verify-source-completeness.mjs --root $ProjectRoot --strict-clean');
   });
 });

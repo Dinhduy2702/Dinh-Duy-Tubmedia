@@ -76,9 +76,9 @@ check(
 
 check(
   page.includes('PHIÊN BẢN HIỆN TẠI') &&
-    page.includes('PHIÊN BẢN MỚI NHẤT') &&
+    page.includes('PHIÊN BẢN TRÊN MÁY CHỦ') &&
     page.includes('Đã có phiên bản mới'),
-  'Update Center uses professional current/latest/new-release presentation'
+  'Update Center uses professional current/server/new-release presentation'
 );
 
 check(

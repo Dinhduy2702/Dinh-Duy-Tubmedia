@@ -133,6 +133,12 @@ const checks = [
     ['npm.cmd run typecheck', 'npm.cmd run lint', 'npm.cmd run test', 'npm.cmd run test:integration'].every(
       (x) => buildScript.includes(x)
     )
+  ],
+  [
+    'official build can safely retry after dependencies and outputs exist',
+    buildScript.includes('Verify build workspace source completeness') &&
+      buildScript.includes('git status --porcelain --untracked-files=no') &&
+      !buildScript.includes('verify-source-completeness.mjs --root $ProjectRoot --strict-clean')
   ]
 ];
 const failed = checks.filter(([, ok]) => !ok);

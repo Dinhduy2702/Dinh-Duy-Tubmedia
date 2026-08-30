@@ -27,8 +27,21 @@ Write-Host "============================================================" -Foreg
 Write-Host ("  DOWNLOAD VIDEO TUBMEDIA " + $Version + " - OFFICIAL BUILD") -ForegroundColor Red
 Write-Host "============================================================" -ForegroundColor Red
 
-Run-Step "Verify clean source completeness" {
-  & node scripts/verify-source-completeness.mjs --root $ProjectRoot --strict-clean
+Run-Step "Verify build workspace source completeness" {
+  & node scripts/verify-source-completeness.mjs --root $ProjectRoot
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  # A retry workspace legitimately contains node_modules/out/release. Keep the
+  # strict-clean mode for exported source packages, while still refusing to
+  # build when any tracked source file was changed outside the release commit.
+  if (Test-Path -LiteralPath (Join-Path $ProjectRoot ".git")) {
+    $TrackedChanges = @(& git status --porcelain --untracked-files=no)
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    if ($TrackedChanges.Count -gt 0) {
+      $TrackedChanges | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+      throw "Tracked source contains uncommitted changes. Commit or restore them before the official build."
+    }
+  }
 }
 Run-Step "Install exact project dependencies" {
   & npm.cmd ci

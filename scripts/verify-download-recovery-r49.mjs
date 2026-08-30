@@ -119,7 +119,7 @@ check(
   'cookie retries clear stale resumeStatus before re-entering the queue'
 );
 check(
-  queue.includes('cookieRetryRequested: false,\n            resumeStatus: null'),
+  /cookieRetryRequested:\s*false,\s*resumeStatus:\s*null/.test(queue),
   'successful downloads clear stale cookie/resume markers'
 );
 check(

@@ -11,6 +11,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import type { AppUpdateReleaseInfo, AppUpdateStatus } from '@shared/types/domain';
 import { useAppStore } from '../stores/app-store';
+import { compareAppVersions } from '../../../shared/app-version';
 import { formatReleaseNotesForDisplay } from '../../../shared/release-notes';
 
 const LAST_KNOWN_RELEASE_KEY = 'tubmedia:last-known-app-release';
@@ -78,15 +79,24 @@ export function UpdatesPage(): React.JSX.Element {
   const currentVersion = status?.currentVersion ?? '—';
   const latestInfo = status?.info ?? lastKnownRelease;
   const latestVersion = latestInfo?.version ?? currentVersion;
+  const releaseRelation = compareAppVersions(latestVersion, currentVersion);
+  const remoteIsNewer = releaseRelation === 1;
+  const remoteIsOlder = releaseRelation === -1;
+  const canDownload = state === 'available' && remoteIsNewer;
+  const canInstall = state === 'downloaded' && remoteIsNewer;
   const hasNewRelease =
-    state === 'available' || state === 'downloading' || state === 'downloaded' || state === 'installing';
-  const downloading = state === 'downloading';
+    remoteIsNewer &&
+    (state === 'available' || state === 'downloading' || state === 'downloaded' || state === 'installing');
+  const downloading = state === 'downloading' && remoteIsNewer;
   const progress = status?.progress?.percent ?? 0;
   const feedConfigured =
     Boolean(settings?.appFeedUrl) ||
     Boolean(status?.supported && !status.message?.includes('chưa được liên kết với máy chủ cập nhật'));
 
   const headline = useMemo(() => {
+    if (remoteIsOlder) {
+      return `Bạn đang dùng Tubmedia ${currentVersion}; máy chủ đang có bản cũ hơn ${latestVersion}.`;
+    }
     if (state === 'available') return `Đã có phiên bản mới ${latestVersion}`;
     if (state === 'downloading') return `Đang tải Tubmedia ${latestVersion}`;
     if (state === 'downloaded') return `Tubmedia ${latestVersion} đã sẵn sàng cài đặt`;
@@ -95,14 +105,14 @@ export function UpdatesPage(): React.JSX.Element {
     if (state === 'error') return 'Chưa thể kiểm tra hoặc tải bản cập nhật';
     if (state === 'disabled') return 'Cập nhật tự động hiện chưa sẵn sàng';
     return `Bạn đang dùng phiên bản mới nhất ${latestVersion}`;
-  }, [latestVersion, state]);
+  }, [currentVersion, latestVersion, remoteIsOlder, state]);
 
   const runUpdate = async (): Promise<void> => {
-    if (state !== 'available' && state !== 'downloaded') return;
-    const kind = state === 'downloaded' ? 'install' : 'update';
+    if (!canDownload && !canInstall) return;
+    const kind = canInstall ? 'install' : 'update';
     setBusy(kind);
     try {
-      if (state === 'downloaded') {
+      if (canInstall) {
         await window.desktop.updates.install();
         return;
       }
@@ -169,7 +179,7 @@ export function UpdatesPage(): React.JSX.Element {
             </div>
 
             <div className="update-next-version">
-              <span>PHIÊN BẢN MỚI NHẤT</span>
+              <span>PHIÊN BẢN TRÊN MÁY CHỦ</span>
               <b>{latestVersion}</b>
             </div>
           </div>
@@ -212,15 +222,15 @@ export function UpdatesPage(): React.JSX.Element {
             </details>
           )}
 
-          {(state === 'available' || state === 'downloaded') && (
+          {(canDownload || canInstall) && (
             <div className="mt-5 flex flex-wrap gap-2">
               <button className="btn btn-primary" disabled={busy !== null} onClick={() => void runUpdate()}>
-                {state === 'downloaded' ? <Rocket size={17} /> : <Download size={17} />}
+                {canInstall ? <Rocket size={17} /> : <Download size={17} />}
                 {busy
-                  ? state === 'downloaded'
+                  ? canInstall
                     ? 'Đang chuẩn bị...'
                     : 'Đang bắt đầu tải...'
-                  : state === 'downloaded'
+                  : canInstall
                     ? 'Cài đặt & khởi động lại'
                     : 'Cập nhật ngay'}
               </button>

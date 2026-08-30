@@ -77,8 +77,8 @@ check(
 );
 
 check(
-  page.includes('PHIÊN BẢN HIỆN TẠI') && page.includes('PHIÊN BẢN MỚI NHẤT'),
-  'Update Center always presents current and latest-known version'
+  page.includes('PHIÊN BẢN HIỆN TẠI') && page.includes('PHIÊN BẢN TRÊN MÁY CHỦ'),
+  'Update Center always presents current and server-known version'
 );
 
 check(
