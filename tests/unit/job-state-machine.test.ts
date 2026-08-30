@@ -27,6 +27,12 @@ describe('job state machine', () => {
     expect(canTransitionJob('verifying', 'skipped')).toBe(true);
   });
 
+  it('allows a verified merge result to reuse an existing final file', () => {
+    expect(initialJobStatus('merge')).toBe('merging');
+    expect(canTransitionJob('merging', 'skipped')).toBe(true);
+    expect(() => assertJobTransition('merging', 'skipped')).not.toThrow();
+  });
+
   it('rejects reopening terminal jobs in place', () => {
     expect(canTransitionJob('completed', 'pending')).toBe(false);
     expect(canTransitionJob('skipped', 'pending')).toBe(false);

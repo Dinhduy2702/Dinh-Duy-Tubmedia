@@ -1,7 +1,7 @@
 import { malformedYouTubeVideoUrlMessage } from '@shared/utils/youtube-url-validation.js';
 import { app, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
-import { access, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, readdir, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import { constants as fsConstants, existsSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import {
@@ -38,6 +38,9 @@ interface ActiveQuickTask {
   compactFilename: boolean;
   genericFallbackTried: boolean;
   recentLines: string[];
+  lastDiskCheckAt: number;
+  diskCheckInFlight: boolean;
+  diskCheckWarningLogged: boolean;
   done: Promise<void>;
 }
 
@@ -213,6 +216,19 @@ export class QuickDownloadService {
     return app.getPath('downloads');
   }
 
+  public cleanupRoots(): { outputDirectories: string[]; tempRoot: string } {
+    return {
+      outputDirectories: [
+        ...new Set(
+          [...this.statuses.values()]
+            .map((status) => status.outputDirectory.trim())
+            .filter((directory) => directory.length > 0)
+        )
+      ],
+      tempRoot: this.tempRoot
+    };
+  }
+
   public async recover(): Promise<void> {
     await mkdir(dirname(this.statePath), { recursive: true });
     const raw = await readFile(this.statePath, 'utf8').catch(() => null);
@@ -316,6 +332,7 @@ export class QuickDownloadService {
     const runToken = `${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}` + `-${outputToken}`;
     const tempDirectory = join(this.tempRoot, outputToken);
     await mkdir(tempDirectory, { recursive: true });
+    await this.assertQuickDiskSpace([request.outputDirectory, tempDirectory]);
 
     const status: QuickDownloadStatus = {
       taskId,
@@ -360,6 +377,9 @@ export class QuickDownloadService {
       compactFilename: false,
       genericFallbackTried: false,
       recentLines: [],
+      lastDiskCheckAt: 0,
+      diskCheckInFlight: false,
+      diskCheckWarningLogged: false,
       done: Promise.resolve()
     };
 
@@ -406,6 +426,16 @@ export class QuickDownloadService {
     if (!active || active.status.taskId !== taskId) return this.status(taskId);
     if (active.status.phase !== 'paused') return cloneStatus(active.status);
 
+    try {
+      await this.assertQuickDiskSpace([active.request.outputDirectory, active.tempDirectory]);
+    } catch (error) {
+      active.status.errorCode = 'DISK_FULL';
+      active.status.error = error instanceof Error ? error.message : String(error);
+      active.status.message = active.status.error;
+      this.publish(active);
+      return cloneStatus(active.status);
+    }
+
     active.status.phase = 'resuming';
     active.status.message = 'Đang tiếp tục cây tiến trình Tải nhanh.';
     this.publish(active);
@@ -420,6 +450,8 @@ export class QuickDownloadService {
     }
 
     active.status.phase = 'downloading';
+    active.status.error = null;
+    active.status.errorCode = null;
     active.status.message = 'Đang tiếp tục tải video.';
     this.publish(active);
     return cloneStatus(active.status);
@@ -652,6 +684,8 @@ export class QuickDownloadService {
   private consumeLine(active: ActiveQuickTask, line: string): void {
     if (!line) return;
 
+    this.scheduleQuickDiskGuard(active);
+
     active.recentLines.push(line);
     if (active.recentLines.length > 80) {
       active.recentLines.splice(0, active.recentLines.length - 80);
@@ -697,6 +731,92 @@ export class QuickDownloadService {
             : 'Đang tải toàn bộ video.';
       this.publish(active);
     }
+  }
+
+  private quickDiskMinimumBytes(): number {
+    const settings = this.settings?.get();
+    const profiles = this.settings?.profiles().resources ?? [];
+    const selected = profiles.find((profile) => profile.id === settings?.defaultResourceProfileId);
+    return selected?.diskFreeMinimumBytes ?? 5 * 1024 ** 3;
+  }
+
+  private async quickDiskState(paths: readonly string[]): Promise<{
+    ready: boolean;
+    folder: string;
+    freeBytes: number;
+    requiredBytes: number;
+  }> {
+    const requiredBytes = this.quickDiskMinimumBytes();
+    for (const folder of new Set(paths)) {
+      const info = await statfs(folder);
+      const freeBytes = Number(info.bavail) * Number(info.bsize);
+      if (freeBytes < requiredBytes) return { ready: false, folder, freeBytes, requiredBytes };
+    }
+    return { ready: true, folder: paths[0] ?? '', freeBytes: 0, requiredBytes };
+  }
+
+  private formatDiskBytes(value: number): string {
+    if (!Number.isFinite(value) || value <= 0) return '0 GB';
+    return `${(value / 1024 ** 3).toFixed(1)} GB`;
+  }
+
+  private async assertQuickDiskSpace(paths: readonly string[]): Promise<void> {
+    const disk = await this.quickDiskState(paths);
+    if (disk.ready) return;
+    throw new Error(
+      `Ổ đĩa chứa ${disk.folder} chỉ còn ${this.formatDiskBytes(disk.freeBytes)}, cần tối thiểu ` +
+        `${this.formatDiskBytes(disk.requiredBytes)} để tải an toàn. Hãy dọn dung lượng rồi thử lại.`
+    );
+  }
+
+  private scheduleQuickDiskGuard(active: ActiveQuickTask): void {
+    const now = Date.now();
+    if (active.diskCheckInFlight || now - active.lastDiskCheckAt < 5_000) return;
+    active.lastDiskCheckAt = now;
+    active.diskCheckInFlight = true;
+
+    void this.quickDiskState([active.request.outputDirectory, active.tempDirectory])
+      .then(async (disk) => {
+        active.diskCheckWarningLogged = false;
+        if (disk.ready || this.activeTask !== active || TERMINAL_PHASES.has(active.status.phase)) return;
+        const message =
+          `Ổ đĩa chứa ${disk.folder} chỉ còn ${this.formatDiskBytes(disk.freeBytes)}, thấp hơn mức an toàn ` +
+          `${this.formatDiskBytes(disk.requiredBytes)}. Tải nhanh đã tạm dừng để tránh đầy ổ; ` +
+          'hãy dọn dung lượng rồi nhấn Tiếp tục.';
+        const pausedProcesses = await this.processes.pauseByJob(active.status.taskId).catch(() => 0);
+        if (pausedProcesses === 0) {
+          active.controller.abort();
+          return;
+        }
+        active.status.phase = 'paused';
+        active.status.errorCode = 'DISK_FULL';
+        active.status.error = message;
+        active.status.message = message;
+        active.status.speed = '';
+        active.status.eta = '';
+        this.publish(active);
+        this.logger.warn('quick-download', 'QUICK_DOWNLOAD_DISK_GUARD_PAUSED', message, {
+          jobId: active.status.taskId,
+          metadata: {
+            folder: disk.folder,
+            freeBytes: disk.freeBytes,
+            requiredBytes: disk.requiredBytes
+          }
+        });
+      })
+      .catch((error: unknown) => {
+        if (active.diskCheckWarningLogged) return;
+        active.diskCheckWarningLogged = true;
+        this.logger.warn(
+          'quick-download',
+          'QUICK_DOWNLOAD_DISK_CHECK_WARNING',
+          `Không thể kiểm tra dung lượng trong khi tải: ${error instanceof Error ? error.message : String(error)}`,
+          { jobId: active.status.taskId }
+        );
+      })
+      .finally(() => {
+        active.diskCheckInFlight = false;
+      });
   }
 
   private async finishTask(active: ActiveQuickTask, code: number): Promise<void> {

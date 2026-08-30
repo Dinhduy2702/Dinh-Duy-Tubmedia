@@ -66,8 +66,8 @@ export const appSettingsSchema = z
     mergeLaneCount: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
     maxGlobalMergeJobs: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
     downloadCompatibilityMode: z.enum(['source', 'capcut_sdr_1080p', 'capcut_sdr_2k']),
-  // ADAPTIVE_SETTINGS_HOTFIX8_SCHEMA
-  downloadEditCopyMode: z.enum(['off', 'capcut_sdr_1080p', 'capcut_sdr_2k']).default('off'),
+    // ADAPTIVE_SETTINGS_HOTFIX8_SCHEMA
+    downloadEditCopyMode: z.enum(['off', 'capcut_sdr_1080p', 'capcut_sdr_2k']).default('off'),
     downloadMinHeight: z.number().int().min(0).max(4320),
     downloadMaxHeight: z.number().int().min(0).max(4320),
     downloadMinFps: z.number().min(0).max(240),
@@ -226,18 +226,20 @@ export const systemCleanupCategorySchema = z.enum([
   'browserCache',
   'capcutCache',
   'zaloCache',
+  'tubmediaResidue',
   'recycleBin',
   'windowsTemp',
   'windowsUpdate',
   'deliveryOptimization',
   'componentStore',
+  'diskInventory',
   'disableHibernate'
 ]);
 export const systemCleanupRequestSchema = z
   .object({
     mode: z.enum(['estimate', 'clean']),
     scope: z.enum(['currentUser', 'wholeMachine']).default('currentUser'),
-    categories: z.array(systemCleanupCategorySchema).min(1).max(12)
+    categories: z.array(systemCleanupCategorySchema).min(1).max(14)
   })
   .strict();
 export const systemCleanupRunSchema = z

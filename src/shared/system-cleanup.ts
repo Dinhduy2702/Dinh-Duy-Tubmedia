@@ -54,6 +54,16 @@ export const SYSTEM_CLEANUP_CATEGORIES = [
     defaultSelected: true
   },
   {
+    id: 'tubmediaResidue',
+    label: 'Dữ liệu tải dở Tubmedia cũ',
+    description:
+      'Chỉ nhận diện tệp .part/fragment, clip tạm và thư mục Tải nhanh do Tubmedia tạo đã quá 7 ngày.',
+    group: 'safe',
+    requiresAdmin: false,
+    irreversible: false,
+    defaultSelected: false
+  },
+  {
     id: 'recycleBin',
     label: 'Thùng rác Windows',
     description: 'Xóa vĩnh viễn các tệp đang nằm trong Recycle Bin.',
@@ -100,6 +110,16 @@ export const SYSTEM_CLEANUP_CATEGORIES = [
     defaultSelected: false
   },
   {
+    id: 'diskInventory',
+    label: 'Kiểm kê file lớn toàn bộ ổ',
+    description:
+      'Chỉ lập báo cáo file lớn và phân loại cần xem/được bảo vệ; Tubmedia tuyệt đối không tự xóa các file này.',
+    group: 'advanced',
+    requiresAdmin: true,
+    irreversible: false,
+    defaultSelected: false
+  },
+  {
     id: 'disableHibernate',
     label: 'Tắt chế độ ngủ đông',
     description:
@@ -115,6 +135,7 @@ export type SystemCleanupCategoryId = (typeof SYSTEM_CLEANUP_CATEGORIES)[number]
 
 export type SystemCleanupMode = 'estimate' | 'clean';
 export type SystemCleanupScope = 'currentUser' | 'wholeMachine';
+export type SystemCleanupFindingClassification = 'safe-to-delete' | 'review' | 'protected';
 
 export interface SystemCleanupRequest {
   mode: SystemCleanupMode;
@@ -137,6 +158,14 @@ export interface SystemCleanupCategoryResult {
   removedItems: number;
   skippedItems: number;
   errors: string[];
+  findings: SystemCleanupFinding[];
+}
+
+export interface SystemCleanupFinding {
+  path: string;
+  bytes: number;
+  classification: SystemCleanupFindingClassification;
+  reason: string;
 }
 
 export interface SystemCleanupStatus {
@@ -158,6 +187,10 @@ export interface SystemCleanupStatus {
   driveBefore: SystemCleanupDriveState | null;
   driveAfter: SystemCleanupDriveState | null;
   results: SystemCleanupCategoryResult[];
+  findings: SystemCleanupFinding[];
+  safeToDeleteBytes: number;
+  reviewBytes: number;
+  protectedBytes: number;
   errors: string[];
 }
 
@@ -221,4 +254,8 @@ export function systemCleanupRequiresAdmin(
 
 export function isIrreversibleCleanupSelection(categories: readonly SystemCleanupCategoryId[]): boolean {
   return SYSTEM_CLEANUP_CATEGORIES.some((item) => categories.includes(item.id) && item.irreversible);
+}
+
+export function isInspectionOnlyCleanupCategory(id: SystemCleanupCategoryId): boolean {
+  return id === 'diskInventory';
 }

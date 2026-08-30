@@ -8,6 +8,11 @@ const expectText = async (path, text, label) => {
   if (!source.includes(text)) throw new Error(`${label}: thiếu ${text} trong ${path}`);
   checks.push(label);
 };
+const expectPattern = async (path, pattern, label) => {
+  const source = await read(path);
+  if (!pattern.test(source)) throw new Error(`${label}: không khớp ${pattern} trong ${path}`);
+  checks.push(label);
+};
 const rejectText = async (path, text, label) => {
   const source = await read(path);
   if (source.includes(text)) throw new Error(`${label}: vẫn còn ${text} trong ${path}`);
@@ -15,10 +20,14 @@ const rejectText = async (path, text, label) => {
 };
 
 await expectText('src/main/ipc/register-ipc.ts', 'dialog.showSaveDialog', 'Save As timeline');
-await expectText('src/renderer/src/pages/DownloadMergePage.tsx', '<FileDown size={17}/>', 'Icon xuất TXT');
+await expectPattern(
+  'src/renderer/src/pages/DownloadMergePage.tsx',
+  /<FileDown\s+size=\{17\}\s*\/>/,
+  'Icon xuất TXT'
+);
 await expectText(
   'src/main/merge/merge-engine.ts',
-  "join(workFolder, '_normalized')",
+  "join(workFolder, '_normalized-cache')",
   'Normalized nằm trong temp'
 );
 await expectText(
@@ -28,13 +37,18 @@ await expectText(
 );
 await expectText(
   'src/main/merge/merge-engine.ts',
-  'if (oldBackup) await rm(oldBackup',
-  'Không để lại backup tạm'
+  'commitFileWithoutOverwrite(pending, final)',
+  'Không ghi đè thành phẩm hiện có'
 );
 await expectText(
   'src/main/files/temporary-cleanup.ts',
-  "['_normalized', '_quarantine', '_yt_tmp']",
+  "['_normalized', '_yt_tmp']",
   'Dọn thư mục app-owned'
+);
+await rejectText(
+  'src/main/files/temporary-cleanup.ts',
+  "['_normalized', '_quarantine', '_yt_tmp']",
+  'Không tự xóa khu cách ly'
 );
 await expectText('src/shared/utils/url.ts', 'downloadLinkTag', 'Nhận diện theo link');
 await expectText(

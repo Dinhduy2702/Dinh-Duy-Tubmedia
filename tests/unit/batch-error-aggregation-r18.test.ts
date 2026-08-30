@@ -61,6 +61,22 @@ describe('R18 R10 central batch attention aggregation', () => {
     expect(coalesceBatchJobFailureAttention(failure('p1', 'same'))).toBeNull();
   });
 
+  it('groups recoverable network warnings without presenting them as errors', () => {
+    const warning = (jobId: string) => ({
+      ...failure('p1', jobId, 'HTTP_ERROR'),
+      severity: 'warning'
+    });
+
+    const first = coalesceBatchJobFailureAttention(warning('j1'));
+    const second = coalesceBatchJobFailureAttention(warning('j2'));
+
+    expect(first?.severity).toBe('warning');
+    expect(first?.title).toContain('chưa tải được');
+    expect(second?.id).toBe('batch-job-failures:p1');
+    expect(second?.title).toContain('2 video');
+    expect(second?.message).toContain('.part');
+  });
+
   it('keeps different projects independent', () => {
     const one = coalesceBatchJobFailureAttention(failure('p1', 'j1'));
 

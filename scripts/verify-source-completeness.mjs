@@ -3,6 +3,11 @@ import { createHash } from 'node:crypto';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { dirname, extname, join, normalize, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
+import {
+  canonicalizeSourceBytesForHash,
+  isRootGitMetadataPath,
+  sourceSha256
+} from './source-inventory-hash.mjs';
 
 const explicitRoot = process.argv.includes('--root')
   ? process.argv[process.argv.indexOf('--root') + 1]
@@ -89,7 +94,9 @@ const packageJson = JSON.parse(await readText(packagePath));
 const packageLock = JSON.parse(await readText(packageLockPath));
 
 if (strictClean) {
-  const forbiddenDirectories = await findForbiddenDirectories(root, forbiddenDirectoryNames);
+  const forbiddenDirectories = (await findForbiddenDirectories(root, forbiddenDirectoryNames)).filter(
+    (directory) => !isRootGitMetadataPath(posix(relative(root, directory)))
+  );
   for (const directory of forbiddenDirectories) {
     fail(`Source sạch chứa thư mục sinh tự động: ${posix(relative(root, directory))}/`);
   }
@@ -119,7 +126,9 @@ for (const file of manifest.requiredFiles) {
 }
 if (!errors.length) pass('đủ thư mục và file bắt buộc trong source manifest');
 
-const discoveredFiles = await walk(root, forbiddenDirectoryNames);
+const discoveredFiles = (await walk(root, forbiddenDirectoryNames)).filter(
+  (path) => !isRootGitMetadataPath(posix(relative(root, path)))
+);
 const allFiles = strictClean
   ? discoveredFiles
   : discoveredFiles.filter((path) => !isWorkspaceGeneratedPath(posix(relative(root, path))));
@@ -161,10 +170,7 @@ if (await fileExists(inventoryPath)) {
       fail(`Source inventory thiếu file: ${relativePath}`);
       continue;
     }
-    const actualHash = createHash('sha256')
-      .update(await readFile(join(root, relativePath)))
-      .digest('hex')
-      .toUpperCase();
+    const actualHash = sourceSha256(await readFile(join(root, relativePath)));
     if (actualHash !== expectedHash) {
       fail(`Source inventory sai SHA-256: ${relativePath}`);
     }
@@ -313,7 +319,9 @@ if (
   canonicalInstallerAssetContract.some((needle) => !installerBuildScript.includes(needle)) ||
   installerBuildScript.includes(legacyProductNameInstallerOutput)
 ) {
-  fail('build-installer-windows.ps1 không khóa tên asset updater canonical Download-video-Tubmedia-Setup-<version>-x64.exe.');
+  fail(
+    'build-installer-windows.ps1 không khóa tên asset updater canonical Download-video-Tubmedia-Setup-<version>-x64.exe.'
+  );
 } else {
   pass('installer/updater asset dùng tên canonical ổn định');
 }
@@ -323,8 +331,12 @@ if (!appConstants.includes(`v${packageJson.version}`)) {
 }
 
 const officialBuild = await readText(join(root, 'BUILD_INSTALLER_CHINH_THUC.ps1'));
-if (!officialBuild.includes(packageJson.version)) {
-  fail('BUILD_INSTALLER_CHINH_THUC.ps1 không chứa phiên bản hiện tại.');
+if (
+  !officialBuild.includes('$Version = [string]$Package.version') ||
+  !officialBuild.includes('Download-video-Tubmedia-Setup-') ||
+  !officialBuild.includes('$Version + "-x64.exe"')
+) {
+  fail('BUILD_INSTALLER_CHINH_THUC.ps1 không lấy tên installer canonical từ package.json.');
 }
 
 const quickService = await readText(join(root, 'src/main/download/quick-download-service.ts'));
@@ -398,7 +410,7 @@ for (const file of allFiles.sort()) {
   if (relativePath === 'SOURCE_INVENTORY.sha256') continue;
   hash.update(relativePath);
   hash.update('\0');
-  hash.update(await readFile(file));
+  hash.update(canonicalizeSourceBytesForHash(await readFile(file)));
   hash.update('\0');
 }
 const inventoryHash = hash.digest('hex').toUpperCase();

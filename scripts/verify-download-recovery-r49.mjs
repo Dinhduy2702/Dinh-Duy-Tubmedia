@@ -73,14 +73,14 @@ function hotfix14ReadSourceTree(root) {
 const hotfix14DownloadSource = hotfix14ReadSourceTree(hotfix14Path.join(process.cwd(), 'src'));
 
 check(
-  hotfix14DownloadSource.includes('youtube-adaptive-r18-default-first-web-safari-fallback') &&
-    /youtube:player[_-]client\s*=\s*default,web_safari/.test(hotfix14DownloadSource) &&
-    !/youtube:player[_-]client\s*=\s*web_safari(?:['"\s,])/.test(hotfix14DownloadSource) &&
+  hotfix14DownloadSource.includes('yt-dlp-dynamic-default-no-manual-web-safari') &&
+    !/youtube:player[_-]client\s*=\s*[^'"\n]*web_safari/.test(hotfix14DownloadSource) &&
     !/['"]--format-sort['"][\s\S]{0,100}?['"]proto:m3u8['"]/.test(hotfix14DownloadSource) &&
     hotfix14DownloadSource.includes('--continue') &&
     hotfix14DownloadSource.includes('--fragment-retries') &&
-    hotfix14DownloadSource.includes('--concurrent-fragments'),
-  'yt-dlp keeps safe partial resume, uses verified HTTP403 client fallback and bounded retries'
+    hotfix14DownloadSource.includes('--concurrent-fragments') &&
+    hotfix14DownloadSource.includes('--no-cache-dir'),
+  'yt-dlp keeps safe partial resume, follows dynamic official clients and refreshes retry metadata'
 );
 check(
   engine.includes('Math.min(job.attempts > 0 ? 1 : 8') && engine.includes('job.attempts === 0'),
@@ -98,7 +98,7 @@ check(
   engine.includes('technicalSummary = sanitizeYtDlpDiagnostic(text)') &&
     engine.includes('failureCategory: failure.category') &&
     engine.includes('failureSubtype: failure.subtype') &&
-    engine.includes("clientPolicy: 'youtube-adaptive-r18-default-first-web-safari-fallback'") &&
+    engine.includes("clientPolicy: 'yt-dlp-dynamic-default-no-manual-web-safari'") &&
     engine.includes('progressPercent: latestProgress.percent'),
   'genuine download failures retain structured sanitized diagnostics and client policy'
 );
@@ -119,7 +119,7 @@ check(
   'cookie retries clear stale resumeStatus before re-entering the queue'
 );
 check(
-  queue.includes('cookieRetryRequested: false,\n            resumeStatus: null'),
+  /cookieRetryRequested:\s*false,\s*resumeStatus:\s*null/.test(queue),
   'successful downloads clear stale cookie/resume markers'
 );
 check(

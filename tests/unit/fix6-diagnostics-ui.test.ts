@@ -12,11 +12,12 @@ describe('FIX6 diagnostics, quiet cookies and compact UI', () => {
     expect(read('src/main/media/file-verifier.ts')).toContain('verifyVideoSample');
   });
 
-  it('keeps tool API fallback informational and app updates manual by default', () => {
+  it('keeps tool API fallback informational and enables safe in-app update checks', () => {
     const updater = read('src/main/updates/tool-update-service.ts');
     expect(updater).toContain("'TOOL_RELEASE_API_DIRECT_FALLBACK'");
     expect(updater).toContain('this.logger.info(');
-    expect(read('src/main/settings/defaults.ts')).toContain('autoCheckAppUpdates: false');
+    expect(read('src/main/settings/defaults.ts')).toContain('autoCheckAppUpdates: true');
+    expect(read('src/main/settings/settings-service.ts')).toContain('app_update_in_app_silent_v1350');
     expect(read('src/renderer/src/layout/Topbar.tsx')).not.toContain('updateBusy ? <LoaderCircle');
   });
 

@@ -37,8 +37,7 @@ describe('user-facing notification boundary', () => {
   });
 
   it('classifies electron-updater same-version output as neutral information', () => {
-    const raw =
-      'Update for version 1.3.0 is not available (latest version: 1.3.0, downgrade is allowed).';
+    const raw = 'Update for version 1.3.0 is not available (latest version: 1.3.0, downgrade is allowed).';
     const issue = friendlyIssue(raw);
     expect(issue.tone).toBe('info');
     expect(issue.title).toBe('Ứng dụng đã được cập nhật');
@@ -72,5 +71,19 @@ describe('user-facing notification boundary', () => {
     expect(projects).not.toContain('{x.errorMessage??');
     expect(projects).not.toContain('<td>{x.message}</td>');
     expect(tools).not.toContain('<span>{tool.error}</span>');
+  });
+
+  it('treats exhausted HTTP 403 and fragment interruptions as recoverable warnings', () => {
+    const forbidden = friendlyIssue(
+      'Máy chủ video vẫn từ chối yêu cầu (HTTP 403) sau 3 lần thử. Tubmedia đã giữ tệp .part.'
+    );
+    const fragment = friendlyIssue(
+      'Dữ liệu video vẫn bị gián đoạn sau 3 lần thử. Tubmedia đã giữ tệp .part.'
+    );
+
+    expect(forbidden.tone).toBe('warning');
+    expect(forbidden.title).toContain('Máy chủ video');
+    expect(fragment.tone).toBe('warning');
+    expect(fragment.title).toContain('Luồng tải video');
   });
 });

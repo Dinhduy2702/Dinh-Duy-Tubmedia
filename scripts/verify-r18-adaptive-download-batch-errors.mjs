@@ -32,13 +32,13 @@ function check(condition, label) {
 }
 
 check(
-  engine.includes('youtube-adaptive-r18-default-first-web-safari-fallback'),
-  'R18 adaptive YouTube policy marker is present'
+  engine.includes("job.attempts > 0 ? ['--no-cache-dir'] : []"),
+  'adaptive retry refreshes stale extractor data'
 );
 
 check(
-  /youtube:player[_-]client\s*=\s*default,web_safari/.test(engine),
-  'YouTube uses default clients plus web_safari fallback'
+  !/youtube:player[_-]client\s*=/.test(engine),
+  'YouTube client selection follows current yt-dlp defaults'
 );
 
 check(

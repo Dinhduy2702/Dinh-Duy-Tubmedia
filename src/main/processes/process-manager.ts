@@ -18,7 +18,12 @@ export interface ProcessRunOptions {
   onStdoutLine?: (line: string) => void;
   onStderrLine?: (line: string) => void;
 }
-export interface ProcessResult { code: number; stdoutTail: string; stderrTail: string; durationMs: number; }
+export interface ProcessResult {
+  code: number;
+  stdoutTail: string;
+  stderrTail: string;
+  durationMs: number;
+}
 interface Managed {
   id: string;
   jobId: string;
@@ -42,10 +47,7 @@ export function isTransientWindowsProcessNtStatus(status: number): boolean {
   );
 }
 
-export function buildWindowsProcessControlScript(
-  pid: number,
-  action: 'pause' | 'resume'
-): string {
+export function buildWindowsProcessControlScript(pid: number, action: 'pause' | 'resume'): string {
   if (!Number.isSafeInteger(pid) || pid <= 0) {
     throw new Error(`PID Windows không hợp lệ: ${pid}`);
   }
@@ -128,7 +130,8 @@ foreach ($targetProcessId in $targets) {
     [void][Tubmedia.NativeProcessControl]::CloseHandle($handle)
   }
 }
-${action === 'pause'
+${
+  action === 'pause'
     ? `if ($rootUnavailable -or $null -ne $rootFailureMessage) {
   # Tiến trình cha đã kết thúc trong lúc duyệt cây. Hoàn tác các tiến trình con
   # vừa tạm dừng để không để lại FFmpeg/aria2c bị treo mồ côi.
@@ -147,7 +150,8 @@ ${action === 'pause'
     }
   }
 }`
-    : ''}
+    : ''
+}
 if ($null -ne $rootFailureMessage) {
   throw $rootFailureMessage
 }
@@ -174,8 +178,13 @@ export function processEnvironmentFor(
 class RingLines {
   private readonly lines: string[] = [];
   public constructor(private readonly max = 400) {}
-  public push(line: string): void { this.lines.push(line); if (this.lines.length > this.max) this.lines.splice(0, this.lines.length - this.max); }
-  public text(): string { return this.lines.join('\n'); }
+  public push(line: string): void {
+    this.lines.push(line);
+    if (this.lines.length > this.max) this.lines.splice(0, this.lines.length - this.max);
+  }
+  public text(): string {
+    return this.lines.join('\n');
+  }
 }
 function lineConsumer(stream: NodeJS.ReadableStream, callback: (line: string) => void): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -187,20 +196,30 @@ function lineConsumer(stream: NodeJS.ReadableStream, callback: (line: string) =>
       buffer = lines.pop() ?? '';
       for (const line of lines) callback(line);
     });
-    stream.on('end', () => { if (buffer) callback(buffer); resolve(); });
+    stream.on('end', () => {
+      if (buffer) callback(buffer);
+      resolve();
+    });
     stream.on('error', reject);
   });
 }
 export class ProcessManager {
   private readonly active = new Map<string, Managed>();
   public constructor(private readonly logger: Logger) {}
-  public count(): number { return this.active.size; }
-  public hasJob(jobId: string): boolean { return [...this.active.values()].some((item) => item.jobId === jobId); }
-  public isToolActive(tool: string): boolean { return [...this.active.values()].some((item) => item.tool === tool); }
+  public count(): number {
+    return this.active.size;
+  }
+  public hasJob(jobId: string): boolean {
+    return [...this.active.values()].some((item) => item.jobId === jobId);
+  }
+  public isToolActive(tool: string): boolean {
+    return [...this.active.values()].some((item) => item.tool === tool);
+  }
   public async run(options: ProcessRunOptions): Promise<ProcessResult> {
     const id = randomUUID();
     const startedAt = Date.now();
-    const stdout = new RingLines(); const stderr = new RingLines();
+    const stdout = new RingLines();
+    const stderr = new RingLines();
     const child = spawn(options.executablePath, options.args, {
       cwd: options.cwd,
       env: processEnvironmentFor(options.tool, options.env),
@@ -220,27 +239,45 @@ export class ProcessManager {
       controlTail: Promise.resolve()
     };
     this.active.set(id, managed);
-    this.logger.info('process', 'PROCESS_STARTED', `${options.tool} PID ${child.pid ?? 0} đã bắt đầu.`, { jobId: options.jobId, ...(options.projectId ? { projectId: options.projectId } : {}), metadata: { executable: options.executablePath, argsCount: options.args.length } });
+    this.logger.info('process', 'PROCESS_STARTED', `${options.tool} PID ${child.pid ?? 0} đã bắt đầu.`, {
+      jobId: options.jobId,
+      ...(options.projectId ? { projectId: options.projectId } : {}),
+      metadata: { executable: options.executablePath, argsCount: options.args.length }
+    });
     if (child.pid && process.platform === 'win32') void this.setPriority(child.pid, managed.priority);
     let cancelled = false;
     const abort = (): void => {
       cancelled = true;
       void this.kill(id).catch((error) => {
-        this.logger.error('process', 'PROCESS_CANCEL_FAILED', `Không thể hủy cây tiến trình ${options.tool}: ${error instanceof Error ? error.message : String(error)}`, {
-          jobId: options.jobId,
-          ...(options.projectId ? { projectId: options.projectId } : {})
-        });
+        this.logger.error(
+          'process',
+          'PROCESS_CANCEL_FAILED',
+          `Không thể hủy cây tiến trình ${options.tool}: ${error instanceof Error ? error.message : String(error)}`,
+          {
+            jobId: options.jobId,
+            ...(options.projectId ? { projectId: options.projectId } : {})
+          }
+        );
       });
     };
     options.signal?.addEventListener('abort', abort, { once: true });
     let timedOut = false;
-    const timer = options.timeoutMs ? setTimeout(() => {
-      timedOut = true;
-      this.logger.warn('process', 'PROCESS_TIMEOUT', `${options.tool} quá thời gian.`, { jobId: options.jobId });
-      void this.kill(id).catch((error) => {
-        this.logger.error('process', 'PROCESS_TIMEOUT_KILL_FAILED', `Không thể kết thúc cây tiến trình quá hạn: ${error instanceof Error ? error.message : String(error)}`, { jobId: options.jobId });
-      });
-    }, options.timeoutMs) : null;
+    const timer = options.timeoutMs
+      ? setTimeout(() => {
+          timedOut = true;
+          this.logger.warn('process', 'PROCESS_TIMEOUT', `${options.tool} quá thời gian.`, {
+            jobId: options.jobId
+          });
+          void this.kill(id).catch((error) => {
+            this.logger.error(
+              'process',
+              'PROCESS_TIMEOUT_KILL_FAILED',
+              `Không thể kết thúc cây tiến trình quá hạn: ${error instanceof Error ? error.message : String(error)}`,
+              { jobId: options.jobId }
+            );
+          });
+        }, options.timeoutMs)
+      : null;
     let stdoutCallbackEnabled = true;
     let stderrCallbackEnabled = true;
     const outPromise = lineConsumer(child.stdout, (line) => {
@@ -304,20 +341,54 @@ export class ProcessManager {
       this.active.delete(id);
     }
     await Promise.allSettled([outPromise, errPromise]);
-    const result = { code, stdoutTail: stdout.text(), stderrTail: stderr.text(), durationMs: Date.now() - startedAt };
-    this.logger.info('process', 'PROCESS_FINISHED', `${options.tool} kết thúc với mã ${code}.`, { jobId: options.jobId, ...(options.projectId ? { projectId: options.projectId } : {}), metadata: { durationMs: result.durationMs } });
+    const result = {
+      code,
+      stdoutTail: stdout.text(),
+      stderrTail: stderr.text(),
+      durationMs: Date.now() - startedAt
+    };
+    this.logger.info('process', 'PROCESS_FINISHED', `${options.tool} kết thúc với mã ${code}.`, {
+      jobId: options.jobId,
+      ...(options.projectId ? { projectId: options.projectId } : {}),
+      metadata: { durationMs: result.durationMs }
+    });
     if (timedOut) throw new ProcessTimeoutError(options.tool, options.timeoutMs ?? 0);
     if (cancelled) throw new ProcessCancelledError();
     return result;
   }
   public async setPriority(pid: number, priority: ProcessPriority): Promise<void> {
     if (process.platform !== 'win32') return;
-    const map: Record<ProcessPriority, string> = { idle: 'Idle', below_normal: 'BelowNormal', normal: 'Normal', above_normal: 'AboveNormal', high: 'High' };
-    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `Get-Process -Id ${pid} -ErrorAction Stop | ForEach-Object { $_.PriorityClass='${map[priority]}' }`], { shell: false, windowsHide: true, stdio: 'ignore' });
+    const map: Record<ProcessPriority, string> = {
+      idle: 'Idle',
+      below_normal: 'BelowNormal',
+      normal: 'Normal',
+      above_normal: 'AboveNormal',
+      high: 'High'
+    };
+    const child = spawn(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `Get-Process -Id ${pid} -ErrorAction Stop | ForEach-Object { $_.PriorityClass='${map[priority]}' }`
+      ],
+      { shell: false, windowsHide: true, stdio: 'ignore' }
+    );
     await new Promise<void>((resolve) => child.once('close', () => resolve()));
   }
-  public async pauseByJob(jobId: string): Promise<void> { for (const [id, p] of this.active) if (p.jobId === jobId) await this.pause(id); }
-  public async resumeByJob(jobId: string): Promise<void> { for (const [id, p] of this.active) if (p.jobId === jobId) await this.resume(id); }
+  public async pauseByJob(jobId: string): Promise<number> {
+    let paused = 0;
+    for (const [id, process] of this.active) {
+      if (process.jobId !== jobId) continue;
+      await this.pause(id);
+      paused += 1;
+    }
+    return paused;
+  }
+  public async resumeByJob(jobId: string): Promise<void> {
+    for (const [id, p] of this.active) if (p.jobId === jobId) await this.resume(id);
+  }
   private async pause(id: string): Promise<void> {
     await this.setSuspended(id, true);
   }
@@ -325,19 +396,30 @@ export class ProcessManager {
     await this.setSuspended(id, false);
   }
   public async kill(id: string): Promise<void> {
-    const m = this.active.get(id); if (!m?.process.pid) return;
+    const m = this.active.get(id);
+    if (!m?.process.pid) return;
     if (process.platform === 'win32') {
-      const child = spawn('taskkill.exe', ['/PID', String(m.process.pid), '/T', '/F'], { shell: false, windowsHide: true, stdio: 'ignore' });
+      const child = spawn('taskkill.exe', ['/PID', String(m.process.pid), '/T', '/F'], {
+        shell: false,
+        windowsHide: true,
+        stdio: 'ignore'
+      });
       await new Promise<void>((resolve, reject) => {
         child.once('error', reject);
-        child.once('close', (code) => code === 0 || code === 128
-          ? resolve()
-          : reject(new Error(`taskkill thất bại với mã ${code ?? -1}.`)));
+        child.once('close', (code) =>
+          code === 0 || code === 128
+            ? resolve()
+            : reject(new Error(`taskkill thất bại với mã ${code ?? -1}.`))
+        );
       });
     } else m.process.kill('SIGKILL');
   }
-  public async killByJob(jobId: string): Promise<void> { for (const [id, p] of this.active) if (p.jobId === jobId) await this.kill(id); }
-  public async shutdown(): Promise<void> { await Promise.all([...this.active.keys()].map((id) => this.kill(id))); }
+  public async killByJob(jobId: string): Promise<void> {
+    for (const [id, p] of this.active) if (p.jobId === jobId) await this.kill(id);
+  }
+  public async shutdown(): Promise<void> {
+    await Promise.all([...this.active.keys()].map((id) => this.kill(id)));
+  }
 
   private async setSuspended(id: string, suspended: boolean): Promise<void> {
     const managed = this.active.get(id);
@@ -348,10 +430,7 @@ export class ProcessManager {
       if (managed.suspended === suspended) return;
 
       if (process.platform === 'win32') {
-        await this.controlWindowsProcessTree(
-          managed.process.pid,
-          suspended ? 'pause' : 'resume'
-        );
+        await this.controlWindowsProcessTree(managed.process.pid, suspended ? 'pause' : 'resume');
       } else {
         managed.process.kill(suspended ? 'SIGSTOP' : 'SIGCONT');
       }
@@ -379,7 +458,9 @@ export class ProcessManager {
     );
     let stderr = '';
     child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk: string) => { stderr += chunk; });
+    child.stderr.on('data', (chunk: string) => {
+      stderr += chunk;
+    });
     await new Promise<void>((resolve, reject) => {
       child.once('error', reject);
       child.once('close', (code) => {

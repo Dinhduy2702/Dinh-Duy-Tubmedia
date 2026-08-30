@@ -10,7 +10,7 @@ const base = spawnSync(process.execPath, ['scripts/verify-release-candidate.mjs'
 });
 if (base.status !== 0) process.exit(base.status ?? 1);
 
-const expectedVersion = '1.3.4';
+const expectedVersion = '1.3.5';
 const packageJson = JSON.parse(await read('package.json'));
 const packageLock = JSON.parse(await read('package-lock.json'));
 const constants = await read('src/shared/constants/app.ts');
@@ -30,14 +30,25 @@ const confirmDialog = await read('src/renderer/src/components/ConfirmDialog.tsx'
 const preloadApi = await read('src/preload/index.ts');
 
 const checks = [
-  ['package version 1.3.4', packageJson.version === expectedVersion],
+  ['package version 1.3.5', packageJson.version === expectedVersion],
   [
-    'package-lock version 1.3.4',
+    'package-lock version 1.3.5',
     packageLock.version === expectedVersion && packageLock.packages?.['']?.version === expectedVersion
   ],
-  ['renderer label v1.3.4', constants.includes("APP_VERSION_LABEL = 'v1.3.4'")],
-  ['changelog 1.3.4 first', changelog.startsWith('# Tubmedia 1.3.4')],
-  ['official build targets 1.3.4', buildScript.includes('Download video Tubmedia-Setup-1.3.4-x64.exe')],
+  ['renderer label v1.3.5', constants.includes("APP_VERSION_LABEL = 'v1.3.5'")],
+  ['changelog 1.3.5 first', changelog.startsWith('# Tubmedia 1.3.5')],
+  [
+    'official build derives canonical installer name from package version',
+    buildScript.includes('$Version = [string]$Package.version') &&
+      buildScript.includes('Download-video-Tubmedia-Setup-') &&
+      buildScript.includes('$Version + "-x64.exe"')
+  ],
+  [
+    'official build requires and publishes differential blockmap',
+    buildScript.includes('$Blockmap = $Installer + ".blockmap"') &&
+      buildScript.includes('Differential updater blockmap was not created') &&
+      buildScript.includes('Upload the EXE, blockmap, SHA256 file and latest.yml')
+  ],
   [
     'GitHub updater configured',
     Array.isArray(packageJson.build?.publish) && packageJson.build.publish[0]?.provider === 'github'
@@ -122,12 +133,18 @@ const checks = [
     ['npm.cmd run typecheck', 'npm.cmd run lint', 'npm.cmd run test', 'npm.cmd run test:integration'].every(
       (x) => buildScript.includes(x)
     )
+  ],
+  [
+    'official build can safely retry after dependencies and outputs exist',
+    buildScript.includes('Verify build workspace source completeness') &&
+      buildScript.includes('git status --porcelain --untracked-files=no') &&
+      !buildScript.includes('verify-source-completeness.mjs --root $ProjectRoot --strict-clean')
   ]
 ];
 const failed = checks.filter(([, ok]) => !ok);
 if (failed.length) {
-  console.error('Tubmedia 1.3.4 stable verification failed:');
+  console.error('Tubmedia 1.3.5 stable verification failed:');
   for (const [name] of failed) console.error(`- ${name}`);
   process.exit(1);
 }
-console.log(`Tubmedia 1.3.4 stable verification OK: ${checks.length} checks.`);
+console.log(`Tubmedia 1.3.5 stable verification OK: ${checks.length} checks.`);

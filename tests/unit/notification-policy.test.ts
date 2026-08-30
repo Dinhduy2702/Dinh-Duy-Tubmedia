@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   isAttentionNoticeResolved,
   notificationDuration,
+  shouldRouteIssueToAttention,
   shouldShowInlineBlockingIssue,
   SUCCESS_NOTIFICATION_DURATION_MS,
   TRANSIENT_NOTIFICATION_DURATION_MS,
@@ -22,6 +23,13 @@ describe('notification policy', () => {
     expect(notificationDuration('info')).toBe(4_800);
     expect(notificationDuration('success')).toBe(3_600);
     expect(notificationDuration('warning')).toBe(6_500);
+  });
+
+  it('routes informational, successful and warning results away from sticky error state', () => {
+    expect(shouldRouteIssueToAttention('info')).toBe(true);
+    expect(shouldRouteIssueToAttention('success')).toBe(true);
+    expect(shouldRouteIssueToAttention('warning')).toBe(true);
+    expect(shouldRouteIssueToAttention('error')).toBe(false);
   });
 
   it('shows cookie guidance while the related job is still blocked', () => {

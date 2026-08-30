@@ -15,7 +15,11 @@ assert.match(stateMachine, /case 'download':\s*return 'analyzing'/);
 assert.match(stateMachine, /analyzing: new Set\(\[[^\]]*'downloading'/);
 assert.match(stateMachine, /verifying: new Set\(\[[^\]]*'skipped'/);
 assert.match(queueManager, /initialJobStatus\(job\.type\)/);
-assert.match(queueManager, /initialJobStatus\(active\.job\.type\)/);
+assert.match(
+  queueManager,
+  /resolveResumeStatus\(observed\.status,\s*current\.input\.resumeStatus,\s*active\.job\.type\)/
+);
+assert.doesNotMatch(queueManager, /status:\s*initialJobStatus\(active\.job\.type\)/);
 assert.doesNotMatch(queueManager, /startStatusForJobType/);
 assert.equal(DOWNLOAD_LIST_POLICY_VERSION, 'download-list-multiplatform-v5');
 const branches = REFERENCE_1080P_FORMAT_SELECTOR.split('/');

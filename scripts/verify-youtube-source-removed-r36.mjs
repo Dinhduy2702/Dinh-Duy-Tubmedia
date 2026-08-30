@@ -24,7 +24,7 @@ const r49Unit = text('tests/unit/download-recovery-r49.test.ts');
 const durationUnit = text('tests/unit/video-duration-persistence.test.ts');
 const pkg = JSON.parse(text('package.json'));
 
-check(pkg.version === '1.3.4', 'public version is 1.3.4');
+check(pkg.version === '1.3.5', 'public version is 1.3.5');
 check(util.includes("| 'removed'"), 'download failure subtype includes removed');
 check(util.includes('isExplicitlyRemovedYoutubeSource'), 'explicit removed-source detector exists');
 
@@ -99,7 +99,7 @@ check(
     r49Unit.includes("subtype: 'removed'"),
   'legacy R49 unit test expects explicit removed source subtype'
 );
-check(durationUnit.includes("toBe('1.3.4')"), 'duration persistence unit test expects public version 1.3.4');
+check(durationUnit.includes("toBe('1.3.5')"), 'duration persistence unit test expects public version 1.3.5');
 check(
   fs.existsSync(path.join(root, 'tests/unit/youtube-source-removed-r36.test.ts')),
   'focused removed-source tests exist'
@@ -137,4 +137,4 @@ for (const gate of [
   check(String(pkg.scripts.check).includes(gate), gate + ' remains in npm run check');
 }
 
-console.log('Tubmedia v1.3.4 R36 YouTube removed-source verification OK.');
+console.log('Tubmedia v1.3.5 R36 YouTube removed-source verification OK.');

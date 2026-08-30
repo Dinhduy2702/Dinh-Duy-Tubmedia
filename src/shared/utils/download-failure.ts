@@ -21,6 +21,82 @@ export interface YtDlpFailureDetail {
   retryable: boolean;
 }
 
+type RetryableAppFailure = {
+  code?: unknown;
+  retryable?: unknown;
+  details?: unknown;
+};
+
+const ALL_FAILURE_SUBTYPES: ReadonlySet<YtDlpFailureSubtype> = new Set([
+  'disk_full',
+  'tool_missing',
+  'http_429',
+  'authentication',
+  'removed',
+  'unavailable',
+  'http_403',
+  'fragment',
+  'extractor',
+  'network',
+  'unknown'
+]);
+
+const CIRCUIT_FAILURE_SUBTYPES: ReadonlySet<YtDlpFailureSubtype> = new Set([
+  'http_403',
+  'fragment',
+  'extractor',
+  'network'
+]);
+
+export function failureSubtypeFromDetails(details: unknown): YtDlpFailureSubtype | null {
+  if (!details || typeof details !== 'object' || Array.isArray(details)) return null;
+  const subtype = (details as Record<string, unknown>).failureSubtype;
+  return typeof subtype === 'string' && ALL_FAILURE_SUBTYPES.has(subtype as YtDlpFailureSubtype)
+    ? (subtype as YtDlpFailureSubtype)
+    : null;
+}
+
+/**
+ * The project circuit breaker is only for exhausted download failures that
+ * actually point to the network, CDN or extractor. A retryable merge/process
+ * failure must never pause unrelated downloads in the same project.
+ */
+export function isCircuitEligibleDownloadFailure(jobType: unknown, failure: RetryableAppFailure): boolean {
+  if (jobType !== 'download' || failure.retryable !== true) return false;
+  if (failure.code === 'NETWORK_ERROR') return true;
+  if (failure.code !== 'DOWNLOAD_FAILED') return false;
+  const subtype = failureSubtypeFromDetails(failure.details);
+  return subtype !== null && CIRCUIT_FAILURE_SUBTYPES.has(subtype);
+}
+
+/**
+ * DownloadEngine messages are intentionally neutral because the queue decides
+ * whether another attempt exists. Once all attempts are exhausted, replace
+ * them with a final message that does not incorrectly promise another retry.
+ */
+export function exhaustedDownloadFailureMessage(
+  originalMessage: string,
+  details: unknown,
+  attempts: number
+): string {
+  const attemptCount = Math.max(1, Math.trunc(attempts));
+  const attemptLabel = `sau ${attemptCount} lần thử`;
+  const subtype = failureSubtypeFromDetails(details);
+  if (subtype === 'http_403') {
+    return `Máy chủ video vẫn từ chối yêu cầu (HTTP 403) ${attemptLabel}. Tubmedia đã dừng riêng video này và giữ tệp .part để có thể tiếp tục khi thử lại.`;
+  }
+  if (subtype === 'fragment') {
+    return `Dữ liệu video vẫn bị gián đoạn ${attemptLabel}. Tubmedia đã dừng riêng video này và giữ tệp .part để có thể tiếp tục khi thử lại.`;
+  }
+  if (subtype === 'extractor') {
+    return `Nền tảng chưa cung cấp dữ liệu video ổn định ${attemptLabel}. Tubmedia đã dừng riêng video này; dữ liệu tải dở vẫn được giữ an toàn.`;
+  }
+  if (subtype === 'network') {
+    return `Kết nối tới máy chủ video vẫn không ổn định ${attemptLabel}. Tubmedia đã dừng riêng video này và giữ dữ liệu tải dở để thử lại sau.`;
+  }
+  return originalMessage;
+}
+
 function includesAny(text: string, needles: readonly string[]): boolean {
   return needles.some((needle) => text.includes(needle));
 }

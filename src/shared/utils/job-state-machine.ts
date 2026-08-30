@@ -81,7 +81,7 @@ const allowedTransitions: Readonly<Record<JobStatus, ReadonlySet<JobStatus>>> = 
     'failed',
     'interrupted'
   ]),
-  merging: new Set(['retrying', 'paused', 'completed', 'cancelled', 'failed', 'interrupted']),
+  merging: new Set(['retrying', 'paused', 'completed', 'skipped', 'cancelled', 'failed', 'interrupted']),
   paused: new Set([
     'pending',
     'analyzing',

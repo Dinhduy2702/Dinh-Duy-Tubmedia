@@ -11,7 +11,7 @@ const releaseNotesUtility = readFileSync(join(root, 'src/shared/release-notes.ts
 const checks = [
   [
     'release notes are formatted as text',
-    page.includes('formatReleaseNotesForDisplay(status.info.releaseNotes)') &&
+    page.includes('formatReleaseNotesForDisplay(latestInfo.releaseNotes)') &&
       page.includes("whiteSpace: 'pre-line'")
   ],
   ['raw release note interpolation is removed', !page.includes('<div>{status.info.releaseNotes}</div>')],
@@ -29,14 +29,22 @@ const checks = [
       service.includes('!isNewerAppVersion(')
   ],
   ['install blocks downgrade', service.includes('Chỉ có thể cài phiên bản mới hơn phiên bản đang chạy')],
-  ['downloaded downgrade packages are rejected', service.includes('APP_UPDATE_DOWNLOADED_DOWNGRADE_BLOCKED')],
+  [
+    'downloaded stale or downgrade packages are rejected',
+    service.includes('APP_UPDATE_STALE_PACKAGE_IGNORED') &&
+      service.includes('!isNewerAppVersion(info.version, currentVersion)')
+  ],
   [
     'download action requires a newer remote version',
-    page.includes("status?.state === 'available'") && page.includes('isNewerAppVersion(')
+    page.includes("const canDownload = state === 'available' && remoteIsNewer") &&
+      page.includes('if (!canDownload && !canInstall) return;') &&
+      page.includes('window.desktop.updates.download()')
   ],
   [
     'install action requires a newer remote version',
-    page.includes("status?.state === 'downloaded'") && page.includes('isNewerAppVersion(')
+    page.includes("const canInstall = state === 'downloaded' && remoteIsNewer") &&
+      page.includes('if (canInstall)') &&
+      page.includes('window.desktop.updates.install()')
   ],
   [
     'older remote version is labelled correctly',

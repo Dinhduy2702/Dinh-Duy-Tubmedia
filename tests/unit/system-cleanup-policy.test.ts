@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   SYSTEM_CLEANUP_CATEGORIES,
+  isInspectionOnlyCleanupCategory,
   isIrreversibleCleanupSelection,
   systemCleanupRequiresAdmin,
   validateSystemCleanupRequest
@@ -65,5 +66,16 @@ describe('system cleanup policy', () => {
     expect(isIrreversibleCleanupSelection(['userTemp'])).toBe(false);
     expect(isIrreversibleCleanupSelection(['recycleBin'])).toBe(true);
     expect(isIrreversibleCleanupSelection(['disableHibernate'])).toBe(true);
+  });
+
+  it('keeps whole-disk inventory report-only and residue cleanup opt-in', () => {
+    expect(isInspectionOnlyCleanupCategory('diskInventory')).toBe(true);
+    expect(isInspectionOnlyCleanupCategory('tubmediaResidue')).toBe(false);
+    expect(SYSTEM_CLEANUP_CATEGORIES.find((item) => item.id === 'diskInventory')?.defaultSelected).toBe(
+      false
+    );
+    expect(SYSTEM_CLEANUP_CATEGORIES.find((item) => item.id === 'tubmediaResidue')?.defaultSelected).toBe(
+      false
+    );
   });
 });

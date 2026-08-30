@@ -3,9 +3,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { safeUiText } from '../utils/ui-error';
 import {
   SYSTEM_CLEANUP_CATEGORIES,
+  isInspectionOnlyCleanupCategory,
   isIrreversibleCleanupSelection,
   systemCleanupRequiresAdmin,
   type SystemCleanupCategoryId,
+  type SystemCleanupFindingClassification,
   type SystemCleanupScope,
   type SystemCleanupStatus
 } from '@shared/system-cleanup';
@@ -33,11 +35,13 @@ const WHOLE_MACHINE_SCAN_CATEGORIES: SystemCleanupCategoryId[] = [
   'browserCache',
   'capcutCache',
   'zaloCache',
+  'tubmediaResidue',
   'recycleBin',
   'windowsTemp',
   'windowsUpdate',
   'deliveryOptimization',
-  'componentStore'
+  'componentStore',
+  'diskInventory'
 ];
 
 const SAFETY_META: Record<SystemCleanupCategoryId, SafetyMeta> = {
@@ -71,6 +75,12 @@ const SAFETY_META: Record<SystemCleanupCategoryId, SafetyMeta> = {
     description: 'Không đụng tới Zalo Received Files hoặc dữ liệu trò chuyện.',
     tone: 'safe'
   },
+  tubmediaResidue: {
+    label: 'An toàn có kiểm soát',
+    description:
+      'Chỉ xóa phần tải dở và clip/thư mục tạm có dấu nhận diện Tubmedia, không đụng thành phẩm; dữ liệu tiếp tục tải quá 7 ngày sẽ mất.',
+    tone: 'caution'
+  },
   recycleBin: {
     label: 'Cần kiểm tra',
     description: 'Tệp trong Thùng rác sẽ bị xóa vĩnh viễn.',
@@ -95,6 +105,12 @@ const SAFETY_META: Record<SystemCleanupCategoryId, SafetyMeta> = {
     label: 'Cần kiểm tra',
     description: 'DISM dọn thành phần Windows cũ và có thể chạy nhiều phút.',
     tone: 'caution'
+  },
+  diskInventory: {
+    label: 'Chỉ báo cáo',
+    description:
+      'Quét file lớn trên các ổ cố định để phân loại cần xem hoặc được bảo vệ; hạng mục này không có lệnh xóa.',
+    tone: 'safe'
   },
   disableHibernate: {
     label: 'Thay đổi hệ thống',
@@ -185,8 +201,27 @@ function cleanupStatusMessage(status: SystemCleanupStatus): string {
     return 'Đã dừng theo yêu cầu';
   }
 
-  return status.phase === 'failed' ? 'Dọn dẹp gặp lỗi' : status.message;
+  return status.phase === 'failed'
+    ? status.mode === 'estimate'
+      ? 'Quét không hoàn tất'
+      : 'Dọn dẹp không hoàn tất'
+    : status.message;
 }
+
+const FINDING_META: Record<SystemCleanupFindingClassification, { title: string; description: string }> = {
+  'safe-to-delete': {
+    title: 'Có thể xóa bằng Tubmedia',
+    description: 'Chỉ các mục thuộc allowlist mới được đưa vào lệnh dọn.'
+  },
+  review: {
+    title: 'Cần người dùng xem lại',
+    description: 'Tubmedia chỉ báo cáo và không tự xóa các file này.'
+  },
+  protected: {
+    title: 'Dữ liệu được bảo vệ',
+    description: 'Tubmedia khóa xóa vì đây có thể là dữ liệu Windows hoặc chương trình.'
+  }
+};
 
 export function SystemCleanupPanel(): React.JSX.Element {
   const defaultSelection = useMemo(
@@ -203,6 +238,7 @@ export function SystemCleanupPanel(): React.JSX.Element {
   const running = Boolean(status && !terminalPhases.has(status.phase));
   const currentScanKey = scanKey(scope, selected);
   const requiresAdmin = systemCleanupRequiresAdmin(selected, scope);
+  const cleanableSelected = selected.filter((id) => !isInspectionOnlyCleanupCategory(id));
 
   const resultById = new Map(status?.results.map((result) => [result.id, result]) ?? []);
   const selectedEstimatedBytes = selected.reduce(
@@ -212,7 +248,7 @@ export function SystemCleanupPanel(): React.JSX.Element {
   const overallNeed = needMeta(selectedEstimatedBytes);
   const canClean =
     !running &&
-    selected.length > 0 &&
+    cleanableSelected.length > 0 &&
     lastScannedKey === currentScanKey &&
     status?.mode === 'estimate' &&
     status.phase === 'completed';
@@ -271,10 +307,17 @@ export function SystemCleanupPanel(): React.JSX.Element {
     }
 
     const requestKey = scanKey(requestScope, categories);
-    const categoryItems = SYSTEM_CLEANUP_CATEGORIES.filter((item) => categories.includes(item.id));
+    const executableCategories =
+      mode === 'clean' ? categories.filter((id) => !isInspectionOnlyCleanupCategory(id)) : categories;
+    const categoryItems = SYSTEM_CLEANUP_CATEGORIES.filter((item) => executableCategories.includes(item.id));
 
     if (mode === 'clean' && lastScannedKey !== requestKey) {
       setError('Hãy quét dung lượng với đúng phạm vi và hạng mục hiện tại trước khi xóa.');
+      return;
+    }
+
+    if (mode === 'clean' && executableCategories.length === 0) {
+      setError('Các hạng mục đang chọn chỉ dùng để lập báo cáo, không có dữ liệu nào được phép xóa.');
       return;
     }
 
@@ -295,7 +338,7 @@ export function SystemCleanupPanel(): React.JSX.Element {
         return;
       }
 
-      if (categories.includes('disableHibernate')) {
+      if (executableCategories.includes('disableHibernate')) {
         const phrase = window.prompt(
           'Tắt ngủ đông sẽ thay đổi tính năng nguồn của Windows.\n' +
             'Nhập chính xác "TAT NGU DONG" để xác nhận:'
@@ -307,7 +350,7 @@ export function SystemCleanupPanel(): React.JSX.Element {
         }
       }
 
-      if (isIrreversibleCleanupSelection(categories)) {
+      if (isIrreversibleCleanupSelection(executableCategories)) {
         const irreversibleConfirmed = window.confirm(
           'Lựa chọn có thao tác không thể hoàn tác, ví dụ xóa Thùng rác. Bạn xác nhận tiếp tục?'
         );
@@ -326,7 +369,7 @@ export function SystemCleanupPanel(): React.JSX.Element {
       const next = await window.desktop.systemCleanup.start({
         mode,
         scope: requestScope,
-        categories
+        categories: executableCategories
       });
 
       setStatus(next);
@@ -404,8 +447,8 @@ export function SystemCleanupPanel(): React.JSX.Element {
           </span>
           <div>
             <small>Quy tắc an toàn</small>
-            <strong>Chỉ vị trí cho phép</strong>
-            <em>Không quét xóa tùy tiện ổ đĩa.</em>
+            <strong>Quét rộng, xóa theo allowlist</strong>
+            <em>File lớn ngoài allowlist chỉ được báo cáo.</em>
           </div>
         </article>
 
@@ -445,7 +488,14 @@ export function SystemCleanupPanel(): React.JSX.Element {
               const checked = selected.includes(item.id);
               const result = resultById.get(item.id);
               const safety = SAFETY_META[item.id];
-              const need = needMeta(result?.estimatedBytes ?? 0, item.id);
+              const inspectionOnly = isInspectionOnlyCleanupCategory(item.id);
+              const need = inspectionOnly
+                ? {
+                    label: status?.phase === 'completed' && result ? 'Đã kiểm kê' : 'Chờ quét',
+                    description: 'Kết quả được phân loại bên dưới và không tham gia lệnh xóa.',
+                    tone: 'low' as const
+                  }
+                : needMeta(result?.estimatedBytes ?? 0, item.id);
 
               return (
                 <label className={`system-cleanup-option ${checked ? 'is-selected' : ''}`} key={item.id}>
@@ -471,6 +521,7 @@ export function SystemCleanupPanel(): React.JSX.Element {
                         {need.label}
                       </em>
                       {item.requiresAdmin && <em>Quyền quản trị</em>}
+                      {inspectionOnly && <em>Không tự xóa</em>}
                       {item.irreversible && <em>Không thể hoàn tác</em>}
                     </span>
                   </span>
@@ -513,6 +564,23 @@ export function SystemCleanupPanel(): React.JSX.Element {
             </span>
           </div>
 
+          {status.mode === 'estimate' && (
+            <div className="cleanup-classification-stats" aria-label="Phân loại dữ liệu đã quét">
+              <span className="is-safe">
+                <small>Có thể dọn</small>
+                <b>{formatBytes(status.safeToDeleteBytes ?? status.estimatedBytes)}</b>
+              </span>
+              <span className="is-review">
+                <small>Cần xem lại • không tự xóa</small>
+                <b>{formatBytes(status.reviewBytes ?? 0)}</b>
+              </span>
+              <span className="is-protected">
+                <small>Được bảo vệ • khóa xóa</small>
+                <b>{formatBytes(status.protectedBytes ?? 0)}</b>
+              </span>
+            </div>
+          )}
+
           {(status.driveBefore || status.driveAfter) && (
             <div className="cleanup-drive-comparison">
               <span>
@@ -533,7 +601,9 @@ export function SystemCleanupPanel(): React.JSX.Element {
                   const category = SYSTEM_CLEANUP_CATEGORIES.find((item) => item.id === result.id);
                   return (
                     <li key={result.id}>
-                      <b>{category?.label ?? 'Hạng mục hệ thống'}:</b> ước tính {formatBytes(result.estimatedBytes)}, đã xóa {formatBytes(result.removedBytes)}, bỏ qua {result.skippedItems} mục
+                      <b>{category?.label ?? 'Hạng mục hệ thống'}:</b> ước tính{' '}
+                      {formatBytes(result.estimatedBytes)}, đã xóa {formatBytes(result.removedBytes)}, bỏ qua{' '}
+                      {result.skippedItems} mục
                     </li>
                   );
                 })}
@@ -541,10 +611,51 @@ export function SystemCleanupPanel(): React.JSX.Element {
             </details>
           )}
 
+          {status.findings?.length > 0 && (
+            <div className="cleanup-findings" aria-label="Danh sách dữ liệu được phân loại">
+              {(['safe-to-delete', 'review', 'protected'] as const).map((classification) => {
+                const findings = status.findings.filter(
+                  (finding) => finding.classification === classification
+                );
+                if (findings.length === 0) return null;
+                const meta = FINDING_META[classification];
+
+                return (
+                  <details className={`cleanup-finding-group is-${classification}`} key={classification}>
+                    <summary>
+                      <span>
+                        <b>{meta.title}</b>
+                        <small>{meta.description}</small>
+                      </span>
+                      <strong>{findings.length} mục</strong>
+                    </summary>
+                    <ul>
+                      {findings.map((finding, index) => (
+                        <li key={`${classification}:${finding.path}:${index}`}>
+                          <div>
+                            <b title={finding.path}>{finding.path}</b>
+                            <span>{formatBytes(finding.bytes)}</span>
+                          </div>
+                          <small>{finding.reason}</small>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                );
+              })}
+            </div>
+          )}
+
           {status.errors.length > 0 && (
             <details className="system-cleanup-errors">
               <summary>{status.errors.length} mục chưa thể xử lý</summary>
-              <ul>{status.errors.map((item) => <li key={item}>{safeUiText(item, 'Một mục đang được Windows sử dụng nên đã được bỏ qua.')}</li>)}</ul>
+              <ul>
+                {status.errors.map((item) => (
+                  <li key={item}>
+                    {safeUiText(item, 'Một mục đang được Windows sử dụng nên đã được bỏ qua.')}
+                  </li>
+                ))}
+              </ul>
             </details>
           )}
         </div>
@@ -557,7 +668,7 @@ export function SystemCleanupPanel(): React.JSX.Element {
           disabled={running}
           onClick={() => void scanWholeMachine()}
         >
-          Quét thông minh toàn bộ máy
+          Quét và phân loại toàn bộ máy
         </button>
 
         <button
@@ -573,7 +684,11 @@ export function SystemCleanupPanel(): React.JSX.Element {
           type="button"
           className="system-cleanup-button primary"
           disabled={!canClean}
-          title={canClean ? 'Xóa các file rác đã quét' : 'Phải quét đúng lựa chọn hiện tại trước khi xóa'}
+          title={
+            canClean
+              ? 'Chỉ xóa các file thuộc allowlist đã quét'
+              : 'Phải quét đúng lựa chọn hiện tại trước khi xóa; kiểm kê toàn máy chỉ dùng để báo cáo'
+          }
           onClick={() => void start('clean')}
         >
           Dọn dẹp và xóa file đã chọn
@@ -588,7 +703,8 @@ export function SystemCleanupPanel(): React.JSX.Element {
 
       {!canClean && !running && (
         <p className="cleanup-action-note">
-          Nút xóa được khóa cho đến khi bạn quét xong đúng phạm vi và hạng mục đang chọn.
+          Nút xóa được khóa cho đến khi quét xong đúng lựa chọn. Kiểm kê file lớn luôn chỉ báo cáo và không
+          bao giờ được đưa vào lệnh xóa.
         </p>
       )}
     </section>

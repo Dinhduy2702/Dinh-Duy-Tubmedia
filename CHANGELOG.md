@@ -1,3 +1,13 @@
+# Tubmedia 1.3.5
+
+- Phục hồi tải YouTube HTTP 403/fragment an toàn hơn: làm mới metadata ở lần thử lại, giữ tệp `.part`, giảm còn một fragment song song và không ép client `web_safari` dễ lỗi.
+- Chỉ mở circuit breaker sau khi ba tác vụ thực sự cạn retry; gom cảnh báo có thể phục hồi theo danh sách và không hiển thị chúng như lỗi nghiêm trọng lặp lại.
+- Sửa chuyển trạng thái hợp lệ từ `merging` sang `skipped` khi đầu ra đã được xác minh hoặc nguồn phụ thuộc được bỏ qua an toàn.
+- Hợp nhất updater thành một luồng trong app: hiển thị tiến độ, chặn cài khi còn tác vụ, sao lưu dữ liệu và cập nhật silent không chạy lại wizard cài mới.
+- Làm cứng Update Center để không tải/cài nhầm bản cũ hơn; sửa toàn bộ cổng phát hành chạy ổn định trên Windows CRLF và cho phép build lại an toàn sau một lần dừng giữa chừng.
+- Kiểm tra dung lượng trước và trong khi tải/ghép, tự tạm dừng trước khi đầy ổ; bổ sung ngưỡng RAM thích ứng cho máy user cấu hình thấp.
+- Nâng cấp dọn dẹp với ba lớp `có thể xóa / cần xem lại / được bảo vệ`; kiểm kê toàn máy chỉ báo cáo và không tự ý xóa dữ liệu ngoài allowlist.
+
 # Tubmedia 1.3.4
 
 - Nhận diện riêng video YouTube đã bị xóa/removed và hiển thị thông báo chính xác.

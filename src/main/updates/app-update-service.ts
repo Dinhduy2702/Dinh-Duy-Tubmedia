@@ -95,14 +95,18 @@ export class AppUpdateService {
   private networkCheckInFlight: Promise<void> | null = null;
   private feedUnavailableForSession = false;
   private feedUnavailableLogged = false;
+  private configuredChannel = '';
+  private readonly hasActiveWork: () => boolean;
 
   public constructor(
     private readonly settings: SettingsService,
     private readonly queue: QueueManager,
     private readonly backups: BackupService,
     private readonly logger: Logger,
-    private readonly prepareForInstall: () => Promise<void> = () => Promise.resolve()
+    private readonly prepareForInstall: () => Promise<void> = () => Promise.resolve(),
+    hasActiveWork?: () => boolean
   ) {
+    this.hasActiveWork = hasActiveWork ?? (() => this.queue.activeCount() > 0);
     const sourceReady = app.isPackaged && this.hasConfiguredUpdateSource();
     this.status = this.baseStatus(
       app.isPackaged && sourceReady ? 'idle' : 'disabled',
@@ -118,7 +122,7 @@ export class AppUpdateService {
     updater.autoDownload = false;
     /* TUBMEDIA_V133_DIFFERENTIAL_UPDATE */
     updater.disableDifferentialDownload = false;
-    updater.autoInstallOnAppQuit = true;
+    updater.autoInstallOnAppQuit = false;
     updater.allowDowngrade = false;
   }
 
@@ -287,9 +291,10 @@ export class AppUpdateService {
 
     if (this.feedUnavailableForSession) {
       if (silent) return this.status;
-      const status = this.metadataUnavailableStatus();
-      this.emit(status);
-      return status;
+      // A previous 404 can be temporary while a release is still publishing.
+      // An explicit user check must always be allowed to retry in the same app session.
+      this.feedUnavailableForSession = false;
+      this.feedUnavailableLogged = false;
     }
 
     if (!this.hasConfiguredUpdateSource()) {
@@ -311,6 +316,9 @@ export class AppUpdateService {
     if (this.networkCheckInFlight) {
       // Coalesce duplicate checks. Never turn an in-flight background request
       // into a visible "checking" state.
+      if (!silent) {
+        await this.waitForNetworkCheck(this.networkCheckInFlight, MANUAL_UPDATE_CHECK_TIMEOUT_MS);
+      }
       return this.status;
     }
 
@@ -388,34 +396,41 @@ export class AppUpdateService {
       );
     }
 
-    await this.getUpdater()
-      .downloadUpdate()
-      .then((downloadResult) => {
-        /* TUBMEDIA_V132_UPDATE_NOW_AUTO_INSTALL_AST */
-        this.logger.info(
-          'update',
-          'APP_UPDATE_NOW_READY_TO_INSTALL',
-          'Cập nhật đã tải xong; Tubmedia sẽ cài đặt im lặng và tự khởi động lại.'
-        );
+    this.emit({
+      ...this.status,
+      state: 'downloading',
+      message: 'Đang tải bản cập nhật trong Tubmedia...',
+      progress: { percent: 0, bytesPerSecond: 0, transferred: 0, total: 0 },
+      error: null
+    });
+    const release = this.status.info;
+    const checkedAt = this.status.checkedAt;
 
-        setTimeout(() => {
-          try {
-            // electron-updater 6.x positional API:
-            // isSilent=true, isForceRunAfter=true.
-            this.getUpdater().quitAndInstall(true, true);
-          } catch (error) {
-            this.logger.warn(
-              'update',
-              'APP_UPDATE_NOW_INSTALL_START_FAILED',
-              error instanceof Error ? error.message : String(error)
-            );
-          }
-        }, 350);
-
-        return downloadResult;
-      });
-    return this.status;
+    try {
+      await this.getUpdater().downloadUpdate();
+      this.logger.info(
+        'update',
+        'APP_UPDATE_DOWNLOAD_READY',
+        'Cập nhật đã tải và xác minh xong; đang chờ người dùng xác nhận cài đặt an toàn.'
+      );
+      return this.status;
+    } catch (error) {
+      const technicalMessage = error instanceof Error ? error.message : String(error);
+      this.logger.warn('update', 'APP_UPDATE_DOWNLOAD_FAILED', technicalMessage);
+      const status: AppUpdateStatus = {
+        ...this.baseStatus(
+          'error',
+          'Không thể tải trọn vẹn bản cập nhật. Bạn có thể thử lại ngay trong app.'
+        ),
+        checkedAt,
+        info: release,
+        error: technicalMessage
+      };
+      this.emit(status);
+      throw new Error(status.message ?? 'Không thể tải bản cập nhật.');
+    }
   }
+
   public async install(): Promise<void> {
     if (
       this.status.state !== 'downloaded' ||
@@ -426,8 +441,10 @@ export class AppUpdateService {
       );
     }
 
-    if (this.queue.activeCount() > 0) {
-      throw new Error('Hãy tạm dừng hoặc hoàn tất các tác vụ trước khi cập nhật.');
+    if (this.hasActiveWork()) {
+      throw new Error(
+        'Hãy tạm dừng hoặc hoàn tất mọi tác vụ tải, cắt, ghép và Tải nhanh trước khi cập nhật.'
+      );
     }
 
     this.emit({
@@ -435,10 +452,24 @@ export class AppUpdateService {
       state: 'installing',
       message: 'Đang sao lưu và chuẩn bị khởi động lại...'
     });
-    await this.backups.create(undefined, false, 'update');
-    await this.prepareForInstall();
-    const updater = this.getUpdater();
-    setImmediate(() => /* TUBMEDIA_V132_SILENT_INSTALL_FALLBACK_AST */ updater.quitAndInstall(true, true));
+    try {
+      await this.backups.create(undefined, false, 'update');
+      await this.prepareForInstall();
+      const updater = this.getUpdater();
+      // electron-updater 6.x positional API: isSilent=true, isForceRunAfter=true.
+      // The NSIS installer also recognizes --updated and forces silent mode as a second safety layer.
+      updater.quitAndInstall(true, true);
+    } catch (error) {
+      const technicalMessage = error instanceof Error ? error.message : String(error);
+      this.logger.warn('update', 'APP_UPDATE_INSTALL_PREPARATION_FAILED', technicalMessage);
+      this.emit({
+        ...this.status,
+        state: 'downloaded',
+        message: 'Bản cập nhật vẫn được giữ. Tubmedia chưa thể chuẩn bị cài đặt an toàn.',
+        error: technicalMessage
+      });
+      throw new Error('Chưa thể chuẩn bị cập nhật an toàn. Hãy đóng tác vụ đang chạy rồi thử lại.');
+    }
   }
   private baseStatus(state: AppUpdateStatus['state'], message: string): AppUpdateStatus {
     return {
@@ -592,14 +623,31 @@ export class AppUpdateService {
     updater.autoDownload = false;
     updater.autoInstallOnAppQuit = false;
 
+    if (this.configuredChannel !== channel) {
+      this.feedUnavailableForSession = false;
+      this.feedUnavailableLogged = false;
+      this.configuredChannel = channel;
+    }
+
     const feed = settings.appFeedUrl.trim();
-    if (!feed || feed === this.configuredFeed) return;
+    if (!feed) {
+      if (this.configuredFeed) {
+        this.configuredFeed = '';
+        this.feedUnavailableForSession = false;
+        this.feedUnavailableLogged = false;
+      }
+      return;
+    }
     const parsed = new URL(feed);
     if (parsed.protocol !== 'https:') {
       throw new Error('Địa chỉ nhận bản cập nhật ứng dụng bắt buộc dùng HTTPS.');
     }
-    updater.setFeedURL({ provider: 'generic', url: parsed.toString() });
-    this.configuredFeed = feed;
+    const normalizedFeed = parsed.toString();
+    if (normalizedFeed === this.configuredFeed) return;
+    updater.setFeedURL({ provider: 'generic', url: normalizedFeed });
+    this.configuredFeed = normalizedFeed;
+    this.feedUnavailableForSession = false;
+    this.feedUnavailableLogged = false;
   }
 
   private emit(status: AppUpdateStatus): void {

@@ -53,7 +53,24 @@ type MaybePromise<T> = T | Promise<T>;
 
 export function registerIpc(ctx: AppContext): void {
   // TUBMEDIA_FEATURE_SERVICES
-  const systemCleanup = new SystemCleanupService();
+  const systemCleanup = new SystemCleanupService(() => {
+    const settings = ctx.settings.get();
+    const projects = ctx.projects.list(true);
+    const quick = ctx.quickDownload.cleanupRoots();
+    const trackedTempFiles = projects.flatMap((project) =>
+      ctx.itemRepo
+        .list(project.id)
+        .map((item) => item.clipFile)
+        .filter((path): path is string => typeof path === 'string' && path.length > 0)
+    );
+    return {
+      sourceFolders: [settings.defaultSourceFolder, ...projects.map((project) => project.sourceFolder)],
+      tempFolders: [settings.defaultTempFolder, ...projects.map((project) => project.tempFolder)],
+      trackedTempFiles,
+      quickOutputFolders: quick.outputDirectories,
+      quickTempRoots: [quick.tempRoot]
+    };
+  });
   const videoLinkFilter = new VideoLinkFilterService(ctx.tools, ctx.logger);
 
   const handle = <Input, Output>(
@@ -420,7 +437,9 @@ export function registerIpc(ctx: AppContext): void {
       filters: [{ name: 'Báo cáo JSON', extensions: ['json'] }]
     });
     if (result.canceled || !result.filePath) return null;
-    const filePath = result.filePath.toLowerCase().endsWith('.json') ? result.filePath : `${result.filePath}.json`;
+    const filePath = result.filePath.toLowerCase().endsWith('.json')
+      ? result.filePath
+      : `${result.filePath}.json`;
     await writeFile(filePath, content, 'utf8');
     return filePath;
   });

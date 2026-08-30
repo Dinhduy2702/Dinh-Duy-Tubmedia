@@ -67,20 +67,18 @@ check(
 );
 
 check(
-  !page.includes('Kiểm tra ngay') && !page.includes('updates.check()') && !page.includes("run('check')"),
-  'Update Center has no manual check action'
+  page.includes('Thử kiểm tra lại') && page.includes('updates.check()'),
+  'Update Center has an explicit manual check/retry action'
 );
 
 check(
-  !page.includes('Đang kiểm tra bản cập nhật') &&
-    !page.includes('Đang kiểm tra...') &&
-    !page.includes('RefreshCcw'),
-  'Update Center contains no checking spinner/message'
+  page.includes('Đang kiểm tra phiên bản mới') && page.includes('RefreshCcw'),
+  'manual check exposes a bounded spinner/message only inside Update Center'
 );
 
 check(
-  page.includes('PHIÊN BẢN HIỆN TẠI') && page.includes('PHIÊN BẢN MỚI NHẤT'),
-  'Update Center always presents current and latest-known version'
+  page.includes('PHIÊN BẢN HIỆN TẠI') && page.includes('PHIÊN BẢN TRÊN MÁY CHỦ'),
+  'Update Center always presents current and server-known version'
 );
 
 check(
@@ -94,8 +92,8 @@ check(
 );
 
 check(
-  page.includes("status.state === 'checking' || status.state === 'error'"),
-  'legacy checking/error state is normalized away from primary screen'
+  page.includes("state === 'error'") && page.includes('Cần thử lại'),
+  'real manual check errors remain actionable without becoming startup popups'
 );
 
 check(

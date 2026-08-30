@@ -80,7 +80,11 @@ function isTechnicalText(raw: string): boolean {
   }
   if (/\n\s*at\s+/i.test(trimmed) || /\bat\s+[^\s]+\s*\([^)]*:\d+:\d+\)/i.test(trimmed)) return true;
   if (/\b(?:TypeError|ReferenceError|SyntaxError|UnhandledPromiseRejection)\b/i.test(trimmed)) return true;
-  if (/\b(?:eventCode|jobId|projectId|progressPhases|cookieFailureConfirmed|cookieRetryRequested)\b/.test(trimmed)) {
+  if (
+    /\b(?:eventCode|jobId|projectId|progressPhases|cookieFailureConfirmed|cookieRetryRequested)\b/.test(
+      trimmed
+    )
+  ) {
     return true;
   }
   return false;
@@ -104,13 +108,13 @@ function preferredMessage(value: unknown): string {
 function hasErrorSignal(record: UnknownRecord): boolean {
   return Boolean(
     textField(record, 'error') ||
-      textField(record, 'errorMessage') ||
-      textField(record, 'errorCode') ||
-      record.success === false ||
-      record.ok === false ||
-      ['failed', 'error'].includes(textField(record, 'state').toLowerCase()) ||
-      ['failed', 'error'].includes(textField(record, 'status').toLowerCase()) ||
-      ['failed', 'error'].includes(textField(record, 'phase').toLowerCase())
+    textField(record, 'errorMessage') ||
+    textField(record, 'errorCode') ||
+    record.success === false ||
+    record.ok === false ||
+    ['failed', 'error'].includes(textField(record, 'state').toLowerCase()) ||
+    ['failed', 'error'].includes(textField(record, 'status').toLowerCase()) ||
+    ['failed', 'error'].includes(textField(record, 'phase').toLowerCase())
   );
 }
 
@@ -153,7 +157,9 @@ function containsTechnicalKeys(value: unknown): boolean {
 function userMessage(raw: string, fallback: string): string {
   const cleaned = cleanRemotePrefix(raw).replace(/\s+/g, ' ').trim();
   if (!cleaned || isTechnicalText(cleaned)) return fallback;
-  return cleaned.length > USER_MESSAGE_LIMIT ? `${cleaned.slice(0, USER_MESSAGE_LIMIT - 1).trim()}…` : cleaned;
+  return cleaned.length > USER_MESSAGE_LIMIT
+    ? `${cleaned.slice(0, USER_MESSAGE_LIMIT - 1).trim()}…`
+    : cleaned;
 }
 
 function updaterNotice(raw: string): Pick<FriendlyIssue, 'title' | 'message' | 'tone'> | null {
@@ -167,7 +173,9 @@ function updaterNotice(raw: string): Pick<FriendlyIssue, 'title' | 'message' | '
     };
   }
   if (
-    (lower.includes('update for version') && lower.includes('is not available') && lower.includes('latest version')) ||
+    (lower.includes('update for version') &&
+      lower.includes('is not available') &&
+      lower.includes('latest version')) ||
     lower.includes('you are using the latest version') ||
     lower.includes('đang sử dụng phiên bản mới nhất')
   ) {
@@ -239,7 +247,8 @@ export function friendlyIssue(value: unknown): FriendlyIssue {
   if (/^(?:đã\s+hủy|thao\s+tác\s+đã\s+hủy|cancelled|canceled)/i.test(cleaned)) {
     return {
       title: 'Đã hủy thao tác',
-      message: 'Yêu cầu đã được dừng theo lựa chọn của bạn. Dữ liệu đã hoàn tất trước đó vẫn được giữ nguyên.',
+      message:
+        'Yêu cầu đã được dừng theo lựa chọn của bạn. Dữ liệu đã hoàn tất trước đó vẫn được giữ nguyên.',
       steps: [],
       technical,
       tone: 'info'
@@ -381,6 +390,44 @@ export function friendlyIssue(value: unknown): FriendlyIssue {
       tone: 'warning'
     };
   }
+  if (
+    lower.includes('http 403') ||
+    lower.includes('http error 403') ||
+    lower.includes('403 forbidden') ||
+    /máy chủ video.*từ chối/.test(lower)
+  ) {
+    return {
+      title: 'Máy chủ video tạm thời từ chối tải',
+      message:
+        'Video này chưa tải xong vì máy chủ nguồn trả về HTTP 403. Dữ liệu đã tải dở vẫn được giữ để tiếp tục ở lần thử sau.',
+      steps: [
+        'Không xóa tệp .part trong thư mục tải.',
+        'Chờ một lúc rồi chọn Thử lại đúng video.',
+        'Nếu nhiều video cùng lỗi, kiểm tra cookies, proxy và kết nối mạng.'
+      ],
+      technical,
+      tone: 'warning'
+    };
+  }
+  if (
+    lower.includes('một phần dữ liệu video bị gián đoạn') ||
+    lower.includes('dữ liệu video vẫn bị gián đoạn') ||
+    lower.includes('fragment') ||
+    lower.includes('did not get any data blocks')
+  ) {
+    return {
+      title: 'Luồng tải video bị gián đoạn',
+      message:
+        'Một phần dữ liệu từ máy chủ nguồn chưa tải được. Dữ liệu hoàn chỉnh trước đó và tệp .part vẫn được giữ an toàn.',
+      steps: [
+        'Không xóa tệp .part trong thư mục tải.',
+        'Chờ kết nối ổn định rồi chọn Thử lại đúng video.',
+        'Mở Nhật ký riêng nếu cùng video tiếp tục bị gián đoạn.'
+      ],
+      technical,
+      tone: 'warning'
+    };
+  }
   /* TUBMEDIA VISUAL OUTPUT ISSUE R33 */
   if (
     lower.includes('visual-integrity-verification') ||
@@ -391,8 +438,10 @@ export function friendlyIssue(value: unknown): FriendlyIssue {
   ) {
     return {
       title: 'Phát hiện lỗi hình ảnh trong thành phẩm',
-      message:
-        userMessage(cleaned, 'Tubmedia đã chặn file trước khi xuất vì hậu kiểm phát hiện frame lỗi, đoạn đen bất thường hoặc hình đứng kéo dài. File lỗi không được dùng làm thành phẩm.'),
+      message: userMessage(
+        cleaned,
+        'Tubmedia đã chặn file trước khi xuất vì hậu kiểm phát hiện frame lỗi, đoạn đen bất thường hoặc hình đứng kéo dài. File lỗi không được dùng làm thành phẩm.'
+      ),
       steps: [
         'Xem mốc thời gian và video nguồn gần nhất trong trạng thái chi tiết.',
         'Kiểm tra clip nguồn quanh mốc đó; Tubmedia đã tự thử mã hóa lại nếu lỗi nằm gần điểm nối.',
@@ -421,9 +470,10 @@ export function friendlyIssue(value: unknown): FriendlyIssue {
     };
   }
 
-  const fallback = containsTechnicalKeys(structured) || isTechnicalText(cleaned)
-    ? 'Ứng dụng chưa thể hoàn tất thao tác này. Chi tiết kỹ thuật đã được lưu trong Nhật ký để hỗ trợ kiểm tra.'
-    : 'Ứng dụng gặp sự cố chưa xác định. Trạng thái hiện tại vẫn được giữ an toàn.';
+  const fallback =
+    containsTechnicalKeys(structured) || isTechnicalText(cleaned)
+      ? 'Ứng dụng chưa thể hoàn tất thao tác này. Chi tiết kỹ thuật đã được lưu trong Nhật ký để hỗ trợ kiểm tra.'
+      : 'Ứng dụng gặp sự cố chưa xác định. Trạng thái hiện tại vẫn được giữ an toàn.';
   return {
     title: 'Không thể hoàn tất thao tác',
     message: userMessage(cleaned, fallback),

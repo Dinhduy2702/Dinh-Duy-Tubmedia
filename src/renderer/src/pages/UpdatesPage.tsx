@@ -1,7 +1,17 @@
-import { CheckCircle2, Download, Rocket, Server, Settings, ShieldCheck } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Download,
+  RefreshCcw,
+  Rocket,
+  Server,
+  Settings,
+  ShieldCheck
+} from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import type { AppUpdateReleaseInfo, AppUpdateStatus } from '@shared/types/domain';
 import { useAppStore } from '../stores/app-store';
+import { compareAppVersions } from '../../../shared/app-version';
 import { formatReleaseNotesForDisplay } from '../../../shared/release-notes';
 
 const LAST_KNOWN_RELEASE_KEY = 'tubmedia:last-known-app-release';
@@ -29,7 +39,6 @@ function readLastKnownRelease(): AppUpdateReleaseInfo | null {
 
 function stableState(status: AppUpdateStatus | null): AppUpdateStatus['state'] {
   if (!status) return 'idle';
-  if (status.state === 'checking' || status.state === 'error') return 'idle';
   return status.state;
 }
 
@@ -38,6 +47,8 @@ function badgeLabel(state: AppUpdateStatus['state']): string {
   if (state === 'downloading') return 'Đang tải cập nhật';
   if (state === 'downloaded') return 'Sẵn sàng cài đặt';
   if (state === 'installing') return 'Đang cài đặt';
+  if (state === 'checking') return 'Đang kiểm tra';
+  if (state === 'error') return 'Cần thử lại';
   if (state === 'disabled') return 'Cập nhật tự động chưa sẵn sàng';
   return 'Đang dùng bản mới nhất';
 }
@@ -49,7 +60,7 @@ export function UpdatesPage(): React.JSX.Element {
   const setStatus = useAppStore((state) => state.setUpdateStatus);
   const setError = useAppStore((state) => state.setError);
   const setPage = useAppStore((state) => state.setPage);
-  const [busy, setBusy] = useState<'update' | 'install' | null>(null);
+  const [busy, setBusy] = useState<'check' | 'update' | 'install' | null>(null);
   const [lastKnownRelease, setLastKnownRelease] = useState<AppUpdateReleaseInfo | null>(() =>
     readLastKnownRelease()
   );
@@ -68,32 +79,57 @@ export function UpdatesPage(): React.JSX.Element {
   const currentVersion = status?.currentVersion ?? '—';
   const latestInfo = status?.info ?? lastKnownRelease;
   const latestVersion = latestInfo?.version ?? currentVersion;
+  const releaseRelation = compareAppVersions(latestVersion, currentVersion);
+  const remoteIsNewer = releaseRelation === 1;
+  const remoteIsOlder = releaseRelation === -1;
+  const canDownload = state === 'available' && remoteIsNewer;
+  const canInstall = state === 'downloaded' && remoteIsNewer;
   const hasNewRelease =
-    state === 'available' || state === 'downloading' || state === 'downloaded' || state === 'installing';
-  const downloading = state === 'downloading';
+    remoteIsNewer &&
+    (state === 'available' || state === 'downloading' || state === 'downloaded' || state === 'installing');
+  const downloading = state === 'downloading' && remoteIsNewer;
   const progress = status?.progress?.percent ?? 0;
   const feedConfigured =
-    Boolean(settings?.appFeedUrl) || Boolean(status?.supported && status?.state !== 'disabled');
+    Boolean(settings?.appFeedUrl) ||
+    Boolean(status?.supported && !status.message?.includes('chưa được liên kết với máy chủ cập nhật'));
 
   const headline = useMemo(() => {
+    if (remoteIsOlder) {
+      return `Bạn đang dùng Tubmedia ${currentVersion}; máy chủ đang có bản cũ hơn ${latestVersion}.`;
+    }
     if (state === 'available') return `Đã có phiên bản mới ${latestVersion}`;
     if (state === 'downloading') return `Đang tải Tubmedia ${latestVersion}`;
     if (state === 'downloaded') return `Tubmedia ${latestVersion} đã sẵn sàng cài đặt`;
     if (state === 'installing') return `Đang cài đặt Tubmedia ${latestVersion}`;
+    if (state === 'checking') return 'Đang kiểm tra phiên bản mới...';
+    if (state === 'error') return 'Chưa thể kiểm tra hoặc tải bản cập nhật';
     if (state === 'disabled') return 'Cập nhật tự động hiện chưa sẵn sàng';
     return `Bạn đang dùng phiên bản mới nhất ${latestVersion}`;
-  }, [latestVersion, state]);
+  }, [currentVersion, latestVersion, remoteIsOlder, state]);
 
   const runUpdate = async (): Promise<void> => {
-    if (state !== 'available' && state !== 'downloaded') return;
-    const kind = state === 'downloaded' ? 'install' : 'update';
+    if (!canDownload && !canInstall) return;
+    const kind = canInstall ? 'install' : 'update';
     setBusy(kind);
     try {
-      if (state === 'downloaded') {
+      if (canInstall) {
         await window.desktop.updates.install();
         return;
       }
       const result = await window.desktop.updates.download();
+      setStatus(result);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const runCheck = async (): Promise<void> => {
+    if (state === 'downloading' || state === 'installing') return;
+    setBusy('check');
+    try {
+      const result = await window.desktop.updates.check();
       setStatus(result);
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
@@ -114,7 +150,11 @@ export function UpdatesPage(): React.JSX.Element {
         </div>
 
         <span className={`update-state-badge update-state-${state}`}>
-          {state === 'available' || state === 'downloading' ? (
+          {state === 'error' ? (
+            <AlertTriangle size={15} />
+          ) : state === 'checking' ? (
+            <RefreshCcw size={15} className="animate-spin" />
+          ) : state === 'available' || state === 'downloading' ? (
             <Download size={15} />
           ) : state === 'downloaded' || state === 'installing' ? (
             <Rocket size={15} />
@@ -139,7 +179,7 @@ export function UpdatesPage(): React.JSX.Element {
             </div>
 
             <div className="update-next-version">
-              <span>PHIÊN BẢN MỚI NHẤT</span>
+              <span>PHIÊN BẢN TRÊN MÁY CHỦ</span>
               <b>{latestVersion}</b>
             </div>
           </div>
@@ -147,6 +187,9 @@ export function UpdatesPage(): React.JSX.Element {
           <div className="update-message mt-4">
             <div>
               <b>{headline}</b>
+              {status?.message && (state === 'error' || state === 'disabled') && (
+                <small>{status.message}</small>
+              )}
               {status?.checkedAt && status.state !== 'checking' && (
                 <small>
                   Thông tin phiên bản cập nhật lúc {new Date(status.checkedAt).toLocaleString('vi-VN')}
@@ -179,17 +222,30 @@ export function UpdatesPage(): React.JSX.Element {
             </details>
           )}
 
-          {(state === 'available' || state === 'downloaded') && (
+          {(canDownload || canInstall) && (
             <div className="mt-5 flex flex-wrap gap-2">
               <button className="btn btn-primary" disabled={busy !== null} onClick={() => void runUpdate()}>
-                {state === 'downloaded' ? <Rocket size={17} /> : <Download size={17} />}
+                {canInstall ? <Rocket size={17} /> : <Download size={17} />}
                 {busy
-                  ? state === 'downloaded'
+                  ? canInstall
                     ? 'Đang chuẩn bị...'
                     : 'Đang bắt đầu tải...'
-                  : state === 'downloaded'
+                  : canInstall
                     ? 'Cài đặt & khởi động lại'
                     : 'Cập nhật ngay'}
+              </button>
+            </div>
+          )}
+
+          {!['available', 'downloading', 'downloaded', 'installing'].includes(state) && (
+            <div className="mt-5 flex flex-wrap gap-2">
+              <button className="btn" disabled={busy !== null} onClick={() => void runCheck()}>
+                <RefreshCcw size={17} className={busy === 'check' ? 'animate-spin' : ''} />
+                {busy === 'check'
+                  ? 'Đang kiểm tra...'
+                  : state === 'error'
+                    ? 'Thử kiểm tra lại'
+                    : 'Kiểm tra cập nhật'}
               </button>
             </div>
           )}
@@ -208,11 +264,11 @@ export function UpdatesPage(): React.JSX.Element {
               </li>
               <li>
                 <b>2</b>
-                <span>Chỉ tải khi người dùng bấm Cập nhật ngay.</span>
+                <span>Tải và hiển thị toàn bộ tiến trình ngay trong Tubmedia.</span>
               </li>
               <li>
                 <b>3</b>
-                <span>Chỉ cài khi hàng đợi đã an toàn để không làm hỏng tệp đang xử lý.</span>
+                <span>Chỉ cài khi mọi tác vụ đã an toàn; bộ cài chạy im lặng, không mở wizard cài mới.</span>
               </li>
               <li>
                 <b>4</b>
@@ -230,7 +286,7 @@ export function UpdatesPage(): React.JSX.Element {
                 <b>{feedConfigured ? 'Cập nhật tự động đã sẵn sàng' : 'Chưa liên kết máy chủ cập nhật'}</b>
                 <p>
                   {feedConfigured
-                    ? 'Tubmedia kiểm tra phiên bản khi khởi động và định kỳ trong nền. Không cần thao tác kiểm tra thủ công.'
+                    ? 'Tubmedia kiểm tra khi khởi động và định kỳ; bạn vẫn có thể kiểm tra lại ngay trên trang này.'
                     : 'Bản cài đặt chưa có nguồn cập nhật hợp lệ.'}
                 </p>
               </div>
