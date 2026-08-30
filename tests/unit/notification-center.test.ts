@@ -53,4 +53,15 @@ describe('Trung tâm thông báo độc lập', () => {
     expect(center).toContain('Mở thư mục');
     expect(center).toContain('Sao chép đường dẫn');
   });
+
+  it('does not keep a resolved queue error actionable after app restart', async () => {
+    const [store, center] = await Promise.all([
+      source('src/renderer/src/stores/app-store.ts'),
+      source('src/renderer/src/components/NotificationCenter.tsx')
+    ]);
+
+    expect(store).toContain('reconcileJobNotifications');
+    expect(store).toContain('isJobNoticeStillBlocking(notice, jobs)');
+    expect(center).toContain('isJobNoticeStillBlocking(notification, jobs)');
+  });
 });

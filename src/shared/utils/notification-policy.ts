@@ -39,13 +39,26 @@ function noticeMatchesJob(
   return isCookieBlockingCode(notice.code) && isCookieBlockingCode(job.errorCode);
 }
 
+/**
+ * A persisted notification may outlive the queue row that originally created it.
+ * Treat it as actionable only while a matching job is still genuinely blocked.
+ * Logs remain the durable audit trail after the blocker has been resolved.
+ */
+export function isJobNoticeStillBlocking(
+  notice: Pick<AttentionNotice, 'jobId' | 'projectId' | 'code'>,
+  jobs: readonly Pick<QueueJob, 'id' | 'projectId' | 'status' | 'errorCode'>[]
+): boolean {
+  if (!notice.jobId && !notice.projectId) return false;
+  return jobs.some((job) => noticeMatchesJob(notice, job));
+}
+
 export function isAttentionNoticeResolved(
   notice: Pick<AttentionNotice, 'sticky' | 'jobId' | 'projectId' | 'code'>,
   jobs: readonly Pick<QueueJob, 'id' | 'projectId' | 'status' | 'errorCode'>[]
 ): boolean {
   if (!notice.sticky) return false;
   if (!notice.jobId && !notice.projectId) return false;
-  return !jobs.some((job) => noticeMatchesJob(notice, job));
+  return !isJobNoticeStillBlocking(notice, jobs);
 }
 
 export function shouldShowInlineBlockingIssue(

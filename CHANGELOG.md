@@ -1,3 +1,10 @@
+# Tubmedia 1.3.6
+
+- Tự hòa giải lỗi giả `Không thể chuyển tác vụ từ merging sang skipped` do dữ liệu còn lại từ 1.3.4 khi thành phẩm đã được hậu kiểm hợp lệ.
+- Chỉ khôi phục bản ghi có đủ dấu xác minh `verified-final`, đầu ra đã ghi nhận và đúng mã lỗi chuyển trạng thái; không che giấu lỗi ghép thật.
+- Xóa thông báo tác vụ đã hết hiệu lực khỏi Trung tâm thông báo khi khởi động, nhưng vẫn giữ thông báo được ghim và toàn bộ nhật ký kiểm toán.
+- Đồng bộ lại trạng thái dự án hoàn tất mà không xóa hoặc ghép lại video thành phẩm hiện có.
+
 # Tubmedia 1.3.5
 
 - Phục hồi tải YouTube HTTP 403/fragment an toàn hơn: làm mới metadata ở lần thử lại, giữ tệp `.part`, giảm còn một fragment song song và không ép client `web_safari` dễ lỗi.
