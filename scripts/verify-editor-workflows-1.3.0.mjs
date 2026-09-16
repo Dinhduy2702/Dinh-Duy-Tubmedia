@@ -31,7 +31,7 @@ function check(label, condition) {
   console.log(`PASS: ${label}`);
 }
 
-check('package version is exactly 1.3.6', files.packageJson.version === '1.3.6');
+check('package version is exactly 1.3.7', files.packageJson.version === '1.3.7');
 check(
   'Editor Studio is the default landing page',
   files.appStore.includes("page: 'editor-home'") && files.app.includes("page === 'editor-home'")
@@ -134,4 +134,4 @@ check(
     !files.history.includes('Math.random(')
 );
 
-console.log(`Tubmedia 1.3.6 editor workflow verification OK: ${checks.length} checks.`);
+console.log(`Tubmedia 1.3.7 editor workflow verification OK: ${checks.length} checks.`);

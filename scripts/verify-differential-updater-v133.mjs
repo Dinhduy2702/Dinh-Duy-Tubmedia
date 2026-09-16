@@ -13,7 +13,7 @@ const check = (ok, label) => {
   if (!ok) failures += 1;
 };
 
-check(pkg.version === '1.3.6', 'package version is 1.3.6');
+check(pkg.version === '1.3.7', 'package version is 1.3.7');
 check(updater.includes('TUBMEDIA_V133_DIFFERENTIAL_UPDATE'), 'differential marker exists');
 check(
   updater.includes('updater.disableDifferentialDownload = false'),
