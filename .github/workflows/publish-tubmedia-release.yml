@@ -4,12 +4,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - package.json
-      - package-lock.json
-      - src/shared/constants/app.ts
-      - CHANGELOG.md
-      - .github/workflows/publish-tubmedia-release.yml
   workflow_dispatch:
 
 permissions:
