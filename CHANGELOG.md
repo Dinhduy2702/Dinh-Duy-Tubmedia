@@ -1,3 +1,10 @@
+# Tubmedia 1.3.7
+
+- Sửa lỗi ghép video bị chặn sai khi FFprobe báo 30,000 FPS và 29,996 FPS dù chênh lệch chỉ 0,004 FPS.
+- Đồng bộ ngưỡng tương thích concat với ngưỡng normalize 0,01 FPS để tránh mã hóa lại không cần thiết.
+- Giữ nguyên kiểm tra nghiêm ngặt nominal FPS, time base, codec, profile, extradata và audio layout.
+- Bổ sung kiểm thử hồi quy cho sai số FPS vô hại và khác biệt chuẩn FPS thực sự.
+
 # Tubmedia 1.3.6
 
 - Tự hòa giải lỗi giả `Không thể chuyển tác vụ từ merging sang skipped` do dữ liệu còn lại từ 1.3.4 khi thành phẩm đã được hậu kiểm hợp lệ.

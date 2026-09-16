@@ -1,5 +1,6 @@
 _r35-css-existed.txt
 .gitattributes
+.github/workflows/publish-tubmedia-release.yml
 .gitignore
 .prettierignore
 .prettierrc.json

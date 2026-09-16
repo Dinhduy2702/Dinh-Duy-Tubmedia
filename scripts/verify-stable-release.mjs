@@ -10,7 +10,7 @@ const base = spawnSync(process.execPath, ['scripts/verify-release-candidate.mjs'
 });
 if (base.status !== 0) process.exit(base.status ?? 1);
 
-const expectedVersion = '1.3.6';
+const expectedVersion = '1.3.7';
 const packageJson = JSON.parse(await read('package.json'));
 const packageLock = JSON.parse(await read('package-lock.json'));
 const constants = await read('src/shared/constants/app.ts');
@@ -30,13 +30,13 @@ const confirmDialog = await read('src/renderer/src/components/ConfirmDialog.tsx'
 const preloadApi = await read('src/preload/index.ts');
 
 const checks = [
-  ['package version 1.3.6', packageJson.version === expectedVersion],
+  ['package version 1.3.7', packageJson.version === expectedVersion],
   [
-    'package-lock version 1.3.6',
+    'package-lock version 1.3.7',
     packageLock.version === expectedVersion && packageLock.packages?.['']?.version === expectedVersion
   ],
-  ['renderer label v1.3.6', constants.includes("APP_VERSION_LABEL = 'v1.3.6'")],
-  ['changelog 1.3.6 first', changelog.startsWith('# Tubmedia 1.3.6')],
+  ['renderer label v1.3.7', constants.includes("APP_VERSION_LABEL = 'v1.3.7'")],
+  ['changelog 1.3.7 first', changelog.startsWith('# Tubmedia 1.3.7')],
   [
     'official build derives canonical installer name from package version',
     buildScript.includes('$Version = [string]$Package.version') &&
@@ -143,8 +143,8 @@ const checks = [
 ];
 const failed = checks.filter(([, ok]) => !ok);
 if (failed.length) {
-  console.error('Tubmedia 1.3.6 stable verification failed:');
+  console.error('Tubmedia 1.3.7 stable verification failed:');
   for (const [name] of failed) console.error(`- ${name}`);
   process.exit(1);
 }
-console.log(`Tubmedia 1.3.6 stable verification OK: ${checks.length} checks.`);
+console.log(`Tubmedia 1.3.7 stable verification OK: ${checks.length} checks.`);
