@@ -46,6 +46,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
           $Package = Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json
           $Version = [string]$Package.version
           if ($Version -ne $env:EXPECTED_VERSION) {
