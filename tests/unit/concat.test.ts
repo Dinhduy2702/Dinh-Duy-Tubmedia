@@ -36,6 +36,18 @@ describe('concat compatibility', () => {
     expect(compareForConcat(info, { ...info, fps: 60 }).reasons[0]).toContain('FPS');
   });
 
+  it('accepts harmless average-FPS probe drift below the normalization threshold', () => {
+    const result = compareForConcat(info, { ...info, fps: 29.996 });
+    expect(result.compatible).toBe(true);
+    expect(result.reasons.some((reason) => reason.startsWith('FPS:'))).toBe(false);
+  });
+
+  it('still blocks a real 30 versus 30000/1001 FPS mismatch', () => {
+    const result = compareForConcat(info, { ...info, fps: 30_000 / 1_001 });
+    expect(result.compatible).toBe(false);
+    expect(result.reasons.some((reason) => reason.startsWith('FPS:'))).toBe(true);
+  });
+
   it('blocks time-base and codec-extradata changes before stream-copy', () => {
     const signed = { ...info, videoExtradataHash: 'SHA256:AAA', audioExtradataHash: 'SHA256:BBB' };
     const timeBaseMismatch = compareForConcat(signed, { ...signed, timeBase: '1/90000' });

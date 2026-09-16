@@ -1,5 +1,7 @@
 import type { MediaInfo } from '../types/domain.js';
 
+const CONCAT_AVERAGE_FPS_TOLERANCE = 0.01;
+
 export interface ConcatCompatibility {
   compatible: boolean;
   reasons: string[];
@@ -21,6 +23,10 @@ export interface ConcatCompatibility {
  * FFmpeg concat stream-copy requires identical stream configuration; SPS/PPS/VPS,
  * AAC configuration or timestamp bases that differ are normalized before concat.
  * This deliberately trades a little speed on risky boundaries for deterministic output.
+ *
+ * FFprobe average FPS can drift slightly because it is derived from frame count and
+ * duration. Differences below the normalizer's 0.01 FPS threshold are harmless when
+ * nominal FPS, time base and codec signatures still match.
  */
 export function compareForConcat(
   reference: MediaInfo,
@@ -28,6 +34,13 @@ export function compareForConcat(
 ): ConcatCompatibility {
   const reasons: string[] = [];
   const advisories: string[] = [];
+  const averageFpsDifference = Math.abs(reference.fps - candidate.fps);
+  if (!Number.isFinite(averageFpsDifference) || averageFpsDifference >= CONCAT_AVERAGE_FPS_TOLERANCE) {
+    reasons.push(
+      `FPS: ${Math.round(reference.fps * 1000)} ≠ ${Math.round(candidate.fps * 1000)}`
+    );
+  }
+
   /* TUBMEDIA STRICT CONCAT SAFETY R33 */
   const fields: Array<[string, unknown, unknown]> = [
     ['Codec video', reference.videoCodec, candidate.videoCodec],
@@ -42,7 +55,6 @@ export function compareForConcat(
     ['Color range', reference.colorRange ?? null, candidate.colorRange ?? null],
     ['Chiều rộng', reference.width, candidate.width],
     ['Chiều cao', reference.height, candidate.height],
-    ['FPS', Math.round(reference.fps * 1000), Math.round(candidate.fps * 1000)],
     ['Pixel format', reference.pixelFormat, candidate.pixelFormat],
     ['HDR', reference.hdr, candidate.hdr],
     ['Loại HDR', reference.hdrType ?? null, candidate.hdrType ?? null],
