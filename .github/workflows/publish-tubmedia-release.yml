@@ -95,6 +95,22 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          function Get-Sha256Hex {
+            param([Parameter(Mandatory = $true)][string]$LiteralPath)
+            $Stream = [System.IO.File]::OpenRead($LiteralPath)
+            try {
+              $Hasher = [System.Security.Cryptography.SHA256]::Create()
+              try {
+                return ([System.BitConverter]::ToString($Hasher.ComputeHash($Stream))).Replace('-', '')
+              }
+              finally {
+                $Hasher.Dispose()
+              }
+            }
+            finally {
+              $Stream.Dispose()
+            }
+          }
           $InstallerName = "Download-video-Tubmedia-Setup-$env:VERSION-x64.exe"
           $BlockmapName = "$InstallerName.blockmap"
           $ChecksumName = "Download-video-Tubmedia-$env:VERSION-SHA256.txt"
@@ -113,9 +129,25 @@ jobs:
             throw 'latest.yml installer URL does not match the canonical asset name.'
           }
           $ChecksumPath = Join-Path release $ChecksumName
-          $ChecksumLine = (Get-Content -LiteralPath $ChecksumPath | Select-Object -First 1).Trim()
-          $ExpectedSha256 = ($ChecksumLine -split '\s+')[0].ToUpperInvariant()
-          $ActualSha256 = (Get-FileHash -LiteralPath (Join-Path release $InstallerName) -Algorithm SHA256).Hash
+          $ExpectedSha256 = $null
+          foreach ($ChecksumLine in (Get-Content -LiteralPath $ChecksumPath)) {
+            $Match = [regex]::Match(
+              $ChecksumLine,
+              '^\s*SHA-256:\s*(?<hash>[0-9A-Fa-f]{64})\s*$',
+              [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+            )
+            if (-not $Match.Success) {
+              $Match = [regex]::Match($ChecksumLine, '^\s*(?<hash>[0-9A-Fa-f]{64})(?:\s+\*?.+)?$')
+            }
+            if ($Match.Success) {
+              $ExpectedSha256 = $Match.Groups['hash'].Value.ToUpperInvariant()
+              break
+            }
+          }
+          if ([string]::IsNullOrWhiteSpace($ExpectedSha256)) {
+            throw 'Checksum file does not contain a valid SHA-256 value.'
+          }
+          $ActualSha256 = Get-Sha256Hex -LiteralPath (Join-Path release $InstallerName)
           if ($ExpectedSha256 -ne $ActualSha256) {
             throw 'Installer SHA-256 does not match its checksum file.'
           }
@@ -161,6 +193,22 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          function Get-Sha256Hex {
+            param([Parameter(Mandatory = $true)][string]$LiteralPath)
+            $Stream = [System.IO.File]::OpenRead($LiteralPath)
+            try {
+              $Hasher = [System.Security.Cryptography.SHA256]::Create()
+              try {
+                return ([System.BitConverter]::ToString($Hasher.ComputeHash($Stream))).Replace('-', '')
+              }
+              finally {
+                $Hasher.Dispose()
+              }
+            }
+            finally {
+              $Stream.Dispose()
+            }
+          }
           $InstallerName = "Download-video-Tubmedia-Setup-$env:VERSION-x64.exe"
           $Names = @(
             $InstallerName,
@@ -187,8 +235,8 @@ jobs:
             throw 'Downloading draft release assets for verification failed.'
           }
           foreach ($Name in $Names) {
-            $LocalHash = (Get-FileHash -LiteralPath (Join-Path release $Name) -Algorithm SHA256).Hash
-            $RemoteHash = (Get-FileHash -LiteralPath (Join-Path $VerifyDir $Name) -Algorithm SHA256).Hash
+            $LocalHash = Get-Sha256Hex -LiteralPath (Join-Path release $Name)
+            $RemoteHash = Get-Sha256Hex -LiteralPath (Join-Path $VerifyDir $Name)
             if ($LocalHash -ne $RemoteHash) {
               throw "Uploaded asset differs from local verified file: $Name"
             }
