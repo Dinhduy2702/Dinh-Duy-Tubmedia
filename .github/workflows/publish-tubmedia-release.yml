@@ -59,15 +59,24 @@ jobs:
           }
           $Tag = "v$Version"
           & gh release view $Tag --repo $env:GITHUB_REPOSITORY *> $null
-          if ($LASTEXITCODE -eq 0) {
+          $ReleaseExitCode = $LASTEXITCODE
+          if ($ReleaseExitCode -eq 0) {
             throw "Release $Tag already exists; refusing to overwrite it."
           }
+          if ($ReleaseExitCode -ne 1) {
+            throw "Checking whether release $Tag exists failed with exit code $ReleaseExitCode."
+          }
           & git ls-remote --exit-code --tags origin "refs/tags/$Tag" *> $null
-          if ($LASTEXITCODE -eq 0) {
+          $TagExitCode = $LASTEXITCODE
+          if ($TagExitCode -eq 0) {
             throw "Tag $Tag already exists without a release; manual inspection is required."
+          }
+          if ($TagExitCode -ne 2) {
+            throw "Checking whether tag $Tag exists failed with exit code $TagExitCode."
           }
           "VERSION=$Version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "TAG=$Tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          exit 0
 
       - name: Ensure NSIS compiler is available
         shell: pwsh
