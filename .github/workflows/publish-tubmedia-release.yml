@@ -129,26 +129,17 @@ jobs:
             throw 'latest.yml installer URL does not match the canonical asset name.'
           }
           $ChecksumPath = Join-Path release $ChecksumName
-          $ExpectedSha256 = $null
-          foreach ($ChecksumLine in (Get-Content -LiteralPath $ChecksumPath)) {
-            $Match = [regex]::Match(
-              $ChecksumLine,
-              '^\s*SHA-256:\s*(?<hash>[0-9A-Fa-f]{64})\s*$',
-              [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
-            )
-            if (-not $Match.Success) {
-              $Match = [regex]::Match($ChecksumLine, '^\s*(?<hash>[0-9A-Fa-f]{64})(?:\s+\*?.+)?$')
-            }
-            if ($Match.Success) {
-              $ExpectedSha256 = $Match.Groups['hash'].Value.ToUpperInvariant()
-              break
-            }
-          }
-          if ([string]::IsNullOrWhiteSpace($ExpectedSha256)) {
-            throw 'Checksum file does not contain a valid SHA-256 value.'
-          }
           $ActualSha256 = Get-Sha256Hex -LiteralPath (Join-Path release $InstallerName)
-          if ($ExpectedSha256 -ne $ActualSha256) {
+          $ChecksumText = Get-Content -LiteralPath $ChecksumPath -Raw
+          $ManifestHashes = @(
+            [regex]::Matches(
+              $ChecksumText,
+              '(?i)(?<![0-9A-F])[0-9A-F]{64}(?![0-9A-F])'
+            ) |
+              ForEach-Object { $_.Value.ToUpperInvariant() } |
+              Select-Object -Unique
+          )
+          if ($ManifestHashes.Count -ne 1 -or $ManifestHashes[0] -ne $ActualSha256) {
             throw 'Installer SHA-256 does not match its checksum file.'
           }
           @"
