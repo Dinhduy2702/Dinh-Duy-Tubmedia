@@ -45,7 +45,9 @@ function Copy-VerifiedAria([string]$Source,[string]$Reason) {
   Copy-Item -LiteralPath $Source -Destination $Dest -Force
 
   if (-not (Test-Aria $Dest)) {
-    throw "aria2c copy verification failed: $Reason"
+    Remove-Item -LiteralPath $Dest -Force -ErrorAction SilentlyContinue
+    Write-Warning "aria2c copy verification failed: $Reason; trying next source."
+    return $false
   }
 
   Write-Host "ARIA2_BUNDLED_OK source=$Reason"
