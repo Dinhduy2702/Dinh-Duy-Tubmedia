@@ -1,6 +1,32 @@
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version 2.0
 
+function Get-FileHashPortable {
+  param(
+    [Parameter(Mandatory = $true)][string]$LiteralPath,
+    [ValidateSet("SHA256")][string]$Algorithm = "SHA256"
+  )
+
+  $stream = [System.IO.File]::OpenRead($LiteralPath)
+  try {
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+      $hex = ([System.BitConverter]::ToString($sha256.ComputeHash($stream))).Replace("-", "")
+      return [PSCustomObject]@{
+        Algorithm = $Algorithm
+        Hash = $hex
+        Path = $LiteralPath
+      }
+    }
+    finally {
+      $sha256.Dispose()
+    }
+  }
+  finally {
+    $stream.Dispose()
+  }
+}
+
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $projectRoot
 
@@ -102,7 +128,7 @@ try {
     $archive.Dispose()
   }
 
-  $hash = Get-FileHash -LiteralPath $zipPath -Algorithm SHA256
+  $hash = Get-FileHashPortable -LiteralPath $zipPath -Algorithm SHA256
   [System.IO.File]::WriteAllText(
     $checksumPath,
     ($hash.Hash + "  " + [System.IO.Path]::GetFileName($zipPath) + "`r`n"),

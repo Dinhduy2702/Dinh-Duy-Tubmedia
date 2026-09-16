@@ -1,6 +1,32 @@
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version 2.0
 
+function Get-FileHashPortable {
+  param(
+    [Parameter(Mandatory = $true)][string]$LiteralPath,
+    [ValidateSet("SHA256")][string]$Algorithm = "SHA256"
+  )
+
+  $stream = [System.IO.File]::OpenRead($LiteralPath)
+  try {
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+      $hex = ([System.BitConverter]::ToString($sha256.ComputeHash($stream))).Replace("-", "")
+      return [PSCustomObject]@{
+        Algorithm = $Algorithm
+        Hash = $hex
+        Path = $LiteralPath
+      }
+    }
+    finally {
+      $sha256.Dispose()
+    }
+  }
+  finally {
+    $stream.Dispose()
+  }
+}
+
 function Write-Step {
   param([Parameter(Mandatory = $true)][string]$Text)
   Write-Host ""
@@ -298,7 +324,7 @@ if (-not (Test-Path -LiteralPath $installerPath)) {
 }
 
 $installer = Get-Item -LiteralPath $installerPath
-$hash = Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256
+$hash = Get-FileHashPortable -LiteralPath $installer.FullName -Algorithm SHA256
 $checksumPath = Join-Path $releaseDir ("Download-video-Tubmedia-" + $productVersion + "-SHA256.txt")
 $checksumText = $hash.Hash + "  " + $installer.Name + "`r`n"
 Write-Utf8BomFile -Path $checksumPath -Content $checksumText

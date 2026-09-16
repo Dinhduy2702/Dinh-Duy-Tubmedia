@@ -4,6 +4,32 @@ param()
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+function Get-FileHashPortable {
+  param(
+    [Parameter(Mandatory = $true)][string]$LiteralPath,
+    [ValidateSet("SHA256")][string]$Algorithm = "SHA256"
+  )
+
+  $stream = [System.IO.File]::OpenRead($LiteralPath)
+  try {
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+      $hex = ([System.BitConverter]::ToString($sha256.ComputeHash($stream))).Replace("-", "")
+      return [PSCustomObject]@{
+        Algorithm = $Algorithm
+        Hash = $hex
+        Path = $LiteralPath
+      }
+    }
+    finally {
+      $sha256.Dispose()
+    }
+  }
+  finally {
+    $stream.Dispose()
+  }
+}
+
 $Project = Split-Path -Parent $PSScriptRoot
 $ToolDir = Join-Path $Project "tool"
 $Dest = Join-Path $ToolDir "aria2c.exe"
@@ -91,7 +117,7 @@ try {
     -UseBasicParsing `
     -Headers @{ "User-Agent" = "Tubmedia-Build/1.3.3" }
 
-  $zipSha = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToUpperInvariant()
+  $zipSha = (Get-FileHashPortable -LiteralPath $zip -Algorithm SHA256).Hash.ToUpperInvariant()
 
   if ($zipSha -ne $ExpectedZipSha256) {
     throw "aria2 archive SHA-256 mismatch. Expected=$ExpectedZipSha256 Actual=$zipSha"
@@ -124,6 +150,6 @@ try {
   Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-$exeSha = (Get-FileHash -LiteralPath $Dest -Algorithm SHA256).Hash
+$exeSha = (Get-FileHashPortable -LiteralPath $Dest -Algorithm SHA256).Hash
 Write-Host "ARIA2_EXE_SHA256=$exeSha"
 Write-Host "ARIA2_BUNDLE_COMPLETE"
