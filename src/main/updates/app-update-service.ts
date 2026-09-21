@@ -93,6 +93,7 @@ export class AppUpdateService {
   private silentCheck = false;
   private updater: AutoUpdater | null = null;
   private networkCheckInFlight: Promise<void> | null = null;
+  private downloadInFlight: Promise<AppUpdateStatus> | null = null;
   private feedUnavailableForSession = false;
   private feedUnavailableLogged = false;
   private configuredChannel = '';
@@ -380,6 +381,17 @@ export class AppUpdateService {
     return this.status;
   }
   public async download(): Promise<AppUpdateStatus> {
+    // Bấm "Cập nhật ngay" lần nữa khi đang tải không được chạy lại check() (có thể đặt trạng thái
+    // về 'available' giữa chừng) hay gọi downloadUpdate() lần hai; dùng chung một lượt tải.
+    if (this.downloadInFlight) return this.downloadInFlight;
+    const run = this.downloadOnce().finally(() => {
+      this.downloadInFlight = null;
+    });
+    this.downloadInFlight = run;
+    return run;
+  }
+
+  private async downloadOnce(): Promise<AppUpdateStatus> {
     const currentVersion = app.getVersion();
 
     if (this.status.state === 'downloaded' && isNewerAppVersion(this.status.info?.version, currentVersion)) {
