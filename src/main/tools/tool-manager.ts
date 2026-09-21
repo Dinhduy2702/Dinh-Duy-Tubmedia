@@ -1,11 +1,12 @@
 import type { BrowserWindow } from 'electron';
 import { constants } from 'node:fs';
-import { access, mkdir, readdir } from 'node:fs/promises';
+import { access, mkdir, readdir, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { AppSettings, ToolStatus } from '@shared/types/domain.js';
 import type { ProcessManager } from '../processes/process-manager.js';
 import type { Logger } from '../logging/logger.js';
 import { IPC } from '@shared/contracts/channels.js';
+import { toolPathSyntaxError, type ToolPathSettingKey } from '../security/settings-policy.js';
 
 export const TOOL_NAMES = ['yt-dlp', 'ffmpeg', 'ffprobe', 'ffplay', 'aria2c'] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
@@ -44,6 +45,11 @@ function uniqueCandidates<T extends { path: string }>(values: T[]): T[] {
 
 function normalizedConfiguredPath(value: string): string {
   return value.trim().replace(/^"(.*)"$/, '$1').trim();
+}
+
+/** Đường dẫn do người dùng cấu hình chỉ được dùng khi đúng tên công cụ, là đường dẫn đầy đủ và không phải UNC. */
+function guardedConfiguredPath(key: ToolPathSettingKey, value: string): string {
+  return toolPathSyntaxError(key, value) === null ? normalizedConfiguredPath(value) : '';
 }
 
 export function verifiedCapabilities(
@@ -196,13 +202,21 @@ export class ToolManager {
 
   private configuredPath(name: ToolName): string {
     const settings = this.getSettings();
-    if (name === 'yt-dlp') return normalizedConfiguredPath(settings.ytdlpPath);
-    if (name === 'ffmpeg') return normalizedConfiguredPath(settings.ffmpegPath);
-    if (name === 'ffprobe') return normalizedConfiguredPath(settings.ffprobePath);
-    if (name === 'aria2c') return normalizedConfiguredPath(settings.aria2cPath);
+    if (name === 'yt-dlp') return guardedConfiguredPath('ytdlpPath', settings.ytdlpPath);
+    if (name === 'ffmpeg') return guardedConfiguredPath('ffmpegPath', settings.ffmpegPath);
+    if (name === 'ffprobe') return guardedConfiguredPath('ffprobePath', settings.ffprobePath);
+    if (name === 'aria2c') return guardedConfiguredPath('aria2cPath', settings.aria2cPath);
     // ffplay is shipped together with FFmpeg. If FFmpeg is configured, prefer its sibling ffplay.exe.
-    const ffmpegPath = normalizedConfiguredPath(settings.ffmpegPath);
+    const ffmpegPath = guardedConfiguredPath('ffmpegPath', settings.ffmpegPath);
     return ffmpegPath ? join(dirname(ffmpegPath), this.executableName('ffplay')) : '';
+  }
+
+  private async isFile(path: string): Promise<boolean> {
+    try {
+      return (await stat(path)).isFile();
+    } catch {
+      return false;
+    }
   }
 
   private async canAccess(path: string): Promise<boolean> {
@@ -259,7 +273,8 @@ export class ToolManager {
       if (folder) candidates.push({ path: join(folder, ...parts, executable), source: 'local' });
     };
 
-    if (configured) candidates.push({ path: configured, source: 'local' });
+    // Đường dẫn cấu hình phải là tệp thật; thư mục hoặc mục không tồn tại bị bỏ qua.
+    if (configured && await this.isFile(configured)) candidates.push({ path: configured, source: 'local' });
 
     // The user's portable folder: <project>\tool\yt-dlp.exe, ffmpeg.exe, ffprobe.exe, ffplay.exe...
     candidates.push({ path: join(this.appPath, 'tool', executable), source: 'local' });

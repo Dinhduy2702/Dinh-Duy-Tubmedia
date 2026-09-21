@@ -256,6 +256,7 @@ src/main/queue/queue-manager.ts
 src/main/runtime/electron-security-guard.ts
 src/main/security/open-path-policy.ts
 src/main/security/sender-validator.ts
+src/main/security/settings-policy.ts
 src/main/settings/defaults.ts
 src/main/settings/hardware-service.ts
 src/main/settings/settings-service.ts
@@ -373,6 +374,7 @@ TEST_RESULTS.md
 tests/e2e/app.spec.ts
 tests/integration/database.test.ts
 tests/integration/queue-retry-requeue.test.ts
+tests/integration/settings-restore-policy.test.ts
 tests/unit/app-update-version.test.ts
 tests/unit/batch-error-aggregation-r18.test.ts
 tests/unit/brand-layout.test.ts
@@ -437,6 +439,7 @@ tests/unit/runtime-performance-policy.test.ts
 tests/unit/runtime-recovery-upgrade.test.ts
 tests/unit/safe-json.test.ts
 tests/unit/secret-redaction.test.ts
+tests/unit/settings-policy.test.ts
 tests/unit/sha256-sums.test.ts
 tests/unit/smart-merge-pipeline-v120.test.ts
 tests/unit/source-completeness.test.ts
@@ -450,6 +453,7 @@ tests/unit/timeline.test.ts
 tests/unit/timestamp.test.ts
 tests/unit/tool-bootstrap-release.test.ts
 tests/unit/tool-capabilities.test.ts
+tests/unit/tool-manager-configured-path.test.ts
 tests/unit/tool-update-rate-limit.test.ts
 tests/unit/typography-system.test.ts
 tests/unit/ui-density.test.ts

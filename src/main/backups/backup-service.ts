@@ -12,6 +12,8 @@ import {
 } from '../database/sqlite.js';
 import type { Logger } from '../logging/logger.js';
 import { InvalidInputError } from '@shared/errors/app-errors.js';
+import { parseJsonOr } from '@shared/utils/safe-json.js';
+import { sanitizeRestoredAppSettings } from '../security/settings-policy.js';
 
 export interface BackupPreview {
   path: string;
@@ -151,6 +153,28 @@ export class BackupService {
     }
   }
 
+  /**
+   * Backup là tệp không đáng tin: cài đặt vừa nạp phải qua schema và chính sách an toàn (địa chỉ
+   * cập nhật, đường dẫn công cụ). Trường sai bị bỏ để ứng dụng dùng giá trị mặc định.
+   */
+  private sanitizeRestoredSettings(): void {
+    const target = this.database.db;
+    const row = target.prepare("SELECT value_json FROM main.app_settings WHERE key='app'").get() as
+      | { value_json: string }
+      | undefined;
+    if (!row) return;
+    const { value, dropped } = sanitizeRestoredAppSettings(parseJsonOr<unknown>(row.value_json, null));
+    if (dropped.length === 0) return;
+    target
+      .prepare("UPDATE main.app_settings SET value_json=? WHERE key='app'")
+      .run(JSON.stringify(value));
+    this.logger.warn(
+      'backup',
+      'BACKUP_SETTINGS_SANITIZED',
+      `Bỏ qua ${dropped.length} cài đặt trong bản sao lưu vì không đạt yêu cầu an toàn: ${dropped.join(', ')}.`
+    );
+  }
+
   public restore(path: string, mode: 'merge' | 'replace'): { projects: number } {
     if (!existsSync(path)) throw new Error(`Không tìm thấy tệp sao lưu: ${path}`);
     const preview = this.preview(path);
@@ -235,6 +259,8 @@ export class BackupService {
             `INSERT OR REPLACE INTO main.${table}(${common.join(',')}) SELECT ${common.join(',')} FROM backupdb.${table}`
           );
         }
+
+        this.sanitizeRestoredSettings();
 
         const integrity = target.prepare('PRAGMA main.integrity_check').all() as Array<{ integrity_check: string }>;
         if (integrity.some((row) => row.integrity_check !== 'ok')) {

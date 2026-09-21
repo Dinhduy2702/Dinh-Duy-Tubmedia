@@ -11,6 +11,7 @@ import type { SettingsService } from '../settings/settings-service.js';
 import type { QueueManager } from '../queue/queue-manager.js';
 import type { BackupService } from '../backups/backup-service.js';
 import type { Logger } from '../logging/logger.js';
+import { feedUrlError } from '../security/settings-policy.js';
 
 type AutoUpdater = AppUpdater;
 type ElectronUpdaterModule = { autoUpdater?: AppUpdater };
@@ -654,6 +655,9 @@ export class AppUpdateService {
     if (parsed.protocol !== 'https:') {
       throw new Error('Địa chỉ nhận bản cập nhật ứng dụng bắt buộc dùng HTTPS.');
     }
+    // Lớp phòng thủ thứ hai: dù giá trị đến từ đâu, chỉ cài bản cập nhật từ máy chủ mặc định.
+    const feedPolicyError = feedUrlError(feed);
+    if (feedPolicyError) throw new Error(feedPolicyError);
     const normalizedFeed = parsed.toString();
     if (normalizedFeed === this.configuredFeed) return;
     updater.setFeedURL({ provider: 'generic', url: normalizedFeed });

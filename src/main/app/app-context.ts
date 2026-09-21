@@ -46,7 +46,7 @@ export class AppContext {
   public readonly logger = new Logger(this.logRepo, join(this.userData, 'logs'));
   public readonly paths = new PathService();
   public readonly hardware = new HardwareService();
-  public readonly settings = new SettingsService(this.settingsRepo, this.hardware);
+  public readonly settings = new SettingsService(this.settingsRepo, this.hardware, this.logger);
   public readonly cookies = new CookieService(this.userData, this.settings);
   public readonly projects = new ProjectService(this.projectRepo, this.paths);
   public readonly input = new InputService(this.itemRepo);
