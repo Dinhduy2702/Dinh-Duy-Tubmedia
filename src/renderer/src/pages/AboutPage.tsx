@@ -10,14 +10,15 @@ import {
   Workflow
 } from 'lucide-react';
 import { APP_NAME, APP_VERSION_LABEL } from '@shared/constants/app';
-import { DeveloperSignature, TubmediaMark } from '../components/TubmediaBrand';
+import { BrandKit } from '../components/BrandKit';
+import { DeveloperSignature, TubmediaLogo, TubmediaMark } from '../components/TubmediaBrand';
 
 export function AboutPage(): React.JSX.Element {
   return <div className="page-shell about-page">
     <section className="about-hero tubmedia-about-hero">
       <div className="about-hero-orb about-orb-one"/>
       <div className="about-hero-orb about-orb-two"/>
-      <div className="about-app-icon"><TubmediaMark size={58}/></div>
+      <div className="about-app-icon about-app-logo"><TubmediaLogo variant="horizontal" height={92}/></div>
       <div className="about-hero-copy">
         <span className="eyebrow">QUY TRÌNH SÁNG TẠO TUBMEDIA</span>
         <h1>{APP_NAME}</h1>
@@ -32,7 +33,7 @@ export function AboutPage(): React.JSX.Element {
     </section>
 
     <section className="developer-profile tubmedia-developer-profile">
-      <div className="developer-avatar"><TubmediaMark size={42}/></div>
+      <div className="developer-avatar"><TubmediaMark size={44}/></div>
       <div><span>THIẾT KẾ VÀ PHÁT TRIỂN BỞI</span><h2>Đình Duy <strong>Tubmedia</strong></h2><p>Tập trung vào quy trình tải, kiểm tra, quản lý và ghép video dành cho người dùng Windows.</p></div>
       <div className="developer-signature"><Sparkles size={18}/>Dành riêng cho Tubmedia</div>
     </section>
@@ -45,6 +46,8 @@ export function AboutPage(): React.JSX.Element {
       <Feature icon={Code2} title="Ứng dụng máy tính thực thụ" text="Giao diện React giao tiếp với phần xử lý Electron qua cầu nối an toàn; bản phát hành không phụ thuộc máy chủ web."/>
       <Feature icon={ShieldCheck} title="Kiểm tra và cách ly tệp lỗi" text="ffprobe và FFmpeg xác minh tệp tải về; tệp lỗi được đưa vào khu cách ly thay vì báo hoàn tất sai."/>
     </div>
+
+    <BrandKit/>
 
     <section className="responsibility-card">
       <div><ShieldCheck size={21}/></div>

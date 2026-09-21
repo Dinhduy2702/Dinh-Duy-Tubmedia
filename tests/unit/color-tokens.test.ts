@@ -214,7 +214,8 @@ describe('bảng màu ngữ nghĩa (phương án C)', () => {
     }
   });
 
-  it('đỏ của logo (#D92B20) không xuất hiện trong bảng màu giao diện', () => {
+  it('đỏ của logo (#DB2B23 đo từ logo chuẩn; #D92B20 là logo cũ) không xuất hiện trong bảng màu giao diện', () => {
+    expect(tokensCss.toLowerCase()).not.toContain('db2b23');
     expect(tokensCss.toLowerCase()).not.toContain('d92b20');
     const errorRed = resolve(light, '--tone-error-icon');
     expect(errorRed.toLowerCase()).toBe('#b3261e');

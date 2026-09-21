@@ -346,7 +346,7 @@ function auditPageColors() {
       a
     };
   };
-  const allowedRed = '.tone-error, [data-tone="error"], .btn-danger, .confirm-danger-button, .tubmedia-wordmark-picture, .tubmedia-wordmark-mark, .developer-signature-logo, .sidebar-brand, .startup-logo, .btn-delete-lane, .diagnostics-error-list, img, picture, [class*="tubmedia-mark"], svg:has([class*="tubmedia-mark"])';
+  const allowedRed = '.tone-error, [data-tone="error"], .btn-danger, .confirm-danger-button, .tm-logo, .brand-kit-swatch-chip, .btn-delete-lane, .diagnostics-error-list, img, picture';
   const own = (el) => {
     const raw = el.getAttribute('class');
     return el.tagName.toLowerCase() + (raw && raw.trim() ? '.' + raw.trim().split(/\s+/).slice(0, 3).join('.') : '');
@@ -475,6 +475,22 @@ async function capturePass(handle, state, withOverlays) {
         const file = join(directory, `${String(number).padStart(2, '0')}-${slug}.png`);
         await handle.page.screenshot({ path: file });
         shots.push(file);
+        if (id === 'about') {
+          // Mục "Bộ nhận diện" nằm dưới màn hình đầu: chụp riêng cả khối.
+          const kit = handle.page.locator('[data-testid="brand-kit"]');
+          if (await kit.count()) {
+            const kitFile = join(directory, `${String(number).padStart(2, '0')}b-bo-nhan-dien.png`);
+            // Nới cửa sổ cho vừa cả khối rồi chụp phần tử (chụp phần tử đang cuộn sẽ dính thanh trên cùng).
+            const kitHeight = await kit.first().evaluate((element) => Math.ceil(element.getBoundingClientRect().height));
+            await setSize(handle, `${size.split('x')[0]}x${Math.min(4000, kitHeight + 280)}`);
+            await kit.first().scrollIntoViewIfNeeded();
+            await sleep(300);
+            await kit.first().screenshot({ path: kitFile });
+            shots.push(kitFile);
+            await setSize(handle, size);
+            await handle.page.locator('.page-shell').first().evaluate((element) => { element.scrollTop = 0; });
+          }
+        }
         if (auditColors) {
           const result = await handle.page.evaluate(auditPageColors);
           auditResults.push({ state, size, theme, page: id, ...result });

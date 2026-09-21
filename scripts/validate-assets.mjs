@@ -62,8 +62,12 @@ async function validateSvg(path) {
   if (!text.includes('<svg') || !/viewBox=["']0 0 128 128["']/.test(text)) {
     throw new Error(`${path}: SVG thiếu phần tử gốc hoặc viewBox chuẩn.`);
   }
-  if (!text.includes('<rect') || !text.includes('<path') || !text.includes('</svg>')) {
+  // logo chuẩn 1.4: huy hiệu đỏ #DB2B23 + nút play trắng, đều là đường vẽ (path); không phụ thuộc ảnh/phông ngoài
+  if (!text.includes('<path') || !text.includes('</svg>') || !text.includes('#DB2B23')) {
     throw new Error(`${path}: SVG logo thiếu hình khối bắt buộc.`);
+  }
+  if (/<image|<text|href=|@import|url\(/.test(text)) {
+    throw new Error(`${path}: SVG logo không được phụ thuộc ảnh, phông hay tài nguyên ngoài.`);
   }
 }
 

@@ -8,6 +8,7 @@ import './system-cleanup.css';
 import './quick-download.css';
 import './video-link-filter.css';
 import './typography.css';
+import './brand.css';
 import './tokens.css';
 
 const rootElement = document.getElementById('root');

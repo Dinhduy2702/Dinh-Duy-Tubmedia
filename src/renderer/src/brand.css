@@ -1,0 +1,355 @@
+/* Tubmedia 1.4 — nhận diện: logo chuẩn (vẽ lại từ logo-tubmedia.png) và trang "Bộ nhận diện".
+
+   Màu logo đo từ ảnh gốc. Đỏ logo #DB2B23 CHỈ nằm trong ảnh logo; KHÔNG dùng làm màu báo lỗi hay màu nhấn
+   (đỏ báo lỗi là #B3261E, luôn đi kèm biểu tượng ⊗ và nhãn "Lỗi" — xem tokens.css).
+   Tệp này nạp TRƯỚC tokens.css để bảng màu giao diện vẫn có tiếng nói cuối cùng. */
+
+:root {
+  --logo-red: #db2b23;
+  --logo-play: #f9f9f9;
+  --logo-paper: #fafaf9;
+  --logo-ink: #262626;
+  --logo-charcoal: #1c1c1e;
+  /* Chữ và thanh của logo: theo giao diện (nền tối → trắng). */
+  --logo-text: var(--logo-paper);
+  --logo-bar: var(--logo-paper);
+}
+
+:root.light {
+  --logo-text: var(--logo-ink);
+  --logo-bar: var(--logo-ink);
+}
+
+.tm-logo {
+  display: block;
+  flex: 0 0 auto;
+  max-width: 100%;
+  overflow: visible;
+}
+
+.tm-logo-badge {
+  fill: var(--logo-red);
+}
+
+.tm-logo-play {
+  fill: var(--logo-play);
+}
+
+.tm-logo-text {
+  fill: var(--logo-text);
+}
+
+.tm-logo-bar {
+  fill: var(--logo-bar);
+}
+
+/* Chữ trắng CHỈ trên nền tối; chữ đen trên nền sáng — ép cứng khi biết chắc nền. */
+.tm-logo--on-dark {
+  --logo-text: var(--logo-paper);
+  --logo-bar: var(--logo-paper);
+}
+
+.tm-logo--on-light {
+  --logo-text: var(--logo-ink);
+  --logo-bar: var(--logo-ink);
+}
+
+.tm-logo--mono-white .tm-logo-mono {
+  fill: #ffffff;
+}
+
+.tm-logo--mono-charcoal .tm-logo-mono {
+  fill: var(--logo-ink);
+}
+
+/* ---- Thanh bên (luôn đen than) ------------------------------------ */
+.sidebar-brand {
+  min-height: 100px;
+  padding: 1rem;
+}
+
+.tm-brand-lockup {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+/* Chọn bản theo bề rộng THẬT của thanh bên (không theo cửa sổ): đủ rộng → bản ngang, hẹp → chỉ biểu tượng. */
+.sidebar-brand {
+  container: sidebar-brand / inline-size;
+}
+
+.tm-brand-compact {
+  display: none;
+}
+
+@container sidebar-brand (max-width: 150px) {
+  .tm-brand-full {
+    display: none;
+  }
+
+  .tm-brand-compact {
+    display: block;
+  }
+}
+
+/* ---- Màn hình khởi động ------------------------------------------- */
+.startup-logo {
+  display: flex;
+  width: auto;
+  height: auto;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  animation: none;
+}
+
+.startup-brand-copy span {
+  color: var(--text-secondary);
+}
+
+/* ---- Trang Thông tin ---------------------------------------------- */
+.about-app-icon.about-app-logo {
+  width: auto;
+  height: auto;
+  flex-basis: auto;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  animation: none;
+}
+
+.tubmedia-developer-profile .developer-avatar {
+  width: 64px;
+  height: 64px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-sunken);
+  box-shadow: none;
+}
+
+/* Thẻ "Phát triển bởi": đen than như thanh bên (không còn nền đỏ gradient; đỏ chỉ nằm trong logo). */
+.developer-signature-icon-shell {
+  border-color: #3a3a3d;
+  background: #262629;
+  box-shadow: none;
+}
+
+.developer-signature-logo {
+  filter: none !important;
+}
+
+.about-brand-signature .developer-signature-card {
+  border-color: #333337;
+  background: var(--logo-charcoal);
+  box-shadow: none;
+  color: #f2efea;
+}
+
+.about-brand-signature .developer-signature-card::before,
+.about-brand-signature .developer-signature-card::after,
+.about-brand-signature .developer-signature-shine {
+  display: none;
+}
+
+.about-brand-signature .developer-signature-card span,
+.about-brand-signature .developer-signature-card b {
+  text-shadow: none;
+}
+
+.about-brand-signature .developer-signature-card small {
+  color: #b4afa7;
+}
+
+/* ---- Mục "Bộ nhận diện" ------------------------------------------- */
+.brand-kit {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding: 1.15rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 18px;
+  background: var(--surface-card);
+}
+
+.brand-kit h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 900;
+}
+
+.brand-kit h3 {
+  margin: 0 0 0.45rem;
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.brand-kit p,
+.brand-kit li {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  line-height: 1.6;
+}
+
+.brand-kit-lead {
+  max-width: 76ch;
+  margin: 0.25rem 0 0;
+}
+
+.brand-kit-stage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 0.75rem;
+}
+
+.brand-kit-stage {
+  display: grid;
+  min-height: 150px;
+  grid-template-rows: 1fr auto;
+  gap: 0.6rem;
+  padding: 0.9rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+}
+
+.brand-kit-stage-art {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.brand-kit-stage small {
+  font-size: 0.66rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.brand-kit-stage.is-dark,
+.brand-kit-rule-art.is-dark {
+  border-color: #333337;
+  background: var(--logo-charcoal);
+  color: #f2efea;
+}
+
+.brand-kit-stage.is-light,
+.brand-kit-rule-art.is-light {
+  border-color: #d9d5cf;
+  background: #ffffff;
+  color: #1c1c1e;
+}
+
+.brand-kit-stage.is-gray,
+.brand-kit-rule-art.is-gray {
+  border-color: #b9b5af;
+  background: #b9b5af;
+  color: #1c1c1e;
+}
+
+.brand-kit-swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.6rem;
+}
+
+.brand-kit-swatch {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+}
+
+.brand-kit-swatch-chip {
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 10px;
+}
+
+.brand-kit-swatch b {
+  display: block;
+  font-size: 0.72rem;
+}
+
+.brand-kit-swatch code {
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+}
+
+.brand-kit-rules {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.75rem;
+}
+
+.brand-kit-rule {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.8rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  background: var(--surface-app);
+}
+
+.brand-kit-rule-art {
+  display: flex;
+  min-height: 92px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+}
+
+.brand-kit-verdict {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.18rem 0.55rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+}
+
+.brand-kit-verdict.is-ok {
+  border-color: var(--tone-success-border);
+  background: var(--tone-success-bg);
+  color: var(--tone-success-text);
+}
+
+.brand-kit-verdict.is-no {
+  border-color: var(--tone-neutral-border);
+  background: var(--tone-neutral-bg);
+  color: var(--tone-neutral-text);
+}
+
+.brand-kit-clear-space {
+  display: inline-block;
+  padding: 26px;
+  border: 1px dashed var(--border-control);
+  border-radius: 6px;
+}
+
+.brand-kit-facts {
+  display: grid;
+  margin: 0;
+  padding-left: 1.1rem;
+  gap: 0.2rem;
+}
+
+.brand-kit-distort {
+  display: inline-block;
+  transform: scaleX(1.5);
+  transform-origin: center;
+}
+
+@media (max-width: 720px) {
+  .brand-kit {
+    padding: 0.85rem;
+  }
+}
