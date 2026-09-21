@@ -14,9 +14,14 @@ export class PathService {
     try { await access(path, constants.R_OK | constants.W_OK); } catch { throw new PermissionDeniedError(path); }
     const test = resolve(path, `.vdmsp-write-test-${randomUUID()}.tmp`);
     const handle = await open(test, 'wx');
-    await handle.writeFile('ok');
-    await handle.close();
-    await rm(test, { force: true });
+    try {
+      await handle.writeFile('ok');
+    } finally {
+      // Đóng handle và xóa tệp thử kể cả khi ghi thất bại (ví dụ đĩa đầy); nếu không, tệp
+      // .vdmsp-write-test còn sót lại và handle bị khóa trên Windows.
+      await handle.close();
+      await rm(test, { force: true });
+    }
     const fs = await statfs(path);
     const freeBytes = Number(fs.bavail) * Number(fs.bsize);
     const totalBytes = Number(fs.blocks) * Number(fs.bsize);

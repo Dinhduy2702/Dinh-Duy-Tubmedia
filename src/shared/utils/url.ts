@@ -22,6 +22,9 @@ export function normalizeUrl(raw: string): string | null {
       }
     }
     url.protocol = 'https:';
+    // Các scheme không phải web (javascript:, mailto:, file:, data:...) không đổi được sang https.
+    // Không được coi là liên kết video hợp lệ và không được chuyển tiếp cho yt-dlp.
+    if (url.protocol !== 'https:') return null;
     url.pathname = url.pathname.replace(/\/$/, '') || '/';
     url.searchParams.sort();
     return url.toString();
