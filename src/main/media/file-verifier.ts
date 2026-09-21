@@ -14,6 +14,8 @@ export interface VerificationResult {
   duration: number;
 }
 
+export const AUDIO_STREAM_MISSING_REASON = 'Không tìm thấy audio stream theo lựa chọn tải.';
+
 export type VisualIntegrityIssueType = 'decode' | 'black' | 'freeze';
 
 export interface VisualIntegrityIssue {
@@ -560,7 +562,7 @@ export class FileVerifier {
         reasons.push('Không tìm thấy video stream hoặc độ phân giải không hợp lệ.');
       }
       if (expectedStreams.audio && !info.audioCodec) {
-        reasons.push('Không tìm thấy audio stream theo lựa chọn tải.');
+        reasons.push(AUDIO_STREAM_MISSING_REASON);
       }
       if (info.duration <= 0) reasons.push('Thời lượng không hợp lệ.');
       if (info.fileSize <= 0) reasons.push('Dung lượng file không hợp lệ.');

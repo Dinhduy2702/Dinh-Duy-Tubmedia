@@ -13,7 +13,7 @@ import {
 import { ProcessCancelledError, ToolNotFoundError } from '@shared/errors/app-errors.js';
 import { hasConfiguredCookies } from '@shared/utils/cookie-policy.js';
 import { cleanExternalText } from '@shared/utils/text-encoding.js';
-import type { FileVerifier } from '../media/file-verifier.js';
+import { AUDIO_STREAM_MISSING_REASON, type FileVerifier } from '../media/file-verifier.js';
 import type { Logger } from '../logging/logger.js';
 import type { ProcessManager } from '../processes/process-manager.js';
 import type { SettingsService } from '../settings/settings-service.js';
@@ -862,14 +862,28 @@ export class QuickDownloadService {
         ? active.status.requestedEndSeconds - active.status.requestedStartSeconds
         : undefined;
 
-    const checked = await this.verifier.verify(active.status.outputPath, 'standard', expectedDuration, {
-      jobId: active.status.taskId,
-      signal: active.controller.signal,
-      expectedStreams: {
-        video: active.status.mediaMode !== 'audio-only',
-        audio: active.status.mediaMode !== 'video-only'
+    const verifyWith = (audio: boolean): ReturnType<FileVerifier['verify']> =>
+      this.verifier.verify(active.status.outputPath!, 'standard', expectedDuration, {
+        jobId: active.status.taskId,
+        signal: active.controller.signal,
+        expectedStreams: { video: active.status.mediaMode !== 'audio-only', audio }
+      });
+    let checked = await verifyWith(active.status.mediaMode !== 'video-only');
+
+    // Nhiều video hợp lệ vốn không có kênh âm thanh (clip im lặng, hoạt họa, ghi màn hình). yt-dlp đã tải
+    // đúng thứ nguồn cung cấp nên chỉ báo cảnh báo, không đánh dấu thất bại nếu đây là lỗi duy nhất.
+    if (
+      !checked.ok &&
+      active.status.mediaMode === 'video-audio' &&
+      checked.reasons.length === 1 &&
+      checked.reasons[0] === AUDIO_STREAM_MISSING_REASON
+    ) {
+      const silent = await verifyWith(false);
+      if (silent.ok) {
+        checked = silent;
+        active.status.warnings.push('Video nguồn không có kênh âm thanh nên tệp đầu ra chỉ có hình.');
       }
-    });
+    }
 
     active.status.actualDurationSeconds = checked.duration;
     if (!checked.ok) {
