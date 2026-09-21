@@ -135,7 +135,7 @@ export function Topbar(): React.JSX.Element {
       await refreshJobs();
       setAttention({
         id: createUiEventId('global-queue'),
-        severity: queueSummary.allPaused ? 'success' : 'warning',
+        severity: queueSummary.allPaused ? 'success' : 'neutral',
         title: queueSummary.allPaused ? 'Đã tiếp tục tất cả' : 'Đã tạm dừng tất cả',
         message: 'Thao tác đã áp dụng cho toàn bộ danh sách tải và toàn bộ quy trình tải–ghép.',
         sticky: false

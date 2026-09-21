@@ -1,4 +1,4 @@
-import { AlertTriangle, Copy, FileText, X } from 'lucide-react';
+import { Copy, FileText, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import type { LogEntry } from '@shared/types/domain';
 import {
@@ -8,6 +8,8 @@ import {
 } from '@shared/utils/diagnostic-policy';
 import { useAppStore } from '../stores/app-store';
 import { friendlyIssue } from '../utils/ui-error';
+import { NOTICE_TONE_LABEL, noticeAriaRole, type NoticeTone } from '@shared/utils/notice-tone';
+import { ToneIcon } from './ui/ToneIcon';
 
 function supportText(error: unknown, log: LogEntry | null): string {
   if (error instanceof Error) return error.stack ?? error.message;
@@ -46,6 +48,9 @@ export function DiagnosticDock(): React.JSX.Element | null {
   const log = logs.find((entry) => shouldDisplayDiagnostic(entry, jobs)) ?? null;
   const blocking = Boolean(log && isDiagnosticStillBlocking(log, jobs));
   const issue = useMemo(() => friendlyIssue(log?.message ?? ''), [log]);
+  // Mức lấy từ MỨC CỦA DÒNG NHẬT KÝ (error/warn/info), không đoán từ chữ: nhật ký cảnh báo không được ra đỏ.
+  const tone: NoticeTone =
+    issue.tone !== 'error' ? issue.tone : log?.level === 'error' ? 'error' : log?.level === 'warn' ? 'warning' : 'info';
   const diagnosticId = log?.id ?? '';
   const [dismissedId, setDismissedId] = useState('');
 
@@ -65,11 +70,17 @@ export function DiagnosticDock(): React.JSX.Element | null {
   };
 
   return (
-    <aside className={`diagnostic-dock diagnostic-${issue.tone}`} role="alert" aria-live="assertive">
+    <aside
+      className={`diagnostic-dock tone-${tone} diagnostic-${tone}`}
+      data-tone={tone}
+      role={noticeAriaRole(tone)}
+      aria-live={noticeAriaRole(tone) === 'alert' ? 'assertive' : 'polite'}
+    >
       <div className="diagnostic-dock-accent" />
       <div className="diagnostic-dock-head">
-        <span className="diagnostic-dock-icon"><AlertTriangle size={17} /></span>
+        <span className="diagnostic-dock-icon"><ToneIcon tone={tone} size={20} /></span>
         <div className="min-w-0 flex-1">
+          <span className="tone-chip">{NOTICE_TONE_LABEL[tone]}</span>
           <b>{issue.title}</b>
           <small>{blocking ? 'Tác vụ đang chờ bạn xử lý' : 'Thông báo cần kiểm tra'}</small>
         </div>

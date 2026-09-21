@@ -41,6 +41,7 @@ import { FolderField } from '../components/FolderField';
 import { StatusBadge } from '../components/StatusBadge';
 import { CompactLogRow } from '../components/CompactLogRow';
 import { useAppStore } from '../stores/app-store';
+import { showNotice } from '../utils/notify';
 import { createUiEventId } from '../utils/ui-id';
 import { loadWorkbenchPath, saveWorkbenchPath } from '../utils/workbench-path-memory';
 import { friendlyIssue, safeUiText } from '../utils/ui-error';
@@ -236,7 +237,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
   const notify = (
     title: string,
     message: string,
-    severity: 'info' | 'success' | 'warning' = 'success'
+    severity: 'info' | 'success' | 'warning' | 'neutral' = 'success'
   ): void => {
     setAttention({ id: createUiEventId('action'), severity, title, message });
   };
@@ -342,7 +343,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
         action === 'pause'
           ? 'Các tiến trình của danh sách khác không bị ảnh hưởng.'
           : `Thao tác chỉ áp dụng cho danh sách ${laneNumber(slot)}.`,
-        action === 'cancel' ? 'warning' : 'success'
+        action === 'resume' ? 'success' : 'neutral'
       );
     } catch (error) {
       setError(messageOf(error));
@@ -396,7 +397,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
       notify(
         `Thử lại danh sách ${laneNumber(slot)}`,
         count > 0 ? `Đã đưa ${count} tác vụ về hàng chờ.` : 'Không có tác vụ lỗi cần thử lại.',
-        'info'
+        count > 0 ? 'success' : 'neutral'
       );
     } catch (error) {
       setError(messageOf(error));
@@ -454,7 +455,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
           : false;
       });
       if (hiddenRunning) {
-        setError('Một danh sách sắp bị ẩn vẫn đang chạy. Hãy tạm dừng hoặc hủy riêng danh sách đó trước.');
+        showNotice('warning', 'Danh sách đang chạy', 'Một danh sách sắp bị ẩn vẫn đang chạy. Hãy tạm dừng hoặc hủy riêng danh sách đó trước.');
         return;
       }
     }

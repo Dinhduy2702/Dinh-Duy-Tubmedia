@@ -11,6 +11,9 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import type { AppUpdateReleaseInfo, AppUpdateStatus } from '@shared/types/domain';
 import { useAppStore } from '../stores/app-store';
+import type { NoticeTone } from '@shared/utils/notice-tone';
+import { Notice } from '../components/ui/Notice';
+import { ToneIcon } from '../components/ui/ToneIcon';
 import { compareAppVersions } from '../../../shared/app-version';
 import { formatReleaseNotesForDisplay } from '../../../shared/release-notes';
 
@@ -51,6 +54,18 @@ function badgeLabel(state: AppUpdateStatus['state']): string {
   if (state === 'error') return 'Cần thử lại';
   if (state === 'disabled') return 'Cập nhật tự động chưa sẵn sàng';
   return 'Đang dùng bản mới nhất';
+}
+
+/**
+ * Mức của trạng thái cập nhật. Không cập nhật được (mất mạng, tệp lỗi...) chỉ là CẢNH BÁO: ứng dụng
+ * hiện tại vẫn dùng bình thường nên không được hiện đỏ.
+ */
+function updateTone(state: AppUpdateStatus['state']): NoticeTone {
+  if (state === 'error') return 'warning';
+  if (state === 'disabled') return 'neutral';
+  if (state === 'downloaded') return 'success';
+  if (state === 'idle' || state === 'not-available') return 'success';
+  return 'info';
 }
 
 // TUBMEDIA_V133_PROFESSIONAL_PASSIVE_UPDATE_CENTER
@@ -149,9 +164,11 @@ export function UpdatesPage(): React.JSX.Element {
           </p>
         </div>
 
-        <span className={`update-state-badge update-state-${state}`}>
+        <span className={`update-state-badge tone-${updateTone(state)} update-state-${state}`}>
           {state === 'error' ? (
             <AlertTriangle size={15} />
+          ) : state === 'disabled' ? (
+            <ToneIcon tone="neutral" size={15} />
           ) : state === 'checking' ? (
             <RefreshCcw size={15} className="animate-spin" />
           ) : state === 'available' || state === 'downloading' ? (
@@ -187,8 +204,22 @@ export function UpdatesPage(): React.JSX.Element {
           <div className="update-message mt-4">
             <div>
               <b>{headline}</b>
-              {status?.message && (state === 'error' || state === 'disabled') && (
-                <small>{status.message}</small>
+              {status?.message && state === 'error' && (
+                <Notice
+                  tone="warning"
+                  title="Chưa cập nhật được"
+                  steps={[
+                    'Tubmedia hiện tại vẫn dùng bình thường, không mất dữ liệu.',
+                    'Kiểm tra kết nối mạng rồi bấm Thử kiểm tra lại.'
+                  ]}
+                >
+                  {status.message}
+                </Notice>
+              )}
+              {status?.message && state === 'disabled' && (
+                <Notice tone="neutral" title="Cập nhật tự động chưa bật">
+                  {status.message}
+                </Notice>
               )}
               {status?.checkedAt && status.state !== 'checking' && (
                 <small>

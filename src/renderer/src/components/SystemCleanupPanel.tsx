@@ -1,6 +1,7 @@
 import { AlertTriangle, CheckCircle2, HardDrive, ShieldCheck, Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { safeUiText } from '../utils/ui-error';
+import { showNotice } from '../utils/notify';
 import {
   SYSTEM_CLEANUP_CATEGORIES,
   isInspectionOnlyCleanupCategory,
@@ -302,7 +303,7 @@ export function SystemCleanupPanel(): React.JSX.Element {
     setError(null);
 
     if (categories.length === 0) {
-      setError('Hãy chọn ít nhất một hạng mục.');
+      showNotice('warning', 'Chưa chọn hạng mục nào', 'Hãy chọn ít nhất một hạng mục rồi thử lại.');
       return;
     }
 
@@ -312,12 +313,12 @@ export function SystemCleanupPanel(): React.JSX.Element {
     const categoryItems = SYSTEM_CLEANUP_CATEGORIES.filter((item) => executableCategories.includes(item.id));
 
     if (mode === 'clean' && lastScannedKey !== requestKey) {
-      setError('Hãy quét dung lượng với đúng phạm vi và hạng mục hiện tại trước khi xóa.');
+      showNotice('warning', 'Cần quét lại trước khi xóa', 'Hãy quét dung lượng với đúng phạm vi và hạng mục hiện tại trước khi xóa.');
       return;
     }
 
     if (mode === 'clean' && executableCategories.length === 0) {
-      setError('Các hạng mục đang chọn chỉ dùng để lập báo cáo, không có dữ liệu nào được phép xóa.');
+      showNotice('info', 'Chỉ có báo cáo, không xóa gì', 'Các hạng mục đang chọn chỉ dùng để lập báo cáo, không có dữ liệu nào được phép xóa.');
       return;
     }
 
@@ -345,7 +346,7 @@ export function SystemCleanupPanel(): React.JSX.Element {
         );
 
         if (phrase !== 'TAT NGU DONG') {
-          setError('Đã hủy thao tác tắt chế độ ngủ đông.');
+          showNotice('neutral', 'Đã hủy thao tác', 'Chế độ ngủ đông vẫn được giữ nguyên.');
           return;
         }
       }

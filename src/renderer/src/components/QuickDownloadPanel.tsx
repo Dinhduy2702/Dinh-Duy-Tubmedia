@@ -20,6 +20,7 @@ import { CookieManagerDialog } from './CookieManagerDialog';
 import { UnifiedDownloadProgress } from './UnifiedDownloadProgress';
 import { safeUiText } from '../utils/ui-error';
 import { useAppStore } from '../stores/app-store';
+import { showNotice } from '../utils/notify';
 
 function formatBytes(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0 B';
@@ -217,7 +218,7 @@ export function QuickDownloadPanel(): ReactElement {
       await navigator.clipboard.writeText(url.trim());
       setError(null);
     } catch {
-      setError('Không thể sao chép liên kết. Hãy chọn và sao chép trực tiếp trong ô liên kết.');
+      showNotice('warning', 'Chưa sao chép được liên kết', 'Hãy chọn và sao chép trực tiếp trong ô liên kết.');
     }
   }
 
@@ -291,7 +292,9 @@ export function QuickDownloadPanel(): ReactElement {
   async function revealOutput(): Promise<void> {
     if (!status) return;
     const revealed = await window.desktop.quickDownload.revealOutput(status.taskId);
-    if (!revealed) setError('File đầu ra không còn tồn tại.');
+    if (!revealed) {
+      showNotice('warning', 'Không thấy tệp đầu ra', 'Tệp có thể đã bị di chuyển hoặc xóa. Hãy mở thư mục lưu để kiểm tra.');
+    }
   }
 
   return (

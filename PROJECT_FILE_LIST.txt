@@ -303,6 +303,8 @@ src/renderer/src/components/StatusBadge.tsx
 src/renderer/src/components/SystemCleanupPanel.tsx
 src/renderer/src/components/ToolReadinessPanel.tsx
 src/renderer/src/components/TubmediaBrand.tsx
+src/renderer/src/components/ui/Notice.tsx
+src/renderer/src/components/ui/ToneIcon.tsx
 src/renderer/src/components/UnifiedDownloadProgress.tsx
 src/renderer/src/components/VirtualTableWindow.tsx
 src/renderer/src/components/WorkflowCard.tsx
@@ -337,6 +339,7 @@ src/renderer/src/system-cleanup.css
 src/renderer/src/tokens.css
 src/renderer/src/tubmedia-theme.css
 src/renderer/src/typography.css
+src/renderer/src/utils/notify.ts
 src/renderer/src/utils/ui-error.ts
 src/renderer/src/utils/ui-id.ts
 src/renderer/src/utils/vi-labels.ts
@@ -439,6 +442,7 @@ tests/unit/network-recovery-wiring-r54.test.ts
 tests/unit/non-conflicting-path.test.ts
 tests/unit/normalization-match.test.ts
 tests/unit/normalize-engine-stream-copy.test.ts
+tests/unit/notice-components.test.ts
 tests/unit/notice-tone.test.ts
 tests/unit/notification-center.test.ts
 tests/unit/notification-policy.test.ts

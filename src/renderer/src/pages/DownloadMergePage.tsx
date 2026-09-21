@@ -54,6 +54,7 @@ import { FolderField } from '../components/FolderField';
 import { StatusBadge } from '../components/StatusBadge';
 import { CompactLogRow } from '../components/CompactLogRow';
 import { useAppStore } from '../stores/app-store';
+import { showNotice } from '../utils/notify';
 import { createUiEventId } from '../utils/ui-id';
 import { loadWorkbenchPath, saveWorkbenchPath } from '../utils/workbench-path-memory';
 import { friendlyIssue } from '../utils/ui-error';
@@ -690,7 +691,7 @@ export function DownloadMergePage(): React.JSX.Element {
   const notify = (
     title: string,
     message: string,
-    severity: 'info' | 'success' | 'warning' = 'success'
+    severity: 'info' | 'success' | 'warning' | 'neutral' = 'success'
   ): void => {
     setAttention({ id: createUiEventId('merge-ui'), severity, title, message, sticky: false });
   };
@@ -777,7 +778,7 @@ export function DownloadMergePage(): React.JSX.Element {
         action === 'cancel'
           ? 'Các quy trình ghép khác không bị ảnh hưởng.'
           : 'Hàng đợi và tệp tạm hiện tại được giữ để tiếp tục đúng vị trí.',
-        action === 'cancel' ? 'warning' : 'success'
+        action === 'resume' ? 'success' : 'neutral'
       );
     } catch (error) {
       setError(messageOf(error));
@@ -795,7 +796,7 @@ export function DownloadMergePage(): React.JSX.Element {
       notify(
         `Thử lại quy trình ghép ${mergeNumber(slot)}`,
         count ? `Đã đưa ${count} tác vụ lỗi về hàng chờ.` : 'Không có tác vụ lỗi cần thử lại.',
-        'info'
+        count ? 'success' : 'neutral'
       );
     } catch (error) {
       setError(messageOf(error));
@@ -850,7 +851,9 @@ export function DownloadMergePage(): React.JSX.Element {
           : false;
       });
       if (hiddenRunning) {
-        setError(
+        showNotice(
+          'warning',
+          'Quy trình ghép đang chạy',
           'Một quy trình ghép sắp bị ẩn vẫn đang chạy. Hãy tạm dừng hoặc hủy riêng quy trình đó trước.'
         );
         return;

@@ -184,8 +184,10 @@ export function App(): React.JSX.Element {
       <div className="app-workspace flex min-w-0 flex-1 flex-col">
         <Topbar />
         <NotificationCenter />
-        <AttentionCenter />
-        <DiagnosticDock />
+        <div className="notice-stack">
+          <AttentionCenter />
+          <DiagnosticDock />
+        </div>
         <main className="app-main scroll min-h-0 flex-1 overflow-auto">
           <Suspense fallback={<PageLoader />}>
             {page === 'editor-home' && <EditorHomePage />}

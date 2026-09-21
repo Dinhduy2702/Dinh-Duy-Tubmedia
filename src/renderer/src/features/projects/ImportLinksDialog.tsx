@@ -14,6 +14,7 @@ import {
 import type { AudioMode, ParsedInputLine } from '@shared/types/domain';
 import { StatusBadge } from '../../components/StatusBadge';
 import { useAppStore } from '../../stores/app-store';
+import { showNotice } from '../../utils/notify';
 
 interface Props {
   projectId: string;
@@ -145,7 +146,7 @@ export function ImportLinksDialog({ projectId, open, onOpenChange, onImported }:
     const file = event.dataTransfer.files[0];
     if (!file) return;
     if (!/\.(txt|csv)$/i.test(file.name)) {
-      setError('Chỉ hỗ trợ kéo thả tệp TXT hoặc CSV.');
+      showNotice('warning', 'Chưa hỗ trợ loại tệp này', 'Chỉ hỗ trợ kéo thả tệp TXT hoặc CSV.');
       return;
     }
     setText(importTextForPath(file.name, await file.text()));
