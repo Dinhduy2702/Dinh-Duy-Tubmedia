@@ -1541,7 +1541,12 @@ function MergeLaneCard({
           <button
             className={`btn btn-primary workflow-primary ${state === 'running' ? 'is-running' : ''}`}
             disabled={busy || (state !== 'running' && state !== 'paused' && !canStart)}
-            onClick={() => void primary.action()}
+            onClick={(event) => {
+              // Nút này đổi vai (Bắt đầu → Tạm dừng) ngay tại chỗ; cú click thứ hai của thao tác bấm đôi
+              // sẽ rơi vào nút Tạm dừng và dừng ngay tác vụ vừa khởi động.
+              if (event.detail > 1) return;
+              void primary.action();
+            }}
           >
             {busy ? <LoaderCircle className="animate-spin" size={18} /> : <PrimaryIcon size={18} />}
             {busy ? 'Đang thực hiện...' : primary.label}

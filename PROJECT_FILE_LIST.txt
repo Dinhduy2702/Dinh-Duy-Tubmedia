@@ -427,6 +427,7 @@ tests/unit/notification-center.test.ts
 tests/unit/notification-policy.test.ts
 tests/unit/open-path-policy.test.ts
 tests/unit/output-path-containment.test.ts
+tests/unit/primary-button-double-click.test.ts
 tests/unit/process-abort-before-spawn.test.ts
 tests/unit/process-callback-safety.test.ts
 tests/unit/process-encoding.test.ts
