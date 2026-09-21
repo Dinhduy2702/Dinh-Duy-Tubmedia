@@ -46,6 +46,7 @@ import type { ZodType } from 'zod';
 import { exportSanitizedLogTree } from '../logging/diagnostic-exporter.js';
 import { redactSecrets } from '@shared/utils/secret-redaction.js';
 import type { AppContext } from '../app/app-context.js';
+import { isBlockedOpenPath } from '../security/open-path-policy.js';
 
 import { SystemCleanupService } from '../system/system-cleanup-service.js';
 import { VideoLinkFilterService } from '../media/video-link-filter-service.js';
@@ -109,7 +110,12 @@ export function registerIpc(ctx: AppContext): void {
     };
   });
   noArgs(IPC.app.getSystemStats, () => ctx.systemStats.sample());
-  handle(IPC.app.showPath, showPathSchema, ({ path }) => shell.openPath(path));
+  handle(IPC.app.showPath, showPathSchema, ({ path }) => {
+    if (isBlockedOpenPath(path)) {
+      throw new InvalidInputError('Tubmedia không mở tệp thực thi hoặc script từ giao diện.');
+    }
+    return shell.openPath(path);
+  });
   noArgs(IPC.app.readClipboard, () => clipboard.readText());
   handle(IPC.app.writeClipboard, clipboardTextSchema, ({ text }) => {
     clipboard.writeText(text);

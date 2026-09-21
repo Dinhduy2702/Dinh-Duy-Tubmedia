@@ -254,6 +254,7 @@ src/main/processes/process-manager.ts
 src/main/projects/project-service.ts
 src/main/queue/queue-manager.ts
 src/main/runtime/electron-security-guard.ts
+src/main/security/open-path-policy.ts
 src/main/security/sender-validator.ts
 src/main/settings/defaults.ts
 src/main/settings/hardware-service.ts
@@ -416,6 +417,7 @@ tests/unit/normalization-match.test.ts
 tests/unit/normalize-engine-stream-copy.test.ts
 tests/unit/notification-center.test.ts
 tests/unit/notification-policy.test.ts
+tests/unit/open-path-policy.test.ts
 tests/unit/process-abort-before-spawn.test.ts
 tests/unit/process-callback-safety.test.ts
 tests/unit/process-encoding.test.ts
