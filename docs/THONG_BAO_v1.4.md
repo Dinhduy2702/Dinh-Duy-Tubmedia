@@ -13,12 +13,15 @@ v1.3.7 và màu mới theo bảng màu phương án C. Nguồn số liệu:
 | Mức | Khi nào | Màu mới | Biểu tượng + nhãn chữ | Tự tắt? |
 |---|---|---|---|---|
 | Lỗi | Việc đang làm bị hỏng thật | đỏ `#B3261E` | ⊗ "Lỗi" | **Không** (đóng được) |
-| Cảnh báo | Việc vẫn chạy nhưng cần chú ý, hoặc thiếu điều kiện | vàng cam `#B26A00` | ⚠ "Cảnh báo" | 6,5 giây |
+| Cảnh báo | Việc vẫn chạy nhưng cần chú ý, hoặc thiếu điều kiện | vàng cam `#B26A00` | ⚠ "Cảnh báo" | 6,5 giây; **cảnh báo cần hành động (cookies, giới hạn tốc độ, mạng, chặn cập nhật…) tối thiểu 12 giây** |
 | Thông tin | Thông tin, tiến trình | xanh dương `#1F5FBF` | ⓘ "Thông tin" | 4,8 giây |
 | Thành công | Hoàn tất | xanh lá `#1F7A3D` | ✓ "Thành công" | 3,6 giây |
 | Ghi nhận (trung tính) | Đã hủy, tạm dừng, bỏ qua, không có gì để làm | xám `#5F5B55` | ⊖ "Đã ghi nhận" | 4,8 giây |
 
 Nhật ký đầy đủ luôn còn trong **Trung tâm thông báo** và trang **Nhật ký**, kể cả khi thông báo nổi đã tự tắt.
+Mọi thông báo nổi đều để lại một **mục CHƯA ĐỌC** (có chấm báo ở chuông và ở từng mục) cho tới khi người dùng mở Trung tâm thông báo.
+Trỏ chuột hoặc focus vào thông báo nổi sẽ **tạm dừng đồng hồ đếm ngược**. Quy tắc hiển thị nằm ở một chỗ duy nhất:
+`noticeDisplayPolicy` trong `src/shared/utils/notification-policy.ts`.
 
 ## A. Thông báo có chữ cố định do giao diện tạo ra
 
@@ -64,7 +67,7 @@ dùng `--accent`, tức **màu ĐỎ thương hiệu** — nên mọi thông bá
 | `NotificationCenter` | "Đã sao chép đường dẫn" / "Không thể mở vị trí đầu ra" / "…sao chép" | Thành công / Cảnh báo | xanh lá / vàng | xanh lá / vàng | — |
 | `use-desktop-events` | "Đã có Tubmedia X" (bản mới) | Thông tin | đỏ | xanh dương | — |
 | `use-desktop-events` | "Bản cập nhật đã sẵn sàng" | Thành công | xanh lá (cố định) | xanh lá (tự tắt) | ✔ không còn cố định |
-| `use-desktop-events` | "Cần thêm Cookies" | Cảnh báo | vàng (cố định) | vàng (tự tắt; việc vẫn hiện ở khung chặn) | ✔ |
+| `use-desktop-events` | "Cần thêm Cookies" | Cảnh báo cần hành động | vàng (cố định) | vàng, hiện ≥ 12 giây (tạm dừng khi trỏ chuột/focus), luôn còn mục chưa đọc | ✔ |
 
 ## B. Thông báo gửi từ tiến trình chính (`queue-manager`)
 
@@ -72,8 +75,9 @@ Các thông báo này **đã có mức rõ ràng** từ nguồn (`AttentionNotic
 
 | Mã / tình huống | Mức thật | Màu cũ | Màu mới | Ghi chú |
 |---|---|---|---|---|
-| `DISK_FULL` (đã tạm dừng an toàn) | Cảnh báo | vàng (cố định) | vàng (tự tắt; nằm lại ở khung chặn của tác vụ) | mức do mã nguồn quyết định |
-| `PERMISSION_DENIED`, `SOURCE_RATE_LIMITED`, `NETWORK_CIRCUIT_OPEN` | Cảnh báo | vàng | vàng | — |
+| `DISK_FULL` (đã tạm dừng an toàn) | Lỗi | vàng (cố định) | đỏ (**không tự tắt**, đóng được) | ✔ trước đây `queue-manager` gắn mức cảnh báo; nay lấy mức từ bảng mức theo mã lỗi nên là LỖI ở mọi tầng |
+| `PERMISSION_DENIED` (không ghi được vào thư mục) | Lỗi | vàng (cố định) | đỏ (**không tự tắt**, đóng được) | ✔ cùng nhóm với `DISK_FULL` (việc bị dừng vì môi trường, người dùng phải xử lý) |
+| `SOURCE_RATE_LIMITED`, `NETWORK_CIRCUIT_OPEN` | Cảnh báo cần hành động | vàng (cố định) | vàng, hiện ≥ 12 giây, tạm dừng khi trỏ chuột/focus, luôn còn mục chưa đọc | ✔ |
 | Công cụ thiếu / lỗi ghép / lỗi xử lý (không tự phục hồi) | Lỗi | đỏ (cố định) | đỏ (không tự tắt, đóng được) | — |
 | Lỗi ngoài có thể phục hồi (mạng, máy chủ nguồn) | Cảnh báo | vàng | vàng | — |
 | `DISK_SPACE_RECOVERED` | Thành công | xanh lá | xanh lá | — |
@@ -85,7 +89,7 @@ Các cột "Màu cũ" lấy từ chạy thật `friendlyIssue` v1.3.7.
 
 | Lỗi | Mã | Mức thật | Màu cũ | Màu mới |
 |---|---|---|---|---|
-| "Hãy tạm dừng hoặc hoàn tất mọi tác vụ… trước khi cập nhật." | `UPDATE_BLOCKED_ACTIVE_WORK` | Cảnh báo | **đỏ** | vàng |
+| "Hãy tạm dừng hoặc hoàn tất mọi tác vụ… trước khi cập nhật." | `UPDATE_BLOCKED_ACTIVE_WORK` | Cảnh báo cần hành động | **đỏ** | vàng (≥ 12 giây) |
 | "Chỉ có thể cài phiên bản mới hơn… đã chặn thao tác hạ cấp." | `UPDATE_NOT_NEWER` | Thông tin | **đỏ** | xanh dương |
 | "Không thể tải trọn vẹn bản cập nhật…" (mất mạng, tệp hỏng, sai mã băm) | `UPDATE_DOWNLOAD_FAILED` | Cảnh báo | **đỏ** | vàng |
 | "Chưa thể chuẩn bị cập nhật an toàn…" | `UPDATE_INSTALL_PREPARATION_FAILED` | Cảnh báo | **đỏ** | vàng |
@@ -95,7 +99,7 @@ Các cột "Màu cũ" lấy từ chạy thật `friendlyIssue` v1.3.7.
 | "Không có gì để dọn." | (chữ) | Trung tính | **vàng** (cảnh báo) | xám |
 | Cookies hết hạn / cần đăng nhập / bị khóa / sai định dạng | `COOKIES_EXPIRED`… | Cảnh báo | vàng | vàng |
 | Dữ liệu nhập chưa hợp lệ (`ZodError`) | `INVALID_INPUT` | Cảnh báo | vàng | vàng |
-| Ổ đĩa không đủ dung lượng | `DISK_FULL` | Lỗi | đỏ | đỏ |
+| Ổ đĩa không đủ dung lượng | `DISK_FULL` | Lỗi | đỏ (qua IPC) / **vàng** (từ tiến trình chính) | đỏ, không tự tắt |
 | Thiếu công cụ bắt buộc | `TOOL_NOT_FOUND` | Lỗi | đỏ | đỏ |
 | Thành phẩm bị hậu kiểm chặn (frame lỗi, timestamp) | `VERIFICATION_FAILED` | Lỗi | đỏ | đỏ |
 | Lỗi lạ chưa phân loại | (không có) | Lỗi | đỏ | đỏ (giữ, an toàn hơn là nói nhẹ đi) |

@@ -31,6 +31,7 @@ import {
   isCircuitEligibleDownloadFailure
 } from '@shared/utils/download-failure.js';
 import { effectiveMemoryReserveBytes } from '@shared/utils/resource-memory.js';
+import { toneForErrorCode } from '@shared/utils/notice-tone.js';
 
 interface ActiveJob {
   job: QueueJob;
@@ -1141,13 +1142,9 @@ export class QueueManager {
                   : ['Mở mục Công cụ.', 'Chọn Kiểm tra lại hoặc Sửa chữa tất cả.'];
     const notice: AttentionNotice = {
       id: `blocking-${scope}-${code}`,
-      severity:
-        code === 'DISK_FULL' ||
-        code === 'PERMISSION_DENIED' ||
-        code === 'SOURCE_RATE_LIMITED' ||
-        code === 'NETWORK_CIRCUIT_OPEN'
-          ? 'warning'
-          : 'error',
+      // Mức lấy từ bảng mức theo mã lỗi (notice-tone.ts): hết dung lượng và không có quyền ghi là LỖI
+      // (không tự tắt), giới hạn tốc độ / mạng không ổn định / cần đăng nhập là CẢNH BÁO cần hành động.
+      severity: toneForErrorCode(code),
       title,
       message,
       code,

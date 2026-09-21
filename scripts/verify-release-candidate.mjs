@@ -102,10 +102,11 @@ check(
 );
 check(
   'critical errors remain until resolved or dismissed',
-  has(
-    'src/renderer/src/components/AttentionCenter.tsx',
-    'Boolean(error || (attention?.sticky && !attentionResolved))'
-  ) && has('src/renderer/src/components/AttentionCenter.tsx', 'isAttentionNoticeResolved(attention, jobs)')
+  // Quy tắc nằm ở noticeDisplayPolicy (notification-policy.ts): lỗi thật không tự tắt trừ khi nguyên nhân đã được giải quyết.
+  has('src/renderer/src/components/AttentionCenter.tsx', 'noticeDisplayPolicy(') &&
+    has('src/renderer/src/components/AttentionCenter.tsx', '!error && attentionResolved') &&
+    has('src/renderer/src/components/AttentionCenter.tsx', 'isAttentionNoticeResolved(attention, jobs)') &&
+    has('src/shared/utils/notification-policy.ts', 'isPersistentNoticeTone(notice.severity) && !resolved')
 );
 check(
   'notification timeout is severity-aware',

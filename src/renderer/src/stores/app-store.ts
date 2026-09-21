@@ -480,6 +480,7 @@ export const useAppStore = create<State>((set, get) => ({
         severity: issue.tone,
         title: issue.title,
         message: issue.message,
+        ...(issue.code ? { code: issue.code } : {}),
         ...(issue.steps.length > 0 ? { steps: issue.steps } : {}),
         sticky: false
       };

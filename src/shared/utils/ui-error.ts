@@ -14,6 +14,8 @@ export interface FriendlyIssue {
   steps: string[];
   technical: string;
   tone: UiTone;
+  /** Mã lỗi nghiệp vụ khi lỗi đến từ tiến trình chính (có dấu kiểu). */
+  code?: string;
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -388,7 +390,7 @@ function classifyIssue(value: unknown): FriendlyIssue {
       message: 'Danh sách đã tạm dừng trước khi ghi thêm dữ liệu để tránh làm hỏng tệp.',
       steps: ['Giải phóng dung lượng hoặc đổi thư mục lưu.', 'Nhấn Tiếp tục sau khi đã xử lý.'],
       technical,
-      tone: 'warning'
+      tone: 'error'
     };
   }
   if (
@@ -401,7 +403,7 @@ function classifyIssue(value: unknown): FriendlyIssue {
       message: 'Windows đang chặn quyền truy cập hoặc đường dẫn không còn tồn tại.',
       steps: ['Chọn thư mục khác trên ổ dữ liệu.', 'Kiểm tra ổ đĩa còn kết nối rồi thử lại.'],
       technical,
-      tone: 'warning'
+      tone: 'error'
     };
   }
   if (
@@ -551,6 +553,7 @@ export function friendlyIssue(value: unknown): FriendlyIssue {
   return {
     ...issue,
     tone: typed.tone,
+    code: typed.code,
     ...(generic ? { title: TYPED_FALLBACK_TITLE[typed.tone], steps: TYPED_FALLBACK_STEPS[typed.tone] } : {})
   };
 }

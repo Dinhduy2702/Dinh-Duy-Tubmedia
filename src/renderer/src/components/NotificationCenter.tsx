@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { Project, QueueJob } from '@shared/types/domain';
-import { isJobNoticeStillBlocking } from '@shared/utils/notification-policy';
+import { isActionRequiredWarning, isJobNoticeStillBlocking } from '@shared/utils/notification-policy';
 import { NOTICE_TONE_LABEL } from '@shared/utils/notice-tone';
 import { ToneIcon } from './ui/ToneIcon';
 import { useShallow } from 'zustand/react/shallow';
@@ -362,7 +362,9 @@ export function NotificationCenter(): React.JSX.Element | null {
                         {notification.count > 1 && (
                           <span className="notification-count">×{notification.count}</span>
                         )}
-                        {notification.sticky && <span className="notification-action-label">Cần xử lý</span>}
+                        {(notification.sticky || isActionRequiredWarning(notification)) && (
+                          <span className="notification-action-label">Cần xử lý</span>
+                        )}
                         {notification.pinned && <Pin size={13} aria-label="Đã ghim" />}
                         {!notification.readAt && (
                           <i className="notification-unread-dot" aria-label="Chưa đọc" />

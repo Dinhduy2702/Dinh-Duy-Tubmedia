@@ -444,6 +444,7 @@ tests/unit/non-conflicting-path.test.ts
 tests/unit/normalization-match.test.ts
 tests/unit/normalize-engine-stream-copy.test.ts
 tests/unit/notice-components.test.ts
+tests/unit/notice-display-policy.test.ts
 tests/unit/notice-tone.test.ts
 tests/unit/notification-center.test.ts
 tests/unit/notification-policy.test.ts

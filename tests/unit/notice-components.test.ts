@@ -45,7 +45,7 @@ describe('thành phần thông báo luôn có biểu tượng + chữ, không ch
     const toast = source('src/renderer/src/components/AttentionCenter.tsx');
     expect(toast).toContain('NOTICE_TONE_LABEL[tone]');
     expect(toast).toContain('<ToneIcon tone={tone}');
-    expect(toast).toContain('isPersistentNoticeTone(tone)');
+    expect(toast).toContain('noticeDisplayPolicy(');
     expect(toast).toContain('aria-label="Đóng thông báo"');
     expect(toast).toContain('tone-${tone}');
   });

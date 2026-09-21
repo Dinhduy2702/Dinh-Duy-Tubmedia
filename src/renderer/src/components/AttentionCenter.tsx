@@ -1,10 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { X, Cookie } from 'lucide-react';
-import {
-  isAttentionNoticeResolved,
-  isPersistentNoticeTone,
-  notificationDuration
-} from '@shared/utils/notification-policy';
+import { isAttentionNoticeResolved, noticeDisplayPolicy } from '@shared/utils/notification-policy';
 import { NOTICE_TONE_LABEL, noticeAriaRole } from '@shared/utils/notice-tone';
 import { ToneIcon } from './ui/ToneIcon';
 import { useAppStore } from '../stores/app-store';
@@ -44,10 +40,20 @@ export function AttentionCenter(): React.JSX.Element | null {
     ['AUTHENTICATION_REQUIRED', 'COOKIES_EXPIRED', 'BROWSER_COOKIE_DATABASE_LOCKED'].includes(
       attention?.code ?? ''
     );
-  // Chỉ LỖI THẬT còn nằm lại cho tới khi người dùng đóng (luôn đóng được). Mọi mức khác tự tắt sau vài giây.
-  const sticky =
-    isPersistentNoticeTone(tone) && Boolean(error || (attention?.sticky && !attentionResolved));
-  const duration = notificationDuration(tone);
+  // Quy tắc hiển thị duy nhất (notification-policy.ts): lỗi thật không tự tắt (đóng được, trừ khi nguyên nhân đã
+  // được giải quyết); cảnh báo cần hành động hiện tối thiểu 12 giây; mức khác tự tắt nhanh. Trỏ chuột hoặc focus
+  // vào thông báo sẽ tạm dừng đồng hồ đếm ngược.
+  const display = noticeDisplayPolicy(
+    {
+      severity: tone,
+      code: attention?.code ?? issue?.code,
+      sticky: attention?.sticky,
+      steps: attention?.steps ?? issue?.steps
+    },
+    !error && attentionResolved
+  );
+  const sticky = display.persistent;
+  const duration = display.durationMs;
 
   const clearTimers = useCallback((): void => {
     if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
