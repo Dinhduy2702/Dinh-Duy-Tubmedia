@@ -239,6 +239,7 @@ src/main/files/ensure-directory.ts
 src/main/files/file-ownership.ts
 src/main/files/non-conflicting-path.ts
 src/main/files/path-containment.ts
+src/main/files/save-text-file-policy.ts
 src/main/files/temporary-cleanup.ts
 src/main/index.ts
 src/main/input/input-service.ts
@@ -451,6 +452,7 @@ tests/unit/retry.test.ts
 tests/unit/runtime-performance-policy.test.ts
 tests/unit/runtime-recovery-upgrade.test.ts
 tests/unit/safe-json.test.ts
+tests/unit/save-text-file-policy.test.ts
 tests/unit/secret-redaction.test.ts
 tests/unit/settings-policy.test.ts
 tests/unit/settings-save-stale-error.test.ts

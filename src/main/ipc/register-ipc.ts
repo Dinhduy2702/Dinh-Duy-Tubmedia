@@ -47,6 +47,7 @@ import { exportSanitizedLogTree } from '../logging/diagnostic-exporter.js';
 import { redactSecrets } from '@shared/utils/secret-redaction.js';
 import type { AppContext } from '../app/app-context.js';
 import { openPathBlockReason } from '../security/open-path-policy.js';
+import { saveTextTypeFor, withRequiredExtension } from '../files/save-text-file-policy.js';
 
 import { SystemCleanupService } from '../system/system-cleanup-service.js';
 import { VideoLinkFilterService } from '../media/video-link-filter-service.js';
@@ -228,14 +229,14 @@ export function registerIpc(ctx: AppContext): void {
     return result.canceled ? null : (result.filePaths[0] ?? null);
   });
   handle(IPC.dialogs.saveTextFile, saveTextFileSchema, async ({ defaultName, content, defaultFolder }) => {
+    // Đuôi lấy theo tên gợi ý (.txt/.csv/.json); trước đây luôn ép .txt nên CSV thành ".csv.txt".
+    const type = saveTextTypeFor(defaultName);
     const result = await dialog.showSaveDialog({
       defaultPath: defaultFolder ? join(defaultFolder, defaultName) : defaultName,
-      filters: [{ name: 'Tệp văn bản', extensions: ['txt'] }]
+      filters: [{ name: type.filterName, extensions: [type.extension] }]
     });
     if (result.canceled || !result.filePath) return null;
-    const filePath = result.filePath.toLowerCase().endsWith('.txt')
-      ? result.filePath
-      : `${result.filePath}.txt`;
+    const filePath = withRequiredExtension(result.filePath, type.extension);
     await writeFile(filePath, content, 'utf8');
     return filePath;
   });
