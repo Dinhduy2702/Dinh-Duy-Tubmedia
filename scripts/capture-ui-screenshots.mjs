@@ -8,9 +8,9 @@
 // chặn hộp thoại/mở thư mục/clipboard/tự khởi động, không tải công cụ (dùng sẵn công cụ đã có),
 // không mạng cập nhật, không đụng cookie hay tài khoản. Chỉ bấm chuyển trang, không thực hiện tác vụ nào.
 // Ảnh lưu NGOÀI repo: <out>/<label>/<trạng-thái>/<kích-thước>/<sáng|tối>/<số>-<trang>.png
-/* global window, document -- chạy bên trong trang qua page.evaluate */
+/* global window, document, getComputedStyle, SVGElement -- chạy bên trong trang qua page.evaluate */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -32,6 +32,11 @@ const onlyPages = option('pages', '')
   .split(',')
   .filter(Boolean);
 const explicitToolsDirectory = option('tools', '');
+// --audit: kiểm tra màu trên giao diện THẬT (đỏ ngoài lỗi, tương phản chữ) và ghi audit-mau.json.
+const auditColors = args.includes('--audit');
+const auditResults = [];
+// --gallery: chụp "thư viện mức thông báo" (mẫu dựng bằng ĐÚNG các lớp CSS của thành phần thật) cho cả hai giao diện.
+const captureGallery = args.includes('--gallery');
 
 const PAGES = [
   ['editor-home', 'tong-quan'],
@@ -296,6 +301,145 @@ async function dismissOverlays(page) {
   }
 }
 
+// Chạy trong trang: liệt kê phần tử dùng màu ĐỎ ngoài vùng cho phép và chữ thiếu tương phản.
+function auditPageColors() {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 1;
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  const parse = (value) => {
+    if (!value || value === 'transparent') return null;
+    context.clearRect(0, 0, 1, 1);
+    context.fillStyle = '#000';
+    context.fillStyle = value;
+    context.fillRect(0, 0, 1, 1);
+    const [r, g, b, a] = context.getImageData(0, 0, 1, 1).data;
+    return { r, g, b, a: a / 255 };
+  };
+  const isRed = (c) => {
+    if (!c || c.a < 0.4) return false;
+    const max = Math.max(c.r, c.g, c.b);
+    const min = Math.min(c.r, c.g, c.b);
+    if (max < 130 || max - min < 70) return false;
+    return c.r === max && c.g < c.r * 0.45 && c.b < c.r * 0.55;
+  };
+  // Màu của mức LỖI trong bảng màu (chữ, biểu tượng, nút nguy hiểm) là đỏ hợp lệ; chỉ đỏ lạc ngoài bảng màu mới bị báo.
+  const rootStyle = getComputedStyle(document.documentElement);
+  const errorTokens = ['--tone-error-text', '--tone-error-icon', '--tone-error-border', '--danger-solid'].map((name) => parse(rootStyle.getPropertyValue(name).trim())).filter(Boolean);
+  const isErrorToken = (c) => c && errorTokens.some((e) => Math.abs(e.r - c.r) + Math.abs(e.g - c.g) + Math.abs(e.b - c.b) <= 6);
+  const strayRed = (value) => { const c = parse(value); return isRed(c) && !isErrorToken(c); };
+  const lin = (v) => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = (c) => 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b);
+  const ratio = (a, b) => {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+  };
+  const over = (top, bottom) => {
+    const a = top.a + bottom.a * (1 - top.a);
+    if (a === 0) return { r: 0, g: 0, b: 0, a: 0 };
+    return {
+      r: (top.r * top.a + bottom.r * bottom.a * (1 - top.a)) / a,
+      g: (top.g * top.a + bottom.g * bottom.a * (1 - top.a)) / a,
+      b: (top.b * top.a + bottom.b * bottom.a * (1 - top.a)) / a,
+      a
+    };
+  };
+  const allowedRed = '.tone-error, [data-tone="error"], .btn-danger, .confirm-danger-button, .tubmedia-wordmark-picture, .tubmedia-wordmark-mark, .developer-signature-logo, .sidebar-brand, .startup-logo, .btn-delete-lane, .diagnostics-error-list, img, picture, [class*="tubmedia-mark"], svg:has([class*="tubmedia-mark"])';
+  const own = (el) => {
+    const raw = el.getAttribute('class');
+    return el.tagName.toLowerCase() + (raw && raw.trim() ? '.' + raw.trim().split(/\s+/).slice(0, 3).join('.') : '');
+  };
+  // Với phần tử không có class (svg/path/b...) ghi thêm phần tử cha gần nhất có class để dễ tìm nguồn màu.
+  const label = (el) => {
+    if (el.getAttribute('class')) return own(el);
+    const parent = el.closest('[class]');
+    return own(el) + (parent ? ' < ' + own(parent) : '');
+  };
+  const reds = [];
+  const lowContrast = [];
+  let textElements = 0;
+  for (const el of document.querySelectorAll('body *')) {
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) continue;
+    const style = getComputedStyle(el);
+    if (style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity) === 0) continue;
+    if (!el.closest(allowedRed)) {
+      const found = [];
+      if (strayRed(style.color) && [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) found.push('chữ');
+      if (strayRed(style.backgroundColor)) found.push('nền');
+      if (parseFloat(style.borderTopWidth) > 0 && strayRed(style.borderTopColor)) found.push('viền');
+      if (el instanceof SVGElement && (strayRed(style.stroke) || strayRed(style.fill))) found.push('biểu tượng');
+      if (found.length) reds.push(label(el) + ' [' + found.join(',') + ']');
+    }
+    const ownText = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+    if (!ownText) continue;
+    textElements += 1;
+    const fg = parse(style.color);
+    if (!fg) continue;
+    let background = { r: 0, g: 0, b: 0, a: 0 };
+    let unknown = false;
+    for (let node = el; node && background.a < 0.999; node = node.parentElement) {
+      const s = getComputedStyle(node);
+      if (s.backgroundImage !== 'none' && !s.backgroundImage.includes('url(')) unknown = true;
+      const c = parse(s.backgroundColor);
+      if (c && c.a > 0) background = over(background, c);
+      if (unknown && background.a < 0.999) break;
+    }
+    if (unknown || background.a < 0.999) continue;
+    const size = parseFloat(style.fontSize);
+    const bold = Number(style.fontWeight) >= 700;
+    const need = size >= 24 || (size >= 18.66 && bold) ? 3 : 4.5;
+    const composed = fg.a < 1 ? over(fg, background) : fg;
+    const value = ratio(composed, background);
+    if (value < need) lowContrast.push({ el: label(el), ratio: Number(value.toFixed(2)), need, size: Math.round(size), text: el.textContent.trim().slice(0, 30) });
+  }
+  return { reds, lowContrast, textElements };
+}
+
+// Chạy trong trang: dựng bảng mẫu 5 mức (thông báo nổi, khung trong trang, nhãn trạng thái, nút).
+function buildToneGallery() {
+  const svg = (paths) =>
+    '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths + '</svg>';
+  const icons = {
+    error: svg('<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>'),
+    warning: svg('<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>'),
+    info: svg('<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>'),
+    success: svg('<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>'),
+    neutral: svg('<circle cx="12" cy="12" r="10"/><path d="M8 12h8"/>')
+  };
+  const labels = { error: 'Lỗi', warning: 'Cảnh báo', info: 'Thông tin', success: 'Thành công', neutral: 'Đã ghi nhận' };
+  const samples = {
+    error: ['Ổ đĩa không đủ dung lượng', 'Tubmedia đã tạm dừng tác vụ trước khi đầy ổ đĩa.'],
+    warning: ['Chưa cập nhật được', 'Hãy tạm dừng hoặc hoàn tất mọi tác vụ trước khi cập nhật.'],
+    info: ['Đã có Tubmedia mới', 'Chọn Cập nhật ngay để tải và theo dõi tiến độ trong app.'],
+    success: ['Đã hoàn tất 3 video', 'Các video đã được kiểm tra và lưu vào thư mục thành phẩm.'],
+    neutral: ['Đã hủy thao tác', 'Dữ liệu đã hoàn tất trước đó vẫn được giữ nguyên.']
+  };
+  const tones = ['error', 'warning', 'info', 'success', 'neutral'];
+  const toast = (tone) =>
+    '<div class="attention-center tone-' + tone + ' attention-' + tone + ' attention-visible" style="position:relative;left:auto;top:auto;transform:none;width:100%">' +
+    '<div class="attention-accent"></div><div class="attention-icon">' + icons[tone] + '</div>' +
+    '<div class="attention-copy"><div class="attention-heading"><span class="tone-chip">' + labels[tone] + '</span><div class="text-sm font-black">' + samples[tone][0] + '</div></div>' +
+    '<div class="mt-1 text-sm leading-5">' + samples[tone][1] + '</div></div><button class="attention-close" aria-label="Đóng">×</button></div>';
+  const notice = (tone) =>
+    '<div class="notice tone-' + tone + '"><span class="notice-icon">' + icons[tone] + '</span><div class="notice-body"><div class="notice-head"><span class="tone-chip">' + labels[tone] + '</span><b class="notice-title">' + samples[tone][0] + '</b></div><div>' + samples[tone][1] + '</div></div></div>';
+  const badge = (status, tone, text) =>
+    '<span class="badge status-badge tone-' + tone + '">' + icons[tone].replace('width="22" height="22"', 'width="13" height="13"') + '<span>' + text + '</span></span>';
+  const badges = [['completed','success','Hoàn tất'],['downloading','info','Đang tải'],['merging','info','Đang ghép'],['paused','neutral','Tạm dừng'],['cancelled','neutral','Đã hủy'],['skipped','neutral','Đã bỏ qua'],['pending','neutral','Đang chờ'],['interrupted','warning','Bị gián đoạn'],['failed','error','Có lỗi']];
+  const host = document.createElement('div');
+  host.id = 'tone-gallery';
+  host.style.cssText = 'position:fixed;inset:0;z-index:5000;overflow:auto;padding:24px 32px;background:var(--bg);color:var(--text);display:grid;grid-template-columns:1fr 1fr;gap:20px 32px;align-content:start';
+  host.innerHTML =
+    '<section><h2 style="margin:0 0 10px;font-size:16px">Thông báo nổi (năm mức) — trong khung .notice-stack như ở app thật</h2><div class="notice-stack" style="position:static;width:100%">' + tones.map(toast).join('') + '</div></section>' +
+    '<section><h2 style="margin:0 0 10px;font-size:16px">Khung trong trang</h2><div style="display:grid;gap:10px">' + tones.map(notice).join('') + '</div>' +
+    '<h2 style="margin:18px 0 10px;font-size:16px">Nhãn trạng thái</h2><div style="display:flex;flex-wrap:wrap;gap:8px">' + badges.map((b) => badge(...b)).join('') + '</div>' +
+    '<h2 style="margin:18px 0 10px;font-size:16px">Nút</h2><div style="display:flex;flex-wrap:wrap;gap:10px"><button class="btn btn-primary">Nút chính</button><button class="btn">Nút phụ</button><button class="btn btn-danger">Xóa (nguy hiểm)</button><button class="btn" disabled>Tắt</button></div>' +
+    '<div class="progress" style="margin-top:14px"><span style="width:62%"></span></div></section>';
+  document.body.appendChild(host);
+}
+
 async function gotoPage(page, id) {
   const selector = `[data-page-id="${id}"]`;
   if (!(await page.locator(selector).count())) return false;
@@ -331,6 +475,10 @@ async function capturePass(handle, state, withOverlays) {
         const file = join(directory, `${String(number).padStart(2, '0')}-${slug}.png`);
         await handle.page.screenshot({ path: file });
         shots.push(file);
+        if (auditColors) {
+          const result = await handle.page.evaluate(auditPageColors);
+          auditResults.push({ state, size, theme, page: id, ...result });
+        }
       }
       if (withOverlays) {
         const bell = handle.page.locator('button[aria-label^="Mở Trung tâm thông báo"]');
@@ -373,8 +521,26 @@ try {
   await handle.page.reload();
   await handle.page.waitForSelector('.app-sidebar', { timeout: 60_000 });
   await capturePass(handle, 'co-du-lieu', true);
+  if (captureGallery) {
+    for (const theme of themes) {
+      await applyTheme(handle.page, theme);
+      await handle.page.evaluate(buildToneGallery);
+      await sleep(400);
+      const galleryDirectory = join(outRoot, label, 'thu-vien-thong-bao');
+      mkdirSync(galleryDirectory, { recursive: true });
+      const galleryFile = join(galleryDirectory, `${theme}.png`);
+      await handle.page.screenshot({ path: galleryFile });
+      shots.push(galleryFile);
+      await handle.page.evaluate(() => document.getElementById('tone-gallery')?.remove());
+    }
+  }
   await closeApp(handle);
   handle = null;
+  if (auditColors) {
+    const auditFile = join(outRoot, label, 'audit-mau.json');
+    writeFileSync(auditFile, JSON.stringify(auditResults, null, 2), 'utf8');
+    console.log(`Đã ghi kiểm tra màu: ${auditFile}`);
+  }
   console.log(`Xong: ${shots.length} ảnh trong ${join(outRoot, label)}`);
 } catch (error) {
   console.error(error);

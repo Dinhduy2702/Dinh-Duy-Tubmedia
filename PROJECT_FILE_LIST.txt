@@ -39,6 +39,7 @@ docs/MIGRATION_PLAN.md
 docs/SECURITY_MODEL.md
 docs/STATE_MACHINE.md
 docs/SYSTEM_DESIGN.md
+docs/THONG_BAO_v1.4.md
 docs/VERIFICATION_STATUS.md
 electron.vite.config.ts
 eslint.config.js
