@@ -1,4 +1,4 @@
-import { useEffect, useState, type ChangeEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import {
   ChevronDown,
   Cpu,
@@ -42,6 +42,7 @@ export function SettingsPage(): React.JSX.Element | null {
   const [saving, setSaving] = useState(false);
   const [settingsAction, setSettingsAction] = useState<'detect' | 'recommend' | 'apply' | null>(null);
   const [recommended, setRecommended] = useState<ResourceProfile | null>(null);
+  const lastSaveFailed = useRef(false);
   const concurrency = hardware ? recommendDownloadConcurrency(hardware) : null;
   const currentPlan = concurrency && settings
     ? planForListCount(concurrency, settings.downloadLaneCount, settings.downloadVerifyEntireFile)
@@ -56,8 +57,16 @@ export function SettingsPage(): React.JSX.Element | null {
     try {
       const next = await window.desktop.settings.update(settings);
       setSettings(next);
+      // Lỗi cố định của lần lưu trước còn treo trên màn hình sẽ che mất thông báo thành công này.
+      if (lastSaveFailed.current) {
+        lastSaveFailed.current = false;
+        setError(null);
+      }
       setAttention({ id: createUiEventId('settings-save'), severity: 'success', title: 'Đã lưu cài đặt', message: 'Các thiết lập mới sẽ được áp dụng cho tác vụ tiếp theo.', sticky: false });
-    } catch (error) { setError(messageOf(error)); }
+    } catch (error) {
+      lastSaveFailed.current = true;
+      setError(messageOf(error));
+    }
     finally { setSaving(false); }
   };
   const detect = async (): Promise<void> => {

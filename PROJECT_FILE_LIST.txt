@@ -447,6 +447,7 @@ tests/unit/runtime-recovery-upgrade.test.ts
 tests/unit/safe-json.test.ts
 tests/unit/secret-redaction.test.ts
 tests/unit/settings-policy.test.ts
+tests/unit/settings-save-stale-error.test.ts
 tests/unit/sha256-sums.test.ts
 tests/unit/smart-merge-pipeline-v120.test.ts
 tests/unit/source-completeness.test.ts
