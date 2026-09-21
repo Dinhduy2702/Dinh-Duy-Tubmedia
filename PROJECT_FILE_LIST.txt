@@ -347,6 +347,7 @@ src/shared/system-cleanup.ts
 src/shared/types/domain.ts
 src/shared/utils/concat-compatibility.ts
 src/shared/utils/cookie-policy.ts
+src/shared/utils/csv.ts
 src/shared/utils/diagnostic-policy.ts
 src/shared/utils/download-failure.ts
 src/shared/utils/download-quality.ts
@@ -390,6 +391,7 @@ tests/unit/cookie-auto-resume.test.ts
 tests/unit/cookie-normalization.test.ts
 tests/unit/cookie-policy.test.ts
 tests/unit/core-resilience-r35.test.ts
+tests/unit/csv-export.test.ts
 tests/unit/diagnostic-policy.test.ts
 tests/unit/disk-full-recovery.test.ts
 tests/unit/download-performance.test.ts
