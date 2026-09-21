@@ -45,6 +45,7 @@ import type { SettingsService } from '../settings/settings-service.js';
 import type { ToolManager } from '../tools/tool-manager.js';
 import { parseYtDlpProgress, YTDLP_PROGRESS_FLAGS, YTDLP_UTF8_FLAGS } from './ytdlp-progress.js';
 import { buildSafeYtDlpArguments } from './ytdlp-arguments.js';
+import { acceptPathInside } from '../files/path-containment.js';
 
 export interface DownloadProgress {
   percent: number;
@@ -1087,7 +1088,20 @@ export class DownloadEngine {
         };
         onProgress(latestProgress);
       } else if (line.startsWith('__VDMSP_FILE__:')) {
-        finalPath = line.slice('__VDMSP_FILE__:'.length).trim();
+        // Đường dẫn do yt-dlp báo về chỉ được tin khi nằm hẳn trong thư mục nguồn của danh sách;
+        // dòng giả (vd. từ tiêu đề video) trỏ ra ngoài bị từ chối và rơi về bước tìm tệp theo mã liên kết.
+        const reportedPath = line.slice('__VDMSP_FILE__:'.length).trim();
+        const acceptedPath = acceptPathInside(project.sourceFolder, reportedPath);
+        if (acceptedPath) {
+          finalPath = acceptedPath;
+        } else {
+          this.logger.warn(
+            'download',
+            'YTDLP_OUTPUT_PATH_REJECTED',
+            'Bỏ qua đường dẫn tệp do yt-dlp báo về vì nằm ngoài thư mục nguồn của danh sách.',
+            { jobId: job.id, projectId: project.id, metadata: { reportedPath } }
+          );
+        }
       } else if (line.startsWith('__VDMSP_TITLE__:')) {
         title = cleanExternalText(line.slice('__VDMSP_TITLE__:'.length));
         if (title) {

@@ -238,6 +238,7 @@ src/main/downloader/ytdlp-progress.ts
 src/main/files/ensure-directory.ts
 src/main/files/file-ownership.ts
 src/main/files/non-conflicting-path.ts
+src/main/files/path-containment.ts
 src/main/files/temporary-cleanup.ts
 src/main/index.ts
 src/main/input/input-service.ts
@@ -422,6 +423,7 @@ tests/unit/normalize-engine-stream-copy.test.ts
 tests/unit/notification-center.test.ts
 tests/unit/notification-policy.test.ts
 tests/unit/open-path-policy.test.ts
+tests/unit/output-path-containment.test.ts
 tests/unit/process-abort-before-spawn.test.ts
 tests/unit/process-callback-safety.test.ts
 tests/unit/process-encoding.test.ts

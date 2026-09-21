@@ -19,6 +19,7 @@ import type { ProcessManager } from '../processes/process-manager.js';
 import type { SettingsService } from '../settings/settings-service.js';
 import type { ToolManager } from '../tools/tool-manager.js';
 import { buildQuickDownloadArguments } from './quick-download-command.js';
+import { acceptPathInside } from '../files/path-containment.js';
 
 import { isExplicitlyRemovedYoutubeSource } from '@shared/utils/download-failure.js';
 
@@ -701,7 +702,19 @@ export class QuickDownloadService {
     }
 
     if (line.startsWith('TUBMEDIA_FILE|')) {
-      active.status.outputPath = line.slice('TUBMEDIA_FILE|'.length);
+      // Chỉ tin đường dẫn nằm hẳn trong thư mục đích; nếu không, bước tìm theo mã (findOutputByToken) sẽ xử lý.
+      const reportedPath = line.slice('TUBMEDIA_FILE|'.length);
+      const acceptedPath = acceptPathInside(active.request.outputDirectory, reportedPath);
+      if (!acceptedPath) {
+        this.logger.warn(
+          'quick-download',
+          'OUTPUT_PATH_REJECTED',
+          'Bỏ qua đường dẫn tệp do yt-dlp báo về vì nằm ngoài thư mục đích.',
+          { jobId: active.status.taskId, metadata: { reportedPath } }
+        );
+        return;
+      }
+      active.status.outputPath = acceptedPath;
       if (!active.status.title) {
         const recoveredTitle = titleFromOutputPath(active.status.outputPath);
         if (recoveredTitle) active.status.title = recoveredTitle;
