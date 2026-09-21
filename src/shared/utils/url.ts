@@ -33,6 +33,27 @@ export function normalizeUrl(raw: string): string | null {
   }
 }
 
+/**
+ * Địa chỉ được phép đưa cho yt-dlp: bắt đầu bằng http(s)://, phân tích được và không có khoảng trắng
+ * hay ký tự điều khiển. Khớp với bộ tách link của trình nhập (`https?://[^\s"'<>]+`), nên dữ liệu
+ * hợp lệ luôn qua được; chuỗi như `--exec ...` hoặc `file:///...` thì không.
+ */
+export function isSafeMediaUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 8192) return false;
+  if (/\s/.test(value)) return false;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code < 0x20 || code === 0x7f) return false;
+  }
+  if (!/^https?:\/\//i.test(value)) return false;
+  try {
+    const url = new URL(value);
+    return (url.protocol === 'http:' || url.protocol === 'https:') && url.hostname.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 export function detectPlatform(normalizedUrl: string): { platform: string; extractorKey: string; mediaId: string | null } {
   const url = new URL(normalizedUrl);
   const host = url.hostname.toLowerCase().replace(/^www\./, '');

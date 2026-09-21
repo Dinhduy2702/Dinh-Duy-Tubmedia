@@ -154,6 +154,7 @@ export function buildQuickDownloadArguments(
     args.push('--ies', 'generic,default');
   }
 
-  args.push(request.url);
+  // "--" bảo đảm URL luôn là đối số vị trí, không bao giờ bị yt-dlp hiểu là tùy chọn.
+  args.push('--', request.url);
   return args;
 }

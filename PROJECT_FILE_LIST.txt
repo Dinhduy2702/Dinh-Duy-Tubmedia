@@ -233,6 +233,7 @@ src/main/database/sqlite.ts
 src/main/download/quick-download-command.ts
 src/main/download/quick-download-service.ts
 src/main/downloader/download-engine.ts
+src/main/downloader/ytdlp-arguments.ts
 src/main/downloader/ytdlp-progress.ts
 src/main/files/ensure-directory.ts
 src/main/files/file-ownership.ts
@@ -374,6 +375,7 @@ TEST_RESULTS.md
 tests/e2e/app.spec.ts
 tests/integration/database.test.ts
 tests/integration/queue-retry-requeue.test.ts
+tests/integration/restore-sources-policy.test.ts
 tests/integration/settings-restore-policy.test.ts
 tests/unit/app-update-version.test.ts
 tests/unit/batch-error-aggregation-r18.test.ts
@@ -470,6 +472,7 @@ tests/unit/windows-process-control.test.ts
 tests/unit/workbench-storage.test.ts
 tests/unit/youtube-source-removed-r36.test.ts
 tests/unit/youtube-url-validation-r34.test.ts
+tests/unit/ytdlp-arguments.test.ts
 tests/unit/ytdlp-progress.test.ts
 TOOL_UPDATE.md
 tool/.vdmsp-tool-metadata.json

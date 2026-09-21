@@ -44,6 +44,7 @@ import type { ProcessManager } from '../processes/process-manager.js';
 import type { SettingsService } from '../settings/settings-service.js';
 import type { ToolManager } from '../tools/tool-manager.js';
 import { parseYtDlpProgress, YTDLP_PROGRESS_FLAGS, YTDLP_UTF8_FLAGS } from './ytdlp-progress.js';
+import { buildSafeYtDlpArguments } from './ytdlp-arguments.js';
 
 export interface DownloadProgress {
   percent: number;
@@ -919,7 +920,6 @@ export class DownloadEngine {
         : `%(title).165B [%(id)s] [${linkTag}].%(ext)s`
     );
     const args = [
-      source.originalUrl,
       '--no-playlist',
       ...(job.attempts > 0 ? ['--no-cache-dir'] : []),
       ...YTDLP_PROGRESS_FLAGS,
@@ -1169,7 +1169,8 @@ export class DownloadEngine {
       projectId: project.id,
       tool: 'yt-dlp',
       executablePath: ytdlp.executablePath,
-      args,
+      // --ignore-config đứng đầu, URL đứng cuối sau "--": URL không bao giờ bị hiểu là tùy chọn.
+      args: buildSafeYtDlpArguments(args, source.originalUrl),
       priority: resource.processPriority,
       timeoutMs: 48 * 60 * 60 * 1000,
       signal,

@@ -244,7 +244,10 @@ export class VideoLinkFilterService {
 
     try {
       const template = ['%(id)s', '%(title)s', '%(webpage_url)s', '%(extractor_key)s'].join(YTDLP_SEPARATOR);
+      // Danh sách link nằm trong --batch-file nên không có URL nào trên dòng lệnh; --ignore-config
+      // chặn tệp cấu hình yt-dlp trên máy chèn thêm tùy chọn (như --exec).
       const args = [
+        '--ignore-config',
         '--ignore-errors',
         '--quiet',
         '--no-warnings',
