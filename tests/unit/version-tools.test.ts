@@ -136,6 +136,12 @@ describe('công cụ tăng và kiểm tra số phiên bản', () => {
     for (const line of good) expect(findHardcodedVersionChecks('x', line)).toEqual([]);
   });
 
+  it('giao diện lấy số phiên bản từ APP_VERSION_LABEL, không tự ghi số riêng', () => {
+    const home = readFileSync(join(process.cwd(), 'src/renderer/src/pages/EditorHomePage.tsx'), 'utf8');
+    expect(home).toContain('APP_VERSION_LABEL');
+    expect(home).not.toMatch(/EDITOR STUDIOs+d/);
+  });
+
   it('mã nguồn thật của dự án đang đồng nhất số phiên bản', () => {
     const files: Record<string, string> = {};
     for (const path of Object.values(VERSION_FILES)) {
