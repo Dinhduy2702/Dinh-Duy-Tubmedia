@@ -122,6 +122,12 @@
     "appId": "com.tubmedia.download-video",
     "productName": "Download video Tubmedia",
     "asar": true,
+    "electronFuses": {
+      "runAsNode": false,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "onlyLoadAppFromAsar": true
+    },
     "npmRebuild": false,
     "directories": {
       "output": "release"

@@ -15,6 +15,7 @@ import { IPC } from '@shared/contracts/channels.js';
 import { AppContext } from './app/app-context.js';
 import { registerIpc } from './ipc/register-ipc.js';
 import { createMainWindow } from './windows/main-window.js';
+import { readDevelopmentEnvironment } from './runtime/development-environment.js';
 import { REQUIRED_TOOL_NAMES } from './tools/tool-manager.js';
 
 let context: AppContext | null = null;
@@ -28,8 +29,7 @@ let shutdownStarted = false;
 let shutdownMode: 'preserve' | 'cancel' = 'preserve';
 let allowWindowClose = false;
 
-const isE2E = process.env.TUBMEDIA_E2E === '1';
-const e2eUserData = process.env.TUBMEDIA_E2E_USER_DATA;
+const { e2e: isE2E, e2eUserData } = readDevelopmentEnvironment(process.env, app.isPackaged);
 
 if (isE2E && e2eUserData) {
   app.setPath('userData', e2eUserData);

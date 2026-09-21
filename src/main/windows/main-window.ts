@@ -1,6 +1,7 @@
 import { app, BrowserWindow, nativeTheme, shell, type Event as ElectronEvent } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readDevelopmentEnvironment } from '../runtime/development-environment.js';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 
@@ -50,8 +51,9 @@ export function createMainWindow(): BrowserWindow {
     if (url !== current) event.preventDefault();
   });
 
-  if (process.env.ELECTRON_RENDERER_URL) {
-    void window.loadURL(process.env.ELECTRON_RENDERER_URL);
+  const { rendererUrl } = readDevelopmentEnvironment(process.env, app.isPackaged);
+  if (rendererUrl) {
+    void window.loadURL(rendererUrl);
   } else {
     void window.loadFile(join(currentDir, '../renderer/index.html'));
   }

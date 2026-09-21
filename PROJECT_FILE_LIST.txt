@@ -255,6 +255,7 @@ src/main/normalize/normalize-engine.ts
 src/main/processes/process-manager.ts
 src/main/projects/project-service.ts
 src/main/queue/queue-manager.ts
+src/main/runtime/development-environment.ts
 src/main/runtime/electron-security-guard.ts
 src/main/security/open-path-policy.ts
 src/main/security/sender-validator.ts
@@ -395,6 +396,7 @@ tests/unit/download-quality.test.ts
 tests/unit/download-recovery-policy.test.ts
 tests/unit/download-recovery-r49.test.ts
 tests/unit/editor-workflows-1.3.0.test.ts
+tests/unit/electron-fuses.test.ts
 tests/unit/encoder-selection.test.ts
 tests/unit/existing-download.test.ts
 tests/unit/ffmpeg-progress.test.ts
