@@ -1,6 +1,12 @@
 import { describeValidationIssues } from './validation-message.js';
+import {
+  NOTICE_TONE_LABEL,
+  readTypedMessage,
+  stripTypedMarker,
+  type NoticeTone
+} from './notice-tone.js';
 
-export type UiTone = 'info' | 'success' | 'warning' | 'error';
+export type UiTone = NoticeTone;
 
 export interface FriendlyIssue {
   title: string;
@@ -62,7 +68,7 @@ function parseStructuredString(value: string): unknown {
 }
 
 function cleanRemotePrefix(raw: string): string {
-  return raw
+  return stripTypedMarker(raw)
     .replace(/^Error invoking remote method '[^']+':\s*/i, '')
     .replace(/^[A-Za-z]+Error:\s*/i, '')
     .replace(/^Error:\s*/i, '')
@@ -218,7 +224,7 @@ export function safeUiText(value: unknown, fallback = 'Không thể hoàn tất 
   return userMessage(preferred, fallback);
 }
 
-export function friendlyIssue(value: unknown): FriendlyIssue {
+function classifyIssue(value: unknown): FriendlyIssue {
   const structured = typeof value === 'string' ? parseStructuredString(value) : value;
   const technical = stableTechnical(structured);
   const completed = completedResult(structured);
@@ -256,17 +262,26 @@ export function friendlyIssue(value: unknown): FriendlyIssue {
     };
   }
 
-  if (/^(?:đã\s+hủy|thao\s+tác\s+đã\s+hủy|cancelled|canceled)/i.test(cleaned)) {
+  if (/^(?:đã\s+hủy|thao\s+tác\s+đã\s+hủy|tác\s+vụ\s+đã\s+(?:bị\s+)?hủy|cancelled|canceled)/i.test(cleaned)) {
     return {
       title: 'Đã hủy thao tác',
       message:
         'Yêu cầu đã được dừng theo lựa chọn của bạn. Dữ liệu đã hoàn tất trước đó vẫn được giữ nguyên.',
       steps: [],
       technical,
-      tone: 'info'
+      tone: 'neutral'
     };
   }
-  if (/^(?:hãy\s+chọn|vui\s+lòng|chỉ\s+hỗ\s+trợ|cần\s+chọn|không\s+có\s+gì\s+để)/i.test(cleaned)) {
+  if (/^không\s+có\s+gì\s+để/i.test(cleaned)) {
+    return {
+      title: 'Không có gì để làm',
+      message: userMessage(cleaned, 'Hiện không có mục nào cần xử lý.'),
+      steps: [],
+      technical,
+      tone: 'neutral'
+    };
+  }
+  if (/^(?:hãy\s+chọn|vui\s+lòng|chỉ\s+hỗ\s+trợ|cần\s+chọn)/i.test(cleaned)) {
     return {
       title: 'Cần bổ sung thông tin',
       message: userMessage(cleaned, 'Hãy kiểm tra lại lựa chọn rồi thử lại.'),
@@ -497,4 +512,50 @@ export function friendlyIssue(value: unknown): FriendlyIssue {
     technical,
     tone: 'error'
   };
+}
+
+const GENERIC_FALLBACK_TITLE = 'Không thể hoàn tất thao tác';
+
+const TYPED_FALLBACK_TITLE: Record<NoticeTone, string> = {
+  error: GENERIC_FALLBACK_TITLE,
+  warning: 'Cần chú ý',
+  info: 'Thông tin',
+  success: 'Đã hoàn tất',
+  neutral: 'Đã ghi nhận'
+};
+
+const TYPED_FALLBACK_STEPS: Record<NoticeTone, string[]> = {
+  error: [],
+  warning: ['Kiểm tra điều kiện nêu trên rồi thử lại.'],
+  info: [],
+  success: [],
+  neutral: []
+};
+
+function typedRaw(value: unknown): string {
+  if (value instanceof Error) return value.message;
+  if (typeof value === 'string') return value;
+  const record = asRecord(value);
+  return record ? preferredMessage(record) : '';
+}
+
+/**
+ * Mức (tone) ưu tiên lấy từ dấu KIỂU do bên chính gắn vào lỗi (xem notice-tone.ts). Chỉ khi lỗi
+ * không có dấu kiểu (lỗi lạ, chưa phân loại) mới dùng cách nhận diện theo nội dung như trước.
+ */
+export function friendlyIssue(value: unknown): FriendlyIssue {
+  const issue = classifyIssue(value);
+  const typed = readTypedMessage(typedRaw(value));
+  if (!typed) return issue;
+  const generic = issue.title === GENERIC_FALLBACK_TITLE;
+  return {
+    ...issue,
+    tone: typed.tone,
+    ...(generic ? { title: TYPED_FALLBACK_TITLE[typed.tone], steps: TYPED_FALLBACK_STEPS[typed.tone] } : {})
+  };
+}
+
+/** Nhãn chữ của mức, dùng chung cho mọi thành phần hiển thị thông báo. */
+export function issueToneLabel(tone: UiTone): string {
+  return NOTICE_TONE_LABEL[tone];
 }

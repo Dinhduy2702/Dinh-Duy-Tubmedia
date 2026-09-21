@@ -2,6 +2,7 @@ import { app, clipboard, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { IPC } from '@shared/contracts/channels.js';
+import { runWithWireErrors } from './wire-error.js';
 import {
   backupCreateSchema,
   browserCookieSchema,
@@ -82,14 +83,14 @@ export function registerIpc(ctx: AppContext): void {
   ): void => {
     ipcMain.handle(channel, (event: IpcMainInvokeEvent, raw: unknown) => {
       ctx.sender.assert(event);
-      return handler(schema.parse(raw));
+      return runWithWireErrors(() => handler(schema.parse(raw)));
     });
   };
 
   const noArgs = <Output>(channel: string, handler: () => MaybePromise<Output>): void => {
     ipcMain.handle(channel, (event: IpcMainInvokeEvent) => {
       ctx.sender.assert(event);
-      return handler();
+      return runWithWireErrors(() => handler());
     });
   };
 

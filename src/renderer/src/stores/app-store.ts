@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { friendlyIssue, safeUiText } from '../utils/ui-error';
 import { isJobNoticeStillBlocking, shouldRouteIssueToAttention } from '@shared/utils/notification-policy';
+import { isNoticeTone } from '@shared/utils/notice-tone';
 import type {
   AppSettings,
   AppUpdateStatus,
@@ -96,6 +97,7 @@ const DAY_MS = 24 * 60 * 60 * 1_000;
 const RETENTION_MS: Record<AttentionSeverity, number> = {
   success: DAY_MS,
   info: 3 * DAY_MS,
+  neutral: 3 * DAY_MS,
   warning: 30 * DAY_MS,
   error: 30 * DAY_MS
 };
@@ -128,7 +130,7 @@ function outputPathFromUnknown(value: unknown): string | null {
 }
 
 function validSeverity(value: unknown): value is AttentionSeverity {
-  return value === 'info' || value === 'success' || value === 'warning' || value === 'error';
+  return isNoticeTone(value);
 }
 
 function normalizeStoredNotification(value: unknown): NotificationRecord | null {

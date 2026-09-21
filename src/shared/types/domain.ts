@@ -487,7 +487,7 @@ export interface WorkbenchState {
   mergeLanes: WorkbenchSlotState[];
 }
 
-export type AttentionSeverity = 'info' | 'success' | 'warning' | 'error';
+export type AttentionSeverity = 'info' | 'success' | 'warning' | 'error' | 'neutral';
 export interface AttentionNotice {
   id: string;
   severity: AttentionSeverity;

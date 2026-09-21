@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { AppUpdater, ProgressInfo, UpdateInfo } from 'electron-updater';
 import type { AppUpdateReleaseInfo, AppUpdateStatus } from '@shared/types/domain.js';
 import { IPC } from '@shared/contracts/channels.js';
+import { AppError } from '@shared/errors/app-errors.js';
 import { sanitizeProgress } from '@shared/utils/progress-policy.js';
 import { compareAppVersions, isNewerAppVersion } from '@shared/app-version.js';
 import type { SettingsService } from '../settings/settings-service.js';
@@ -404,7 +405,8 @@ export class AppUpdateService {
     }
 
     if (this.status.state !== 'available' || !isNewerAppVersion(this.status.info?.version, currentVersion)) {
-      throw new Error(
+      throw new AppError(
+        'UPDATE_NOT_NEWER',
         this.status.message ?? 'Không có phiên bản mới hơn để tải. Tubmedia không cho phép hạ cấp.'
       );
     }
@@ -440,7 +442,7 @@ export class AppUpdateService {
         error: technicalMessage
       };
       this.emit(status);
-      throw new Error(status.message ?? 'Không thể tải bản cập nhật.');
+      throw new AppError('UPDATE_DOWNLOAD_FAILED', status.message ?? 'Không thể tải bản cập nhật.', true);
     }
   }
 
@@ -449,13 +451,15 @@ export class AppUpdateService {
       this.status.state !== 'downloaded' ||
       !isNewerAppVersion(this.status.info?.version, app.getVersion())
     ) {
-      throw new Error(
+      throw new AppError(
+        'UPDATE_NOT_NEWER',
         'Chỉ có thể cài phiên bản mới hơn phiên bản đang chạy. Tubmedia đã chặn thao tác hạ cấp.'
       );
     }
 
     if (this.hasActiveWork()) {
-      throw new Error(
+      throw new AppError(
+        'UPDATE_BLOCKED_ACTIVE_WORK',
         'Hãy tạm dừng hoặc hoàn tất mọi tác vụ tải, cắt, ghép và Tải nhanh trước khi cập nhật.'
       );
     }
@@ -481,7 +485,11 @@ export class AppUpdateService {
         message: 'Bản cập nhật vẫn được giữ. Tubmedia chưa thể chuẩn bị cài đặt an toàn.',
         error: technicalMessage
       });
-      throw new Error('Chưa thể chuẩn bị cập nhật an toàn. Hãy đóng tác vụ đang chạy rồi thử lại.');
+      throw new AppError(
+        'UPDATE_INSTALL_PREPARATION_FAILED',
+        'Chưa thể chuẩn bị cập nhật an toàn. Hãy đóng tác vụ đang chạy rồi thử lại.',
+        true
+      );
     }
   }
   private baseStatus(state: AppUpdateStatus['state'], message: string): AppUpdateStatus {

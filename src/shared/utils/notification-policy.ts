@@ -10,7 +10,7 @@ export const TRANSIENT_NOTIFICATION_DURATION_MS = 4_800;
 export const SUCCESS_NOTIFICATION_DURATION_MS = 3_600;
 export const WARNING_NOTIFICATION_DURATION_MS = 6_500;
 
-export function notificationDuration(severity: AttentionNotice['severity'] | 'error'): number {
+export function notificationDuration(severity: AttentionNotice['severity']): number {
   if (severity === 'success') return SUCCESS_NOTIFICATION_DURATION_MS;
   if (severity === 'warning' || severity === 'error') return WARNING_NOTIFICATION_DURATION_MS;
   return TRANSIENT_NOTIFICATION_DURATION_MS;
@@ -18,6 +18,14 @@ export function notificationDuration(severity: AttentionNotice['severity'] | 'er
 
 export function shouldRouteIssueToAttention(tone: UiTone): boolean {
   return tone !== 'error';
+}
+
+/**
+ * Chỉ LỖI THẬT mới nằm lại trên màn hình cho tới khi người dùng đóng. Mọi mức khác (cảnh báo,
+ * thông tin, thành công, trung tính) tự tắt sau vài giây; nội dung vẫn còn trong Trung tâm thông báo.
+ */
+export function isPersistentNoticeTone(tone: AttentionNotice['severity']): boolean {
+  return tone === 'error';
 }
 
 const INLINE_BLOCKING_STATUSES: ReadonlySet<QueueJob['status']> = new Set([

@@ -249,6 +249,7 @@ src/main/files/temporary-cleanup.ts
 src/main/index.ts
 src/main/input/input-service.ts
 src/main/ipc/register-ipc.ts
+src/main/ipc/wire-error.ts
 src/main/logging/diagnostic-exporter.ts
 src/main/logging/logger.ts
 src/main/media/file-verifier.ts
@@ -364,6 +365,7 @@ src/shared/utils/input-parser.ts
 src/shared/utils/job-state-machine.ts
 src/shared/utils/merge-target.ts
 src/shared/utils/normalization-match.ts
+src/shared/utils/notice-tone.ts
 src/shared/utils/notification-policy.ts
 src/shared/utils/progress-policy.ts
 src/shared/utils/quality-decision.ts
@@ -419,6 +421,7 @@ tests/unit/hardware-recommendation.test.ts
 tests/unit/independent-workflow-accordion-1.3.0.test.ts
 tests/unit/input-parser.test.ts
 tests/unit/installer-upgrade.test.ts
+tests/unit/ipc-wire-error.test.ts
 tests/unit/job-resume-race.test.ts
 tests/unit/job-state-machine.test.ts
 tests/unit/logger-resilience.test.ts
@@ -434,6 +437,7 @@ tests/unit/network-recovery-wiring-r54.test.ts
 tests/unit/non-conflicting-path.test.ts
 tests/unit/normalization-match.test.ts
 tests/unit/normalize-engine-stream-copy.test.ts
+tests/unit/notice-tone.test.ts
 tests/unit/notification-center.test.ts
 tests/unit/notification-policy.test.ts
 tests/unit/open-path-policy.test.ts
