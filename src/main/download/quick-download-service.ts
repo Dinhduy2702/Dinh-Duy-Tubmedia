@@ -3,7 +3,7 @@ import { app, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { access, mkdir, readFile, readdir, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import { constants as fsConstants, existsSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, extname, join } from 'node:path';
 import {
   validateQuickDownloadRequest,
   type QuickDownloadErrorCode,
@@ -850,6 +850,8 @@ export class QuickDownloadService {
       throw new Error('yt-dlp báo hoàn tất nhưng không tìm thấy file đầu ra.');
     }
 
+    if (active.status.mediaMode === 'video-only') await this.stripAudioTrack(active, active.status.outputPath);
+
     active.status.phase = 'verifying';
     active.status.progress = 99.5;
     active.status.message = 'Đang kiểm tra file đầu ra bằng ffprobe/FFmpeg.';
@@ -906,6 +908,56 @@ export class QuickDownloadService {
     this.cookieBlockedRequest = null;
     this.publish(active);
     await this.cleanupActive(active, true);
+  }
+
+  /**
+   * "Chỉ video" chọn luồng `bv*`, nhưng nguồn chỉ có định dạng gộp (liên kết trực tiếp, nhiều mạng xã hội)
+   * thì yt-dlp vẫn trả về tệp có cả âm thanh. Nếu tệp còn âm thanh thì cắt bỏ (copy, không mã hóa lại).
+   */
+  private async stripAudioTrack(active: ActiveQuickTask, outputPath: string): Promise<void> {
+    const ffprobe = this.tools.get('ffprobe');
+    const ffmpeg = this.tools.get('ffmpeg');
+    if (!ffprobe.executablePath || !ffmpeg.executablePath) return;
+    const signal = active.controller.signal;
+    const common = { jobId: active.status.taskId, signal, priority: 'below_normal' as const };
+
+    const probe = await this.processes.run({
+      ...common,
+      tool: 'ffprobe',
+      executablePath: ffprobe.executablePath,
+      args: ['-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=index', '-of', 'csv=p=0', outputPath],
+      timeoutMs: 60_000
+    });
+    // ffprobe lỗi thì để bước kiểm tra đầu ra báo lỗi thật; không có luồng âm thanh thì không cần làm gì.
+    if (probe.code !== 0 || !probe.stdoutTail.trim()) return;
+
+    active.status.phase = 'processing';
+    active.status.message = 'Nguồn chỉ có luồng gộp hình và tiếng: đang loại bỏ âm thanh khỏi video.';
+    this.publish(active);
+
+    const extension = extname(outputPath);
+    const stripped = join(dirname(outputPath), `${basename(outputPath, extension)}.noaudio${extension}`);
+    try {
+      const result = await this.processes.run({
+        ...common,
+        tool: 'ffmpeg',
+        executablePath: ffmpeg.executablePath,
+        args: ['-y', '-v', 'error', '-i', outputPath, '-map', '0:v', '-c', 'copy', '-an', stripped],
+        timeoutMs: 30 * 60 * 1000
+      });
+      if (result.code !== 0 || !existsSync(stripped)) {
+        throw new Error(result.stderrTail.trim() || `FFmpeg kết thúc với mã ${result.code}.`);
+      }
+      await rename(stripped, outputPath);
+    } catch (error) {
+      await rm(stripped, { force: true }).catch(() => undefined);
+      if (signal.aborted) throw error;
+      const detail = error instanceof Error ? error.message : String(error);
+      active.status.warnings.push('Không loại được âm thanh khỏi video; tệp được giữ nguyên gồm cả âm thanh.');
+      this.logger.warn('quick-download', 'QUICK_DOWNLOAD_STRIP_AUDIO_FAILED', detail, {
+        jobId: active.status.taskId
+      });
+    }
   }
 
   private skipRemovedTask(active: ActiveQuickTask): void {

@@ -440,6 +440,7 @@ tests/unit/quick-download-resilience.test.ts
 tests/unit/quick-download-service.test.ts
 tests/unit/quick-download-silent-source.test.ts
 tests/unit/quick-download-sync.test.ts
+tests/unit/quick-download-video-only.test.ts
 tests/unit/quick-download.test.ts
 tests/unit/release-update-system.test.ts
 tests/unit/resource-memory-r56.test.ts
