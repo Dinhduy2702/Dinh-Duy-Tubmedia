@@ -131,6 +131,10 @@ function clampCount(value: number): 1 | 2 | 3 | 4 {
 function mapOf<T>(factory: (slot: MergeLaneId) => T): MergeMap<T> {
   return Object.fromEntries(MERGE_IDS.map((slot) => [slot, factory(slot)])) as MergeMap<T>;
 }
+/** Khớp downloadMergeSchema: name ≤ 160 ký tự, finalFileName ≤ 220 ký tự. */
+const MERGE_LANE_NAME_MAX_LENGTH = 160;
+const MERGE_FINAL_FILE_NAME_MAX_LENGTH = 220;
+
 function loadTimelineOnlyMode(slot: MergeLaneId): boolean {
   try { return window.localStorage.getItem('tubmedia.merge.timelineOnly.' + slot) === '1'; }
   catch { return false; }
@@ -715,7 +719,8 @@ export function DownloadMergePage(): React.JSX.Element {
           const next = await window.desktop.workbench.saveMergeDraft({
             slot,
             ...forms[slot],
-            name: forms[slot].finalFileName,
+            // Tên hiển thị của quy trình tối đa 160 ký tự; tên tệp thành phẩm (finalFileName) được phép tới 220.
+            name: forms[slot].finalFileName.slice(0, MERGE_LANE_NAME_MAX_LENGTH),
             exportTimelineTxt: false
           });
           if (revisionRef.current[slot] === revision) {
@@ -742,7 +747,8 @@ export function DownloadMergePage(): React.JSX.Element {
       const next = await window.desktop.workbench.startMerge({
         slot,
         ...forms[slot],
-        name: forms[slot].finalFileName,
+        // Tên hiển thị của quy trình tối đa 160 ký tự; tên tệp thành phẩm (finalFileName) được phép tới 220.
+            name: forms[slot].finalFileName.slice(0, MERGE_LANE_NAME_MAX_LENGTH),
         exportTimelineTxt: false
       });
       setStates((current) => ({ ...current, [slot]: next }));
@@ -1344,6 +1350,7 @@ function MergeLaneCard({
                 finalFileName: event.target.value
               }))
             }
+            maxLength={MERGE_FINAL_FILE_NAME_MAX_LENGTH}
             placeholder="Ví dụ: Tong_hop_video_01"
           />
         </label>
