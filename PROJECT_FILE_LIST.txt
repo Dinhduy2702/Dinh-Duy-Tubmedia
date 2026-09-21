@@ -458,6 +458,7 @@ tests/unit/user-facing-notifications.test.ts
 tests/unit/user-runtime-hardening-r55.test.ts
 tests/unit/video-duration-input.test.ts
 tests/unit/video-duration-persistence.test.ts
+tests/unit/video-filter-encoding.test.ts
 tests/unit/video-link-filter.test.ts
 tests/unit/windows-process-control.test.ts
 tests/unit/workbench-storage.test.ts
