@@ -153,6 +153,7 @@ RUN_VERIFY_AND_BUILD_FIXED.cmd
 scripts/build-installer-windows.ps1
 scripts/build-release-windows.ps1
 scripts/build-source-update.ps1
+scripts/bump-version.mjs
 scripts/check-native-build-tools.mjs
 scripts/create-release-config.mjs
 scripts/doctor-windows.ps1
@@ -210,9 +211,12 @@ scripts/verify-updater-metadata-encoding-pre132.mjs
 scripts/verify-v0100.mjs
 scripts/verify-v0101.mjs
 scripts/verify-validation-gate-fixes.mjs
+scripts/verify-version-consistency.mjs
 scripts/verify-video-link-filter.mjs
 scripts/verify-youtube-source-removed-r36.mjs
 scripts/verify-youtube-url-validation-r34.mjs
+scripts/version-tools.d.mts
+scripts/version-tools.mjs
 scripts/write-updater-metadata-utf8nobom.mjs
 SECURITY.md
 SOURCE_UPDATE_OVERWRITE_VI.md
@@ -483,6 +487,7 @@ tests/unit/url.test.ts
 tests/unit/user-facing-notifications.test.ts
 tests/unit/user-runtime-hardening-r55.test.ts
 tests/unit/validation-message.test.ts
+tests/unit/version-tools.test.ts
 tests/unit/video-duration-input.test.ts
 tests/unit/video-duration-persistence.test.ts
 tests/unit/video-filter-encoding.test.ts

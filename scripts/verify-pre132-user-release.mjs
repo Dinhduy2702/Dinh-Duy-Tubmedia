@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { isValidVersion } from './version-tools.mjs';
 
 const cwd = process.cwd();
 const read = (file) => fs.readFileSync(file, 'utf8');
@@ -95,7 +96,7 @@ const preloadSources = preloadFiles.map(read).join('\n');
 
 const applicationSources = `${mainSources}\n${rendererSources}\n${preloadSources}`;
 
-check(pkg.version === '1.3.7', 'v1.3.7 audit keeps application version 1.3.7');
+check(isValidVersion(pkg.version), 'user release audit requires a valid application version');
 
 check(pkg.devDependencies?.electron === '43.2.0', 'Electron is pinned to 43.2.0');
 
@@ -272,12 +273,12 @@ check(
 
 check(
   pkg.scripts?.['verify:pre132-user-release'] === 'node scripts/verify-pre132-user-release.mjs',
-  'v1.3.7 user release verifier is registered'
+  'user release verifier is registered'
 );
 
 check(
   typeof pkg.scripts?.check === 'string' && pkg.scripts.check.includes('npm run verify:pre132-user-release'),
-  'v1.3.7 user release verification is permanent in npm run check'
+  'user release verification is permanent in npm run check'
 );
 
 check(
@@ -287,7 +288,7 @@ check(
 );
 
 if (failures > 0) {
-  throw new Error(`Pre-1.3.7 user release verification failed: ${failures}/${checks} checks failed.`);
+  throw new Error(`User release verification failed: ${failures}/${checks} checks failed.`);
 }
 
-console.log(`Tubmedia v1.3.7 user release verification OK: ${checks} checks.`);
+console.log(`Tubmedia v${pkg.version} user release verification OK: ${checks} checks.`);

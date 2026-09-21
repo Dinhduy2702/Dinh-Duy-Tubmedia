@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { isValidVersion } from './version-tools.mjs';
 
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
 const prepare = String(pkg.scripts?.['prepare:aria2'] || '');
@@ -15,7 +16,7 @@ function check(ok, label) {
   if (!ok) failures += 1;
 }
 
-check(pkg.version === '1.3.7', 'package version is 1.3.7');
+check(isValidVersion(pkg.version), 'package version is a valid release version');
 check(prepare.includes('ensure-bundled-aria2.ps1'), 'prepare:aria2 owns the bundled aria2 bootstrap');
 check(dist.includes('npm run prepare:aria2'), 'official NSIS build prepares aria2 before packaging');
 check(
