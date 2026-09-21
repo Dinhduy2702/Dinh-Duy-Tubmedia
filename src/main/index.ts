@@ -194,11 +194,20 @@ function startStatsTimer(): void {
       !currentWindow.isVisible()
     )
       return;
-    void currentContext.systemStats.sample().then((stats) => {
-      if (!currentWindow.isDestroyed() && currentWindow.isVisible() && !currentWindow.isMinimized()) {
-        currentWindow.webContents.send(IPC.events.systemStats, stats);
-      }
-    });
+    void currentContext.systemStats
+      .sample()
+      .then((stats) => {
+        if (!currentWindow.isDestroyed() && currentWindow.isVisible() && !currentWindow.isMinimized()) {
+          currentWindow.webContents.send(IPC.events.systemStats, stats);
+        }
+      })
+      .catch((error: unknown) => {
+        currentContext.logger.debug(
+          'app',
+          'SYSTEM_STATS_SAMPLE_FAILED',
+          error instanceof Error ? error.message : String(error)
+        );
+      });
   }, 2_000);
 }
 
@@ -210,7 +219,13 @@ function startUpdateScheduler(current: AppContext): void {
       return;
     const checkedAt = status.checkedAt ? Date.parse(status.checkedAt) : 0;
     if (Number.isFinite(checkedAt) && Date.now() - checkedAt < 5 * 60 * 1_000) return;
-    void current.appUpdates.check(true);
+    void current.appUpdates.check(true).catch((error: unknown) => {
+      current.logger.warn(
+        'update',
+        'APP_UPDATE_CHECK_FAILED',
+        error instanceof Error ? error.message : String(error)
+      );
+    });
   };
   updateInitialTimer = setTimeout(check, 25_000);
   updateTimer = setInterval(check, 6 * 60 * 60 * 1_000);
@@ -299,6 +314,12 @@ if (!lock) {
     .then(initializeApplication)
     .catch((error: unknown) => {
       console.error(error);
+      // Không thoát âm thầm: người dùng cần biết vì sao ứng dụng không mở được
+      // (ví dụ cơ sở dữ liệu hỏng hoặc migration thất bại).
+      dialog.showErrorBox(
+        'Download video Tubmedia không thể khởi động',
+        error instanceof Error ? error.message : String(error)
+      );
       app.quit();
     });
 }
@@ -318,16 +339,30 @@ app.on('before-quit', (event: ElectronEvent) => {
   if (updateInitialTimer) clearTimeout(updateInitialTimer);
 
   void (async () => {
-    await current.quickDownload.shutdown(shutdownMode === 'preserve');
-    await current.queue.stop(shutdownMode === 'preserve');
-    await current.processes.shutdown();
-    await current.logger.flush();
-    current.database.close();
-    if (powerSaveBlockerId !== null && powerSaveBlocker.isStarted(powerSaveBlockerId)) {
-      powerSaveBlocker.stop(powerSaveBlockerId);
-      powerSaveBlockerId = null;
+    // Mỗi bước dọn dẹp phải độc lập: nếu một bước ném lỗi thì các bước sau vẫn chạy
+    // và app.exit(0) luôn được gọi, tránh tiến trình Tubmedia treo ngầm không thoát được.
+    const step = async (name: string, action: () => Promise<void> | void): Promise<void> => {
+      try {
+        await action();
+      } catch (error) {
+        console.error(`Shutdown step "${name}" failed:`, error instanceof Error ? error.message : error);
+      }
+    };
+    try {
+      await step('quickDownload', () => current.quickDownload.shutdown(shutdownMode === 'preserve'));
+      await step('queue', () => current.queue.stop(shutdownMode === 'preserve'));
+      await step('processes', () => current.processes.shutdown());
+      await step('logger', () => current.logger.flush());
+      await step('database', () => current.database.close());
+      await step('powerSaveBlocker', () => {
+        if (powerSaveBlockerId !== null && powerSaveBlocker.isStarted(powerSaveBlockerId)) {
+          powerSaveBlocker.stop(powerSaveBlockerId);
+          powerSaveBlockerId = null;
+        }
+      });
+      await step('tray', () => tray?.destroy());
+    } finally {
+      app.exit(0);
     }
-    tray?.destroy();
-    app.exit(0);
   })();
 });

@@ -227,6 +227,9 @@ export class ProcessManager {
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe']
     });
+    // Nếu tiến trình thoát ngay, ghi/đóng stdin có thể phát 'error' (EPIPE). Không có
+    // listener thì lỗi này trở thành uncaught exception trong main process.
+    child.stdin.on('error', () => undefined);
     child.stdin.end();
     const managed: Managed = {
       id,
@@ -261,6 +264,9 @@ export class ProcessManager {
       });
     };
     options.signal?.addEventListener('abort', abort, { once: true });
+    // Tín hiệu có thể đã bị hủy trước khi tiến trình được tạo (người dùng bấm Hủy
+    // giữa hai bước). Sự kiện 'abort' sẽ không bắn lại nên phải xử lý ngay tại đây.
+    if (options.signal?.aborted) abort();
     let timedOut = false;
     const timer = options.timeoutMs
       ? setTimeout(() => {
@@ -375,7 +381,11 @@ export class ProcessManager {
       ],
       { shell: false, windowsHide: true, stdio: 'ignore' }
     );
-    await new Promise<void>((resolve) => child.once('close', () => resolve()));
+    // Thiếu listener 'error' (ví dụ không khởi chạy được powershell.exe) sẽ làm sập main process.
+    await new Promise<void>((resolve) => {
+      child.once('error', () => resolve());
+      child.once('close', () => resolve());
+    });
   }
   public async pauseByJob(jobId: string): Promise<number> {
     let paused = 0;
@@ -418,7 +428,16 @@ export class ProcessManager {
     for (const [id, p] of this.active) if (p.jobId === jobId) await this.kill(id);
   }
   public async shutdown(): Promise<void> {
-    await Promise.all([...this.active.keys()].map((id) => this.kill(id)));
+    // allSettled: một tiến trình không kill được không được làm bỏ sót các tiến trình còn lại.
+    const results = await Promise.allSettled([...this.active.keys()].map((id) => this.kill(id)));
+    const failed = results.filter((result) => result.status === 'rejected');
+    if (failed.length > 0) {
+      this.logger.warn(
+        'process',
+        'PROCESS_SHUTDOWN_PARTIAL',
+        `Không thể kết thúc ${failed.length}/${results.length} tiến trình khi đóng ứng dụng.`
+      );
+    }
   }
 
   private async setSuspended(id: string, suspended: boolean): Promise<void> {

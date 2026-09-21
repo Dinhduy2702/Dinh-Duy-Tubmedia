@@ -70,7 +70,11 @@ export class AppDatabase {
   }
 
   public close(): void {
-    this.checkpoint();
-    this.db.close();
+    try {
+      this.checkpoint();
+    } finally {
+      // Luôn đóng kết nối, kể cả khi checkpoint WAL thất bại (đĩa đầy, file bị khóa).
+      this.db.close();
+    }
   }
 }
