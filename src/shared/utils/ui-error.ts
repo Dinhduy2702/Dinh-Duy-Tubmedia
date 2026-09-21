@@ -1,3 +1,5 @@
+import { describeValidationIssues } from './validation-message.js';
+
 export type UiTone = 'info' | 'success' | 'warning' | 'error';
 
 export interface FriendlyIssue {
@@ -234,6 +236,16 @@ export function friendlyIssue(value: unknown): FriendlyIssue {
 
   const raw = preferredMessage(structured);
   const cleaned = cleanRemotePrefix(raw);
+  const validation = describeValidationIssues(cleaned);
+  if (validation) {
+    return {
+      title: 'Dữ liệu chưa hợp lệ',
+      message: validation,
+      steps: ['Sửa lại ô được nêu ở trên rồi thử lại.'],
+      technical,
+      tone: 'warning'
+    };
+  }
   const lower = cleaned.toLowerCase();
   const update = updaterNotice(cleaned);
   if (update) {

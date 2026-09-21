@@ -372,6 +372,7 @@ src/shared/utils/text-encoding.ts
 src/shared/utils/timestamp.ts
 src/shared/utils/ui-error.ts
 src/shared/utils/url.ts
+src/shared/utils/validation-message.ts
 src/shared/utils/video-link-filter.ts
 src/shared/utils/youtube-url-validation.ts
 src/shared/video-link-filter.ts
@@ -480,6 +481,7 @@ tests/unit/update-center-release-notes.test.ts
 tests/unit/url.test.ts
 tests/unit/user-facing-notifications.test.ts
 tests/unit/user-runtime-hardening-r55.test.ts
+tests/unit/validation-message.test.ts
 tests/unit/video-duration-input.test.ts
 tests/unit/video-duration-persistence.test.ts
 tests/unit/video-filter-encoding.test.ts
