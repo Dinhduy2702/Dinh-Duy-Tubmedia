@@ -4,6 +4,7 @@ import {
   type ValidatedQuickDownloadRequest
 } from '@shared/quick-download.js';
 import type { AppSettings } from '@shared/types/domain.js';
+import { YTDLP_PROGRESS_FLAGS } from '../downloader/ytdlp-progress.js';
 
 export interface QuickDownloadCommandPaths {
   ffmpegDirectory: string;
@@ -70,7 +71,9 @@ export function buildQuickDownloadArguments(
   const args = [
     '--ignore-config',
     '--no-playlist',
-    '--newline',
+    // --print làm yt-dlp im lặng: thiếu --progress thì --progress-template không in dòng nào và
+    // thanh tiến độ/tốc độ/ETA đứng ở 0% cho tới khi xong.
+    ...YTDLP_PROGRESS_FLAGS,
     '--no-color',
     '--windows-filenames',
     '--trim-filenames',
