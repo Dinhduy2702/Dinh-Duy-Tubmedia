@@ -50,6 +50,14 @@ const PAUSABLE_STATUSES = new Set([
   'retrying',
   'interrupted'
 ]);
+const RUNNING_STATUSES = new Set([
+  'analyzing',
+  'downloading',
+  'verifying',
+  'normalizing',
+  'processing',
+  'merging'
+]);
 const JOB_TYPE_TEXT: Record<JobType, string> = {
   analyze: 'phân tích',
   download: 'tải video',
@@ -704,14 +712,115 @@ export class QueueManager {
     const controller = new AbortController();
     const sourceLock = job.sourceId;
     if (sourceLock) this.sourceLocks.add(sourceLock);
-    const promise = this.execute(job, profile, controller.signal).finally(() => {
-      this.active.delete(job.id);
-      this.progressUpdates.delete(job.id);
-      if (sourceLock) this.sourceLocks.delete(sourceLock);
-      if (job.projectId) this.syncProjectStatus(job.projectId);
-      this.emit();
-    });
+    const promise = this.execute(job, profile, controller.signal)
+      .catch((error: unknown) => this.handleExecutorCrash(job, error))
+      .finally(() => {
+        this.active.delete(job.id);
+        this.progressUpdates.delete(job.id);
+        if (sourceLock) this.sourceLocks.delete(sourceLock);
+        try {
+          if (job.projectId) this.syncProjectStatus(job.projectId);
+          this.emit();
+        } catch (error) {
+          this.logger.error(
+            'queue',
+            'JOB_FINALIZE_FAILED',
+            error instanceof Error ? error.message : String(error),
+            { jobId: job.id, ...(job.projectId ? { projectId: job.projectId } : {}) }
+          );
+        }
+      });
     this.active.set(job.id, { job, controller, promise, sourceLock });
+  }
+
+  /**
+   * execute() đã tự phân loại mọi lỗi nghiệp vụ. Đây là lưới an toàn cho lỗi hạ tầng
+   * (SQLite lỗi, tác vụ bị xóa giữa chừng...). Nếu không bắt ở đây, promise bị từ chối
+   * không ai lắng nghe sẽ trở thành unhandled rejection trong main process, và tác vụ
+   * có thể kẹt vĩnh viễn ở trạng thái đang chạy dù không còn worker nào xử lý.
+   */
+  private handleExecutorCrash(job: QueueJob, error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    this.logger.error('queue', 'JOB_EXECUTOR_CRASHED', message, {
+      jobId: job.id,
+      ...(job.projectId ? { projectId: job.projectId } : {})
+    });
+    try {
+      const current = this.repo.get(job.id);
+      if (
+        current &&
+        !TERMINAL_STATUSES.has(current.status) &&
+        current.status !== 'paused' &&
+        current.status !== 'interrupted'
+      ) {
+        this.emitProgress(
+          this.repo.update(job.id, {
+            status: 'failed',
+            errorCode: 'UNHANDLED_ERROR',
+            errorMessage: message,
+            finishedAt: new Date().toISOString()
+          })
+        );
+      }
+    } catch {
+      // Tác vụ đã bị xóa hoặc DB không ghi được; đã có nhật ký ở trên.
+    }
+  }
+
+  /**
+   * Chờ rồi đưa tác vụ đang 'retrying' về 'pending'. Khác với setTimeout thuần:
+   * - thời gian chờ bị ngắt ngay khi tác vụ bị hủy hoặc ứng dụng đóng (trước đây
+   *   việc đóng ứng dụng/xóa tác vụ có thể phải chờ tới ~75 giây);
+   * - nếu người dùng đã tạm dừng tác vụ trong lúc chờ thì giữ nguyên trạng thái tạm
+   *   dừng thay vì tự ý chạy lại;
+   * - nếu bị hủy trong lúc chờ thì đánh dấu 'cancelled' thay vì để 'retrying' vĩnh viễn.
+   */
+  private async requeueAfterDelay(
+    jobId: string,
+    signal: AbortSignal,
+    delayMs: number,
+    patch: { errorCode?: string | null; errorMessage?: string | null },
+    inputPatch: Record<string, unknown>
+  ): Promise<void> {
+    await new Promise<void>((resolve) => {
+      if (signal.aborted) {
+        resolve();
+        return;
+      }
+      const onAbort = (): void => {
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        signal.removeEventListener('abort', onAbort);
+        resolve();
+      }, delayMs);
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+    const current = this.repo.get(jobId);
+    if (!current) return;
+    if (signal.aborted) {
+      // Đóng ứng dụng kiểu "giữ lại" đã đặt 'interrupted' từ trước; chỉ xử lý khi còn 'retrying'.
+      if (current.status === 'retrying') {
+        this.emitProgress(
+          this.repo.update(jobId, {
+            status: 'cancelled',
+            errorCode: 'PROCESS_CANCELLED',
+            errorMessage: 'Tác vụ đã bị hủy.',
+            finishedAt: new Date().toISOString()
+          })
+        );
+      }
+      return;
+    }
+    // Nếu người dùng bấm Tiếp tục ngay trong lúc chờ, resumeActiveJobState có thể đã đặt
+    // một trạng thái "đang chạy" dù chưa có tiến trình nào. Đưa về 'retrying' để hợp lệ hóa.
+    if (RUNNING_STATUSES.has(current.status)) {
+      this.repo.update(jobId, { status: 'retrying' });
+    } else if (current.status !== 'retrying') {
+      return;
+    }
+    this.repo.update(jobId, { status: 'pending', ...patch }, inputPatch);
   }
 
   private syncProjectStatus(projectId: string): void {
@@ -1231,23 +1340,18 @@ export class QueueManager {
             ...(job.projectId ? { projectId: job.projectId } : {})
           }
         );
-        await new Promise((resolve) => setTimeout(resolve, 350));
-        if (!signal.aborted) {
-          this.repo.update(
-            job.id,
-            {
-              status: 'pending',
-              errorCode: null,
-              errorMessage: null
-            },
-            {
-              resumeStatus: null,
-              cookieFailureConfirmed: true,
-              cookieRetryRequested: true,
-              progressStage: 'Đang thử lại bằng cookies đã cấu hình'
-            }
-          );
-        }
+        await this.requeueAfterDelay(
+          job.id,
+          signal,
+          350,
+          { errorCode: null, errorMessage: null },
+          {
+            resumeStatus: null,
+            cookieFailureConfirmed: true,
+            cookieRetryRequested: true,
+            progressStage: 'Đang thử lại bằng cookies đã cấu hình'
+          }
+        );
         return;
       }
       if (
@@ -1389,10 +1493,7 @@ export class QueueManager {
           ...(job.projectId ? { projectId: job.projectId } : {}),
           metadata: { nextAttempt: job.attempts + 2, maxAttempts: job.maxAttempts }
         });
-        await new Promise((resolve) => setTimeout(resolve, retryDelayMs(job.attempts + 1)));
-        if (!signal.aborted) {
-          this.repo.update(job.id, { status: 'pending' }, { resumeStatus: null });
-        }
+        await this.requeueAfterDelay(job.id, signal, retryDelayMs(job.attempts + 1), {}, { resumeStatus: null });
       } else {
         const circuitEligible = isCircuitEligibleDownloadFailure(job.type, appError);
         const finalMessage = circuitEligible
@@ -1877,15 +1978,27 @@ export class QueueManager {
 
   public async resumeAll(): Promise<void> {
     const projectIds = new Set<string>();
+    let firstError: Error | null = null;
     for (const job of this.repo.list()) {
       if (!['paused', 'interrupted'].includes(job.status)) continue;
-      await this.resume(job.id, false);
-      if (job.projectId) projectIds.add(job.projectId);
+      // Một tác vụ lỗi khi tiếp tục (đã bị xóa/đổi trạng thái, PowerShell resume thất bại...)
+      // không được chặn các tác vụ còn lại, và nhất là không được để cờ paused kẹt ở true.
+      try {
+        await this.resume(job.id, false);
+        if (job.projectId) projectIds.add(job.projectId);
+      } catch (error) {
+        if (error instanceof InvalidInputError) {
+          this.logger.warn('queue', 'RESUME_ALL_JOB_SKIPPED', error.message, { jobId: job.id });
+        } else {
+          firstError ??= error instanceof Error ? error : new Error(String(error));
+        }
+      }
     }
     this.paused = false;
     for (const projectId of projectIds) this.projects.setStatus(projectId, 'active');
     this.logger.info('queue', 'ALL_WORKFLOWS_RESUMED', 'Đã tiếp tục tất cả danh sách tải và quy trình ghép.');
     this.emit();
+    if (firstError) throw firstError;
   }
   public async pause(jobId: string, emitChange = true): Promise<void> {
     /* TUBMEDIA_V132_PAUSE_TERMINAL_NOOP_HOTFIX */
@@ -2162,6 +2275,7 @@ export class QueueManager {
     return removed;
   }
   public async cancelAllAndWait(timeoutMs = 15_000): Promise<number> {
+    const wasPaused = this.paused;
     this.paused = true;
     const targets = this.repo.list().filter((job) => !TERMINAL_STATUSES.has(job.status));
     for (const job of targets) this.cancel(job.id, false);
@@ -2172,6 +2286,8 @@ export class QueueManager {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     if (this.active.size > 0) {
+      // Không để hàng đợi bị "đóng băng" vĩnh viễn chỉ vì lần hủy này hết thời gian chờ.
+      this.paused = wasPaused;
       throw new Error('Một số tiến trình nền chưa dừng hoàn toàn. Hãy chờ vài giây rồi thử xóa lại.');
     }
 

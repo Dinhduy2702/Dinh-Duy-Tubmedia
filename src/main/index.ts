@@ -349,18 +349,30 @@ app.on('before-quit', (event: ElectronEvent) => {
       }
     };
     try {
-      await step('quickDownload', () => current.quickDownload.shutdown(shutdownMode === 'preserve'));
-      await step('queue', () => current.queue.stop(shutdownMode === 'preserve'));
-      await step('processes', () => current.processes.shutdown());
-      await step('logger', () => current.logger.flush());
-      await step('database', () => current.database.close());
+      await step('quickDownload', async () => {
+        await current.quickDownload.shutdown(shutdownMode === 'preserve');
+      });
+      await step('queue', async () => {
+        await current.queue.stop(shutdownMode === 'preserve');
+      });
+      await step('processes', async () => {
+        await current.processes.shutdown();
+      });
+      await step('logger', async () => {
+        await current.logger.flush();
+      });
+      await step('database', () => {
+        current.database.close();
+      });
       await step('powerSaveBlocker', () => {
         if (powerSaveBlockerId !== null && powerSaveBlocker.isStarted(powerSaveBlockerId)) {
           powerSaveBlocker.stop(powerSaveBlockerId);
           powerSaveBlockerId = null;
         }
       });
-      await step('tray', () => tray?.destroy());
+      await step('tray', () => {
+        tray?.destroy();
+      });
     } finally {
       app.exit(0);
     }
