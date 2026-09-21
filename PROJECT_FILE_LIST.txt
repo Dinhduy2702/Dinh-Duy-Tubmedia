@@ -463,6 +463,7 @@ tests/unit/sha256-sums.test.ts
 tests/unit/smart-merge-pipeline-v120.test.ts
 tests/unit/source-completeness.test.ts
 tests/unit/startup-fast.test.ts
+tests/unit/system-cleanup-estimate-guard.test.ts
 tests/unit/system-cleanup-navigation.test.ts
 tests/unit/system-cleanup-policy.test.ts
 tests/unit/temporary-cleanup.test.ts

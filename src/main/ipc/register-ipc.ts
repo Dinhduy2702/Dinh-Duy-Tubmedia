@@ -396,7 +396,13 @@ export function registerIpc(ctx: AppContext): void {
 
   // TUBMEDIA_SYSTEM_CLEANUP_HANDLERS
   handle(IPC.systemCleanup.start, systemCleanupRequestSchema, (request) => {
-    if (ctx.queue.activeCount() > 0 || ctx.processes.count() > 0 || ctx.quickDownload.isActive()) {
+    // Chỉ chế độ xóa cần chặn khi còn tác vụ chạy. Xem trước (estimate) chỉ đọc dung lượng; trước đây
+    // nó cũng bị chặn ngay sau khi mở app vì các tiến trình kiểm tra công cụ lúc khởi động (yt-dlp
+    // --version, ffprobe...) được tính là "đang chạy", kèm thông báo sai là còn tác vụ tải/ghép.
+    if (
+      request.mode === 'clean' &&
+      (ctx.queue.activeCount() > 0 || ctx.processes.count() > 0 || ctx.quickDownload.isActive())
+    ) {
       throw new InvalidInputError(
         'Không thể dọn dẹp khi Tubmedia còn tác vụ tải, cắt, chuẩn hóa, ghép hoặc tải nhanh đang chạy.'
       );
