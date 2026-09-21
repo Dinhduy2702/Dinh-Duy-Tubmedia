@@ -154,6 +154,7 @@ scripts/build-installer-windows.ps1
 scripts/build-release-windows.ps1
 scripts/build-source-update.ps1
 scripts/bump-version.mjs
+scripts/capture-ui-screenshots.mjs
 scripts/check-native-build-tools.mjs
 scripts/create-release-config.mjs
 scripts/doctor-windows.ps1
@@ -481,6 +482,7 @@ tests/unit/tool-manager-configured-path.test.ts
 tests/unit/tool-update-rate-limit.test.ts
 tests/unit/typography-system.test.ts
 tests/unit/ui-density.test.ts
+tests/unit/ui-screenshot-script.test.ts
 tests/unit/unified-download-progress-1.3.0.test.ts
 tests/unit/update-center-release-notes.test.ts
 tests/unit/url.test.ts

@@ -103,6 +103,7 @@ export function Sidebar(): React.JSX.Element {
             {group.items.map(({ id, label, hint, icon: Icon }) => (
               <button
                 key={id}
+                data-page-id={id}
                 onClick={() => setPage(id)}
                 className={`sidebar-item ${page === id ? 'is-active' : ''}`}
                 aria-current={page === id ? 'page' : undefined}
