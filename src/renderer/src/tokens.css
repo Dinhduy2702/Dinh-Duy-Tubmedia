@@ -1,0 +1,751 @@
+/* Tubmedia 1.4 — bảng màu ngữ nghĩa (phương án C: màu theo logo, đen than làm điểm nhấn).
+   Tệp này nạp CUỐI CÙNG: nó định nghĩa token mới và ánh xạ lại các biến cũ (--accent, --good, --warn,
+   --bad, --panel...) để mọi màn hình cũ dùng chung một bảng màu mà không phải viết lại từng trang.
+
+   Quy tắc:
+   - Đen than là màu chủ đạo: thanh bên (luôn tối), nút chính, mục đang chọn.
+   - Đỏ CHỈ dành cho lỗi thật và nút nguy hiểm. Màu đỏ của logo chỉ nằm trong ảnh logo.
+   - Xanh dương chỉ cho thông tin, thanh tiến độ và liên kết.
+   - Mỗi mức thông báo có nền/viền/chữ/biểu tượng riêng và LUÔN kèm biểu tượng + nhãn chữ. */
+
+/* ------------------------------------------------------------------ */
+/* 1. Token — giao diện TỐI (mặc định)                                   */
+/* ------------------------------------------------------------------ */
+:root {
+  color-scheme: dark;
+
+  --surface-app: #121213;
+  --surface-card: #1e1e20;
+  --surface-sunken: #262629;
+  --border-subtle: #38383c;
+  --border-control: #7a766f;
+  --text-primary: #f2efea;
+  --text-secondary: #b4afa7;
+
+  --action-bg: #f2efea;
+  --action-bg-hover: #ffffff;
+  --action-text: #1c1c1e;
+
+  --sidebar-bg: #1c1c1e;
+  --sidebar-text: #f2efea;
+  --sidebar-muted: #b4afa7;
+  --sidebar-active-bg: #3a3a3d;
+  --sidebar-border: #333337;
+
+  --link: #7fb0f5;
+  --progress-fill: #6fa3ee;
+  --progress-track: #2f2f33;
+  --focus-ring: #f2efea;
+
+  --danger-solid: #c23d34;
+  --danger-solid-text: #ffffff;
+
+  --tone-info-bg: #172a45;
+  --tone-info-border: #3a5e96;
+  --tone-info-text: #bbd3f5;
+  --tone-info-icon: #6fa3ee;
+  --tone-success-bg: #15301e;
+  --tone-success-border: #2f6b44;
+  --tone-success-text: #b7e4c4;
+  --tone-success-icon: #5cc084;
+  --tone-warning-bg: #38290a;
+  --tone-warning-border: #8a6416;
+  --tone-warning-text: #f2d9a0;
+  --tone-warning-icon: #e8a43a;
+  --tone-error-bg: #3a1714;
+  --tone-error-border: #8a3630;
+  --tone-error-text: #f6c3bf;
+  --tone-error-icon: #f0655b;
+  --tone-neutral-bg: #2a2a2d;
+  --tone-neutral-border: #4a4a4f;
+  --tone-neutral-text: #d9d5ce;
+  --tone-neutral-icon: #a8a39b;
+
+  /* Ánh xạ biến cũ → bảng màu mới */
+  --bg: var(--surface-app);
+  --bg-soft: #171719;
+  --panel: var(--surface-card);
+  --panel2: var(--surface-sunken);
+  --panel3: #2f2f33;
+  --border: var(--border-subtle);
+  --border-strong: #4a4a4f;
+  --text: var(--text-primary);
+  --muted: var(--text-secondary);
+  --accent: #f2efea;
+  --accent2: #ddd9d2;
+  --accent3: #c4bfb7;
+  --accent-soft: rgba(242, 239, 234, 0.1);
+  --on-accent: #1c1c1e;
+  --good: var(--tone-success-icon);
+  --warn: var(--tone-warning-icon);
+  --bad: var(--tone-error-icon);
+  --info: var(--tone-info-icon);
+  --shadow-sm: 0 6px 18px rgba(0, 0, 0, 0.28);
+  --shadow: 0 18px 44px rgba(0, 0, 0, 0.34);
+  --shadow-red: 0 6px 18px rgba(0, 0, 0, 0.3);
+}
+
+/* ------------------------------------------------------------------ */
+/* 2. Token — giao diện SÁNG                                            */
+/* ------------------------------------------------------------------ */
+:root.light {
+  color-scheme: light;
+
+  --surface-app: #eeebe7;
+  --surface-card: #ffffff;
+  --surface-sunken: #f6f4f1;
+  --border-subtle: #d9d5cf;
+  --border-control: #85807a;
+  --text-primary: #1c1c1e;
+  --text-secondary: #55524d;
+
+  --action-bg: #1c1c1e;
+  --action-bg-hover: #2e2e31;
+  --action-text: #ffffff;
+
+  --link: #1f5fbf;
+  --progress-fill: #1f5fbf;
+  --progress-track: #e2ded8;
+  --focus-ring: #1c1c1e;
+
+  --danger-solid: #b3261e;
+  --danger-solid-text: #ffffff;
+
+  --tone-info-bg: #e6eef9;
+  --tone-info-border: #9db8e3;
+  --tone-info-text: #16407f;
+  --tone-info-icon: #1f5fbf;
+  --tone-success-bg: #e4f2e7;
+  --tone-success-border: #9bcba6;
+  --tone-success-text: #14532d;
+  --tone-success-icon: #1f7a3d;
+  --tone-warning-bg: #fbf0d6;
+  --tone-warning-border: #e3be6a;
+  --tone-warning-text: #6b4300;
+  --tone-warning-icon: #b26a00;
+  --tone-error-bg: #fbe5e3;
+  --tone-error-border: #e0928c;
+  --tone-error-text: #8a1c14;
+  --tone-error-icon: #b3261e;
+  --tone-neutral-bg: #f3f1ee;
+  --tone-neutral-border: #c9c4bc;
+  --tone-neutral-text: #3a3835;
+  --tone-neutral-icon: #5f5b55;
+
+  --bg-soft: #e7e3de;
+  --panel3: #efece8;
+  --border-strong: #c9c4bc;
+  --accent: #1c1c1e;
+  --accent2: #2e2e31;
+  --accent3: #4a4a4e;
+  --accent-soft: rgba(28, 28, 30, 0.07);
+  --on-accent: #ffffff;
+  --shadow-sm: 0 4px 14px rgba(28, 28, 30, 0.07);
+  --shadow: 0 14px 36px rgba(28, 28, 30, 0.1);
+  --shadow-red: 0 4px 14px rgba(28, 28, 30, 0.14);
+}
+
+/* Lớp gán bốn biến của một mức; mọi thành phần thông báo chỉ đọc --tone-*. */
+.tone-info { --tone-bg: var(--tone-info-bg); --tone-border: var(--tone-info-border); --tone-text: var(--tone-info-text); --tone-icon: var(--tone-info-icon); }
+.tone-success { --tone-bg: var(--tone-success-bg); --tone-border: var(--tone-success-border); --tone-text: var(--tone-success-text); --tone-icon: var(--tone-success-icon); }
+.tone-warning { --tone-bg: var(--tone-warning-bg); --tone-border: var(--tone-warning-border); --tone-text: var(--tone-warning-text); --tone-icon: var(--tone-warning-icon); }
+.tone-error { --tone-bg: var(--tone-error-bg); --tone-border: var(--tone-error-border); --tone-text: var(--tone-error-text); --tone-icon: var(--tone-error-icon); }
+.tone-neutral { --tone-bg: var(--tone-neutral-bg); --tone-border: var(--tone-neutral-border); --tone-text: var(--tone-neutral-text); --tone-icon: var(--tone-neutral-icon); }
+
+/* ------------------------------------------------------------------ */
+/* 3. Nền, viền và ô nhập                                                */
+/* ------------------------------------------------------------------ */
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--text-primary) 18%, transparent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.input,
+.select,
+.textarea,
+input[type='text'],
+input[type='search'],
+input[type='number'],
+select,
+textarea {
+  border-color: var(--border-control);
+}
+
+.input:focus,
+.select:focus,
+.textarea:focus {
+  border-color: var(--focus-ring);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 22%, transparent);
+}
+
+input[type='checkbox'],
+input[type='radio'],
+input[type='range'] {
+  accent-color: var(--action-bg);
+}
+
+a,
+.link {
+  color: var(--link);
+}
+
+/* ------------------------------------------------------------------ */
+/* 4. Nút                                                               */
+/* ------------------------------------------------------------------ */
+.btn-primary,
+.quick-download-button.primary,
+.system-cleanup-button.primary {
+  border-color: transparent;
+  background: var(--action-bg);
+  color: var(--action-text);
+  box-shadow: none;
+}
+
+.btn-primary:hover:not(:disabled),
+.quick-download-button.primary:hover:not(:disabled),
+.system-cleanup-button.primary:hover:not(:disabled) {
+  background: var(--action-bg-hover);
+  box-shadow: none;
+}
+
+.btn-danger,
+.confirm-danger-button {
+  border-color: transparent;
+  background: var(--danger-solid);
+  color: var(--danger-solid-text);
+  box-shadow: none;
+}
+
+.log-filters button.active,
+.cookie-tabs button.active,
+.tool-action-update,
+.sidebar-logo,
+.about-app-icon,
+.developer-avatar,
+.tool-card-icon,
+.update-version-icon,
+.update-feed-icon,
+.topbar-notification-count {
+  background: var(--action-bg);
+  color: var(--action-text);
+  box-shadow: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* 5. Thanh bên: LUÔN đen than, kể cả giao diện sáng                     */
+/* ------------------------------------------------------------------ */
+.app-sidebar {
+  color-scheme: dark;
+  --text: var(--sidebar-text);
+  --muted: var(--sidebar-muted);
+  --panel: var(--sidebar-bg);
+  --panel2: #262629;
+  --panel3: #2f2f33;
+  --border: var(--sidebar-border);
+  --border-strong: #4a4a4f;
+  --accent: #f2efea;
+  --accent2: #ddd9d2;
+  --accent3: #c4bfb7;
+  --accent-soft: rgba(255, 255, 255, 0.08);
+  --on-accent: #1c1c1e;
+  border-right-color: var(--sidebar-border);
+  background: var(--sidebar-bg);
+  color: var(--sidebar-text);
+}
+
+.app-sidebar::before {
+  display: none;
+}
+
+.app-sidebar .sidebar-item {
+  color: var(--sidebar-muted);
+}
+
+.app-sidebar .sidebar-item:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: transparent;
+  color: var(--sidebar-text);
+}
+
+.app-sidebar .sidebar-item.is-active {
+  border-color: transparent;
+  background: var(--sidebar-active-bg);
+  box-shadow: none;
+  color: #ffffff;
+}
+
+.app-sidebar .sidebar-item::before,
+.app-sidebar .sidebar-item.is-active::before {
+  background: #f2efea;
+  box-shadow: none;
+}
+
+.app-sidebar .sidebar-item-icon {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--sidebar-muted);
+}
+
+.app-sidebar .sidebar-item.is-active .sidebar-item-icon {
+  background: #f2efea;
+  color: #1c1c1e;
+  box-shadow: none;
+}
+
+.app-sidebar .sidebar-count {
+  background: #f2efea;
+  color: #1c1c1e;
+}
+
+.app-sidebar .sidebar-version {
+  border-color: #4a4a4f;
+  background: transparent;
+  color: var(--sidebar-muted);
+}
+
+.app-sidebar .developer-signature-card {
+  border-color: #3a3a3d;
+  background: #262629;
+  box-shadow: none;
+}
+
+.app-sidebar .developer-signature-shine,
+.app-sidebar .developer-signature-card::before,
+.app-sidebar .developer-signature-card::after {
+  display: none;
+}
+
+.app-sidebar .developer-signature-logo {
+  filter: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* 6. Thanh tiến độ: xanh dương, chỉ animate transform (khi có)          */
+/* ------------------------------------------------------------------ */
+.progress {
+  background: var(--progress-track);
+  border-color: transparent;
+}
+
+.progress > span,
+:root.is-processing .progress > span,
+:root.is-processing .progress span {
+  background: var(--progress-fill);
+  box-shadow: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* 7. Nhãn mức (chip) và thành phần Notice dùng chung                    */
+/* ------------------------------------------------------------------ */
+.tone-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+  border: 1px solid var(--tone-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tone-bg) 70%, var(--surface-card));
+  padding: 0.12rem 0.5rem;
+  color: var(--tone-text);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  border: 1px solid var(--tone-border);
+  border-radius: 12px;
+  background: var(--tone-bg);
+  padding: 0.8rem 0.95rem;
+  color: var(--tone-text);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.notice-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  margin-top: 0.1rem;
+  color: var(--tone-icon);
+}
+
+.notice-body {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 0.25rem;
+  overflow-wrap: anywhere;
+}
+
+.notice-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.notice-title {
+  color: var(--tone-text);
+  font-weight: 700;
+}
+
+.notice-steps {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0.3rem 0 0;
+  padding-left: 1.15rem;
+  color: var(--tone-text);
+  font-size: 0.8125rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* 8. StatusBadge: luôn biểu tượng + chữ, màu theo mức                   */
+/* ------------------------------------------------------------------ */
+.status-badge {
+  border-color: var(--tone-border);
+  background: var(--tone-bg);
+  color: var(--tone-text);
+}
+
+.status-badge svg {
+  color: var(--tone-icon);
+}
+
+.status-badge > span {
+  color: var(--tone-text);
+}
+
+/* ------------------------------------------------------------------ */
+/* 9. Thông báo nổi: xếp chồng ở góc DƯỚI-PHẢI, không che tiêu đề trang  */
+/* ------------------------------------------------------------------ */
+.notice-stack {
+  position: fixed;
+  z-index: 1200;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  width: min(440px, calc(100vw - 32px));
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.notice-stack .attention-center,
+.notice-stack .diagnostic-dock {
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  width: 100%;
+  transform: none;
+  filter: none;
+}
+
+.notice-stack .attention-center {
+  border: 1px solid var(--tone-border);
+  border-radius: 14px;
+  background: var(--tone-bg);
+  color: var(--tone-text);
+  box-shadow: var(--shadow);
+  contain: layout paint style;
+  transition:
+    opacity 220ms cubic-bezier(0.32, 0.72, 0, 1),
+    transform 220ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.notice-stack .attention-entering {
+  opacity: 0;
+  transform: translate3d(0, 10px, 0);
+}
+
+.notice-stack .attention-visible {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+
+.notice-stack .attention-leaving {
+  opacity: 0;
+  transform: translate3d(0, 6px, 0);
+}
+
+.attention-center .attention-icon {
+  background: transparent;
+  color: var(--tone-icon);
+}
+
+.attention-center .attention-copy,
+.attention-center .attention-copy * {
+  color: var(--tone-text);
+}
+
+.attention-center .attention-accent,
+.attention-center .attention-life {
+  background: var(--tone-icon);
+}
+
+.attention-center .attention-close {
+  color: var(--tone-text);
+}
+
+.attention-center .attention-close:hover {
+  background: color-mix(in srgb, var(--tone-icon) 16%, transparent);
+}
+
+.attention-center .btn {
+  color: var(--text-primary);
+}
+
+.attention-center .btn-primary {
+  color: var(--action-text);
+}
+
+.diagnostic-dock.tone-error,
+.diagnostic-dock.tone-warning,
+.diagnostic-dock.tone-info,
+.diagnostic-dock.tone-neutral,
+.diagnostic-dock.tone-success {
+  border-color: var(--tone-border);
+  background: var(--tone-bg);
+  color: var(--tone-text);
+}
+
+.diagnostic-dock .diagnostic-dock-accent {
+  background: var(--tone-icon);
+}
+
+.diagnostic-dock .diagnostic-dock-icon {
+  background: transparent;
+  color: var(--tone-icon);
+}
+
+.diagnostic-dock p,
+.diagnostic-dock b,
+.diagnostic-dock small,
+.diagnostic-dock ol {
+  color: var(--tone-text);
+}
+
+/* Trung tâm thông báo */
+.notification-item {
+  border-color: var(--tone-border);
+  background: var(--tone-bg);
+  color: var(--tone-icon);
+}
+
+.notification-item::before {
+  background: var(--tone-icon);
+}
+
+.notification-item .notification-item-tone {
+  background: transparent;
+  color: var(--tone-icon);
+}
+
+.notification-item .notification-item-content,
+.notification-item .notification-item-title-row > b,
+.notification-item .notification-item-main p,
+.notification-item .notification-item-main ol,
+.notification-item .notification-item-main time {
+  color: var(--tone-text);
+}
+
+.notification-item.is-read:not(.is-pinned) {
+  background: color-mix(in srgb, var(--tone-bg) 60%, var(--surface-card));
+  opacity: 0.86;
+}
+
+/* ------------------------------------------------------------------ */
+/* 10. Màn hình khởi động và các chỗ cũ còn nền đỏ                        */
+/* ------------------------------------------------------------------ */
+.startup-shell {
+  background: #121213;
+}
+
+.startup-card-wrap {
+  background: linear-gradient(115deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.55);
+  animation: none;
+}
+
+.startup-light-frame,
+.startup-card::before,
+.startup-ambient {
+  display: none;
+}
+
+.startup-loader {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.05);
+  color: #f2efea;
+  box-shadow: none;
+}
+
+.startup-dots i {
+  background: #f2efea;
+}
+
+.startup-logo {
+  box-shadow: none;
+}
+
+/* Trang Dọn dẹp: thẻ "an toàn" không được viền đỏ; mức nào ra mức đó bằng chip có chữ. */
+.system-cleanup-category,
+.system-cleanup-card,
+.system-cleanup-option {
+  border-color: var(--border-subtle);
+}
+
+.system-cleanup-category.is-selected,
+.system-cleanup-card.is-selected,
+.system-cleanup-option.is-selected,
+.system-cleanup-category:has(input:checked),
+.system-cleanup-option:has(input:checked) {
+  border-color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 5%, var(--surface-card));
+}
+
+/* Nhãn trạng thái cập nhật: màu theo mức (không cập nhật được chỉ là cảnh báo, không đỏ) */
+.update-state-badge:where(.tone-info, .tone-success, .tone-warning, .tone-error, .tone-neutral) {
+  border-color: var(--tone-border);
+  background: var(--tone-bg);
+  color: var(--tone-text);
+}
+
+.update-message .notice {
+  margin-top: 0.6rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* 11. Sửa các chỗ cũ còn dùng màu cố định (xanh/đỏ/vàng/tím lẻ tẻ)      */
+/* ------------------------------------------------------------------ */
+
+/* Biến cũ --good/--warn/--bad còn được dùng làm MÀU CHỮ trong CSS cũ, nên ở giao diện sáng chúng đậm hơn
+   màu biểu tượng một chút để chữ vẫn đạt tương phản 4,5:1. Thành phần mới (Notice, StatusBadge, thông báo
+   nổi) dùng đúng token --tone-* nguyên bản. */
+:root.light {
+  --good: #1a6b36;
+  --warn: #8a5400;
+  --bad: #b3261e;
+  --info: #1f5fbf;
+}
+
+/* Trang Dọn dẹp: nhãn mức an toàn theo mức thông báo, không dùng màu cứng và không dùng đỏ cho "thay đổi hệ thống". */
+.safety-very-safe,
+.safety-safe {
+  border-color: var(--tone-success-border) !important;
+  background: var(--tone-success-bg);
+  color: var(--tone-success-text) !important;
+}
+
+.safety-caution,
+.need-high,
+.safety-system,
+.need-urgent {
+  border-color: var(--tone-warning-border) !important;
+  background: var(--tone-warning-bg);
+  color: var(--tone-warning-text) !important;
+}
+
+.need-medium {
+  border-color: var(--tone-info-border) !important;
+  background: var(--tone-info-bg);
+  color: var(--tone-info-text) !important;
+}
+
+/* Trạng thái tác vụ theo làn */
+.workflow-state-completed {
+  --workflow-state-color: var(--tone-success-icon);
+}
+
+.workflow-state-failed {
+  --workflow-state-color: var(--tone-error-icon);
+}
+
+/* Khung lỗi của Tải nhanh: lỗi thật → tông lỗi chuẩn */
+.quick-download-error {
+  border-color: var(--tone-error-border);
+  background: var(--tone-error-bg);
+  color: var(--tone-error-text);
+}
+
+.tool-action-update:hover:not(:disabled) {
+  background: var(--action-bg-hover);
+  box-shadow: none;
+}
+
+/* Chip trạng thái ở thanh trên và các nhãn "sẵn sàng": chữ theo tông thành công để đủ tương phản */
+.tool-status-button.is-ready,
+.tools-ready-hero.is-ready,
+.info-disclosure-status,
+.badge-good,
+.responsibility-card h3 {
+  color: var(--tone-success-text);
+}
+
+.tool-status-button:not(.is-ready) {
+  color: var(--tone-warning-text);
+}
+
+/* Khung "đang bị chặn" và chi tiết lỗi: mọi mức đều có tông riêng (trước đây chỉ có cảnh báo và lỗi). */
+.blocking-card.blocking-info,
+.blocking-card.blocking-success,
+.blocking-card.blocking-neutral,
+.blocking-card.blocking-warning,
+.blocking-card.blocking-error {
+  border-color: var(--tone-border);
+  background: var(--tone-bg);
+  color: var(--tone-text);
+}
+
+.blocking-card.blocking-info { --tone-bg: var(--tone-info-bg); --tone-border: var(--tone-info-border); --tone-text: var(--tone-info-text); }
+.blocking-card.blocking-success { --tone-bg: var(--tone-success-bg); --tone-border: var(--tone-success-border); --tone-text: var(--tone-success-text); }
+.blocking-card.blocking-neutral { --tone-bg: var(--tone-neutral-bg); --tone-border: var(--tone-neutral-border); --tone-text: var(--tone-neutral-text); }
+.blocking-card.blocking-warning { --tone-bg: var(--tone-warning-bg); --tone-border: var(--tone-warning-border); --tone-text: var(--tone-warning-text); }
+.blocking-card.blocking-error { --tone-bg: var(--tone-error-bg); --tone-border: var(--tone-error-border); --tone-text: var(--tone-error-text); }
+
+.blocking-card p,
+.blocking-card ol {
+  color: var(--tone-text);
+}
+
+.compact-detail-good .compact-detail-trigger { color: var(--tone-success-text); }
+.compact-detail-warning .compact-detail-trigger { color: var(--tone-warning-text); }
+.compact-detail-danger .compact-detail-trigger { color: var(--tone-error-text); }
+.compact-detail-info .compact-detail-trigger { color: var(--tone-info-text); }
+.compact-detail-neutral .compact-detail-trigger { color: var(--text-secondary); }
+
+/* Chữ phụ trên nền có pha màu (CSS cũ pha 6–9% màu nhấn vào nền thẻ): dùng chữ phụ đậm hơn một nấc để giữ tương phản ≥ 4,5:1. */
+:root.light {
+  --text-secondary-strong: #46433f;
+}
+
+:root:not(.light) {
+  --text-secondary-strong: #c9c4bc;
+}
+
+.recommend-strip,
+.quick-download-ready-progress span,
+.quick-download-timeline-toggle b,
+.lane-quality span,
+.merge-timeline-only-option small,
+.is-total span,
+.is-total small,
+.diagnostics-error-list time {
+  color: var(--text-secondary-strong);
+}
+
+.diagnostics-error-list b {
+  color: var(--tone-error-text);
+}

@@ -334,6 +334,7 @@ src/renderer/src/quick-download.css
 src/renderer/src/stores/app-store.ts
 src/renderer/src/styles.css
 src/renderer/src/system-cleanup.css
+src/renderer/src/tokens.css
 src/renderer/src/tubmedia-theme.css
 src/renderer/src/typography.css
 src/renderer/src/utils/ui-error.ts
@@ -393,6 +394,7 @@ tests/unit/app-update-version.test.ts
 tests/unit/batch-error-aggregation-r18.test.ts
 tests/unit/brand-layout.test.ts
 tests/unit/clip-engine-mute-copy.test.ts
+tests/unit/color-tokens.test.ts
 tests/unit/compact-operational-ui.test.ts
 tests/unit/concat.test.ts
 tests/unit/cookie-auto-resume.test.ts
