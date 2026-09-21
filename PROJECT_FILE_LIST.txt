@@ -415,6 +415,7 @@ tests/unit/job-state-machine.test.ts
 tests/unit/logger-resilience.test.ts
 tests/unit/media-analyzer-hdr.test.ts
 tests/unit/media-duration-sanity.test.ts
+tests/unit/merge-checkpoint-file-name.test.ts
 tests/unit/merge-checkpoint-ownership-hotfix13.test.ts
 tests/unit/merge-output-integrity.test.ts
 tests/unit/merge-product-name-length.test.ts

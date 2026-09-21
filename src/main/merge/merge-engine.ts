@@ -127,6 +127,22 @@ export type MergeRecoveryDecision =
   | { action: 'commit-checkpoint'; mode: 'verified-checkpoint'; quarantineCheckpoint: false }
   | { action: 'rebuild'; mode: 'new-merge'; quarantineCheckpoint: boolean };
 
+/**
+ * NTFS giới hạn 255 đơn vị UTF-16 cho MỘT thành phần đường dẫn. Tệp checkpoint có tên
+ * "<tên>.<chữ ký 24 ký tự>.pending.mp4" (thêm 37 ký tự) nên tên thành phẩm dài 219–220 ký tự
+ * (mức tối đa giao diện cho phép) làm ffmpeg không mở được tệp. Chỉ phần tên dùng cho tệp
+ * checkpoint bị rút ngắn; tên thành phẩm cuối cùng giữ nguyên.
+ */
+export const MAX_CHECKPOINT_STEM_LENGTH = 150;
+
+export function checkpointFileStem(safeName: string): string {
+  if (safeName.length <= MAX_CHECKPOINT_STEM_LENGTH) return safeName;
+  let stem = safeName.slice(0, MAX_CHECKPOINT_STEM_LENGTH);
+  const last = stem.charCodeAt(stem.length - 1);
+  if (last >= 0xd800 && last <= 0xdbff) stem = stem.slice(0, -1); // không cắt đôi cặp ký tự thay thế (emoji)
+  return stem.replace(/[. ]+$/g, '') || 'Thành phẩm';
+}
+
 export function decideMergeRecoveryCandidate(
   kind: MergeRecoveryCandidateKind,
   verificationOk: boolean
@@ -866,8 +882,9 @@ export class MergeEngine {
     const checkpointFolder = join(workFolder, 'Tubmedia', 'merge-checkpoints');
     await ensureTubmediaOwnedDirectory(checkpointFolder, 'merge-checkpoints', join(workFolder, 'Tubmedia'));
     const checkpointSignature = await this.createMergeCheckpointSignature(inputs, profile, final);
-    const pending = join(checkpointFolder, `${safeName}.${checkpointSignature}.pending.mp4`);
-    const receiptPath = join(checkpointFolder, `${safeName}.${checkpointSignature}.complete.json`);
+    const checkpointStem = checkpointFileStem(safeName);
+    const pending = join(checkpointFolder, `${checkpointStem}.${checkpointSignature}.pending.mp4`);
+    const receiptPath = join(checkpointFolder, `${checkpointStem}.${checkpointSignature}.complete.json`);
     const receiptOutput = await this.readMergeCheckpointReceipt(receiptPath, checkpointSignature);
     const candidates: Array<{ path: string; kind: 'final' | 'checkpoint' }> = [];
     const candidateKeys = new Set<string>();
