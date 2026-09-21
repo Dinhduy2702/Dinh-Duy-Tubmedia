@@ -360,6 +360,7 @@ src/shared/utils/resource-memory.ts
 src/shared/utils/retry.ts
 src/shared/utils/safe-json.ts
 src/shared/utils/secret-redaction.ts
+src/shared/utils/sha256-sums.ts
 src/shared/utils/text-encoding.ts
 src/shared/utils/timestamp.ts
 src/shared/utils/ui-error.ts
@@ -433,6 +434,7 @@ tests/unit/runtime-performance-policy.test.ts
 tests/unit/runtime-recovery-upgrade.test.ts
 tests/unit/safe-json.test.ts
 tests/unit/secret-redaction.test.ts
+tests/unit/sha256-sums.test.ts
 tests/unit/smart-merge-pipeline-v120.test.ts
 tests/unit/source-completeness.test.ts
 tests/unit/startup-fast.test.ts
