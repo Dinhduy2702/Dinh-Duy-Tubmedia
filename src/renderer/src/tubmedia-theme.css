@@ -586,6 +586,19 @@ html.light .tubmedia-logo-light {
   background: linear-gradient(var(--accent3), var(--accent));
   animation: meter-wave 1.6s ease-in-out infinite;
 }
+/* VẤN ĐỀ 2 mục 1 (2026-09-22): nhãn "Đang giảm tải" khi bộ điều tiết CPU tạm hoãn tác vụ mới. */
+.topbar-load-throttled {
+  margin-left: 0.4rem;
+  border: 1px solid var(--tone-warning-border);
+  border-radius: 999px;
+  background: var(--tone-warning-bg);
+  padding: 0.16rem 0.5rem;
+  color: var(--tone-warning-text);
+  font-size: 0.6rem;
+  font-weight: 850;
+  white-space: nowrap;
+  cursor: help;
+}
 .topbar-sparkline span:nth-child(1) {
   height: 25%;
   animation-delay: -0.5s;

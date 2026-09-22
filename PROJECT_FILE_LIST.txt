@@ -198,6 +198,7 @@ scripts/verify-editor-workflows-1.3.0.mjs
 scripts/verify-hdr-capcut-hotfix7.mjs
 scripts/verify-independent-workflow-accordion-1.3.0.mjs
 scripts/verify-js-yaml-security-pre132.mjs
+scripts/verify-load-governor.mjs
 scripts/verify-merge-visual-boundary-hotfix11.mjs
 scripts/verify-notification-cookie-action-r31n.mjs
 scripts/verify-notification-cookie-upgrade.mjs
@@ -277,6 +278,7 @@ src/main/normalize/normalize-engine.ts
 src/main/processes/process-manager.ts
 src/main/projects/project-service.ts
 src/main/queue/queue-manager.ts
+src/main/queue/system-load-governor.ts
 src/main/runtime/development-environment.ts
 src/main/runtime/electron-security-guard.ts
 src/main/security/open-path-policy.ts
@@ -418,6 +420,7 @@ src/shared/video-link-filter.ts
 TEST_RESULTS.md
 tests/e2e/app.spec.ts
 tests/integration/database.test.ts
+tests/integration/queue-load-governor.test.ts
 tests/integration/queue-retry-requeue.test.ts
 tests/integration/restore-sources-policy.test.ts
 tests/integration/settings-restore-policy.test.ts
@@ -517,6 +520,7 @@ tests/unit/startup-fast.test.ts
 tests/unit/system-cleanup-estimate-guard.test.ts
 tests/unit/system-cleanup-navigation.test.ts
 tests/unit/system-cleanup-policy.test.ts
+tests/unit/system-load-governor.test.ts
 tests/unit/taskbar-tray-icon.test.ts
 tests/unit/temporary-cleanup.test.ts
 tests/unit/timeline-merge-recovery-hotfix12.test.ts

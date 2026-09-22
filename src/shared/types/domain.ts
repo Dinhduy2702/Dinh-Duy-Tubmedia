@@ -366,6 +366,8 @@ export interface SystemStats {
   activeJobs: number;
   downloadSpeedBytes: number;
   encodeFps: number;
+  /** VẤN ĐỀ 2 mục 1 (2026-09-22): true khi bộ điều tiết CPU đang tạm hoãn tác vụ mới vì máy đang bận. */
+  systemLoadThrottled: boolean;
   sampledAt: string;
 }
 

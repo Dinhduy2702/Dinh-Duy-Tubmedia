@@ -44,6 +44,8 @@ const PAUSED = new Set(['paused', 'interrupted']);
 
 export function Topbar(): React.JSX.Element {
   const cpuPercent = useAppStore((state) => state.stats?.cpuPercent);
+  // VẤN ĐỀ 2 mục 1 (2026-09-22): hiện trạng thái khi bộ điều tiết đang tạm hoãn tác vụ mới vì máy bận.
+  const systemLoadThrottled = useAppStore((state) => state.stats?.systemLoadThrottled ?? false);
   const queueSummary = useAppStore(
     useShallow((state) => {
       let activeJobs = 0;
@@ -166,6 +168,14 @@ export function Topbar(): React.JSX.Element {
             <span />
             <span />
           </i>
+          {systemLoadThrottled && (
+            <span
+              className="topbar-load-throttled"
+              title="Máy đang bận (CPU hệ thống cao liên tục) — Tubmedia tạm hoãn tác vụ mới, tác vụ đang chạy không bị ảnh hưởng."
+            >
+              Đang giảm tải
+            </span>
+          )}
         </div>
         <div className="topbar-job-pill">
           <span className={queueSummary.activeJobs > 0 ? 'pulse-dot' : ''} />

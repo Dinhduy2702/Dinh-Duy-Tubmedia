@@ -22,6 +22,11 @@ import type { ClipEngine } from '../clips/clip-engine.js';
 import type { MergeEngine } from '../merge/merge-engine.js';
 import type { ProcessManager } from '../processes/process-manager.js';
 import type { Logger } from '../logging/logger.js';
+import {
+  SystemLoadGovernor,
+  DEFAULT_LOAD_GOVERNOR_SUSTAINED_MS,
+  defaultLowPercentFor
+} from './system-load-governor.js';
 import { InvalidInputError, ProcessingFailedError, type AppError } from '@shared/errors/app-errors.js';
 import { cleanupTemporaryArtifacts } from '../files/temporary-cleanup.js';
 import { sanitizeNullableSeconds, sanitizeProgress } from '@shared/utils/progress-policy.js';
@@ -160,6 +165,9 @@ export class QueueManager {
   private tickRunning = false;
   private paused = false;
   private previousCpu = cpus();
+  // VẤN ĐỀ 2 mục 1 (2026-09-22): một bộ điều tiết theo hồ sơ tài nguyên (ngưỡng cao lấy từ
+  // cpuSoftLimitPercent của chính hồ sơ đó — tôn trọng cấu hình người dùng đã có, không thêm ngưỡng mới).
+  private readonly loadGovernors = new Map<string, SystemLoadGovernor>();
   private window: BrowserWindow | null = null;
   private readonly repeatedFailures = new Map<string, number[]>();
   private readonly cleanupInProgress = new Set<string>();
@@ -581,6 +589,26 @@ export class QueueManager {
     return changed;
   }
 
+  // VẤN ĐỀ 2 mục 1 (2026-09-22): lấy (hoặc tạo mới) bộ điều tiết CPU riêng cho từng hồ sơ tài nguyên —
+  // ngưỡng cao = cpuSoftLimitPercent của chính hồ sơ (tôn trọng giá trị người dùng đã đặt/đề xuất theo
+  // máy), ngưỡng thấp thấp hơn một khoảng an toàn để tạo độ trễ (hysteresis), tránh nhấp nháy bật/tắt.
+  private loadGovernorFor(profile: ResourceProfile): SystemLoadGovernor {
+    const existing = this.loadGovernors.get(profile.id);
+    if (existing) return existing;
+    const governor = new SystemLoadGovernor({
+      highPercent: profile.cpuSoftLimitPercent,
+      lowPercent: defaultLowPercentFor(profile.cpuSoftLimitPercent),
+      sustainedMs: DEFAULT_LOAD_GOVERNOR_SUSTAINED_MS
+    });
+    this.loadGovernors.set(profile.id, governor);
+    return governor;
+  }
+
+  /** true nếu ĐANG giảm tải vì CPU hệ thống cao liên tục — dùng để hiện trạng thái trên giao diện. */
+  public isSystemLoadThrottled(): boolean {
+    return [...this.loadGovernors.values()].some((governor) => governor.isThrottled());
+  }
+
   private async resourcesAllow(
     job: QueueJob,
     profile: ResourceProfile,
@@ -588,8 +616,18 @@ export class QueueManager {
   ): Promise<boolean> {
     const memoryReserve = effectiveMemoryReserveBytes(profile.memoryFreeMinimumBytes, totalmem());
     if (freemem() < memoryReserve) return false;
-    if (['clip', 'normalize', 'merge'].includes(job.type) && cpuPercent > profile.cpuSoftLimitPercent)
-      return false;
+    // VẤN ĐỀ 2 mục 1 (2026-09-22): thay kiểm tra tức thời (cpuPercent > cpuSoftLimitPercent, dễ nhấp
+    // nháy bật/tắt khi CPU dao động quanh ngưỡng) bằng bộ điều tiết có độ trễ hai chiều, dùng ĐÚNG ngưỡng
+    // cpuSoftLimitPercent của hồ sơ làm ngưỡng cao (không đổi hành vi với cấu hình người dùng đã đặt).
+    // Áp dụng cho cả tải lẫn ghép (download cũng dùng ffmpeg để hậu xử lý/tạo bản edit, không chỉ mạng)
+    // — CHỈ chặn tác vụ MỚI bắt đầu, không đụng tác vụ đang chạy. Luôn cho phép ÍT NHẤT một tác vụ toàn
+    // ứng dụng đang chạy (this.active.size === 0) để tránh "đói" hoàn toàn khi máy có vẻ bận nhưng thực
+    // ra Tubmedia chưa làm gì cả.
+    const cpuTypeGated = ['download', 'clip', 'normalize', 'merge'].includes(job.type);
+    if (cpuTypeGated && this.active.size > 0) {
+      const throttled = this.loadGovernorFor(profile).sample(cpuPercent, Date.now());
+      if (throttled) return false;
+    }
     if (job.projectId) {
       for (const targetFolder of this.diskFoldersForJob(job)) {
         try {
@@ -646,6 +684,21 @@ export class QueueManager {
     let all = this.repo.list();
     if (await this.recoverDiskFullProjects(all)) all = this.repo.list();
     const cpuPercent = this.cpuPercent();
+    // VẤN ĐỀ 2 mục 1 (2026-09-22): lấy mẫu bộ điều tiết CHO MỌI HỒ SƠ đang có tác vụ hoạt động, MỖI LƯỢT
+    // tick — không chỉ khi có tác vụ đang CHỜ được xét (resourcesAllow). Nếu chỉ lấy mẫu lúc xét tác vụ
+    // chờ, một hàng đợi có tác vụ chờ luôn bị chặn bởi giới hạn SỐ WORKER (không phải CPU) sẽ không bao
+    // giờ chạm tới bộ điều tiết, khiến đồng hồ "đủ lâu" (sustainedMs) không bao giờ tích lũy được dù CPU
+    // đã cao liên tục thật sự — nhịp tick đều đặn (350ms khi có việc đang chạy) mới là nguồn đếm giờ THẬT
+    // đáng tin cậy, không phụ thuộc độ sâu hàng đợi.
+    const nowForSampling = Date.now();
+    const sampledProfileIds = new Set<string>();
+    for (const activeJob of this.active.values()) {
+      if (!['download', 'clip', 'normalize', 'merge'].includes(activeJob.job.type)) continue;
+      const activeProfile = this.profileFor(activeJob.job);
+      if (sampledProfileIds.has(activeProfile.id)) continue;
+      sampledProfileIds.add(activeProfile.id);
+      this.loadGovernorFor(activeProfile).sample(cpuPercent, nowForSampling);
+    }
     const pending: QueueJob[] = [];
     let stateChanged = false;
     for (const job of all.filter((x) => x.status === 'pending')) {
