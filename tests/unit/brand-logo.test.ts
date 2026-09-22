@@ -195,12 +195,11 @@ describe('.ico của bộ nhận diện: tên riêng, không đụng icon bộ c
     for (const size of [16, 24, 32, 48, 64, 128, 256]) expect(sizes).toContain(size);
   });
 
-  it('khác tệp icon.ico hiện có; package.json vẫn dùng resources/icon.ico và resources/icon.png như cũ', () => {
+  it('khác tệp resources/icon.ico (icon taskbar/khay dùng cách dựng khác — xem taskbar-tray-icon.test.ts); package.json không nhắc tên riêng này', () => {
     expect(ico.equals(readFileSync(join(root, 'resources/icon.ico')))).toBe(false);
     const pkg = text('package.json');
     expect(pkg.match(/"resources\/icon\.ico"/g)).toHaveLength(3);
     expect(pkg).toContain('"from": "resources/icon.png"');
     expect(pkg).not.toContain('tubmedia-logo.ico');
-    expect(text('src/main/windows/main-window.ts')).toContain("'icon.png'");
   });
 });

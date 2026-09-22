@@ -501,6 +501,7 @@ tests/unit/startup-fast.test.ts
 tests/unit/system-cleanup-estimate-guard.test.ts
 tests/unit/system-cleanup-navigation.test.ts
 tests/unit/system-cleanup-policy.test.ts
+tests/unit/taskbar-tray-icon.test.ts
 tests/unit/temporary-cleanup.test.ts
 tests/unit/timeline-merge-recovery-hotfix12.test.ts
 tests/unit/timeline-service-safety.test.ts

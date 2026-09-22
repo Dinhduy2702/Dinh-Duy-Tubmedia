@@ -46,9 +46,9 @@ function showMainWindow(): void {
 
 function ensureTray(): void {
   if (tray) return;
-  const icon = nativeImage
-    .createFromPath(join(app.getAppPath(), 'resources', 'icon.png'))
-    .resize({ width: 20, height: 20 });
+  // .ico đa lớp (đã hint riêng 16/20/24/32px cho khay hệ thống): không resize() một ảnh lớn (làm mờ),
+  // để Windows tự chọn đúng khung theo tỉ lệ hiển thị màn hình.
+  const icon = nativeImage.createFromPath(join(app.getAppPath(), 'resources', 'icon.ico'));
   tray = new Tray(icon);
   tray.setToolTip('Download video Tubmedia');
   tray.setContextMenu(

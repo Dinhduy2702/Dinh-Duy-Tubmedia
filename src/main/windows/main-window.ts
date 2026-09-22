@@ -15,9 +15,9 @@ export function createMainWindow(): BrowserWindow {
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#08090c' : '#f7f7f8',
     title: 'Download video Tubmedia',
     autoHideMenuBar: true,
-    icon: app.isPackaged
-      ? join(process.resourcesPath, 'icon.png')
-      : join(process.cwd(), 'resources', 'icon.png'),
+    // .ico đa lớp (16…256px, hint riêng từng cỡ) để icon cửa sổ/taskbar sắc nét ở mọi tỉ lệ hiển thị;
+    // nằm trong resources/ nên có sẵn ở cả chế độ chạy từ mã nguồn lẫn bản đóng gói (packed vào app files).
+    icon: join(app.getAppPath(), 'resources', 'icon.ico'),
     webPreferences: {
       // Sandboxed preload scripts cannot run native ESM imports. The preload
       // build is therefore emitted as one bundled CommonJS file.
