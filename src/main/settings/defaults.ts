@@ -133,7 +133,11 @@ export const builtInResourceProfiles: ResourceProfile[] = [
     ffmpegThreads: 6,
     filterThreads: 3,
     filterComplexThreads: 3,
-    processPriority: 'normal',
+    // VẤN ĐỀ 2 mục 3 (2026-09-22): đồng nhất below_normal cho MỌI hồ sơ dựng sẵn — kể cả máy mạnh nhất —
+    // để tiến trình con (yt-dlp/ffmpeg) luôn nhường CPU cho ứng dụng người dùng đang mở ở foreground
+    // (Windows tự ưu tiên tiến trình mức thường khi có tranh chấp). Trước đây hồ sơ này dùng 'normal'
+    // (ngang hàng ứng dụng foreground, không thấp hơn như mong muốn).
+    processPriority: 'below_normal',
     cpuSoftLimitPercent: 98,
     memoryFreeMinimumBytes: 4 * 1024 ** 3,
     diskFreeMinimumBytes: 15 * 1024 ** 3,
