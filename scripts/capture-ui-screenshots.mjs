@@ -44,15 +44,18 @@ const captureCard = args.includes('--card');
 const captureResponsive = args.includes('--responsive');
 const RESPONSIVE_SIZES = ['920x640', '1280x720', '1920x1080', '2560x1440'];
 const RESPONSIVE_SCALES = [100, 125, 150];
-const RESPONSIVE_PAGES = [['step-download', 'buoc-mot-tai'], ['activity', 'hang-doi']];
+const RESPONSIVE_PAGES = [['download-workbench', 'tai-danh-sach'], ['activity', 'hang-doi']];
 
 const PAGES = [
-  // Điều hướng 3 bước (GĐ 2a): ① Tải, ② Xem trước & Cắt, ③ Ghép & Xuất — nay là trang mở đầu.
+  // Điều chỉnh 2026-09-22: việc CHÍNH hàng ngày thật sự là tải danh sách + ghép theo Timeline (2 trang
+  // cũ, logic không đổi) — nay đứng đầu. "Tải 1 video" (①②③) chỉ là tiện ích phụ, xuống nhóm CÔNG CỤ.
+  ['download-workbench', 'tai-danh-sach'],
+  ['download-merge', 'ghep-theo-timeline'],
+  ['activity', 'hang-doi'],
+  ['history', 'lich-su'],
   ['step-download', 'buoc-mot-tai'],
   ['step-preview-cut', 'buoc-hai-xem-truoc-cat'],
   ['step-merge-export', 'buoc-ba-ghep-xuat'],
-  ['activity', 'hang-doi'],
-  ['history', 'lich-su'],
   ['filter-by-links', 'loc-theo-link'],
   ['cleanup', 'don-dep'],
   ['settings', 'cai-dat'],
@@ -60,10 +63,7 @@ const PAGES = [
   ['tools', 'cong-cu'],
   ['diagnostics', 'chan-doan'],
   ['logs', 'nhat-ky'],
-  ['about', 'gioi-thieu'],
-  // Trang cũ (đa làn/hàng loạt), nay ở nhóm CÔNG CỤ NÂNG CAO — vẫn giữ nguyên, vẫn chụp để đối chiếu.
-  ['download-workbench', 'tai-xuong-hang-loat'],
-  ['download-merge', 'tai-va-ghep-da-lan']
+  ['about', 'gioi-thieu']
 ].filter(([id]) => onlyPages.length === 0 || onlyPages.includes(id));
 
 function fail(message) {

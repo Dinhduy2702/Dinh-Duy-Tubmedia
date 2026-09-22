@@ -26,13 +26,25 @@ interface SidebarItem {
   step?: number;
 }
 
+// Việc CHÍNH thật sự dùng hàng ngày là tải một DANH SÁCH nhiều video rồi GHÉP đúng thứ tự thành 1 file
+// (2 trang cũ, logic không đổi — chỉ đổi vị trí/nhãn cho đúng vai trò). "Tải 1 video" (①②③) chỉ là tiện
+// ích phụ, tải nhanh một video đơn — xem TIEN_DO.md phần "Điều chỉnh thứ tự thanh bên" (2026-09-22).
 const groups: Array<{ label: string; items: SidebarItem[] }> = [
   {
     label: 'VIỆC CHÍNH',
     items: [
-      { id: 'step-download', label: 'Tải', hint: 'Tải một video, chọn đoạn cần dùng', icon: Download, step: 1 },
-      { id: 'step-preview-cut', label: 'Xem trước & Cắt', hint: 'Xem và cắt đoạn đã tải', icon: Scissors, step: 2 },
-      { id: 'step-merge-export', label: 'Ghép & Xuất', hint: 'Ghép các đoạn và xuất thành phẩm', icon: Sparkles, step: 3 },
+      {
+        id: 'download-workbench',
+        label: 'Tải danh sách',
+        hint: 'Nhiều video, nhiều danh sách chạy song song',
+        icon: Download
+      },
+      {
+        id: 'download-merge',
+        label: 'Ghép theo Timeline',
+        hint: 'Ghép đúng thứ tự thành 1 file, tối đa 4 quy trình',
+        icon: Sparkles
+      },
       { id: 'activity', label: 'Hàng đợi', hint: 'Điều khiển mọi tác vụ', icon: Activity },
       { id: 'history', label: 'Lịch sử', hint: 'Tra cứu và xuất CSV/JSON', icon: History }
     ]
@@ -40,6 +52,9 @@ const groups: Array<{ label: string; items: SidebarItem[] }> = [
   {
     label: 'CÔNG CỤ',
     items: [
+      { id: 'step-download', label: 'Tải 1 video', hint: 'Tiện ích nhanh: tải một video, chọn đoạn cần dùng', icon: Download, step: 1 },
+      { id: 'step-preview-cut', label: 'Xem trước & Cắt', hint: 'Xem và cắt đoạn đã tải', icon: Scissors, step: 2 },
+      { id: 'step-merge-export', label: 'Ghép & Xuất', hint: 'Ghép các đoạn và xuất thành phẩm', icon: Sparkles, step: 3 },
       {
         id: 'filter-by-links',
         label: 'Lọc video theo link',
@@ -58,23 +73,6 @@ const groups: Array<{ label: string; items: SidebarItem[] }> = [
       { id: 'diagnostics', label: 'Chẩn đoán', hint: 'Công cụ, tài nguyên và lỗi', icon: Gauge },
       { id: 'logs', label: 'Nhật ký', hint: 'Chi tiết kỹ thuật và sự kiện', icon: FileClock },
       { id: 'about', label: 'Giới thiệu', hint: 'Ứng dụng và nhà phát triển', icon: Info }
-    ]
-  },
-  {
-    label: 'CÔNG CỤ NÂNG CAO',
-    items: [
-      {
-        id: 'download-workbench',
-        label: 'Tải xuống (hàng loạt)',
-        hint: 'Nhiều URL, nhiều danh sách cùng lúc',
-        icon: Download
-      },
-      {
-        id: 'download-merge',
-        label: 'Tải & Ghép (đa làn)',
-        hint: 'Workflow Editor: tối đa 4 quy trình song song',
-        icon: Sparkles
-      }
     ]
   }
 ];

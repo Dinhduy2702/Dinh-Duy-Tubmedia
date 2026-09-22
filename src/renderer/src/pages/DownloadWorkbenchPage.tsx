@@ -6,6 +6,7 @@ import {
   ClipboardPaste,
   Cookie,
   Cpu,
+  Download,
   FileText,
   FolderOpen,
   Gauge,
@@ -593,8 +594,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
   };
 
   return (
-    <div className="page-shell">
-      <QuickDownloadPanel />
+    <div className="page-shell download-workbench-page">
       <header className="page-heading">
         <div>
           <h1>Tải danh sách đa nền tảng</h1>
@@ -698,6 +698,17 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
             );
           })}
       </div>
+
+      {/* "Tải 1 video" là tiện ích phụ (điều chỉnh 2026-09-22) — đặt thu gọn dưới nội dung chính thay vì
+          chiếm đầu trang, vì việc CHÍNH của trang này là tải cả danh sách. */}
+      <InfoDisclosure
+        title="Tiện ích: Tải 1 video"
+        summary="Tải nhanh một video đơn, không cần tạo danh sách"
+        icon={Download}
+        className="mt-4"
+      >
+        <QuickDownloadPanel />
+      </InfoDisclosure>
 
       <CookieManagerDialog
         open={cookieOpen}

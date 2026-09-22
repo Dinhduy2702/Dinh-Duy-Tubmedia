@@ -954,7 +954,7 @@ export function DownloadMergePage(): React.JSX.Element {
   };
 
   return (
-    <div className="page-shell">
+    <div className="page-shell download-merge-page">
       <header className="page-heading">
         <div>
           <h1>Tải & ghép đa nền tảng</h1>

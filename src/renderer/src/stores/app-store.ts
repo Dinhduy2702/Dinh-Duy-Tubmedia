@@ -374,9 +374,10 @@ const initialNotifications = loadNotificationHistory();
 export const useAppStore = create<State>((set, get) => ({
   ready: false,
   loading: false,
-  // Trang mở đầu là bước ① Tải (điều hướng 3 bước GĐ 2a) để mục thanh bên luôn có một mục đang chọn;
+  // Trang mở đầu là "Tải danh sách": việc CHÍNH thật sự dùng hàng ngày (tải một danh sách nhiều video),
+  // trước khi ghép theo Timeline — điều chỉnh 2026-09-22 sau khi người dùng nói rõ chức năng chính.
   // "Tổng quan" (editor-home) không còn trong danh sách thanh bên nhưng vẫn mở được qua bấm logo.
-  page: 'step-download',
+  page: 'download-workbench',
   projects: [],
   jobs: [],
   tools: [],

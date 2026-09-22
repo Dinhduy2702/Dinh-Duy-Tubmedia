@@ -392,6 +392,26 @@
 }
 
 /* ------------------------------------------------------------------ */
+/* 8b. Việc CHÍNH hàng ngày (điều chỉnh 2026-09-22): "Tải danh sách" và "Ghép theo Timeline"
+   (download-workbench, download-merge — logic KHÔNG đổi, chỉ thiết kế lại phần hiển thị, y hệt cách đã
+   làm với trang Cài đặt/Dọn dẹp). Tiêu đề trang 30px đậm đúng đặc tả GĐ 2a (mục 69), tách riêng khỏi
+   `.page-heading h1` dùng chung ở nơi khác (hộp thoại, trang Giới thiệu…) để không đổi những chỗ đó. */
+/* ------------------------------------------------------------------ */
+.download-workbench-page .page-heading h1,
+.download-merge-page .page-heading h1 {
+  font-size: 1.875rem !important; /* 30px */
+  font-weight: 800 !important;
+  letter-spacing: -0.02em !important;
+}
+
+.download-workbench-page .page-heading p,
+.download-merge-page .page-heading p {
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+/* ------------------------------------------------------------------ */
 /* 9. Cỡ chữ (Cài đặt → Vừa/Lớn/Rất lớn): đổi gốc rem, mọi chữ theo hệ --type-* co giãn theo.        */
 /* ------------------------------------------------------------------ */
 :root[data-font-size='large'] {

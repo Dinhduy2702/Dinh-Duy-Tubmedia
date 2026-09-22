@@ -34,21 +34,25 @@ function check(label, condition) {
 
 check('package version is a valid release version', isValidVersion(files.packageJson.version));
 check(
-  'Step ① Tải is the default landing page (điều hướng 3 bước GĐ 2a); Editor Home still reachable via logo',
-  files.appStore.includes("page: 'step-download'") &&
-    files.app.includes("page === 'step-download'") &&
+  // Điều chỉnh 2026-09-22: "Tải danh sách" + "Ghép theo Timeline" LÀ việc chính hàng ngày thật sự
+  // (không phải "Tải 1 video" ①②③, chỉ là tiện ích phụ) — xem TIEN_DO.md.
+  '"Tải danh sách" (download-workbench) is the default landing page; Editor Home still reachable via logo',
+  files.appStore.includes("page: 'download-workbench'") &&
+    files.app.includes("page === 'download-workbench'") &&
     files.sidebar.includes("setPage('editor-home')")
 );
 check(
-  'navigation exposes the 3-step journey, history and diagnostics',
-  ['step-download', 'step-preview-cut', 'step-merge-export', 'history', 'diagnostics'].every((page) =>
-    files.sidebar.includes(`'${page}'`)
+  'navigation exposes the primary daily workflow (tải danh sách + ghép Timeline), the quick single-video journey, history and diagnostics',
+  ['download-workbench', 'download-merge', 'step-download', 'step-preview-cut', 'step-merge-export', 'history', 'diagnostics'].every(
+    (page) => files.sidebar.includes(`'${page}'`)
   )
 );
 check(
-  'System Cleanup is placed under the CÔNG CỤ group (đặc tả GĐ 2a); old batch pages moved under Advanced Tools',
-  files.sidebar.indexOf("label: 'CÔNG CỤ'") < files.sidebar.indexOf("id: 'cleanup'") &&
-    files.sidebar.indexOf("label: 'CÔNG CỤ NÂNG CAO'") < files.sidebar.indexOf("id: 'download-merge'")
+  'VIỆC CHÍNH đứng trước CÔNG CỤ; tải danh sách/ghép Timeline (việc chính hàng ngày) đứng trước "Tải 1 video" (tiện ích phụ) và Dọn dẹp',
+  files.sidebar.indexOf("label: 'VIỆC CHÍNH'") < files.sidebar.indexOf("label: 'CÔNG CỤ'") &&
+    files.sidebar.indexOf("id: 'download-workbench'") < files.sidebar.indexOf("id: 'step-download'") &&
+    files.sidebar.indexOf("id: 'download-merge'") < files.sidebar.indexOf("id: 'cleanup'") &&
+    files.sidebar.indexOf("label: 'CÔNG CỤ'") < files.sidebar.indexOf("id: 'cleanup'")
 );
 check(
   'Editor Home uses actual queue, project, tool and system state',
