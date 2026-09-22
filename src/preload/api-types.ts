@@ -177,6 +177,7 @@ export interface DesktopApi {
     resume(taskId: string): Promise<QuickDownloadStatus | null>;
     cancel(taskId: string): Promise<QuickDownloadStatus | null>;
     revealOutput(taskId: string): Promise<boolean>;
+    previewFrame(input: { url: string; timestampSeconds: number }): Promise<{ dataUrl: string }>;
   };
   videoFilter: {
     chooseLinksFile(): Promise<{ path: string; text: string } | null>;

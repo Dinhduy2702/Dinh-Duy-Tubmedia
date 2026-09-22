@@ -114,7 +114,8 @@ export const IPC = {
     pause: 'quick-download:pause',
     resume: 'quick-download:resume',
     cancel: 'quick-download:cancel',
-    revealOutput: 'quick-download:reveal-output'
+    revealOutput: 'quick-download:reveal-output',
+    previewFrame: 'quick-download:preview-frame'
   },
   videoFilter: {
     chooseLinksFile: 'video-filter:choose-links-file',

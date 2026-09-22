@@ -3,8 +3,9 @@
 // tham chiếu ba gạch chéo chỉ áp dụng cho tệp này, không đổi "lib" chung của tsconfig.node.json
 // (giữ nguyên cho code tiến trình chính không có DOM).
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -283,6 +284,156 @@ test('không bắn thông báo nổi khi sửa danh sách link hoặc đổi s�
     await shellWindow.waitForTimeout(800);
     await noFloatingNotice();
   } finally {
+    await closeElectronApplication();
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Giai đoạn 3 (2026-09-23) — "Tải theo khoảng có xem trước": kiểm tra THẬT đường ống trích khung hình xem
+ * trước (yt-dlp tải một đoạn rất ngắn qua HTTP Range + ffmpeg trích 1 khung hình), dùng Electron thật với
+ * máy chủ HTTP cục bộ (127.0.0.1) phát một clip testsrc do chính ffmpeg đã cài dựng ra — không mạng ngoài,
+ * không cookie/tài khoản thật. Máy chủ hỗ trợ HTTP Range đúng chuẩn, mô phỏng đúng cách CDN thật hoạt
+ * động khi tua video (yt-dlp giao việc tua cho ffmpeg với URL trực tiếp).
+ */
+function resolveToolsDirectoryForTest(): string | null {
+  const needed = ['yt-dlp.exe', 'ffmpeg.exe', 'ffprobe.exe'];
+  const candidates = [
+    path.join(projectRoot, 'tool'),
+    path.join(process.env.LOCALAPPDATA ?? '', 'Programs', 'Download video Tubmedia', 'resources', 'tool')
+  ];
+  for (const directory of candidates) {
+    if (needed.every((name) => fs.existsSync(path.join(directory, name)))) return directory;
+  }
+  return null;
+}
+
+test('Giai đoạn 3: trích khung hình xem trước thật từ một đoạn ngắn (yt-dlp + ffmpeg thật, không mạng ngoài)', async () => {
+  const toolsDirectory = resolveToolsDirectoryForTest();
+  test.skip(!toolsDirectory, 'Không tìm thấy yt-dlp/ffmpeg/ffprobe trên máy này để chạy bài kiểm thật.');
+
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-preview-frame-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+  db.exec(
+    'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
+  );
+  db.prepare(
+    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+  ).run(
+    'app',
+    JSON.stringify({
+      theme: 'dark',
+      startWithWindows: false,
+      autoCheckAppUpdates: false,
+      autoCheckToolUpdates: false,
+      ytdlpPath: path.join(toolsDirectory!, 'yt-dlp.exe'),
+      ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+      ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+    }),
+    new Date().toISOString()
+  );
+  db.close();
+
+  const clipDirectory = path.join(sandbox, 'nguon-that');
+  fs.mkdirSync(clipDirectory, { recursive: true });
+  const clipPath = path.join(clipDirectory, 'clip.mp4');
+  const ffmpegResult = spawnSync(
+    path.join(toolsDirectory!, 'ffmpeg.exe'),
+    ['-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=10:duration=6', '-c:v', 'libx264', '-preset', 'ultrafast', '-an', clipPath],
+    { stdio: 'ignore', windowsHide: true, timeout: 60_000 }
+  );
+  expect(ffmpegResult.status, 'ffmpeg phải dựng được clip thử').toBe(0);
+  const clipData = fs.readFileSync(clipPath);
+
+  let server: Server | undefined;
+  try {
+    server = createServer((request, response) => {
+      const range = request.headers.range;
+      if (range) {
+        const match = /bytes=(\d*)-(\d*)/.exec(range);
+        const start = match?.[1] ? Number(match[1]) : 0;
+        const end = match?.[2] ? Number(match[2]) : clipData.length - 1;
+        response.writeHead(206, {
+          'Content-Type': 'video/mp4',
+          'Content-Range': `bytes ${start}-${end}/${clipData.length}`,
+          'Content-Length': String(end - start + 1),
+          'Accept-Ranges': 'bytes'
+        });
+        response.end(clipData.subarray(start, end + 1));
+        return;
+      }
+      response.writeHead(200, {
+        'Content-Type': 'video/mp4',
+        'Content-Length': String(clipData.length),
+        'Accept-Ranges': 'bytes'
+      });
+      response.end(clipData);
+    });
+    const port = await new Promise<number>((resolvePort) => {
+      server!.listen(0, '127.0.0.1', () => resolvePort((server!.address() as { port: number }).port));
+    });
+    const clipUrl = `http://127.0.0.1:${port}/clip.mp4`;
+
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+        ),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+
+    // tsconfig.node.json (dùng cho tệp này) không thấy được env.d.ts của renderer (khai báo window.desktop)
+    // — ép kiểu NGAY TRONG hàm evaluate (chạy thật trong cửa sổ trình duyệt lúc runtime); không thể truyền
+    // hàm ép kiểu như một đối số vào evaluate vì Playwright chỉ truyền được dữ liệu tuần tự hoá được.
+    interface DesktopPreviewApi {
+      tools: { list: () => Promise<Array<{ name: string; available: boolean }>> };
+      quickDownload: {
+        previewFrame: (input: { url: string; timestampSeconds: number }) => Promise<{ dataUrl: string }>;
+      };
+    }
+
+    let toolsReady = false;
+    const readyDeadline = Date.now() + 30_000;
+    while (Date.now() < readyDeadline) {
+      const list = await shellWindow.evaluate(
+        () => (window as unknown as { desktop: DesktopPreviewApi }).desktop.tools.list()
+      );
+      const ready = list.find((item) => item.name === 'yt-dlp')?.available && list.find((item) => item.name === 'ffmpeg')?.available;
+      if (ready) {
+        toolsReady = true;
+        break;
+      }
+      await sleep(300);
+    }
+    expect(toolsReady, 'yt-dlp/ffmpeg phải sẵn sàng trong 30s').toBe(true);
+
+    const result = await shellWindow.evaluate(
+      (url) => (window as unknown as { desktop: DesktopPreviewApi }).desktop.quickDownload.previewFrame({ url, timestampSeconds: 2 }),
+      clipUrl
+    );
+    expect(result.dataUrl.startsWith('data:image/jpeg;base64,')).toBe(true);
+    const bytes = Buffer.from(result.dataUrl.slice('data:image/jpeg;base64,'.length), 'base64');
+    expect(bytes.length).toBeGreaterThan(100);
+    expect(bytes[0]).toBe(0xff); // magic bytes JPEG
+    expect(bytes[1]).toBe(0xd8);
+
+    const leftover = fs.readdirSync(tmpdir()).filter((name) => name.startsWith('tubmedia-preview-'));
+    expect(leftover, 'không được để lại thư mục tạm nào sau khi trích khung hình xong').toEqual([]);
+  } finally {
+    server?.close();
     await closeElectronApplication();
     fs.rmSync(sandbox, { recursive: true, force: true });
   }

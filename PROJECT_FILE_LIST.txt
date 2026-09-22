@@ -205,6 +205,7 @@ scripts/verify-notification-cookie-upgrade.mjs
 scripts/verify-pause-project-race-v132.mjs
 scripts/verify-pause-terminal-noop-hotfix-v132.mjs
 scripts/verify-pre132-user-release.mjs
+scripts/verify-preview-frame.mjs
 scripts/verify-professional-passive-update-center-v133.mjs
 scripts/verify-professional-update-now-v132.mjs
 scripts/verify-quick-download-integration.mjs
@@ -251,6 +252,8 @@ src/main/database/repositories/project-repository.ts
 src/main/database/repositories/queue-repository.ts
 src/main/database/repositories/settings-repository.ts
 src/main/database/sqlite.ts
+src/main/download/preview-frame-command.ts
+src/main/download/preview-frame-service.ts
 src/main/download/quick-download-command.ts
 src/main/download/quick-download-service.ts
 src/main/downloader/download-engine.ts
@@ -487,6 +490,7 @@ tests/unit/notification-policy.test.ts
 tests/unit/notification-spam-lane-count.test.ts
 tests/unit/open-path-policy.test.ts
 tests/unit/output-path-containment.test.ts
+tests/unit/preview-frame-command.test.ts
 tests/unit/primary-button-double-click.test.ts
 tests/unit/process-abort-before-spawn.test.ts
 tests/unit/process-callback-safety.test.ts

@@ -125,7 +125,8 @@ const api: DesktopApi = {
     pause: (taskId) => invoke(IPC.quickDownload.pause, { taskId }),
     resume: (taskId) => invoke(IPC.quickDownload.resume, { taskId }),
     cancel: (taskId) => invoke(IPC.quickDownload.cancel, { taskId }),
-    revealOutput: (taskId) => invoke(IPC.quickDownload.revealOutput, { taskId })
+    revealOutput: (taskId) => invoke(IPC.quickDownload.revealOutput, { taskId }),
+    previewFrame: (input) => invoke(IPC.quickDownload.previewFrame, input)
   },
   videoFilter: {
     chooseLinksFile: () => invoke(IPC.videoFilter.chooseLinksFile),

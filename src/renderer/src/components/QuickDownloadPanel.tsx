@@ -127,6 +127,13 @@ export function QuickDownloadPanel(): ReactElement {
     }
   });
   const [accurateCut, setAccurateCut] = useState(false);
+  // Giai đoạn 3 (2026-09-23): xem trước khung hình đầu/cuối đoạn — làm mới lại (xóa ảnh cũ) mỗi khi liên
+  // kết hoặc mốc thời gian đổi, để không hiện nhầm ảnh của lần trước.
+  const [previewFrames, setPreviewFrames] = useState<{ start: string; end: string } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const previewInvalidationKey = `${url.trim()}|${startTime}|${endTime}`;
+  const previewInvalidationKeyRef = useRef(previewInvalidationKey);
   const [status, setStatus] = useState<QuickDownloadStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cookieOpen, setCookieOpen] = useState(false);
@@ -228,6 +235,13 @@ export function QuickDownloadPanel(): ReactElement {
   }, [status?.taskId, status?.phase]);
 
   useEffect(() => {
+    if (previewInvalidationKeyRef.current === previewInvalidationKey) return;
+    previewInvalidationKeyRef.current = previewInvalidationKey;
+    setPreviewFrames(null);
+    setPreviewError(null);
+  }, [previewInvalidationKey]);
+
+  useEffect(() => {
     if (!cookieBlocked || !status || openedCookieTask.current === status.taskId) return;
     openedCookieTask.current = status.taskId;
     setCookieOpen(true);
@@ -252,6 +266,32 @@ export function QuickDownloadPanel(): ReactElement {
     const target = url.trim();
     if (!target) return;
     window.open(target, '_blank', 'noopener,noreferrer');
+  }
+
+  /** Giai đoạn 3 (2026-09-23): lấy 2 khung hình thật (mốc bắt đầu + kết thúc) qua yt-dlp + ffmpeg. */
+  async function loadPreviewFrames(): Promise<void> {
+    const startSeconds = parseDurationToSeconds(startTime);
+    const endSeconds = parseDurationToSeconds(endTime);
+    const trimmedUrl = url.trim();
+    if (startSeconds === null || endSeconds === null || !trimmedUrl) return;
+    setPreviewLoading(true);
+    setPreviewError(null);
+    try {
+      const [startFrame, endFrame] = await Promise.all([
+        window.desktop.quickDownload.previewFrame({ url: trimmedUrl, timestampSeconds: startSeconds }),
+        window.desktop.quickDownload.previewFrame({ url: trimmedUrl, timestampSeconds: endSeconds })
+      ]);
+      setPreviewFrames({ start: startFrame.dataUrl, end: endFrame.dataUrl });
+    } catch (previewErr) {
+      setPreviewError(
+        readableError(
+          previewErr,
+          'Không lấy được khung hình xem trước. Nguồn có thể chặn, mốc thời gian vượt quá thời lượng video, hoặc cần Cookies.'
+        )
+      );
+    } finally {
+      setPreviewLoading(false);
+    }
   }
 
   async function chooseDirectory(): Promise<void> {
@@ -434,13 +474,44 @@ export function QuickDownloadPanel(): ReactElement {
           </Card>
 
           <Card icon={ImagePlay} title="Xem trước" subtitle="Khung hình đầu và cuối đoạn đã chọn" className="quick-download-card-preview">
-            <div className="tm-empty quick-download-preview-empty">
-              <span className="tm-empty-icon" aria-hidden="true"><ImagePlay size={22}/></span>
-              <p>
-                Xem trước khung hình chưa có ở bản này — sẽ có ở giai đoạn "tải theo đoạn kèm xem trước"
-                (Giai đoạn 3). Hiện tại bạn vẫn tải được đúng đoạn đã chọn ở thẻ bên cạnh.
-              </p>
-            </div>
+            {!useTimeline ? (
+              <div className="tm-empty quick-download-preview-empty">
+                <span className="tm-empty-icon" aria-hidden="true"><ImagePlay size={22}/></span>
+                <p>Chỉ áp dụng khi bật "Tải video theo mốc thời lượng" ở thẻ bên cạnh.</p>
+              </div>
+            ) : (
+              <div className="quick-download-preview-body">
+                <div className="quick-download-preview-actions">
+                  <button
+                    type="button"
+                    className="btn btn-small"
+                    disabled={!url.trim() || rangeDurationSeconds === null || previewLoading}
+                    onClick={() => void loadPreviewFrames()}
+                  >
+                    {previewLoading ? 'Đang lấy khung hình…' : 'Xem khung hình'}
+                  </button>
+                  <small>Tải một đoạn rất ngắn thật (không âm thanh) quanh mỗi mốc để lấy khung hình — không lưu lại trên máy.</small>
+                </div>
+                {previewError && (
+                  <div className="quick-download-error" role="alert">
+                    <AlertTriangle size={15}/>
+                    {previewError}
+                  </div>
+                )}
+                {previewFrames && (
+                  <div className="quick-download-preview-frames">
+                    <figure>
+                      <img src={previewFrames.start} alt="Khung hình ở mốc bắt đầu" />
+                      <figcaption>Bắt đầu · {startTime}</figcaption>
+                    </figure>
+                    <figure>
+                      <img src={previewFrames.end} alt="Khung hình ở mốc kết thúc" />
+                      <figcaption>Kết thúc · {endTime}</figcaption>
+                    </figure>
+                  </div>
+                )}
+              </div>
+            )}
           </Card>
 
           <Card icon={Save} title="Lưu và tải" subtitle="Chọn nơi lưu rồi bắt đầu" className="quick-download-card-save">

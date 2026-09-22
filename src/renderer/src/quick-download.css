@@ -316,6 +316,60 @@
   line-height: 1.48;
 }
 
+/* Giai đoạn 3 (2026-09-23): xem trước khung hình đầu/cuối đoạn đã chọn. */
+.quick-download-preview-body {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.quick-download-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.quick-download-preview-actions small {
+  color: var(--muted);
+  font-size: 0.66rem;
+  line-height: 1.45;
+}
+
+.quick-download-preview-frames {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.quick-download-preview-frames figure {
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel2);
+}
+
+.quick-download-preview-frames img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  background: #000;
+}
+
+.quick-download-preview-frames figcaption {
+  padding: 0.4rem 0.6rem;
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 800;
+}
+
+@media (max-width: 640px) {
+  .quick-download-preview-frames {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 980px) {
   .quick-download-heading,
   .quick-download-range-head {

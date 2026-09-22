@@ -282,3 +282,11 @@ export const quickDownloadTaskSchema = z
     taskId: idSchema
   })
   .strict();
+/* Giai đoạn 3 (2026-09-23): mốc thời gian tính bằng giây, không âm, không quá dài một cách bất thường
+   (24 giờ) — chặn giá trị vô lý trước khi truyền cho yt-dlp/ffmpeg. */
+export const previewFrameRequestSchema = z
+  .object({
+    url: z.string().trim().min(1).max(4096),
+    timestampSeconds: z.number().min(0).max(86_400)
+  })
+  .strict();

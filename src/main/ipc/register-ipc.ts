@@ -39,7 +39,8 @@ import {
   systemCleanupRunSchema,
   videoLinkFilterRequestSchema,
   quickDownloadRequestSchema,
-  quickDownloadTaskSchema
+  quickDownloadTaskSchema,
+  previewFrameRequestSchema
 } from '@shared/schemas/ipc.js';
 import type { AppSettings } from '@shared/types/domain.js';
 import { InvalidInputError } from '@shared/errors/app-errors.js';
@@ -483,6 +484,9 @@ export function registerIpc(ctx: AppContext): void {
   handle(IPC.quickDownload.pause, quickDownloadTaskSchema, ({ taskId }) => ctx.quickDownload.pause(taskId));
   handle(IPC.quickDownload.resume, quickDownloadTaskSchema, ({ taskId }) => ctx.quickDownload.resume(taskId));
   handle(IPC.quickDownload.cancel, quickDownloadTaskSchema, ({ taskId }) => ctx.quickDownload.cancel(taskId));
+  handle(IPC.quickDownload.previewFrame, previewFrameRequestSchema, (request) =>
+    ctx.previewFrame.extractFrame(request)
+  );
   handle(IPC.quickDownload.revealOutput, quickDownloadTaskSchema, ({ taskId }) =>
     ctx.quickDownload.revealOutput(taskId)
   );

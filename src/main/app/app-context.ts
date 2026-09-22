@@ -33,6 +33,7 @@ import { SenderValidator } from '../security/sender-validator.js';
 import { CookieService } from '../cookies/cookie-service.js';
 import { cleanupTemporaryArtifacts } from '../files/temporary-cleanup.js';
 import { QuickDownloadService } from '../download/quick-download-service.js';
+import { PreviewFrameService } from '../download/preview-frame-service.js';
 
 export class AppContext {
   public readonly userData = app.getPath('userData');
@@ -70,6 +71,10 @@ export class AppContext {
     join(this.userData, 'quick-download'),
     this.settings
   );
+  // Giai đoạn 3 (2026-09-23): dịch vụ riêng, không trạng thái — chỉ trích 1 khung hình rồi tự dọn dẹp,
+  // không dùng chung máy trạng thái tạm dừng/khôi phục của QuickDownloadService (không cần thiết cho
+  // một tác vụ "bắn một phát rồi xong").
+  public readonly previewFrame = new PreviewFrameService(this.processes, this.tools, this.settings, this.logger);
   public readonly quarantine = new QuarantineService(this.logger);
   public readonly downloader = new DownloadEngine(
     this.processes,
