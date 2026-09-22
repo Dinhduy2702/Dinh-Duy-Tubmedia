@@ -412,6 +412,42 @@
 }
 
 /* ------------------------------------------------------------------ */
+/* 8c. Kéo-thả sắp lại thứ tự ghép trong "Ghép theo Timeline" (GĐ 2b, HTML5 Drag and Drop có sẵn của
+   trình duyệt — không thêm thư viện). Chỉ áp dụng cho danh sách CHƯA có timeline thật (đang nhập link);
+   không đổi cách tính/định dạng timeline, chỉ đổi thứ tự dòng trong linksText khi thả. */
+/* ------------------------------------------------------------------ */
+.merge-timeline-row.is-reorderable {
+  grid-template-columns: 20px minmax(190px, auto) minmax(0, 1fr);
+  align-items: center;
+  cursor: grab;
+  transition:
+    opacity var(--motion-fast) var(--motion-ease-feedback),
+    transform var(--motion-fast) var(--motion-ease-feedback);
+}
+
+.merge-timeline-row.is-reorderable:active {
+  cursor: grabbing;
+}
+
+.merge-timeline-drag-handle {
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary, var(--muted));
+}
+
+.merge-timeline-row.is-dragging {
+  opacity: 0.45;
+}
+
+.merge-timeline-row.is-drag-over {
+  transform: translateY(2px);
+}
+
+.merge-timeline-row.is-drag-over .merge-timeline-drag-handle {
+  color: var(--action-bg, var(--accent));
+}
+
+/* ------------------------------------------------------------------ */
 /* 9. Cỡ chữ (Cài đặt → Vừa/Lớn/Rất lớn): đổi gốc rem, mọi chữ theo hệ --type-* co giãn theo.        */
 /* ------------------------------------------------------------------ */
 :root[data-font-size='large'] {

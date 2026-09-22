@@ -15,6 +15,7 @@ const excludedFiles = new Set([
 ]);
 const excludedDirectories = new Set([
   '.git',
+  '.claude',
   'node_modules',
   'out',
   'release',

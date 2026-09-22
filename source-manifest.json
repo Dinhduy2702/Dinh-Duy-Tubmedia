@@ -72,6 +72,7 @@
   ],
   "forbiddenDirectoryNames": [
     ".git",
+    ".claude",
     "node_modules",
     "out",
     "release",

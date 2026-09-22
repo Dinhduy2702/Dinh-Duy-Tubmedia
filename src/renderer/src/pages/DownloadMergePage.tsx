@@ -13,6 +13,7 @@ import {
   FileVideo2,
   FolderOpen,
   Gauge,
+  GripVertical,
   HardDrive,
   Layers3,
   ListOrdered,
@@ -53,6 +54,7 @@ import { ToolReadinessPanel } from '../components/ToolReadinessPanel';
 import { FolderField } from '../components/FolderField';
 import { StatusBadge } from '../components/StatusBadge';
 import { CompactLogRow } from '../components/CompactLogRow';
+import { EmptyState } from '../components/ui/EmptyState';
 import { useAppStore } from '../stores/app-store';
 import { showNotice } from '../utils/notify';
 import { createUiEventId } from '../utils/ui-id';
@@ -389,15 +391,34 @@ function MergeProductionPanel({
   jobs,
   storage,
   onNotice,
-  setError
+  setError,
+  onReorder
 }: {
   form: MergeForm;
   jobs: QueueJob[];
   storage: WorkbenchStorageSummary | null;
   onNotice: (title: string, message: string, severity?: 'info' | 'success' | 'warning') => void;
   setError: (error: string | null) => void;
+  /** Kéo-thả để sắp lại thứ tự ghép: nhận lại linksText đã đổi thứ tự dòng (không đổi cú pháp/dữ liệu
+   * từng dòng — chỉ đổi thứ tự). Không có thì danh sách hiện chỉ để xem, giữ hành vi cũ. */
+  onReorder?: (nextLinksText: string) => void;
 }): React.JSX.Element {
   const items = parseInputText(form.linksText).filter((item) => item.validity !== 'invalid');
+  // dragIndex chỉ để TÔ hiệu ứng (opacity dòng đang kéo) — không dùng để tính thứ tự khi thả, vì state
+  // React có thể chưa kịp cập nhật giữa dragstart và drop (nhất là khi thả rất nhanh). Vị trí nguồn khi
+  // thả lấy trực tiếp từ event.dataTransfer, không phụ thuộc thời điểm re-render.
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const DRAG_MIME = 'application/x-tubmedia-merge-index';
+
+  function reorderTo(sourceIndex: number, targetIndex: number): void {
+    if (!onReorder || Number.isNaN(sourceIndex) || sourceIndex === targetIndex) return;
+    const next = items.map((item) => item.originalText);
+    const [moved] = next.splice(sourceIndex, 1);
+    if (moved === undefined) return;
+    next.splice(targetIndex, 0, moved);
+    onReorder(next.join('\n'));
+  }
   const downloadJobs = jobs.filter((job) => job.type === 'download');
   const clipJobs = jobs.filter((job) => job.type === 'clip' || job.type === 'normalize');
   const mergeJob = jobs.find((job) => job.type === 'merge');
@@ -502,7 +523,7 @@ function MergeProductionPanel({
       </div>
       <div className="merge-timeline-preview">
         <div className="merge-timeline-heading">
-          <div><b>Timeline theo định dạng dựng</b><small>{timelineOnly ? 'Timeline được tính từ nguồn mà không ghép video; copy từng mốc hoặc chọn Xuất TXT' : 'Copy từng mốc hoặc nhấn biểu tượng Lưu để chọn nơi xuất TXT'}</small></div>
+          <div><b>Timeline theo định dạng dựng</b><small>{timelineOnly ? 'Timeline được tính từ nguồn mà không ghép video; copy từng mốc hoặc chọn Xuất TXT' : hasActualTimeline ? 'Copy từng mốc hoặc nhấn biểu tượng Lưu để chọn nơi xuất TXT' : onReorder ? 'Kéo ⠿ để đổi thứ tự ghép' : 'Copy từng mốc hoặc nhấn biểu tượng Lưu để chọn nơi xuất TXT'}</small></div>
           <span>
             {hasActualTimeline
               ? `${timelineRows.length} mốc thời gian thực`
@@ -510,7 +531,13 @@ function MergeProductionPanel({
           </span>
         </div>
         <div className="merge-timeline-rows scroll">
-          {items.length === 0 && <div className="empty-state">Dán liên kết để xem trước thứ tự ghép.</div>}
+          {items.length === 0 && (
+            <EmptyState
+              icon={ListOrdered}
+              title="Chưa có video nào trong quy trình"
+              description="Dán liên kết (mỗi dòng một link) ở ô bên dưới để xem trước thứ tự ghép tại đây. Kéo ⠿ để sắp lại thứ tự sau khi đã dán."
+            />
+          )}
           {hasActualTimeline
             ? timelineRows.map((row) => (
                 <div className="merge-timeline-row is-actual" key={`${row.index}-${row.start}`}>
@@ -537,7 +564,46 @@ function MergeProductionPanel({
                 </div>
               ))
             : items.map((item, index) => (
-                <div className="merge-timeline-row" key={`${item.lineNumber}-${index}`}>
+                <div
+                  className={`merge-timeline-row ${onReorder ? 'is-reorderable' : ''} ${dragIndex === index ? 'is-dragging' : ''} ${dragOverIndex === index && dragIndex !== null && dragIndex !== index ? 'is-drag-over' : ''}`}
+                  key={`${item.lineNumber}-${index}`}
+                  draggable={Boolean(onReorder)}
+                  onDragStart={
+                    onReorder
+                      ? (event) => {
+                          event.dataTransfer.effectAllowed = 'move';
+                          event.dataTransfer.setData(DRAG_MIME, String(index));
+                          setDragIndex(index);
+                        }
+                      : undefined
+                  }
+                  onDragOver={
+                    onReorder
+                      ? (event) => {
+                          event.preventDefault();
+                          event.dataTransfer.dropEffect = 'move';
+                          setDragOverIndex(index);
+                        }
+                      : undefined
+                  }
+                  onDrop={
+                    onReorder
+                      ? (event) => {
+                          event.preventDefault();
+                          const sourceIndex = Number(event.dataTransfer.getData(DRAG_MIME));
+                          reorderTo(sourceIndex, index);
+                          setDragIndex(null);
+                          setDragOverIndex(null);
+                        }
+                      : undefined
+                  }
+                  onDragEnd={onReorder ? () => { setDragIndex(null); setDragOverIndex(null); } : undefined}
+                >
+                  {onReorder && (
+                    <span className="merge-timeline-drag-handle" aria-hidden="true" title="Kéo để đổi thứ tự ghép">
+                      <GripVertical size={15} />
+                    </span>
+                  )}
                   <div className="merge-timeline-mark">
                     <button disabled aria-label="Mốc thời gian chưa sẵn sàng">
                       <Copy size={13} />
@@ -1545,6 +1611,7 @@ function MergeLaneCard({
               storage={storage}
               onNotice={onNotice}
               setError={setError}
+              {...(locked ? {} : { onReorder: (text: string) => update((current) => ({ ...current, linksText: text })) })}
             />
           </div>
         </details>

@@ -466,6 +466,7 @@ tests/unit/merge-checkpoint-ownership-hotfix13.test.ts
 tests/unit/merge-output-integrity.test.ts
 tests/unit/merge-product-name-length.test.ts
 tests/unit/merge-target.test.ts
+tests/unit/merge-timeline-reorder.test.ts
 tests/unit/merge-visual-boundary-hotfix11.test.ts
 tests/unit/motion-system.test.ts
 tests/unit/network-recovery-wiring-r54.test.ts
