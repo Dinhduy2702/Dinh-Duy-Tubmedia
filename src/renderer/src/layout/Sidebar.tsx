@@ -123,7 +123,7 @@ export function Sidebar(): React.JSX.Element {
       </nav>
 
       <div className="sidebar-footer">
-        <DeveloperSignature />
+        <DeveloperSignature intro />
       </div>
     </aside>
   );

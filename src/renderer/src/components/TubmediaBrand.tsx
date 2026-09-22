@@ -89,20 +89,19 @@ export function TubmediaWordmark({ compact = false }: { compact?: boolean }): Re
   </span>;
 }
 
-export function DeveloperSignature(): React.JSX.Element {
-  return <div className="developer-signature-card" aria-label="Tubmedia phát triển bởi Đình Duy">
-    <div className="developer-signature-ambient" aria-hidden="true"/>
-    <div className="developer-signature-identity">
-      <div className="developer-signature-icon-shell" aria-hidden="true">
-        <TubmediaMark className="developer-signature-logo" size={58}/>
-      </div>
-      <div className="developer-signature-copy">
-        <span className="developer-signature-eyebrow">PHÁT TRIỂN BỞI</span>
-        <b className="developer-signature-name">Đình Duy</b>
-        <strong className="developer-signature-product">TUBMEDIA</strong>
-      </div>
-    </div>
-    <div className="developer-signature-divider" aria-hidden="true"/>
-    <small className="developer-signature-tagline">TẢI · XỬ LÝ · GHÉP VIDEO</small>
+/**
+ * Thẻ "Phát triển bởi" (cuối thanh bên và trang Thông tin): nền đen than, không đỏ.
+ * Vệt sáng chỉ chạy MỘT lần khi mở app (intro, chỉ thẻ ở thanh bên) hoặc mỗi lần trỏ chuột vào thẻ;
+ * chỉ dùng transform + opacity; tắt hẳn khi người dùng chọn giảm chuyển động (xem brand.css).
+ */
+export function DeveloperSignature({ intro = false }: { intro?: boolean }): React.JSX.Element {
+  return <div className={`dev-card${intro ? ' dev-card--intro' : ''}`} role="group" aria-label="Tubmedia phát triển bởi Đình Duy">
+    <span className="dev-card-glint" aria-hidden="true"/>
+    <span className="dev-card-mark" aria-hidden="true"><TubmediaMark size={60}/></span>
+    <span className="dev-card-copy">
+      <span className="dev-card-eyebrow">PHÁT TRIỂN BỞI</span>
+      <b className="dev-card-name">Đình Duy</b>
+      <span className="dev-card-product">TUBMEDIA</span>
+    </span>
   </div>;
 }

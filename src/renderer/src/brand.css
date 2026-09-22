@@ -130,37 +130,188 @@
   box-shadow: none;
 }
 
-/* Thẻ "Phát triển bởi": đen than như thanh bên (không còn nền đỏ gradient; đỏ chỉ nằm trong logo). */
-.developer-signature-icon-shell {
-  border-color: #3a3a3d;
-  background: #262629;
-  box-shadow: none;
+/* ---- Thẻ "Phát triển bởi" -------------------------------------------
+   Nền đen than (KHÔNG đỏ, không gradient đỏ). Viền sáng nhẹ lấy từ token thanh bên; khi trỏ chuột viền sáng hơn (chỉ đổi opacity).
+   Vệt sáng: transform + opacity, chạy đúng 1 lần (intro khi mở app, chỉ ở thanh bên) hoặc 1 lần mỗi lần trỏ chuột;
+   KHÔNG lặp vô hạn nên không tốn CPU/GPU nền lúc đang tải hoặc ghép video. */
+.sidebar-footer {
+  container: sidebar-footer / inline-size;
 }
 
-.developer-signature-logo {
-  filter: none !important;
+.dev-card {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.85rem 0.9rem 0.85rem 0.75rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--sidebar-text) 13%, var(--sidebar-bg));
+  border-radius: 16px;
+  background:
+    radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--sidebar-text) 9%, transparent), transparent 62%),
+    linear-gradient(
+      155deg,
+      color-mix(in srgb, var(--sidebar-text) 8%, var(--sidebar-bg)),
+      color-mix(in srgb, var(--sidebar-text) 3%, var(--sidebar-bg))
+    );
+  color: var(--sidebar-text);
 }
 
-.about-brand-signature .developer-signature-card {
-  border-color: #333337;
-  background: var(--logo-charcoal);
-  box-shadow: none;
-  color: #f2efea;
+/* Viền sáng khi trỏ chuột: lớp phủ chỉ đổi opacity (không đổi màu viền nên không phải vẽ lại). */
+.dev-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid color-mix(in srgb, var(--sidebar-text) 30%, transparent);
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
-.about-brand-signature .developer-signature-card::before,
-.about-brand-signature .developer-signature-card::after,
-.about-brand-signature .developer-signature-shine {
+.dev-card:hover::after {
+  opacity: 1;
+}
+
+.dev-card-mark {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0.3rem 0.2rem;
+}
+
+.dev-card-copy {
+  display: grid;
+  min-width: 0;
+  gap: 0.3rem;
+}
+
+.dev-card-eyebrow,
+.dev-card-product {
+  overflow: hidden;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dev-card-eyebrow {
+  color: var(--sidebar-muted);
+  letter-spacing: 0.14em;
+}
+
+.dev-card-name {
+  overflow: hidden;
+  color: var(--sidebar-text);
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dev-card-product {
+  color: color-mix(in srgb, var(--sidebar-muted) 82%, var(--sidebar-bg));
+  letter-spacing: 0.2em;
+}
+
+.dev-card-glint {
+  position: absolute;
+  z-index: 1;
+  top: -30%;
+  bottom: -30%;
+  left: 0;
+  width: 42%;
+  background: linear-gradient(
+    100deg,
+    transparent,
+    color-mix(in srgb, var(--sidebar-text) 20%, transparent) 50%,
+    transparent
+  );
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-140%) skewX(-18deg);
+}
+
+.dev-card--intro .dev-card-glint {
+  animation: dev-card-glint-intro 1400ms cubic-bezier(0.4, 0, 0.2, 1) 1200ms 1;
+}
+
+.dev-card:hover .dev-card-glint {
+  animation: dev-card-glint-hover 1100ms cubic-bezier(0.4, 0, 0.2, 1) 1;
+}
+
+@keyframes dev-card-glint-intro {
+  0% {
+    opacity: 0;
+    transform: translateX(-140%) skewX(-18deg);
+  }
+  20%,
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(300%) skewX(-18deg);
+  }
+}
+
+@keyframes dev-card-glint-hover {
+  0% {
+    opacity: 0;
+    transform: translateX(-140%) skewX(-18deg);
+  }
+  20%,
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(300%) skewX(-18deg);
+  }
+}
+
+/* Giảm chuyển động: bỏ hẳn vệt sáng, giữ thẻ tĩnh. ':root.reduce-motion' là móc cho tùy chọn
+   "Giảm hiệu ứng chuyển động" trong Cài đặt (tùy chọn này sẽ thêm ở Giai đoạn 2a). */
+@media (prefers-reduced-motion: reduce) {
+  .dev-card-glint {
+    display: none;
+  }
+
+  .dev-card::after {
+    transition: none;
+  }
+}
+
+:root.reduce-motion .dev-card-glint {
   display: none;
 }
 
-.about-brand-signature .developer-signature-card span,
-.about-brand-signature .developer-signature-card b {
-  text-shadow: none;
+:root.reduce-motion .dev-card::after {
+  transition: none;
 }
 
-.about-brand-signature .developer-signature-card small {
-  color: #b4afa7;
+/* Thanh bên thu hẹp: chỉ còn biểu tượng. */
+@container sidebar-footer (max-width: 150px) {
+  .dev-card {
+    justify-content: center;
+    padding: 0.5rem;
+  }
+
+  .dev-card-copy {
+    display: none;
+  }
+}
+
+.about-brand-signature {
+  flex: 0 0 250px;
+  width: 250px;
+  min-width: 0;
 }
 
 /* ---- Mục "Bộ nhận diện" ------------------------------------------- */

@@ -37,6 +37,8 @@ const auditColors = args.includes('--audit');
 const auditResults = [];
 // --gallery: chụp "thư viện mức thông báo" (mẫu dựng bằng ĐÚNG các lớp CSS của thành phần thật) cho cả hai giao diện.
 const captureGallery = args.includes('--gallery');
+// --card: chụp thẻ "Phát triển bởi" (tĩnh và một khung giữa vệt sáng) ở thanh bên và trang Thông tin, kiểm tra hiệu ứng thật.
+const captureCard = args.includes('--card');
 
 const PAGES = [
   ['editor-home', 'tong-quan'],
@@ -513,6 +515,104 @@ async function capturePass(handle, state, withOverlays) {
   console.log(`  đã chụp trạng thái "${state}": ${shots.length} ảnh tính đến giờ`);
 }
 
+// Thông tin về vệt sáng đang chạy trên trang: tên, thuộc tính được animate, số lần lặp.
+const glintInfo = () =>
+  document.getAnimations().filter((animation) => String(animation.animationName ?? '').startsWith('dev-card-glint')).map((animation) => {
+    const timing = animation.effect.getComputedTiming();
+    const properties = new Set();
+    for (const frame of animation.effect.getKeyframes()) {
+      for (const key of Object.keys(frame)) if (!['offset', 'computedOffset', 'easing', 'composite'].includes(key)) properties.add(key);
+    }
+    return { name: animation.animationName, playState: animation.playState, properties: [...properties].sort(), iterations: timing.iterations, duration: timing.duration };
+  });
+
+// Đóng băng vệt sáng ở giữa hiệu ứng để chụp một khung.
+const freezeGlint = (milliseconds) => {
+  const found = document.getAnimations().filter((animation) => String(animation.animationName ?? '').startsWith('dev-card-glint'));
+  for (const animation of found) {
+    animation.pause();
+    animation.currentTime = milliseconds;
+  }
+  return found.length;
+};
+
+async function captureDeveloperCard(handle) {
+  const directory = join(outRoot, label, 'the-phat-trien');
+  mkdirSync(directory, { recursive: true });
+  const report = { khungGiua: [], hieuUng: {} };
+  for (const size of ['1440x900', '920x640']) {
+    await setSize(handle, size);
+    for (const theme of themes) {
+      await applyTheme(handle.page, theme);
+      await gotoPage(handle.page, 'editor-home');
+      await dismissOverlays(handle.page);
+      await handle.page.mouse.move(700, 500);
+      await sleep(3_200); // chờ vệt sáng intro (trễ 1,2 giây + chạy 1,4 giây) chạy xong
+      const footer = handle.page.locator('.sidebar-footer');
+      const staticFile = join(directory, `thanh-ben-${size}-${theme}-tinh.png`);
+      await footer.screenshot({ path: staticFile });
+      shots.push(staticFile);
+      await handle.page.locator('.dev-card').first().hover();
+      await sleep(150);
+      const frozen = await handle.page.evaluate(freezeGlint, 380);
+      const midFile = join(directory, `thanh-ben-${size}-${theme}-vet-sang.png`);
+      await footer.screenshot({ path: midFile });
+      shots.push(midFile);
+      report.khungGiua.push({ size, theme, animationsFrozen: frozen });
+      await handle.page.mouse.move(700, 500);
+      await sleep(300);
+    }
+  }
+  // Trang Thông tin (thẻ cùng thành phần, không có intro)
+  await setSize(handle, '1440x900');
+  for (const theme of themes) {
+    await applyTheme(handle.page, theme);
+    await gotoPage(handle.page, 'about');
+    await dismissOverlays(handle.page);
+    await handle.page.mouse.move(700, 800);
+    await sleep(600);
+    const wrapper = handle.page.locator('.about-brand-signature');
+    const staticFile = join(directory, `thong-tin-${theme}-tinh.png`);
+    await wrapper.screenshot({ path: staticFile });
+    shots.push(staticFile);
+    await handle.page.locator('.about-brand-signature .dev-card').hover();
+    await sleep(150);
+    await handle.page.evaluate(freezeGlint, 380);
+    const midFile = join(directory, `thong-tin-${theme}-vet-sang.png`);
+    await wrapper.screenshot({ path: midFile });
+    shots.push(midFile);
+    await handle.page.mouse.move(700, 800);
+  }
+  // Kiểm tra hành vi THẬT của hiệu ứng trên giao diện đang chạy.
+  await applyTheme(handle.page, themes[0]);
+  await gotoPage(handle.page, 'about');
+  await handle.page.emulateMedia({ reducedMotion: 'no-preference' });
+  await handle.page.mouse.move(700, 800);
+  await sleep(400);
+  await handle.page.locator('.about-brand-signature .dev-card').hover();
+  await sleep(200);
+  report.hieuUng.khiTroChuot = await handle.page.evaluate(glintInfo);
+  await sleep(1_600);
+  report.hieuUng.sauKhiChayXong = await handle.page.evaluate(glintInfo);
+  report.hieuUng.visibleKhiChayXong = await handle.page.evaluate(() => getComputedStyle(document.querySelector('.about-brand-signature .dev-card-glint')).opacity);
+  await handle.page.mouse.move(700, 800);
+  await sleep(400);
+  await handle.page.emulateMedia({ reducedMotion: 'reduce' });
+  await handle.page.locator('.about-brand-signature .dev-card').hover();
+  await sleep(300);
+  report.hieuUng.giamChuyenDong = {
+    animations: await handle.page.evaluate(glintInfo),
+    glintDisplay: await handle.page.evaluate(() => getComputedStyle(document.querySelector('.about-brand-signature .dev-card-glint')).display)
+  };
+  await handle.page.emulateMedia({ reducedMotion: 'no-preference' });
+  // Trong lúc "ghép video" thẻ không được tự chạy hiệu ứng: đứng yên 3 giây, không có animation nào của thẻ.
+  await handle.page.mouse.move(700, 800);
+  await sleep(3_000);
+  report.hieuUng.khiDungYen = await handle.page.evaluate(glintInfo);
+  writeFileSync(join(directory, 'kiem-tra-hieu-ung.json'), JSON.stringify(report, null, 2), 'utf8');
+  console.log(`Đã ghi ảnh và kiểm tra hiệu ứng thẻ: ${directory}`);
+}
+
 let handle = null;
 try {
   console.log(`Chụp ảnh "${label}" vào ${join(outRoot, label)}`);
@@ -550,6 +650,7 @@ try {
       await handle.page.evaluate(() => document.getElementById('tone-gallery')?.remove());
     }
   }
+  if (captureCard) await captureDeveloperCard(handle);
   await closeApp(handle);
   handle = null;
   if (auditColors) {
