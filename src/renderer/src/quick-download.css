@@ -616,6 +616,11 @@
 
 
 /* TUBMEDIA QUICK DOWNLOAD RECOVERY R25 */
+/* VẤN ĐỀ 3 (2026-09-22): --warning/--danger/--surface/--text-muted KHÔNG tồn tại ở đâu trong hệ token
+   (xem tokens.css) nên 4 biến này luôn dùng giá trị dự phòng (fallback) cố định — không đổi theo chế độ
+   sáng/tối. Ở chế độ tối, nền dự phòng #111827 gần trùng --panel/--panel2 nên khó nhận ra; ở chế độ
+   SÁNG, nó tạo một khối nền tối lạc tông giữa giao diện sáng. Đổi sang đúng token thật của app — khớp
+   với khối cảnh báo liền kề phía trên (.quick-download-ready-progress) đã dùng đúng --warn/--panel2. */
 .quick-download-recovery-block {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -623,14 +628,14 @@
   align-items: start;
   margin-top: 12px;
   padding: 14px;
-  border: 1px solid color-mix(in srgb, var(--warning, #f59e0b) 38%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 38%, transparent);
   border-radius: 14px;
-  background: color-mix(in srgb, var(--warning, #f59e0b) 10%, var(--surface, #111827));
+  background: color-mix(in srgb, var(--warn) 10%, var(--panel2));
 }
 
 .quick-download-recovery-block.is-path {
-  border-color: color-mix(in srgb, var(--danger, #ef4444) 32%, transparent);
-  background: color-mix(in srgb, var(--danger, #ef4444) 8%, var(--surface, #111827));
+  border-color: color-mix(in srgb, var(--bad) 32%, transparent);
+  background: color-mix(in srgb, var(--bad) 8%, var(--panel2));
 }
 
 .quick-download-recovery-copy {
@@ -648,7 +653,7 @@
 }
 
 .quick-download-recovery-copy small {
-  color: var(--text-muted, #94a3b8);
+  color: var(--muted);
   line-height: 1.45;
 }
 
@@ -668,8 +673,8 @@
 }
 
 .quick-download-recovery-actions button.primary {
-  border-color: color-mix(in srgb, var(--accent, #38bdf8) 55%, transparent);
-  background: color-mix(in srgb, var(--accent, #38bdf8) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 @media (max-width: 900px) {
@@ -685,7 +690,8 @@
 }
 
 
-/* TUBMEDIA QUICK DOWNLOAD RECOVERY R26 */
+/* TUBMEDIA QUICK DOWNLOAD RECOVERY R26 (giữ khối trùng lặp với R25 phía trên nguyên trạng — chỉ sửa
+   cùng lỗi token như trên, không gộp lại để tránh đổi phạm vi ngoài Vấn đề 3). */
 .quick-download-recovery-block {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -693,14 +699,14 @@
   align-items: start;
   margin-top: 12px;
   padding: 14px;
-  border: 1px solid color-mix(in srgb, var(--warning, #f59e0b) 38%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 38%, transparent);
   border-radius: 14px;
-  background: color-mix(in srgb, var(--warning, #f59e0b) 10%, var(--surface, #111827));
+  background: color-mix(in srgb, var(--warn) 10%, var(--panel2));
 }
 
 .quick-download-recovery-block.is-path {
-  border-color: color-mix(in srgb, var(--danger, #ef4444) 32%, transparent);
-  background: color-mix(in srgb, var(--danger, #ef4444) 8%, var(--surface, #111827));
+  border-color: color-mix(in srgb, var(--bad) 32%, transparent);
+  background: color-mix(in srgb, var(--bad) 8%, var(--panel2));
 }
 
 .quick-download-recovery-copy {
@@ -718,7 +724,7 @@
 }
 
 .quick-download-recovery-copy small {
-  color: var(--text-muted, #94a3b8);
+  color: var(--muted);
   line-height: 1.45;
 }
 
@@ -738,8 +744,8 @@
 }
 
 .quick-download-recovery-actions button.primary {
-  border-color: color-mix(in srgb, var(--accent, #38bdf8) 55%, transparent);
-  background: color-mix(in srgb, var(--accent, #38bdf8) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 @media (max-width: 900px) {

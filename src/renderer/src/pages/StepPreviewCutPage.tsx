@@ -8,7 +8,7 @@ import { useAppStore } from '../stores/app-store';
 
 /** Bước ② Xem trước & Cắt — hành trình một video (điều hướng 3 bước, đặc tả GĐ 2a).
  * Tải nhanh (bước ①) chưa có lịch sử nhiều tệp qua IPC, nên trang này cho thấy TRUNG THỰC kết quả tải
- * gần nhất (nếu đã xong) và trỏ sang Tải & Ghép (đa làn) — nơi đã có đủ công cụ cắt/chuẩn hóa thật —
+ * gần nhất (nếu đã xong) và trỏ sang Ghép theo Timeline — nơi đã có đủ công cụ cắt/chuẩn hóa thật —
  * thay vì dựng một bộ cắt video giả không hoạt động. */
 export function StepPreviewCutPage(): React.JSX.Element {
   const setPage = useAppStore((state) => state.setPage);
@@ -70,9 +70,9 @@ export function StepPreviewCutPage(): React.JSX.Element {
     <Card icon={Scissors} title="Công cụ cắt và chuẩn hóa" subtitle="Cắt đoạn, đổi tỉ lệ và chuẩn hóa nhiều tệp cùng lúc">
       <EmptyState
         icon={Scissors}
-        title="Dùng Tải & Ghép (đa làn) để cắt"
-        description="Bộ cắt/chuẩn hóa đầy đủ (nhiều đoạn, xem trước khung hình, Smart Merge) nằm ở trang Tải & Ghép trong nhóm CÔNG CỤ NÂNG CAO. Trang này sẽ có bộ cắt riêng, đơn giản hơn, ở một giai đoạn sau."
-        action={<button type="button" className="btn" onClick={() => setPage('download-merge')}>Mở Tải & Ghép (đa làn)</button>}
+        title="Dùng Ghép theo Timeline để cắt"
+        description="Bộ cắt/chuẩn hóa đầy đủ (nhiều đoạn, xem trước khung hình, Smart Merge) nằm ở trang Ghép theo Timeline trong nhóm VIỆC CHÍNH. Trang này sẽ có bộ cắt riêng, đơn giản hơn, ở một giai đoạn sau."
+        action={<button type="button" className="btn" onClick={() => setPage('download-merge')}>Mở Ghép theo Timeline</button>}
       />
     </Card>
   </div>;

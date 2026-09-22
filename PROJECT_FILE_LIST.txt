@@ -458,6 +458,7 @@ tests/unit/installer-upgrade.test.ts
 tests/unit/ipc-wire-error.test.ts
 tests/unit/job-resume-race.test.ts
 tests/unit/job-state-machine.test.ts
+tests/unit/light-mode-token-consistency.test.ts
 tests/unit/logger-resilience.test.ts
 tests/unit/media-analyzer-hdr.test.ts
 tests/unit/media-duration-sanity.test.ts
