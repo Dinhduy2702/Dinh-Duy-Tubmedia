@@ -87,8 +87,14 @@ describe('vệt sáng của thẻ: nhẹ, có giới hạn, tôn trọng giảm 
   it('chỉ chạy 1 lần (intro khi mở app hoặc mỗi lần trỏ chuột), KHÔNG lặp vô hạn', async () => {
     const css = cardCss(await read('src/renderer/src/brand.css'));
     expect(css).not.toContain('infinite');
-    expect(css).toMatch(/\.dev-card--intro \.dev-card-glint\s*\{\s*animation:\s*dev-card-glint-intro 1400ms [^;]* 1200ms 1;/);
-    expect(css).toMatch(/\.dev-card:hover \.dev-card-glint\s*\{\s*animation:\s*dev-card-glint-hover 1100ms [^;]* 1;/);
+    // Vệt sáng chạy chậm rãi (1,4–1,6 giây), không vội: cả hai lần chạy dùng cùng thời lượng.
+    expect(css).toMatch(/\.dev-card--intro \.dev-card-glint\s*\{\s*animation:\s*dev-card-glint-intro 1500ms [^;]* 1200ms 1;/);
+    expect(css).toMatch(/\.dev-card:hover \.dev-card-glint\s*\{\s*animation:\s*dev-card-glint-hover 1500ms [^;]* 1;/);
+    for (const duration of [/dev-card-glint-intro (\d+)ms/, /dev-card-glint-hover (\d+)ms/]) {
+      const ms = Number(duration.exec(css)?.[1]);
+      expect(ms, `thời lượng vệt sáng ${ms}ms nằm ngoài khoảng 1400–1600ms`).toBeGreaterThanOrEqual(1400);
+      expect(ms).toBeLessThanOrEqual(1600);
+    }
     // không giữ hiệu ứng sau khi chạy xong (không fill-mode forwards/both)
     expect(css).not.toMatch(/animation:[^;]*\b(both|forwards)\b/);
     // khi đứng yên (nền) thẻ không có animation nào: quy tắc animation chỉ nằm dưới intro/hover

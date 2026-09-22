@@ -239,11 +239,11 @@
 }
 
 .dev-card--intro .dev-card-glint {
-  animation: dev-card-glint-intro 1400ms cubic-bezier(0.4, 0, 0.2, 1) 1200ms 1;
+  animation: dev-card-glint-intro 1500ms cubic-bezier(0.4, 0, 0.2, 1) 1200ms 1;
 }
 
 .dev-card:hover .dev-card-glint {
-  animation: dev-card-glint-hover 1100ms cubic-bezier(0.4, 0, 0.2, 1) 1;
+  animation: dev-card-glint-hover 1500ms cubic-bezier(0.4, 0, 0.2, 1) 1;
 }
 
 @keyframes dev-card-glint-intro {

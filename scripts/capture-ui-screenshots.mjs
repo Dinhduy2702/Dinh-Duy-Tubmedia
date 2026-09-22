@@ -547,14 +547,14 @@ async function captureDeveloperCard(handle) {
       await gotoPage(handle.page, 'editor-home');
       await dismissOverlays(handle.page);
       await handle.page.mouse.move(700, 500);
-      await sleep(3_200); // chờ vệt sáng intro (trễ 1,2 giây + chạy 1,4 giây) chạy xong
+      await sleep(3_300); // chờ vệt sáng intro (trễ 1,2 giây + chạy 1,5 giây) chạy xong
       const footer = handle.page.locator('.sidebar-footer');
       const staticFile = join(directory, `thanh-ben-${size}-${theme}-tinh.png`);
       await footer.screenshot({ path: staticFile });
       shots.push(staticFile);
       await handle.page.locator('.dev-card').first().hover();
       await sleep(150);
-      const frozen = await handle.page.evaluate(freezeGlint, 380);
+      const frozen = await handle.page.evaluate(freezeGlint, 520);
       const midFile = join(directory, `thanh-ben-${size}-${theme}-vet-sang.png`);
       await footer.screenshot({ path: midFile });
       shots.push(midFile);
@@ -577,7 +577,7 @@ async function captureDeveloperCard(handle) {
     shots.push(staticFile);
     await handle.page.locator('.about-brand-signature .dev-card').hover();
     await sleep(150);
-    await handle.page.evaluate(freezeGlint, 380);
+    await handle.page.evaluate(freezeGlint, 520);
     const midFile = join(directory, `thong-tin-${theme}-vet-sang.png`);
     await wrapper.screenshot({ path: midFile });
     shots.push(midFile);
