@@ -16,6 +16,7 @@ import { Notice } from '../components/ui/Notice';
 import { ToneIcon } from '../components/ui/ToneIcon';
 import { compareAppVersions } from '../../../shared/app-version';
 import { formatReleaseNotesForDisplay } from '../../../shared/release-notes';
+import { progressFillStyle } from '../utils/progress-style';
 
 const LAST_KNOWN_RELEASE_KEY = 'tubmedia:last-known-app-release';
 
@@ -239,7 +240,7 @@ export function UpdatesPage(): React.JSX.Element {
                 </span>
               </div>
               <div className="progress is-static update-progress">
-                <span style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} />
+                <span style={progressFillStyle(progress)} />
               </div>
             </div>
           )}

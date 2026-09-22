@@ -8,7 +8,7 @@
 // chặn hộp thoại/mở thư mục/clipboard/tự khởi động, không tải công cụ (dùng sẵn công cụ đã có),
 // không mạng cập nhật, không đụng cookie hay tài khoản. Chỉ bấm chuyển trang, không thực hiện tác vụ nào.
 // Ảnh lưu NGOÀI repo: <out>/<label>/<trạng-thái>/<kích-thước>/<sáng|tối>/<số>-<trang>.png
-/* global window, document, getComputedStyle, SVGElement -- chạy bên trong trang qua page.evaluate */
+/* global window, document, getComputedStyle, SVGElement, HTMLElement -- chạy bên trong trang qua page.evaluate */
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
@@ -39,21 +39,31 @@ const auditResults = [];
 const captureGallery = args.includes('--gallery');
 // --card: chụp thẻ "Phát triển bởi" (tĩnh và một khung giữa vệt sáng) ở thanh bên và trang Thông tin, kiểm tra hiệu ứng thật.
 const captureCard = args.includes('--card');
+// --responsive: chụp lưới 4 cỡ cửa sổ × 3 tỉ lệ hiển thị Windows (đặc tả GĐ 2a, hạng mục B.5),
+// tập trung vào trang ① Tải (mới) và Hàng đợi (thanh bên có nhiều mục nhất) thay vì toàn bộ 13+ trang.
+const captureResponsive = args.includes('--responsive');
+const RESPONSIVE_SIZES = ['920x640', '1280x720', '1920x1080', '2560x1440'];
+const RESPONSIVE_SCALES = [100, 125, 150];
+const RESPONSIVE_PAGES = [['step-download', 'buoc-mot-tai'], ['activity', 'hang-doi']];
 
 const PAGES = [
-  ['editor-home', 'tong-quan'],
-  ['download-workbench', 'tai-xuong'],
-  ['filter-by-links', 'loc-theo-link'],
-  ['download-merge', 'tai-va-ghep'],
+  // Điều hướng 3 bước (GĐ 2a): ① Tải, ② Xem trước & Cắt, ③ Ghép & Xuất — nay là trang mở đầu.
+  ['step-download', 'buoc-mot-tai'],
+  ['step-preview-cut', 'buoc-hai-xem-truoc-cat'],
+  ['step-merge-export', 'buoc-ba-ghep-xuat'],
   ['activity', 'hang-doi'],
   ['history', 'lich-su'],
-  ['diagnostics', 'chan-doan'],
-  ['tools', 'cong-cu'],
+  ['filter-by-links', 'loc-theo-link'],
   ['cleanup', 'don-dep'],
-  ['updates', 'cap-nhat'],
-  ['logs', 'nhat-ky'],
   ['settings', 'cai-dat'],
-  ['about', 'gioi-thieu']
+  ['updates', 'cap-nhat'],
+  ['tools', 'cong-cu'],
+  ['diagnostics', 'chan-doan'],
+  ['logs', 'nhat-ky'],
+  ['about', 'gioi-thieu'],
+  // Trang cũ (đa làn/hàng loạt), nay ở nhóm CÔNG CỤ NÂNG CAO — vẫn giữ nguyên, vẫn chụp để đối chiếu.
+  ['download-workbench', 'tai-xuong-hang-loat'],
+  ['download-merge', 'tai-va-ghep-da-lan']
 ].filter(([id]) => onlyPages.length === 0 || onlyPages.includes(id));
 
 function fail(message) {
@@ -282,6 +292,19 @@ async function setSize(handle, size) {
   await sleep(500);
 }
 
+// Mô phỏng tỉ lệ hiển thị Windows (100/125/150%) bằng zoom factor của webContents — cách thực tế để kiểm
+// bố cục co giãn theo DPI mà không cần đổi tỉ lệ màn hình thật của máy đang chạy kịch bản.
+async function applyScale(handle, percent) {
+  await handle.application.evaluate(
+    ({ BrowserWindow }, factor) => {
+      const window = BrowserWindow.getAllWindows()[0];
+      window?.webContents.setZoomFactor(factor);
+    },
+    percent / 100
+  );
+  await sleep(200);
+}
+
 async function applyTheme(page, theme) {
   await page.evaluate((light) => {
     document.documentElement.classList.toggle('light', light);
@@ -443,9 +466,16 @@ function buildToneGallery() {
 }
 
 async function gotoPage(page, id) {
-  const selector = `[data-page-id="${id}"]`;
-  if (!(await page.locator(selector).count())) return false;
-  await page.locator(selector).click();
+  // Click thẳng bằng DOM API: locator.click() đòi phần tử "ổn định" (bounding box không đổi qua 2 khung
+  // liên tiếp) — ở cỡ cửa sổ hẹp hoặc có zoom (--responsive), phần bọc icon có thể chưa "ổn định" theo
+  // định nghĩa đó dù đã hiện rõ và bấm được, khiến Playwright lặp chờ rồi báo timeout.
+  const ok = await page.evaluate((pageId) => {
+    const button = document.querySelector(`[data-page-id="${pageId}"]`);
+    if (!(button instanceof HTMLElement)) return false;
+    button.click();
+    return true;
+  }, id);
+  if (!ok) return false;
   await sleep(900);
   return true;
 }
@@ -613,6 +643,36 @@ async function captureDeveloperCard(handle) {
   console.log(`Đã ghi ảnh và kiểm tra hiệu ứng thẻ: ${directory}`);
 }
 
+// Lưới 4 cỡ cửa sổ × 3 tỉ lệ hiển thị (đặc tả GĐ 2a mục B.5): xác nhận co giãn liên tục, không giật,
+// không cuộn ngang, và thanh bên thu gọn đúng mốc. Chạy độc lập với capturePass thường.
+async function captureResponsiveGrid(handle) {
+  const directory = join(outRoot, label, 'responsive');
+  mkdirSync(directory, { recursive: true });
+  const report = [];
+  for (const size of RESPONSIVE_SIZES) {
+    for (const scale of RESPONSIVE_SCALES) {
+      await setSize(handle, size);
+      await applyScale(handle, scale);
+      for (const [id, slug] of RESPONSIVE_PAGES) {
+        await gotoPage(handle.page, id);
+        await dismissOverlays(handle.page);
+        const overflow = await handle.page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
+        const sidebarWidth = await handle.page.evaluate(() => document.querySelector('.app-sidebar')?.getBoundingClientRect().width ?? null);
+        const file = join(directory, `${size}-${scale}pc-${slug}.png`);
+        await handle.page.screenshot({ path: file });
+        shots.push(file);
+        report.push({ size, scalePercent: scale, page: id, horizontalOverflow: overflow, sidebarWidthPx: sidebarWidth ? Number(sidebarWidth.toFixed(1)) : null });
+      }
+    }
+  }
+  await applyScale(handle, 100);
+  const reportFile = join(directory, 'bao-cao-responsive.json');
+  writeFileSync(reportFile, JSON.stringify(report, null, 2), 'utf8');
+  console.log(`Đã chụp lưới responsive (${RESPONSIVE_SIZES.length} cỡ × ${RESPONSIVE_SCALES.length} tỉ lệ × ${RESPONSIVE_PAGES.length} trang): ${directory}`);
+  const overflowing = report.filter((row) => row.horizontalOverflow);
+  if (overflowing.length) console.log(`  CẢNH BÁO: ${overflowing.length} trường hợp bị cuộn ngang: ${overflowing.map((row) => `${row.size}@${row.scalePercent}%/${row.page}`).join(', ')}`);
+}
+
 let handle = null;
 try {
   console.log(`Chụp ảnh "${label}" vào ${join(outRoot, label)}`);
@@ -651,6 +711,7 @@ try {
     }
   }
   if (captureCard) await captureDeveloperCard(handle);
+  if (captureResponsive) await captureResponsiveGrid(handle);
   await closeApp(handle);
   handle = null;
   if (auditColors) {

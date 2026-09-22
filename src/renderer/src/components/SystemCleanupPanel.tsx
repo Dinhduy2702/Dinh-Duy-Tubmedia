@@ -2,6 +2,7 @@ import { AlertTriangle, CheckCircle2, HardDrive, ShieldCheck, Sparkles } from 'l
 import { useEffect, useMemo, useState } from 'react';
 import { safeUiText } from '../utils/ui-error';
 import { showNotice } from '../utils/notify';
+import { progressFillStyle } from '../utils/progress-style';
 import {
   SYSTEM_CLEANUP_CATEGORIES,
   isInspectionOnlyCleanupCategory,
@@ -543,7 +544,7 @@ export function SystemCleanupPanel(): React.JSX.Element {
           </div>
 
           <div className="system-cleanup-progress-track">
-            <span style={{ width: `${status.progress}%` }} />
+            <span style={progressFillStyle(status.progress)} />
           </div>
 
           <div className="system-cleanup-stats">

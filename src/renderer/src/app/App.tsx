@@ -13,6 +13,15 @@ import { friendlyIssue, safeUiText } from '../utils/ui-error';
 const EditorHomePage = lazy(() =>
   import('../pages/EditorHomePage').then((module) => ({ default: module.EditorHomePage }))
 );
+const StepDownloadPage = lazy(() =>
+  import('../pages/StepDownloadPage').then((module) => ({ default: module.StepDownloadPage }))
+);
+const StepPreviewCutPage = lazy(() =>
+  import('../pages/StepPreviewCutPage').then((module) => ({ default: module.StepPreviewCutPage }))
+);
+const StepMergeExportPage = lazy(() =>
+  import('../pages/StepMergeExportPage').then((module) => ({ default: module.StepMergeExportPage }))
+);
 const DownloadWorkbenchPage = lazy(() =>
   import('../pages/DownloadWorkbenchPage').then((module) => ({ default: module.DownloadWorkbenchPage }))
 );
@@ -98,6 +107,14 @@ export function App(): React.JSX.Element {
     document.documentElement.classList.toggle('is-processing', processing);
     return () => document.documentElement.classList.remove('is-processing');
   }, [processing]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('reduce-motion', settings?.reduceMotion === true);
+  }, [settings?.reduceMotion]);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-font-size', settings?.fontSize ?? 'medium');
+  }, [settings?.fontSize]);
 
   if (!ready) {
     const issue = error ? friendlyIssue(error) : null;
@@ -190,6 +207,9 @@ export function App(): React.JSX.Element {
         <main className="app-main scroll min-h-0 flex-1 overflow-auto">
           <Suspense fallback={<PageLoader />}>
             {page === 'editor-home' && <EditorHomePage />}
+            {page === 'step-download' && <StepDownloadPage />}
+            {page === 'step-preview-cut' && <StepPreviewCutPage />}
+            {page === 'step-merge-export' && <StepMergeExportPage />}
             {page === 'download-workbench' && <DownloadWorkbenchPage />}
             {page === 'filter-by-links' && <VideoLinkFilterPage />}
             {page === 'download-merge' && <DownloadMergePage />}

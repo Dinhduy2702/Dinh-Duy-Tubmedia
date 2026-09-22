@@ -7,6 +7,8 @@ const base = join(homedir(), 'Videos', 'Download video Tubmedia');
 export const defaultAppSettings: AppSettings = {
   theme: 'system',
   language: 'vi',
+  fontSize: 'medium',
+  reduceMotion: false,
   minimizeToTray: false,
   startWithWindows: false,
   closeBehavior: 'ask',

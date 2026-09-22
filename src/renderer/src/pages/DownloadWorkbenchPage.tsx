@@ -47,6 +47,7 @@ import { loadWorkbenchPath, saveWorkbenchPath } from '../utils/workbench-path-me
 import { friendlyIssue, safeUiText } from '../utils/ui-error';
 import { statusLabel } from '../utils/vi-labels';
 import { QuickDownloadPanel } from '../components/QuickDownloadPanel';
+import { progressFillStyle } from '../utils/progress-style';
 
 interface LaneForm {
   name: string;
@@ -1086,7 +1087,7 @@ function LaneCard({
             </strong>
           </div>
           <div className={`progress progress-large ${state === 'running' ? 'is-animated' : 'is-static'}`}>
-            <span style={{ width: `${progress}%` }} />
+            <span style={progressFillStyle(progress)} />
           </div>
           <div className="progress-meta">
             <span>{progress.toFixed(1)}% toàn danh sách</span>

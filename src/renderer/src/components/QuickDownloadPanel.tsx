@@ -18,9 +18,28 @@ import type {
 } from '@shared/quick-download';
 import { CookieManagerDialog } from './CookieManagerDialog';
 import { UnifiedDownloadProgress } from './UnifiedDownloadProgress';
+import { Card } from './ui/Card';
+import { InfoDisclosure } from './InfoDisclosure';
 import { safeUiText } from '../utils/ui-error';
 import { useAppStore } from '../stores/app-store';
 import { showNotice } from '../utils/notify';
+import { ImagePlay, Link2, Save, Scissors, Settings2 } from 'lucide-react';
+
+/** "hh:mm:ss" → giây; null nếu không đúng khuôn dạng — dùng để ước tính độ dài đoạn đã chọn. */
+function parseDurationToSeconds(value: string): number | null {
+  const match = /^(\d{2,4}):([0-5]\d):([0-5]\d)$/.exec(value.trim());
+  if (!match) return null;
+  const [, h, m, s] = match;
+  return Number(h) * 3600 + Number(m) * 60 + Number(s);
+}
+
+function formatSecondsShort(totalSeconds: number): string {
+  const s = Math.max(0, Math.round(totalSeconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  return h > 0 ? `${h} giờ ${m} phút` : m > 0 ? `${m} phút ${sec} giây` : `${sec} giây`;
+}
 
 function formatBytes(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0 B';
@@ -170,6 +189,13 @@ export function QuickDownloadPanel(): ReactElement {
       .join(' • ');
   }, [status]);
 
+  const rangeDurationSeconds = useMemo(() => {
+    const start = parseDurationToSeconds(startTime);
+    const end = parseDurationToSeconds(endTime);
+    if (start === null || end === null || end <= start) return null;
+    return end - start;
+  }, [startTime, endTime]);
+
   useEffect(() => {
     let mounted = true;
     void Promise.all([window.desktop.quickDownload.defaults(), window.desktop.quickDownload.current()])
@@ -299,199 +325,226 @@ export function QuickDownloadPanel(): ReactElement {
 
   return (
     <>
-      <section className="card quick-download-panel quick-download-studio" data-testid="quick-download-panel">
-        <div className="quick-download-heading">
-          <div>
-            <span className="quick-download-eyebrow">TẢI NHANH 1 VIDEO</span>
-            <h2>Video, âm thanh hoặc chỉ lấy đoạn cần dùng</h2>
-            <p>
-              Tải nhanh dùng chung ProcessManager, tự đồng bộ trạng thái khi chuyển trang và nhận lệnh Tạm
-              dừng/Tiếp tục tất cả.
-            </p>
-          </div>
-          <div className="quick-download-heading-actions">
-            <button
-              type="button"
-              className="quick-download-cookie-button"
-              disabled={running}
-              onClick={() => setCookieOpen(true)}
-            >
-              <Cookie size={15} />
-              Cookies
-            </button>
-            <span className="quick-download-badge">Không tải playlist</span>
-          </div>
-        </div>
-
-        <label className="quick-download-field full">
-          <span>Liên kết video</span>
-          <input
-            value={url}
-            disabled={running}
-            onChange={(event) => setUrl(event.target.value)}
-            placeholder="https://www.youtube.com/watch?v=..."
-            autoComplete="off"
-            spellCheck={false}
-          />
-        </label>
-
-        <div className="quick-download-row quick-download-mode-row">
-          <label className="quick-download-field folder">
-            <span>Thư mục lưu</span>
-            <div className="quick-download-folder-input">
-              <input value={outputDirectory} readOnly title={outputDirectory} />
-              <button type="button" disabled={running} onClick={() => void chooseDirectory()}>
-                Chọn thư mục
+      <div className="quick-download-studio" data-testid="quick-download-panel">
+        <div className="tm-card-grid quick-download-grid">
+          <Card icon={Link2} title="Liên kết video" subtitle="Dán liên kết, không tải nguyên playlist" className="quick-download-card-link">
+            <label className="quick-download-field full">
+              <span>Liên kết video</span>
+              <input
+                value={url}
+                disabled={running}
+                onChange={(event) => setUrl(event.target.value)}
+                placeholder="https://www.youtube.com/watch?v=..."
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </label>
+            <div className="quick-download-heading-actions">
+              <button
+                type="button"
+                className="quick-download-cookie-button"
+                disabled={running}
+                onClick={() => setCookieOpen(true)}
+              >
+                <Cookie size={15} />
+                Cookies
               </button>
+              <span className="quick-download-badge">Không tải playlist</span>
             </div>
-          </label>
-          <label className="quick-download-field quality">
-            <span>Nội dung tải</span>
-            <select
-              value={mediaMode}
-              disabled={running}
-              onChange={(event) => setMediaMode(event.target.value as QuickDownloadMediaMode)}
-            >
-              <option value="video-audio">Video + âm thanh</option>
-              <option value="audio-only">Chỉ âm thanh M4A</option>
-              <option value="video-only">Chỉ video, không âm thanh</option>
-            </select>
-          </label>
-          <label className="quick-download-field quality">
-            <span>Chất lượng video</span>
-            <select
-              value={quality}
-              disabled={running || mediaMode === 'audio-only'}
-              onChange={(event) => setQuality(event.target.value as QuickDownloadQuality)}
-            >
-              <option value="best">Cao nhất nguồn</option>
-              <option value="1080p">Tối đa 1080p</option>
-              <option value="720p">Tối đa 720p</option>
-              <option value="480p">Tối đa 480p</option>
-            </select>
-          </label>
-        </div>
+          </Card>
 
-        <div className="quick-download-sidecars">
-          <label>
-            <input
-              type="checkbox"
-              checked={downloadSubtitles}
-              disabled={running}
-              onChange={(event) => setDownloadSubtitles(event.target.checked)}
-            />
-            <span>
-              <b>Phụ đề SRT</b>
-              <small>Phụ đề chính thức và tự động</small>
-            </span>
-          </label>
-          <label className="quick-download-sub-language">
-            <span>Ngôn ngữ</span>
-            <input
-              value={subtitleLanguage}
-              disabled={running || !downloadSubtitles}
-              onChange={(event) => setSubtitleLanguage(event.target.value)}
-              placeholder="vi,en"
-            />
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={downloadThumbnail}
-              disabled={running}
-              onChange={(event) => setDownloadThumbnail(event.target.checked)}
-            />
-            <span>
-              <b>Thumbnail JPG</b>
-              <small>Ảnh đại diện cạnh video</small>
-            </span>
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={writeMetadata}
-              disabled={running}
-              onChange={(event) => setWriteMetadata(event.target.checked)}
-            />
-            <span>
-              <b>Metadata</b>
-              <small>Info JSON và mô tả</small>
-            </span>
-          </label>
-        </div>
+          <Card icon={Scissors} title="Chọn đoạn cần tải" subtitle="Bỏ trống để tải toàn bộ video" className="quick-download-card-range">
+            <label className={`quick-download-timeline-toggle ${useTimeline ? 'is-active' : ''}`}>
+              <input
+                type="checkbox"
+                checked={useTimeline}
+                disabled={running}
+                onChange={(event) => setUseTimeline(event.target.checked)}
+              />
+              <span>
+                <strong>Tải video theo mốc thời lượng</strong>
+                <small>Chỉ hiện Timeline và cắt đoạn khi bạn bật lựa chọn này.</small>
+              </span>
+              <b>{useTimeline ? 'Đang bật' : 'Đang tắt'}</b>
+            </label>
 
-        <label className={`quick-download-timeline-toggle ${useTimeline ? 'is-active' : ''}`}>
-          <input
-            type="checkbox"
-            checked={useTimeline}
-            disabled={running}
-            onChange={(event) => setUseTimeline(event.target.checked)}
-          />
-          <span>
-            <strong>Tải video theo mốc thời lượng</strong>
-            <small>Chỉ hiện Timeline và cắt đoạn khi bạn bật lựa chọn này.</small>
-          </span>
-          <b>{useTimeline ? 'Đang bật' : 'Đang tắt'}</b>
-        </label>
-
-        {useTimeline && (
-          <div className="quick-download-range-box" data-testid="quick-download-timeline-editor">
-            <div className="quick-download-range-head">
-              <div>
-                <strong>Thiết lập Timeline</strong>
-                <small>Nhập HH:MM:SS. Hai mốc được tự động lưu khi thêm link và khi mở lại ứng dụng</small>
+            {useTimeline && (
+              <div className="quick-download-range-box" data-testid="quick-download-timeline-editor">
+                <div className="quick-download-range-head">
+                  <div>
+                    <strong>Thiết lập Timeline</strong>
+                    <small>Nhập HH:MM:SS. Hai mốc được tự động lưu khi thêm link và khi mở lại ứng dụng</small>
+                  </div>
+                  <span>Ví dụ: 25:10:30 → 25:15:30</span>
+                </div>
+                <div className="quick-download-range-inputs">
+                  <label className="quick-download-field">
+                    <span>Bắt đầu</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9:]*"
+                      maxLength={10}
+                      value={startTime}
+                      disabled={running}
+                      placeholder="00:10:00"
+                      title="Mốc thời lượng bắt đầu theo định dạng Giờ:Phút:Giây"
+                      aria-label="Mốc thời lượng bắt đầu"
+                      className="video-duration-input"
+                      onChange={(event) => setStartTime(event.target.value.replace(/[^0-9:]/g, ''))}
+                    />
+                  </label>
+                  <div className="quick-download-arrow">→</div>
+                  <label className="quick-download-field">
+                    <span>Kết thúc</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9:]*"
+                      maxLength={10}
+                      value={endTime}
+                      disabled={running}
+                      placeholder="00:13:00"
+                      title="Mốc thời lượng kết thúc theo định dạng Giờ:Phút:Giây"
+                      aria-label="Mốc thời lượng kết thúc"
+                      className="video-duration-input"
+                      onChange={(event) => setEndTime(event.target.value.replace(/[^0-9:]/g, ''))}
+                    />
+                  </label>
+                  <label className="quick-download-accurate">
+                    <input
+                      type="checkbox"
+                      checked={accurateCut}
+                      disabled={running}
+                      onChange={(event) => setAccurateCut(event.target.checked)}
+                    />
+                    <span>
+                      <strong>Cắt chính xác</strong>
+                      <small>Sát điểm cắt hơn nhưng chậm hơn</small>
+                    </span>
+                  </label>
+                </div>
+                <p className="quick-download-range-estimate">
+                  {rangeDurationSeconds !== null
+                    ? `Độ dài đoạn đã chọn: khoảng ${formatSecondsShort(rangeDurationSeconds)}. Dung lượng ước tính chỉ biết được sau khi Tubmedia đọc thông tin nguồn.`
+                    : 'Nhập đúng mốc bắt đầu/kết thúc (Giờ:Phút:Giây, kết thúc sau bắt đầu) để xem độ dài đoạn.'}
+                </p>
               </div>
-              <span>Ví dụ: 25:10:30 → 25:15:30</span>
+            )}
+          </Card>
+
+          <Card icon={ImagePlay} title="Xem trước" subtitle="Khung hình đầu và cuối đoạn đã chọn" className="quick-download-card-preview">
+            <div className="tm-empty quick-download-preview-empty">
+              <span className="tm-empty-icon" aria-hidden="true"><ImagePlay size={22}/></span>
+              <p>
+                Xem trước khung hình chưa có ở bản này — sẽ có ở giai đoạn "tải theo đoạn kèm xem trước"
+                (Giai đoạn 3). Hiện tại bạn vẫn tải được đúng đoạn đã chọn ở thẻ bên cạnh.
+              </p>
             </div>
-            <div className="quick-download-range-inputs">
-              <label className="quick-download-field">
-                <span>Bắt đầu</span>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9:]*"
-                  maxLength={10}
-                  value={startTime}
-                  disabled={running}
-                  placeholder="00:10:00"
-                  title="Mốc thời lượng bắt đầu theo định dạng Giờ:Phút:Giây"
-                  aria-label="Mốc thời lượng bắt đầu"
-                  className="video-duration-input"
-                  onChange={(event) => setStartTime(event.target.value.replace(/[^0-9:]/g, ''))}
-                />
-              </label>
-              <div className="quick-download-arrow">→</div>
-              <label className="quick-download-field">
-                <span>Kết thúc</span>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9:]*"
-                  maxLength={10}
-                  value={endTime}
-                  disabled={running}
-                  placeholder="00:13:00"
-                  title="Mốc thời lượng kết thúc theo định dạng Giờ:Phút:Giây"
-                  aria-label="Mốc thời lượng kết thúc"
-                  className="video-duration-input"
-                  onChange={(event) => setEndTime(event.target.value.replace(/[^0-9:]/g, ''))}
-                />
-              </label>
-              <label className="quick-download-accurate">
-                <input
-                  type="checkbox"
-                  checked={accurateCut}
-                  disabled={running}
-                  onChange={(event) => setAccurateCut(event.target.checked)}
-                />
-                <span>
-                  <strong>Cắt chính xác</strong>
-                  <small>Sát điểm cắt hơn nhưng chậm hơn</small>
-                </span>
-              </label>
-            </div>
-          </div>
-        )}
+          </Card>
+
+          <Card icon={Save} title="Lưu và tải" subtitle="Chọn nơi lưu rồi bắt đầu" className="quick-download-card-save">
+            <label className="quick-download-field folder">
+              <span>Thư mục lưu</span>
+              <div className="quick-download-folder-input">
+                <input value={outputDirectory} readOnly title={outputDirectory} />
+                <button type="button" disabled={running} onClick={() => void chooseDirectory()}>
+                  Chọn thư mục
+                </button>
+              </div>
+            </label>
+
+            <InfoDisclosure title="Nâng cao" summary="Loại nội dung, chất lượng, phụ đề, thumbnail, metadata" icon={Settings2}>
+              <div className="quick-download-row quick-download-mode-row">
+                <label className="quick-download-field quality">
+                  <span>Nội dung tải</span>
+                  <select
+                    value={mediaMode}
+                    disabled={running}
+                    onChange={(event) => setMediaMode(event.target.value as QuickDownloadMediaMode)}
+                  >
+                    <option value="video-audio">Video + âm thanh</option>
+                    <option value="audio-only">Chỉ âm thanh M4A</option>
+                    <option value="video-only">Chỉ video, không âm thanh</option>
+                  </select>
+                </label>
+                <label className="quick-download-field quality">
+                  <span>Chất lượng video</span>
+                  <select
+                    value={quality}
+                    disabled={running || mediaMode === 'audio-only'}
+                    onChange={(event) => setQuality(event.target.value as QuickDownloadQuality)}
+                  >
+                    <option value="best">Cao nhất nguồn</option>
+                    <option value="1080p">Tối đa 1080p</option>
+                    <option value="720p">Tối đa 720p</option>
+                    <option value="480p">Tối đa 480p</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="quick-download-sidecars">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={downloadSubtitles}
+                    disabled={running}
+                    onChange={(event) => setDownloadSubtitles(event.target.checked)}
+                  />
+                  <span>
+                    <b>Phụ đề SRT</b>
+                    <small>Phụ đề chính thức và tự động</small>
+                  </span>
+                </label>
+                <label className="quick-download-sub-language">
+                  <span>Ngôn ngữ</span>
+                  <input
+                    value={subtitleLanguage}
+                    disabled={running || !downloadSubtitles}
+                    onChange={(event) => setSubtitleLanguage(event.target.value)}
+                    placeholder="vi,en"
+                  />
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={downloadThumbnail}
+                    disabled={running}
+                    onChange={(event) => setDownloadThumbnail(event.target.checked)}
+                  />
+                  <span>
+                    <b>Thumbnail JPG</b>
+                    <small>Ảnh đại diện cạnh video</small>
+                  </span>
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={writeMetadata}
+                    disabled={running}
+                    onChange={(event) => setWriteMetadata(event.target.checked)}
+                  />
+                  <span>
+                    <b>Metadata</b>
+                    <small>Info JSON và mô tả</small>
+                  </span>
+                </label>
+              </div>
+            </InfoDisclosure>
+
+            {!status && (
+              <button
+                type="button"
+                className="btn btn-primary tm-btn-lg quick-download-start-lg"
+                disabled={!canStart}
+                onClick={() => void start()}
+              >
+                <Play size={17} />
+                {useTimeline ? 'Tải đoạn này' : mediaMode === 'audio-only' ? 'Tải toàn bộ âm thanh' : 'Tải toàn bộ video'}
+              </button>
+            )}
+          </Card>
+        </div>
 
         {cookieBlocked && status && (
           <div className="quick-download-cookie-block" role="alert">
@@ -646,27 +699,7 @@ export function QuickDownloadPanel(): ReactElement {
               </>
             }
           />
-        ) : (
-          <div className="quick-download-ready-progress">
-            <div>
-              <b>Sẵn sàng tải một {quickMediaNoun(mediaMode)}</b>
-              <span>Không tích Timeline để tải toàn bộ; tích Timeline để chỉ tải đoạn đã chọn.</span>
-            </div>
-            <button
-              type="button"
-              className="btn btn-primary workflow-primary"
-              disabled={!canStart}
-              onClick={() => void start()}
-            >
-              <Play size={16} />
-              {useTimeline
-                ? 'Tải đoạn theo Timeline'
-                : mediaMode === 'audio-only'
-                  ? 'Tải toàn bộ âm thanh'
-                  : 'Tải toàn bộ video'}
-            </button>
-          </div>
-        )}
+        ) : null}
 
         {displayWarnings.length ? (
           <details className="quick-download-warnings quick-download-unified-warnings">
@@ -686,7 +719,7 @@ export function QuickDownloadPanel(): ReactElement {
               ? 'Timeline đang tắt: Tubmedia tải toàn bộ tệp âm thanh. Tên file vẫn có ID nguồn và mã tác vụ để tránh ghi đè.'
               : 'Timeline đang tắt: Tubmedia tải toàn bộ video. File luôn có Video ID và mã tác vụ để không bỏ qua nhầm video trùng tên.'}
         </div>
-      </section>
+      </div>
       <CookieManagerDialog
         open={cookieOpen}
         onClose={() => setCookieOpen(false)}

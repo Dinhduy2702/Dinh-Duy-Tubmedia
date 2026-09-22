@@ -9,7 +9,7 @@
   --type-xs: 0.6875rem;   /* 11px — timestamps and dense metadata */
   --type-sm: 0.75rem;     /* 12px — secondary labels */
   --type-body-sm: 0.8125rem; /* 13px — buttons, fields and compact body copy */
-  --type-body: 0.875rem;  /* 14px — default application text */
+  --type-body: 0.9375rem; /* 15px — default application text (GĐ 2a) */
   --type-md: 0.9375rem;   /* 15px — emphasized body copy */
   --type-lg: 1rem;        /* 16px — card titles */
   --type-xl: 1.125rem;    /* 18px — section titles */

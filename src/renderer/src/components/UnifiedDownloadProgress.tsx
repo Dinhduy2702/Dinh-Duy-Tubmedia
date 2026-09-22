@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { StatusBadge } from './StatusBadge';
+import { progressFillStyle } from '../utils/progress-style';
 
 const ACTIVE_PROGRESS_STATES = new Set([
   'pending',
@@ -78,7 +79,7 @@ export function UnifiedDownloadProgress({
         }`}
         aria-label={`Tiến trình ${safeProgress.toFixed(1)}%`}
       >
-        <span style={{ width: `${safeProgress}%` }} />
+        <span style={progressFillStyle(safeProgress)} />
       </div>
 
       <div className="unified-download-progress-meta">

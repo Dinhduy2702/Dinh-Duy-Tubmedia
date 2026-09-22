@@ -233,9 +233,13 @@ export type DownloadCompatibilityMode =
   | 'capcut_sdr_1080p'
   | 'capcut_sdr_2k';
 
+export type AppFontSize = 'medium' | 'large' | 'xlarge';
+
 export interface AppSettings {
   theme: 'system' | 'light' | 'dark';
   language: 'vi';
+  fontSize: AppFontSize;
+  reduceMotion: boolean;
   minimizeToTray: boolean;
   startWithWindows: boolean;
   closeBehavior: 'ask' | 'pause_and_exit' | 'cancel_and_exit' | 'tray';

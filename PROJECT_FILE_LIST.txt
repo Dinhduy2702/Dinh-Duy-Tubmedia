@@ -175,6 +175,7 @@ scripts/doctor-windows.ps1
 scripts/ensure-bundled-aria2.ps1
 scripts/generate-installer-blockmap.mjs
 scripts/generate-source-inventory.mjs
+scripts/measure-motion-performance.mjs
 scripts/native-runtime.mjs
 scripts/no-native-rebuild.mjs
 scripts/prepare-public-v131-feed-repair.mjs
@@ -318,10 +319,14 @@ src/renderer/src/components/QuickDownloadPanel.tsx
 src/renderer/src/components/RendererErrorBoundary.tsx
 src/renderer/src/components/StatCard.tsx
 src/renderer/src/components/StatusBadge.tsx
+src/renderer/src/components/StepTabs.tsx
 src/renderer/src/components/SystemCleanupPanel.tsx
 src/renderer/src/components/ToolReadinessPanel.tsx
 src/renderer/src/components/TubmediaBrand.tsx
+src/renderer/src/components/ui/Card.tsx
+src/renderer/src/components/ui/EmptyState.tsx
 src/renderer/src/components/ui/Notice.tsx
+src/renderer/src/components/ui/Skeleton.tsx
 src/renderer/src/components/ui/ToneIcon.tsx
 src/renderer/src/components/UnifiedDownloadProgress.tsx
 src/renderer/src/components/VirtualTableWindow.tsx
@@ -334,6 +339,7 @@ src/renderer/src/layout/Sidebar.tsx
 src/renderer/src/layout/Topbar.tsx
 src/renderer/src/logs-responsive-r35.css
 src/renderer/src/main.tsx
+src/renderer/src/motion.css
 src/renderer/src/pages/AboutPage.tsx
 src/renderer/src/pages/CachePage.tsx
 src/renderer/src/pages/DashboardPage.tsx
@@ -346,6 +352,9 @@ src/renderer/src/pages/LogsPage.tsx
 src/renderer/src/pages/ProjectsPage.tsx
 src/renderer/src/pages/QueuePage.tsx
 src/renderer/src/pages/SettingsPage.tsx
+src/renderer/src/pages/StepDownloadPage.tsx
+src/renderer/src/pages/StepMergeExportPage.tsx
+src/renderer/src/pages/StepPreviewCutPage.tsx
 src/renderer/src/pages/SystemCleanupPage.tsx
 src/renderer/src/pages/ToolsPage.tsx
 src/renderer/src/pages/UpdatesPage.tsx
@@ -358,6 +367,7 @@ src/renderer/src/tokens.css
 src/renderer/src/tubmedia-theme.css
 src/renderer/src/typography.css
 src/renderer/src/utils/notify.ts
+src/renderer/src/utils/progress-style.ts
 src/renderer/src/utils/ui-error.ts
 src/renderer/src/utils/ui-id.ts
 src/renderer/src/utils/vi-labels.ts
@@ -457,6 +467,7 @@ tests/unit/merge-output-integrity.test.ts
 tests/unit/merge-product-name-length.test.ts
 tests/unit/merge-target.test.ts
 tests/unit/merge-visual-boundary-hotfix11.test.ts
+tests/unit/motion-system.test.ts
 tests/unit/network-recovery-wiring-r54.test.ts
 tests/unit/non-conflicting-path.test.ts
 tests/unit/normalization-match.test.ts

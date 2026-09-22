@@ -221,11 +221,17 @@ describe('bảng màu ngữ nghĩa (phương án C)', () => {
     expect(errorRed.toLowerCase()).toBe('#b3261e');
   });
 
-  it('tokens.css được nạp sau mọi tệp CSS khác để ghi đè bảng màu cũ', () => {
+  it('tokens.css được nạp sau mọi tệp màu khác để ghi đè bảng màu cũ; motion.css (GĐ 2a, không đụng màu) nạp sau cùng', () => {
     const main = readFileSync(join(root, 'src/renderer/src/main.tsx'), 'utf8');
     const order = [...main.matchAll(/import '\.\/([a-z0-9.-]+\.css)';/g)].map((match) => match[1]);
-    expect(order.at(-1)).toBe('tokens.css');
+    expect(order.at(-1)).toBe('motion.css');
+    expect(order.indexOf('tokens.css')).toBe(order.length - 2);
     expect(order).toContain('typography.css');
+    // motion.css chỉ lo chuyển động/responsive/kích thước — không được định nghĩa lại token màu.
+    const motionCss = readFileSync(join(root, 'src/renderer/src/motion.css'), 'utf8');
+    for (const colorToken of ['--tone-error-', '--tone-success-', '--tone-warning-', '--tone-info-', '--surface-', '--action-bg', '--sidebar-bg', '--danger-solid']) {
+      expect(motionCss, `motion.css không được định nghĩa ${colorToken}`).not.toContain(`${colorToken}:`);
+    }
   });
 });
 

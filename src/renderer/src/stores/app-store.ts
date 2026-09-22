@@ -19,6 +19,10 @@ import type {
 
 export type PageId =
   | 'editor-home'
+  /** Điều hướng 3 bước GĐ 2a — hành trình một video: tải → xem trước & cắt → ghép & xuất. */
+  | 'step-download'
+  | 'step-preview-cut'
+  | 'step-merge-export'
   | 'download-workbench'
   | 'filter-by-links'
   | 'download-merge'
@@ -370,7 +374,9 @@ const initialNotifications = loadNotificationHistory();
 export const useAppStore = create<State>((set, get) => ({
   ready: false,
   loading: false,
-  page: 'editor-home',
+  // Trang mở đầu là bước ① Tải (điều hướng 3 bước GĐ 2a) để mục thanh bên luôn có một mục đang chọn;
+  // "Tổng quan" (editor-home) không còn trong danh sách thanh bên nhưng vẫn mở được qua bấm logo.
+  page: 'step-download',
   projects: [],
   jobs: [],
   tools: [],

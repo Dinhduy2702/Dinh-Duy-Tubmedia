@@ -5,10 +5,10 @@ import { describe, expect, it } from 'vitest';
 const read = (file: string): string => readFileSync(join(process.cwd(), file), 'utf8');
 
 describe('Tubmedia 1.3.0 editor workflows', () => {
-  it('mở Editor Studio làm trang mặc định và có điều hướng mới', () => {
+  it('mở bước ① Tải làm trang mặc định (điều hướng 3 bước GĐ 2a) và có điều hướng mới', () => {
     const store = read('src/renderer/src/stores/app-store.ts');
     const sidebar = read('src/renderer/src/layout/Sidebar.tsx');
-    expect(store).toContain("page: 'editor-home'");
+    expect(store).toContain("page: 'step-download'");
     expect(sidebar).toContain("id: 'history'");
     expect(sidebar).toContain("id: 'diagnostics'");
   });

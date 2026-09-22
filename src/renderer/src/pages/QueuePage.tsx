@@ -18,6 +18,7 @@ import type { QuickDownloadStatus } from '@shared/quick-download';
 import { useAppStore } from '../stores/app-store';
 import { showNotice } from '../utils/notify';
 import { detailToneFor, toneTextVar } from '@shared/utils/notice-tone';
+import { progressFillStyle } from '../utils/progress-style';
 import { StatusBadge } from '../components/StatusBadge';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CompactDetail } from '../components/CompactDetail';
@@ -297,7 +298,7 @@ function QueueChildRows({
               <div
                 className={`progress queue-row-progress ${RUNNING.has(job.status) ? 'is-animated' : 'is-static'}`}
               >
-                <span style={{ width: `${Math.max(0, Math.min(100, job.progress))}%` }} />
+                <span style={progressFillStyle(job.progress)} />
               </div>
 
               <div className="queue-row-progress-meta">

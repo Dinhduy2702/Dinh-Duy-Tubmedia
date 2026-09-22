@@ -34,16 +34,21 @@ function check(label, condition) {
 
 check('package version is a valid release version', isValidVersion(files.packageJson.version));
 check(
-  'Editor Studio is the default landing page',
-  files.appStore.includes("page: 'editor-home'") && files.app.includes("page === 'editor-home'")
+  'Step ① Tải is the default landing page (điều hướng 3 bước GĐ 2a); Editor Home still reachable via logo',
+  files.appStore.includes("page: 'step-download'") &&
+    files.app.includes("page === 'step-download'") &&
+    files.sidebar.includes("setPage('editor-home')")
 );
 check(
-  'navigation exposes editor home, history and diagnostics',
-  ['editor-home', 'history', 'diagnostics'].every((page) => files.sidebar.includes(`'${page}'`))
+  'navigation exposes the 3-step journey, history and diagnostics',
+  ['step-download', 'step-preview-cut', 'step-merge-export', 'history', 'diagnostics'].every((page) =>
+    files.sidebar.includes(`'${page}'`)
+  )
 );
 check(
-  'System Cleanup is placed under Advanced Tools',
-  files.sidebar.indexOf("label: 'CÔNG CỤ NÂNG CAO'") < files.sidebar.indexOf("id: 'cleanup'")
+  'System Cleanup is placed under the CÔNG CỤ group (đặc tả GĐ 2a); old batch pages moved under Advanced Tools',
+  files.sidebar.indexOf("label: 'CÔNG CỤ'") < files.sidebar.indexOf("id: 'cleanup'") &&
+    files.sidebar.indexOf("label: 'CÔNG CỤ NÂNG CAO'") < files.sidebar.indexOf("id: 'download-merge'")
 );
 check(
   'Editor Home uses actual queue, project, tool and system state',

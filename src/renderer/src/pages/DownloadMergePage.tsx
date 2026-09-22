@@ -59,6 +59,7 @@ import { createUiEventId } from '../utils/ui-id';
 import { loadWorkbenchPath, saveWorkbenchPath } from '../utils/workbench-path-memory';
 import { friendlyIssue } from '../utils/ui-error';
 import { audioModeLabel, jobTypeLabel, statusLabel } from '../utils/vi-labels';
+import { progressFillStyle } from '../utils/progress-style';
 
 interface MergeForm {
   name: string;
@@ -339,7 +340,7 @@ function MergeDetailedProgress({ jobs, timelineOnly }: { jobs: QueueJob[]; timel
         <Gauge size={19} />
       </header>
       <div className={`progress progress-large ${animate ? 'is-animated' : 'is-static'}`}>
-        <span style={{ width: `${progress}%` }} />
+        <span style={progressFillStyle(progress)} />
       </div>
       <div className="merge-progress-grid">
         <div>
@@ -1527,7 +1528,7 @@ function MergeLaneCard({
           <div
             className={`progress progress-large ${activeJob && shouldAnimateJobProgress(activeJob.status) ? 'is-animated' : 'is-static'}`}
           >
-            <span style={{ width: `${progress}%` }} />
+            <span style={progressFillStyle(progress)} />
           </div>
           <div className="progress-meta">
             <span>{progress.toFixed(1)}% toàn quy trình</span>

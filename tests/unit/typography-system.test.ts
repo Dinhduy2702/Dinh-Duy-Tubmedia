@@ -28,7 +28,7 @@ describe('Tubmedia unified typography system', () => {
     expect(typography).toContain('--font-ui:');
     expect(typography).toContain('--font-mono:');
     expect(typography).toContain('--type-2xs: 0.625rem');
-    expect(typography).toContain('--type-body: 0.875rem');
+    expect(typography).toContain('--type-body: 0.9375rem'); // 15px — GĐ 2a, đặc tả thiết kế
     expect(typography).toContain('--type-3xl: 1.75rem');
     expect(typography).toContain('--weight-semibold: 600');
     expect(typography).toContain('--weight-bold: 700');
