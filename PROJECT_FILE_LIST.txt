@@ -471,6 +471,7 @@ tests/unit/merge-timeline-reorder.test.ts
 tests/unit/merge-visual-boundary-hotfix11.test.ts
 tests/unit/motion-system.test.ts
 tests/unit/muc3-below-normal-priority.test.ts
+tests/unit/muc4-free-ram-recommendation.test.ts
 tests/unit/network-recovery-wiring-r54.test.ts
 tests/unit/non-conflicting-path.test.ts
 tests/unit/normalization-match.test.ts

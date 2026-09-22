@@ -22,7 +22,10 @@ export function recommendDownloadConcurrency(
   hardware: HardwareProfile
 ): DownloadConcurrencyRecommendation {
   const logical = Math.max(1, hardware.logicalCpuCount);
-  const ramGb = gib(hardware.totalMemoryBytes);
+  // VẤN ĐỀ 2 mục 4 (2026-09-22): dùng RAM CÒN TRỐNG tại thời điểm đề xuất, không dùng RAM tổng máy —
+  // máy 32GB nhưng đang dùng 28GB cho việc khác (VD đang edit video) không nên được đề xuất như máy
+  // đang rảnh 32GB. hardware.freeMemoryBytes đã được đo mới (freemem()) mỗi lần dò phần cứng.
+  const ramGb = gib(hardware.freeMemoryBytes);
   const hasHdd = hardware.disks.some((disk) => disk.type === 'hdd');
   const hasSsd = hardware.disks.some((disk) => disk.type === 'ssd');
 
