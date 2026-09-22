@@ -484,11 +484,8 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
       }
       const nextSettings = await window.desktop.settings.update({ downloadLaneCount: nextCount });
       setSettings(nextSettings);
-      notify(
-        'Đã thay đổi số danh sách',
-        `Hiện có ${nextCount} danh sách tải độc lập. Dữ liệu của danh sách bị ẩn vẫn được giữ.`,
-        'info'
-      );
+      // VẤN ĐỀ 1 (2026-09-22): đổi số danh sách hiện ngay trên giao diện (tab mới xuất hiện/mất ngay lập
+      // tức) — không cần thêm thông báo nổi cho một thay đổi đã tự thấy rõ; tránh spam khi bấm nhiều lần.
     } catch (error) {
       setError(messageOf(error));
     } finally {

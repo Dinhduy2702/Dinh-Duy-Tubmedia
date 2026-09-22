@@ -478,6 +478,7 @@ tests/unit/notice-display-policy.test.ts
 tests/unit/notice-tone.test.ts
 tests/unit/notification-center.test.ts
 tests/unit/notification-policy.test.ts
+tests/unit/notification-spam-lane-count.test.ts
 tests/unit/open-path-policy.test.ts
 tests/unit/output-path-containment.test.ts
 tests/unit/primary-button-double-click.test.ts

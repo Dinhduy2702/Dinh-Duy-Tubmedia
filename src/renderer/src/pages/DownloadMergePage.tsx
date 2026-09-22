@@ -951,11 +951,8 @@ export function DownloadMergePage(): React.JSX.Element {
       }
       const next = await window.desktop.settings.update({ mergeLaneCount: nextCount });
       setSettings(next);
-      notify(
-        'Đã thay đổi số quy trình ghép',
-        `Hiện có ${nextCount} quy trình tải và ghép độc lập. Dữ liệu quy trình bị ẩn vẫn được giữ.`,
-        'info'
-      );
+      // VẤN ĐỀ 1 (2026-09-22): đổi số quy trình hiện ngay trên giao diện (tab mới xuất hiện/mất ngay lập
+      // tức) — không cần thêm thông báo nổi cho một thay đổi đã tự thấy rõ; tránh spam khi bấm nhiều lần.
     } catch (error) {
       setError(messageOf(error));
     } finally {
