@@ -291,3 +291,27 @@ export const previewFrameRequestSchema = z
     timestampSeconds: z.number().min(0).max(86_400)
   })
   .strict();
+
+// Giai đoạn 6 mục 2 (2026-09-23): "Cắt tệp có sẵn" — cắt một đoạn từ video đã có sẵn trên máy, không
+// qua tải. filePath không dùng pathSchema (giới hạn 32KB, cho đường dẫn thư mục) vì đây là đường dẫn
+// TỆP — vẫn giới hạn độ dài hợp lý để chặn giá trị bất thường.
+export const localCutPreviewFrameRequestSchema = z
+  .object({
+    filePath: z.string().trim().min(1).max(4096),
+    timestampSeconds: z.number().min(0).max(86_400)
+  })
+  .strict();
+export const localCutRequestSchema = z
+  .object({
+    filePath: z.string().trim().min(1).max(4096),
+    outputDirectory: pathSchema,
+    startTime: z.string().trim().min(1).max(32),
+    endTime: z.string().trim().min(1).max(32),
+    accurateCut: z.boolean().default(false)
+  })
+  .strict();
+export const localCutTaskSchema = z
+  .object({
+    taskId: idSchema
+  })
+  .strict();

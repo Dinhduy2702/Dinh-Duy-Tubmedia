@@ -6,6 +6,7 @@ import './styles.css';
 import './tubmedia-theme.css';
 import './system-cleanup.css';
 import './quick-download.css';
+import './local-cut.css';
 import './video-link-filter.css';
 import './typography.css';
 import './brand.css';

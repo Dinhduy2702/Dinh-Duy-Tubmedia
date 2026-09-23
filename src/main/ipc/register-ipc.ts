@@ -41,7 +41,10 @@ import {
   videoLinkFilterRequestSchema,
   quickDownloadRequestSchema,
   quickDownloadTaskSchema,
-  previewFrameRequestSchema
+  previewFrameRequestSchema,
+  localCutPreviewFrameRequestSchema,
+  localCutRequestSchema,
+  localCutTaskSchema
 } from '@shared/schemas/ipc.js';
 import type { AppSettings } from '@shared/types/domain.js';
 import { InvalidInputError } from '@shared/errors/app-errors.js';
@@ -56,6 +59,7 @@ import { SystemCleanupService } from '../system/system-cleanup-service.js';
 import { QuarantineStore } from '../system/cleanup-quarantine.js';
 import { resolveCleanupEnvironmentPaths, type CleanupEnvironmentPaths } from '../system/cleanup-scanner.js';
 import { VideoLinkFilterService } from '../media/video-link-filter-service.js';
+import { LocalCutService } from '../media/local-cut-service.js';
 type MaybePromise<T> = T | Promise<T>;
 
 /**
@@ -122,6 +126,7 @@ export function registerIpc(ctx: AppContext): void {
     cleanupQuarantine
   );
   const videoLinkFilter = new VideoLinkFilterService(ctx.tools, ctx.logger);
+  const localCut = new LocalCutService(ctx.processes, ctx.tools, ctx.verifier, ctx.logger);
 
   const handle = <Input, Output>(
     channel: string,
@@ -546,6 +551,24 @@ export function registerIpc(ctx: AppContext): void {
   handle(IPC.quickDownload.revealOutput, quickDownloadTaskSchema, ({ taskId }) =>
     ctx.quickDownload.revealOutput(taskId)
   );
+
+  // TUBMEDIA_LOCAL_CUT_HANDLERS — Giai đoạn 6 mục 2: cắt tệp video đã có sẵn trên máy, không qua tải.
+  noArgs(IPC.localCut.chooseFile, async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [
+        { name: 'Tệp video', extensions: ['mp4', 'mkv', 'mov', 'webm', 'avi', 'ts', 'm4v', 'flv'] }
+      ]
+    });
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+  handle(IPC.localCut.previewFrame, localCutPreviewFrameRequestSchema, (request) =>
+    localCut.previewFrame(request)
+  );
+  handle(IPC.localCut.start, localCutRequestSchema, (request) => localCut.start(request));
+  handle(IPC.localCut.status, localCutTaskSchema, ({ taskId }) => localCut.status(taskId));
+  handle(IPC.localCut.cancel, localCutTaskSchema, ({ taskId }) => localCut.cancel(taskId));
+  handle(IPC.localCut.revealOutput, localCutTaskSchema, ({ taskId }) => localCut.revealOutput(taskId));
 
   noArgs(IPC.updates.status, () => ctx.appUpdates.getStatus());
   noArgs(IPC.updates.check, () => ctx.appUpdates.check());

@@ -32,6 +32,7 @@ import type {
 } from '@shared/system-cleanup.js';
 import type { QuickDownloadRequest, QuickDownloadStatus } from '@shared/quick-download.js';
 import type { VideoLinkFilterRequest, VideoLinkFilterResult } from '@shared/video-link-filter.js';
+import type { LocalCutRequest, LocalCutStatus } from '@shared/local-cut.js';
 export interface DesktopApi {
   workbench: {
     state(): Promise<WorkbenchState>;
@@ -195,6 +196,14 @@ export interface DesktopApi {
       content: string;
       defaultFolder?: string;
     }): Promise<string | null>;
+  };
+  localCut: {
+    chooseFile(): Promise<string | null>;
+    previewFrame(input: { filePath: string; timestampSeconds: number }): Promise<{ dataUrl: string }>;
+    start(input: LocalCutRequest): Promise<LocalCutStatus>;
+    status(taskId: string): Promise<LocalCutStatus | null>;
+    cancel(taskId: string): Promise<LocalCutStatus | null>;
+    revealOutput(taskId: string): Promise<boolean>;
   };
   updates: {
     status(): Promise<AppUpdateStatus>;

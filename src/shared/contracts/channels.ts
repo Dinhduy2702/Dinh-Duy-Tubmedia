@@ -125,6 +125,14 @@ export const IPC = {
     run: 'video-filter:run',
     saveReport: 'video-filter:save-report'
   },
+  localCut: {
+    chooseFile: 'local-cut:choose-file',
+    previewFrame: 'local-cut:preview-frame',
+    start: 'local-cut:start',
+    status: 'local-cut:status',
+    cancel: 'local-cut:cancel',
+    revealOutput: 'local-cut:reveal-output'
+  },
   updates: {
     status: 'updates:status',
     check: 'updates:check',

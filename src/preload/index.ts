@@ -136,6 +136,14 @@ const api: DesktopApi = {
     run: (input) => invoke(IPC.videoFilter.run, input),
     saveReport: (input) => invoke(IPC.videoFilter.saveReport, input)
   },
+  localCut: {
+    chooseFile: () => invoke(IPC.localCut.chooseFile),
+    previewFrame: (input) => invoke(IPC.localCut.previewFrame, input),
+    start: (input) => invoke(IPC.localCut.start, input),
+    status: (taskId) => invoke(IPC.localCut.status, { taskId }),
+    cancel: (taskId) => invoke(IPC.localCut.cancel, { taskId }),
+    revealOutput: (taskId) => invoke(IPC.localCut.revealOutput, { taskId })
+  },
   updates: {
     status: () => invoke(IPC.updates.status),
     check: () => invoke(IPC.updates.check),

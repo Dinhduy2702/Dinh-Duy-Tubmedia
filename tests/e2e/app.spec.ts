@@ -608,3 +608,194 @@ test('Sửa lỗi 2026-09-23 — tải xong 1 video qua Tải nhanh không làm 
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
 });
+
+test('Giai đoạn 6 mục 2: cắt tệp có sẵn trên máy (không qua tải) — xem trước, cắt nhanh, cắt chính xác, hủy giữa chừng', async () => {
+  const toolsDirectory = resolveToolsDirectoryForTest();
+  test.skip(!toolsDirectory, 'Không tìm thấy ffmpeg/ffprobe trên máy này để chạy bài kiểm thật.');
+
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-local-cut-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  const outputDirectory = path.join(sandbox, 'ra');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+  fs.mkdirSync(outputDirectory, { recursive: true });
+  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+  db.exec(
+    'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
+  );
+  db.prepare(
+    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+  ).run(
+    'app',
+    JSON.stringify({
+      theme: 'dark',
+      startWithWindows: false,
+      autoCheckAppUpdates: false,
+      autoCheckToolUpdates: false,
+      ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+      ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+    }),
+    new Date().toISOString()
+  );
+  db.close();
+
+  const sourceFile = path.join(sandbox, 'video-nguon.mp4');
+  const ffmpegResult = spawnSync(
+    path.join(toolsDirectory!, 'ffmpeg.exe'),
+    [
+      '-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=15:duration=15',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:duration=15',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', sourceFile
+    ],
+    { stdio: 'ignore', windowsHide: true, timeout: 60_000 }
+  );
+  expect(ffmpegResult.status, 'ffmpeg phải dựng được video nguồn thử').toBe(0);
+
+  try {
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+        ),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+
+    interface DesktopLocalCutApi {
+      tools: { list: () => Promise<Array<{ name: string; available: boolean }>> };
+      localCut: {
+        previewFrame: (input: { filePath: string; timestampSeconds: number }) => Promise<{ dataUrl: string }>;
+        start: (input: {
+          filePath: string;
+          outputDirectory: string;
+          startTime: string;
+          endTime: string;
+          accurateCut: boolean;
+        }) => Promise<{ taskId: string }>;
+        status: (taskId: string) => Promise<{
+          phase: string;
+          outputPath: string | null;
+          actualDurationSeconds: number | null;
+        } | null>;
+        cancel: (taskId: string) => Promise<unknown>;
+      };
+    }
+
+    let toolsReady = false;
+    const readyDeadline = Date.now() + 30_000;
+    while (Date.now() < readyDeadline) {
+      const list = await shellWindow.evaluate(
+        () => (window as unknown as { desktop: DesktopLocalCutApi }).desktop.tools.list()
+      );
+      if (list.find((item) => item.name === 'ffmpeg')?.available) {
+        toolsReady = true;
+        break;
+      }
+      await sleep(300);
+    }
+    expect(toolsReady, 'ffmpeg phải sẵn sàng trong 30s').toBe(true);
+
+    await shellWindow.click('text=Xem trước & Cắt');
+    await shellWindow.waitForSelector('text=Cắt tệp có sẵn trên máy', { timeout: 10_000 });
+
+    const [startFrame, endFrame] = await Promise.all([
+      shellWindow.evaluate(
+        (args) => (window as unknown as { desktop: DesktopLocalCutApi }).desktop.localCut.previewFrame(args),
+        { filePath: sourceFile, timestampSeconds: 2 }
+      ),
+      shellWindow.evaluate(
+        (args) => (window as unknown as { desktop: DesktopLocalCutApi }).desktop.localCut.previewFrame(args),
+        { filePath: sourceFile, timestampSeconds: 8 }
+      )
+    ]);
+    expect(startFrame.dataUrl.startsWith('data:image/jpeg;base64,')).toBe(true);
+    expect(endFrame.dataUrl.startsWith('data:image/jpeg;base64,')).toBe(true);
+    expect(startFrame.dataUrl).not.toBe(endFrame.dataUrl);
+
+    async function runToEnd(request: {
+      filePath: string;
+      outputDirectory: string;
+      startTime: string;
+      endTime: string;
+      accurateCut: boolean;
+    }) {
+      const started = await shellWindow!.evaluate(
+        (args) => (window as unknown as { desktop: DesktopLocalCutApi }).desktop.localCut.start(args),
+        request
+      );
+      const deadline = Date.now() + 60_000;
+      while (Date.now() < deadline) {
+        const current = await shellWindow!.evaluate(
+          (taskId) => (window as unknown as { desktop: DesktopLocalCutApi }).desktop.localCut.status(taskId),
+          started.taskId
+        );
+        if (current && ['completed', 'failed', 'cancelled'].includes(current.phase)) return current;
+        await sleep(200);
+      }
+      throw new Error('Quá thời gian chờ lượt cắt kết thúc.');
+    }
+
+    const fastCut = await runToEnd({
+      filePath: sourceFile,
+      outputDirectory,
+      startTime: '00:00:02',
+      endTime: '00:00:08',
+      accurateCut: false
+    });
+    expect(fastCut.phase, 'cắt nhanh phải hoàn tất').toBe('completed');
+    expect(fastCut.outputPath && fs.existsSync(fastCut.outputPath), 'tệp cắt nhanh phải tồn tại thật').toBe(true);
+    expect(fs.existsSync(sourceFile), 'tệp nguồn không được bị đụng tới').toBe(true);
+
+    const accurateCutResult = await runToEnd({
+      filePath: sourceFile,
+      outputDirectory,
+      startTime: '00:00:02',
+      endTime: '00:00:08',
+      accurateCut: true
+    });
+    expect(accurateCutResult.phase, 'cắt chính xác phải hoàn tất').toBe('completed');
+    expect(
+      accurateCutResult.outputPath && fs.existsSync(accurateCutResult.outputPath),
+      'tệp cắt chính xác phải tồn tại thật'
+    ).toBe(true);
+    expect(
+      Math.abs((accurateCutResult.actualDurationSeconds ?? 0) - 6),
+      'thời lượng thật phải xấp xỉ đúng 6 giây yêu cầu'
+    ).toBeLessThanOrEqual(1);
+
+    // Hủy giữa chừng: xác nhận đúng phase 'cancelled' (KHÔNG bị báo nhầm 'failed' — lỗi thật đã tìm và
+    // sửa ngày 2026-09-24: ProcessManager.run() ném lỗi khi bị hủy thay vì trả về {code,...}).
+    const cancelStarted = await shellWindow.evaluate(
+      (args) => (window as unknown as { desktop: DesktopLocalCutApi }).desktop.localCut.start(args),
+      { filePath: sourceFile, outputDirectory, startTime: '00:00:00', endTime: '00:00:14', accurateCut: true }
+    );
+    await sleep(150);
+    await shellWindow.evaluate(
+      (taskId) => (window as unknown as { desktop: DesktopLocalCutApi }).desktop.localCut.cancel(taskId),
+      cancelStarted.taskId
+    );
+    let cancelledStatus: Awaited<ReturnType<DesktopLocalCutApi['localCut']['status']>> = null;
+    const cancelDeadline = Date.now() + 30_000;
+    while (Date.now() < cancelDeadline) {
+      cancelledStatus = await shellWindow.evaluate(
+        (taskId) => (window as unknown as { desktop: DesktopLocalCutApi }).desktop.localCut.status(taskId),
+        cancelStarted.taskId
+      );
+      if (cancelledStatus && ['completed', 'failed', 'cancelled'].includes(cancelledStatus.phase)) break;
+      await sleep(200);
+    }
+    expect(cancelledStatus?.phase, 'hủy giữa chừng phải báo đúng "cancelled", không phải "failed"').toBe('cancelled');
+  } finally {
+    await closeElectronApplication();
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});

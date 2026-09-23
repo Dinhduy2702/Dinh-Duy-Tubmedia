@@ -272,6 +272,8 @@ src/main/ipc/wire-error.ts
 src/main/logging/diagnostic-exporter.ts
 src/main/logging/logger.ts
 src/main/media/file-verifier.ts
+src/main/media/local-cut-command.ts
+src/main/media/local-cut-service.ts
 src/main/media/media-analyzer.ts
 src/main/media/quarantine-service.ts
 src/main/media/video-link-filter-service.ts
@@ -344,6 +346,7 @@ src/renderer/src/features/projects/ImportLinksDialog.tsx
 src/renderer/src/hooks/use-desktop-events.ts
 src/renderer/src/layout/Sidebar.tsx
 src/renderer/src/layout/Topbar.tsx
+src/renderer/src/local-cut.css
 src/renderer/src/logs-responsive-r35.css
 src/renderer/src/main.tsx
 src/renderer/src/motion.css
@@ -385,6 +388,7 @@ src/shared/batch-error-notification-aggregator.ts
 src/shared/constants/app.ts
 src/shared/contracts/channels.ts
 src/shared/errors/app-errors.ts
+src/shared/local-cut.ts
 src/shared/quick-download.ts
 src/shared/release-notes.ts
 src/shared/schemas/ipc.ts
@@ -470,6 +474,9 @@ tests/unit/ipc-wire-error.test.ts
 tests/unit/job-resume-race.test.ts
 tests/unit/job-state-machine.test.ts
 tests/unit/light-mode-token-consistency.test.ts
+tests/unit/local-cut-command.test.ts
+tests/unit/local-cut-service.test.ts
+tests/unit/local-cut.test.ts
 tests/unit/logger-resilience.test.ts
 tests/unit/media-analyzer-hdr.test.ts
 tests/unit/media-duration-sanity.test.ts
