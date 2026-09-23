@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = process.cwd();
@@ -20,27 +20,35 @@ const store = read('src/renderer/src/stores/app-store.ts');
 const page = read('src/renderer/src/pages/SystemCleanupPage.tsx');
 const panel = read('src/renderer/src/components/SystemCleanupPanel.tsx');
 const css = read('src/renderer/src/system-cleanup.css');
-const helper = read('resources/system-cleanup-helper.ps1');
+const scanner = read('src/main/system/cleanup-scanner.ts');
 
 check('sidebar exposes a dedicated cleanup page', sidebar.includes("id: 'cleanup'"));
 check('app renders the cleanup route', app.includes("page === 'cleanup'"));
 check('page id contract includes cleanup', store.includes("'cleanup'"));
 check('cleanup page renders the cleanup panel', page.includes('<SystemCleanupPanel />'));
 check('UI displays estimated storage', panel.includes('Dung lượng tìm thấy'));
-check('UI displays safety levels', panel.includes('Rất an toàn') && panel.includes('Cần kiểm tra'));
+check('UI displays safety levels', panel.includes('Rất an toàn') && panel.includes('An toàn có kiểm soát'));
 check('UI displays cleanup urgency', panel.includes('Mức độ cần dọn'));
 check(
-  'delete is locked until a matching scan completes',
-  panel.includes('lastScannedKey === currentScanKey')
+  'GĐ4a: delete button stays visible but is permanently disabled, no UAC/whole-machine controls remain',
+  panel.includes('Dọn dẹp và xóa file đã chọn') &&
+    /disabled\s*$/m.test(panel) &&
+    !panel.includes('Quét và phân loại toàn bộ máy') &&
+    !panel.includes('wholeMachine') &&
+    !panel.includes('systemCleanupRequiresAdmin')
 );
-check('whole-machine scan remains explicit', panel.includes('Quét và phân loại toàn bộ máy'));
 check(
-  'large-file inventory is visibly report-only',
-  panel.includes('Không tự xóa') && panel.includes('Cần người dùng xem lại')
+  'admin-required maintenance is listed as info-only with a link to Windows Storage Sense',
+  panel.includes('SYSTEM_CLEANUP_ADMIN_INFO_ITEMS') && panel.includes('openStorageSettings')
 );
 check('dangerous user folders remain documented as protected', panel.includes('Zalo Received Files'));
 check('cleanup safety styles exist', css.includes('.cleanup-safety-guide'));
-check('helper still blocks broad roots', helper.includes('Assert-SafeTarget'));
-check('helper still protects Zalo Received Files', helper.includes('Zalo Received Files'));
+check('cleanup admin-info styles exist', css.includes('.system-cleanup-admin-info'));
+check('scanner still blocks broad roots', scanner.includes('assertSafeCleanupPath'));
+check('scanner still protects Zalo Received Files', scanner.includes('Zalo Received Files'));
+check(
+  'PowerShell helper for cleanup no longer exists (GĐ4a removed it entirely)',
+  !existsSync(join(root, 'resources/system-cleanup-helper.ps1'))
+);
 
 console.log(`Cleanup navigation and safety UI verification OK: ${checks.length} checks.`);

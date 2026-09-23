@@ -221,6 +221,9 @@ export const clearWorkbenchSchema = z.object({ slot: z.union([downloadLaneIdSche
 export const clearLogsSchema = z.object({ projectId: idSchema.optional() });
 
 // TUBMEDIA_FEATURE_IPC_SCHEMAS
+// GĐ4a (2026-09-23): bỏ hẳn scope 'wholeMachine' và 7 hạng mục cần quyền quản trị/không thể hoàn tác
+// (recycleBin, windowsTemp, windowsUpdate, deliveryOptimization, componentStore, diskInventory,
+// disableHibernate) — xem src/shared/system-cleanup.ts để biết lý do từng mục.
 export const systemCleanupCategorySchema = z.enum([
   'userTemp',
   'thumbnailCache',
@@ -228,20 +231,12 @@ export const systemCleanupCategorySchema = z.enum([
   'browserCache',
   'capcutCache',
   'zaloCache',
-  'tubmediaResidue',
-  'recycleBin',
-  'windowsTemp',
-  'windowsUpdate',
-  'deliveryOptimization',
-  'componentStore',
-  'diskInventory',
-  'disableHibernate'
+  'tubmediaResidue'
 ]);
 export const systemCleanupRequestSchema = z
   .object({
     mode: z.enum(['estimate', 'clean']),
-    scope: z.enum(['currentUser', 'wholeMachine']).default('currentUser'),
-    categories: z.array(systemCleanupCategorySchema).min(1).max(14)
+    categories: z.array(systemCleanupCategorySchema).min(1).max(7)
   })
   .strict();
 export const systemCleanupRunSchema = z

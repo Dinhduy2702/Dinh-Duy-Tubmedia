@@ -113,7 +113,8 @@ const api: DesktopApi = {
   systemCleanup: {
     start: (input) => invoke(IPC.systemCleanup.start, input),
     status: (runId) => invoke(IPC.systemCleanup.status, { runId }),
-    cancel: (runId) => invoke(IPC.systemCleanup.cancel, { runId })
+    cancel: (runId) => invoke(IPC.systemCleanup.cancel, { runId }),
+    openStorageSettings: () => invoke(IPC.systemCleanup.openStorageSettings)
   },
   quickDownload: {
     defaults: () => invoke(IPC.quickDownload.defaults),

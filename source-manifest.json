@@ -30,7 +30,6 @@
     "resources/icon.ico",
     "resources/icon.png",
     "resources/app-update.yml",
-    "resources/system-cleanup-helper.ps1",
     "src/main/index.ts",
     "src/main/app/app-context.ts",
     "src/main/ipc/register-ipc.ts",

@@ -103,7 +103,8 @@ export const IPC = {
   systemCleanup: {
     start: 'system-cleanup:start',
     status: 'system-cleanup:status',
-    cancel: 'system-cleanup:cancel'
+    cancel: 'system-cleanup:cancel',
+    openStorageSettings: 'system-cleanup:open-storage-settings'
   },
   quickDownload: {
     defaults: 'quick-download:defaults',

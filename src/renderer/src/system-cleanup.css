@@ -234,6 +234,51 @@
   gap: 0.62rem;
 }
 
+.system-cleanup-admin-info {
+  display: grid;
+  gap: 0.5rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: 13px;
+  padding: 0.82rem;
+}
+
+.system-cleanup-admin-info p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.system-cleanup-admin-list {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.system-cleanup-admin-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  border-radius: 10px;
+  background: var(--panel2);
+  padding: 0.5rem 0.68rem;
+}
+
+.system-cleanup-admin-list b {
+  font-size: 0.82rem;
+}
+
+.system-cleanup-admin-list small {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.system-cleanup-admin-info .system-cleanup-button {
+  justify-self: start;
+}
+
 .system-cleanup-option {
   display: flex;
   gap: 0.68rem;
@@ -564,10 +609,6 @@
 .system-cleanup-button.secondary {
   background: var(--panel);
   color: var(--text);
-}
-
-.system-cleanup-button.whole-machine {
-  border-color: color-mix(in srgb, var(--accent) 46%, var(--border));
 }
 
 .system-cleanup-button.primary {

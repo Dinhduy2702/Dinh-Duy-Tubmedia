@@ -121,7 +121,11 @@ describe('không còn thông báo "tự đoán mức"', () => {
         if (/hủy|tạm dừng|bỏ qua/i.test(match[2] ?? '')) expect(match[1], match[2]).toBe('neutral');
       }
     }
-    expect(seen.length).toBeGreaterThanOrEqual(8);
+    // GĐ4a (2026-09-23) đã bỏ 3 lời gọi showNotice gắn với nhánh mode 'clean' cũ của
+    // SystemCleanupPanel.tsx (nhánh đó không còn tồn tại — xóa thật đã bị khóa cứng, chưa mở ở bản
+    // này) nên tổng số giảm từ 8 xuống 7. Đây là thay đổi nội dung hợp lệ, không phải hồi quy: ngưỡng
+    // dưới đây chỉ để đảm bảo còn dùng showNotice có mức rõ ràng, không phải một con số cố định.
+    expect(seen.length).toBeGreaterThanOrEqual(7);
   });
 
   it('hủy / tạm dừng không còn được báo bằng mức cảnh báo (vàng) ở các trang danh sách và hàng đợi', () => {
@@ -154,10 +158,8 @@ describe('không còn thông báo "tự đoán mức"', () => {
     expect(queue).not.toMatch(/issue\s*\?\s*'danger'/);
   });
 
-  it('hộp thoại gốc của trình duyệt chỉ còn ở trang Dọn dẹp cũ (sẽ thay khi viết lại ở Giai đoạn 4)', () => {
+  it('không còn hộp thoại gốc của trình duyệt ở đâu nữa (GĐ4a đã viết lại trang Dọn dẹp, bỏ window.confirm/prompt)', () => {
     const withNative = rendererFiles.filter((file) => /window\.(?:confirm|prompt|alert)\(/.test(readFileSync(file, 'utf8')));
-    expect(withNative.map((file) => file.replace(/\\/g, '/').split('/src/renderer/src/')[1])).toEqual([
-      'components/SystemCleanupPanel.tsx'
-    ]);
+    expect(withNative.map((file) => file.replace(/\\/g, '/').split('/src/renderer/src/')[1])).toEqual([]);
   });
 });

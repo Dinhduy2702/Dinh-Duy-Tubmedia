@@ -160,7 +160,6 @@ REQUIREMENTS_VI.md
 resources/app-update.yml
 resources/icon.ico
 resources/icon.png
-resources/system-cleanup-helper.ps1
 resources/tools/.gitkeep
 RUN_DEV_WINDOWS.bat
 RUN_VERIFY_AND_BUILD_FIXED.cmd
@@ -292,6 +291,7 @@ src/main/settings/hardware-service.ts
 src/main/settings/settings-service.ts
 src/main/storage/path-service.ts
 src/main/storage/workbench-storage.ts
+src/main/system/cleanup-scanner.ts
 src/main/system/system-cleanup-service.ts
 src/main/system/system-stats-service.ts
 src/main/tools/tool-manager.ts
@@ -427,10 +427,12 @@ tests/integration/queue-load-governor.test.ts
 tests/integration/queue-retry-requeue.test.ts
 tests/integration/restore-sources-policy.test.ts
 tests/integration/settings-restore-policy.test.ts
+tests/integration/system-cleanup-service.test.ts
 tests/unit/app-update-version.test.ts
 tests/unit/batch-error-aggregation-r18.test.ts
 tests/unit/brand-layout.test.ts
 tests/unit/brand-logo.test.ts
+tests/unit/cleanup-scanner.test.ts
 tests/unit/clip-engine-mute-copy.test.ts
 tests/unit/color-tokens.test.ts
 tests/unit/compact-operational-ui.test.ts

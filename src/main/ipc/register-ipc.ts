@@ -413,6 +413,11 @@ export function registerIpc(ctx: AppContext): void {
   });
   handle(IPC.systemCleanup.status, systemCleanupRunSchema, ({ runId }) => systemCleanup.status(runId));
   handle(IPC.systemCleanup.cancel, systemCleanupRunSchema, ({ runId }) => systemCleanup.cancel(runId));
+  // GĐ4a: các hạng mục cần quyền quản trị (Windows Temp, cache Update, Delivery Optimization,
+  // Component Store) không còn được Tubmedia tự chạy — chỉ mở công cụ Dọn dẹp ổ đĩa của Windows.
+  noArgs(IPC.systemCleanup.openStorageSettings, async () => {
+    await shell.openExternal('ms-settings:storagesense');
+  });
 
   // TUBMEDIA_VIDEO_LINK_FILTER_HANDLERS
   noArgs(IPC.videoFilter.chooseLinksFile, async () => {

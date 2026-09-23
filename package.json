@@ -161,10 +161,6 @@
       {
         "from": "resources/app-update.yml",
         "to": "app-update.yml"
-      },
-      {
-        "from": "resources/system-cleanup-helper.ps1",
-        "to": "system-cleanup-helper.ps1"
       }
     ],
     "win": {

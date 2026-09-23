@@ -166,6 +166,7 @@ export interface DesktopApi {
     start(input: SystemCleanupRequest): Promise<SystemCleanupStatus>;
     status(runId: string): Promise<SystemCleanupStatus | null>;
     cancel(runId: string): Promise<SystemCleanupStatus | null>;
+    openStorageSettings(): Promise<void>;
   };
   quickDownload: {
     defaults(): Promise<{ outputDirectory: string }>;
