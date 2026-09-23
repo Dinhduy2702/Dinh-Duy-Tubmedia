@@ -10,6 +10,7 @@ import {
   Tray,
   type Event as ElectronEvent
 } from 'electron';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { IPC } from '@shared/contracts/channels.js';
 import { AppContext } from './app/app-context.js';
@@ -33,6 +34,13 @@ const { e2e: isE2E, e2eUserData } = readDevelopmentEnvironment(process.env, app.
 
 if (isE2E && e2eUserData) {
   app.setPath('userData', e2eUserData);
+  // Sandbox luôn cả thư mục Tải xuống mặc định trong lúc kiểm thử e2e — QuickDownloadService dùng
+  // app.getPath('downloads') làm thư mục lưu mặc định; nếu không đổi, một kịch bản e2e tải video thật
+  // (không chỉ định rõ outputDirectory) sẽ vô tình ghi vào thư mục Downloads THẬT của máy đang chạy.
+  // Downloads thật của Windows luôn tồn tại sẵn nên chỗ này phải tự tạo thư mục sandbox tương ứng.
+  const e2eDownloads = join(e2eUserData, 'e2e-downloads');
+  mkdirSync(e2eDownloads, { recursive: true });
+  app.setPath('downloads', e2eDownloads);
 }
 
 app.setAppUserModelId('com.tubmedia.download-video');

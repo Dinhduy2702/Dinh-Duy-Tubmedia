@@ -903,10 +903,6 @@ export class QuickDownloadService {
       throw new Error(`File đầu ra không đạt kiểm tra: ${checked.reasons.join('; ')}`);
     }
 
-    if (active.request.embedCredit) {
-      await this.embedCreditMetadata(active, active.status.outputPath);
-    }
-
     active.status.phase = 'completed';
     active.status.progress = 100;
     active.status.message =
@@ -923,6 +919,24 @@ export class QuickDownloadService {
     this.cookieBlockedRequest = null;
     this.publish(active);
     await this.cleanupActive(active, true);
+
+    // Sửa lỗi (2026-09-23): ghi credit KHÔNG được chặn báo "hoàn tất" — trước đây bước này chạy TRƯỚC
+    // khi đặt phase='completed', nên nếu remux ffmpeg chạy lâu hơn dự kiến trên một video thật (file
+    // lớn hơn, đĩa/diệt virus quét tệp mới ghi...), toàn bộ nút trên trang Tải nhanh (đều disabled khi
+    // "running") sẽ bị khóa suốt thời gian đó — đúng như bị báo "app đơ, vòng xoay quay mãi". Giờ chạy
+    // NGẦM sau khi đã báo hoàn tất: người dùng dùng được ứng dụng ngay, credit ghi thêm phía sau.
+    if (active.request.embedCredit) {
+      void this.embedCreditMetadata(active, active.status.outputPath)
+        .then(() => this.publish(active))
+        .catch((error: unknown) => {
+          this.logger.warn(
+            'quick-download',
+            'QUICK_DOWNLOAD_CREDIT_METADATA_BACKGROUND_FAILED',
+            error instanceof Error ? error.message : String(error),
+            { jobId: active.status.taskId }
+          );
+        });
+    }
   }
 
   /**
@@ -1002,9 +1016,9 @@ export class QuickDownloadService {
     ];
     const comment = commentLines.join('\n');
 
-    active.status.message = 'Đang ghi thông tin nguồn gốc vào tệp.';
-    this.publish(active);
-
+    // KHÔNG cập nhật active.status.message/publish ở đây nữa — bước này chạy NGẦM sau khi đã báo
+    // "hoàn tất" (xem lời gọi ở nơi gọi hàm này); ghi đè message lúc này sẽ khiến trạng thái hiển thị
+    // giật lùi từ "Đã tải xong" về một dòng "đang xử lý" gây hiểu lầm dù phase vẫn là 'completed'.
     const extension = extname(outputPath);
     const tempOutput = join(dirname(outputPath), `${basename(outputPath, extension)}.credit${extension}`);
 
@@ -1030,7 +1044,9 @@ export class QuickDownloadService {
           `comment=${comment}`,
           tempOutput
         ],
-        timeoutMs: 30 * 60 * 1000
+        // Remux -c copy chỉ đổi header container, không mã hóa lại — vài phút là đủ dư cho cả tệp rất
+        // lớn. Chạy nền (không chặn "hoàn tất") nên không cần mốc 30 phút như các bước xử lý chính.
+        timeoutMs: 5 * 60 * 1000
       });
       if (result.code !== 0 || !existsSync(tempOutput)) {
         throw new Error(result.stderrTail.trim() || `FFmpeg kết thúc với mã ${result.code}.`);
