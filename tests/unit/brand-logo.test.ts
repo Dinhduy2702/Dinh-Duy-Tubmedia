@@ -126,11 +126,14 @@ describe('logo chuẩn: màu trong CSS và quy tắc dùng', () => {
 });
 
 describe('logo chuẩn được tích hợp vào ứng dụng', () => {
-  it('thanh bên dùng logo bản ngang chữ trắng trên nền đen than; chỉ còn biểu tượng khi thanh bên thật sự hẹp', () => {
+  it('thanh bên dùng logo bản ngang, tự đổi chữ trắng/đen than theo đúng chế độ sáng/tối (tone="auto"); chỉ còn biểu tượng khi thanh bên thật sự hẹp', () => {
+    // 2026-09-23: ĐẢO LẠI quyết định GĐ1 (logo thanh bên ép cứng tone="on-dark") — thanh bên nay đổi
+    // theo đúng chế độ sáng/tối, nên logo cũng phải tự đổi theo (tone="auto" đọc đúng :root.light).
     const brand = text('src/renderer/src/components/TubmediaBrand.tsx');
     expect(text('src/renderer/src/layout/Sidebar.tsx')).toContain('<TubmediaWordmark />');
-    expect(brand).toContain('variant="horizontal" tone="on-dark"');
-    expect(brand).toContain('variant="mark" tone="on-dark"');
+    expect(brand).toContain('variant="horizontal" tone="auto"');
+    expect(brand).toContain('variant="mark" tone="auto"');
+    expect(brand).not.toMatch(/TubmediaWordmark[\s\S]{0,400}tone="on-dark"/);
     expect(brandCss).toMatch(/\.sidebar-brand\s*\{\s*container:\s*sidebar-brand \/ inline-size/);
     expect(brandCss).toMatch(/@container sidebar-brand \(max-width: 150px\)[\s\S]*\.tm-brand-full\s*\{\s*display:\s*none/);
   });
@@ -145,10 +148,21 @@ describe('logo chuẩn được tích hợp vào ứng dụng', () => {
     expect(text('src/renderer/src/app/App.tsx')).toContain('<TubmediaLogo variant="horizontal"');
     const about = text('src/renderer/src/pages/AboutPage.tsx');
     expect(about).toContain('<TubmediaLogo variant="horizontal"');
-    expect(about).toContain('<BrandKit/>');
   });
 
-  it('mục Bộ nhận diện có logo, đủ mã màu và cách dùng đúng/sai (kèm chữ, không chỉ màu)', () => {
+  it('mục "Bộ nhận diện" KHÔNG còn hiện ở trang Giới thiệu (2026-09-23 — tài liệu kỹ thuật, không phải thứ người dùng cuối cần xem), nhưng vẫn còn nguyên trong docs/brand/BO_NHAN_DIEN.md', () => {
+    const about = text('src/renderer/src/pages/AboutPage.tsx');
+    expect(about).not.toContain('<BrandKit');
+    expect(about).not.toContain("from '../components/BrandKit'");
+    // Component vẫn còn trong mã nguồn (không xóa) — chỉ không còn được import/hiển thị.
+    expect(() => text('src/renderer/src/components/BrandKit.tsx')).not.toThrow();
+    const doc = text('docs/brand/BO_NHAN_DIEN.md');
+    expect(doc).toContain('Đen than giao diện');
+    expect(doc).toContain('#DB2B23');
+    expect(doc).toContain('#B3261E');
+  });
+
+  it('mục Bộ nhận diện (component BrandKit.tsx, còn trong mã nguồn nhưng không hiển thị trong app) có logo, đủ mã màu và cách dùng đúng/sai (kèm chữ, không chỉ màu)', () => {
     const kit = text('src/renderer/src/components/BrandKit.tsx');
     const colors = text('src/renderer/src/brand/brand-colors.ts');
     for (const hex of [RED, PLAY, PAPER, INK, '#1C1C1E', '#B3261E']) expect(colors).toContain(`'${hex.slice(1)}'`);

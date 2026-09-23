@@ -62,7 +62,7 @@
   fill: var(--logo-ink);
 }
 
-/* ---- Thanh bên (luôn đen than) ------------------------------------ */
+/* ---- Thanh bên (theo đúng chế độ sáng/tối — đổi 2026-09-23) -------- */
 .sidebar-brand {
   min-height: 100px;
   padding: 1rem;
@@ -131,7 +131,9 @@
 }
 
 /* ---- Thẻ "Phát triển bởi" -------------------------------------------
-   Nền đen than (KHÔNG đỏ, không gradient đỏ). Viền sáng nhẹ lấy từ token thanh bên; khi trỏ chuột viền sáng hơn (chỉ đổi opacity).
+   KHÔNG đỏ, không gradient đỏ. Nền/chữ dùng --sidebar-bg/--sidebar-text (đen than ở chế độ tối, sáng ở
+   chế độ sáng — đổi 2026-09-23, trước đó ép cứng đen than mọi chế độ). Viền sáng nhẹ lấy từ token thanh
+   bên; khi trỏ chuột viền sáng hơn (chỉ đổi opacity).
    Vệt sáng: transform + opacity, chạy đúng 1 lần (intro khi mở app, chỉ ở thanh bên) hoặc 1 lần mỗi lần trỏ chuột;
    KHÔNG lặp vô hạn nên không tốn CPU/GPU nền lúc đang tải hoặc ghép video. */
 .sidebar-footer {

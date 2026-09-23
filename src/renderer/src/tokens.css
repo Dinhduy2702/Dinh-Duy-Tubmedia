@@ -3,7 +3,9 @@
    --bad, --panel...) để mọi màn hình cũ dùng chung một bảng màu mà không phải viết lại từng trang.
 
    Quy tắc:
-   - Đen than là màu chủ đạo: thanh bên (luôn tối), nút chính, mục đang chọn.
+   - Đen than là màu chủ đạo: nút chính, mục đang chọn — dùng làm điểm nhấn (--action-bg), không phải nền
+     cố định. Thanh bên đổi theo đúng chế độ sáng/tối như phần còn lại của giao diện (2026-09-23, đảo lại
+     quyết định "thanh bên luôn tối" đã chốt ở GĐ1 theo yêu cầu mới của người dùng — xem phần 5 bên dưới).
    - Đỏ CHỈ dành cho lỗi thật và nút nguy hiểm. Màu đỏ của logo chỉ nằm trong ảnh logo.
    - Xanh dương chỉ cho thông tin, thanh tiến độ và liên kết.
    - Mỗi mức thông báo có nền/viền/chữ/biểu tượng riêng và LUÔN kèm biểu tượng + nhãn chữ. */
@@ -135,6 +137,14 @@
   --bg-soft: #e7e3de;
   --panel3: #efece8;
   --border-strong: #c9c4bc;
+  /* Thanh bên (2026-09-23, ĐẢO LẠI quyết định "luôn đen than" của GĐ1 theo yêu cầu mới): chế độ sáng
+     phải sáng đồng nhất, kể cả thanh bên — dùng đúng token nền/chữ đã có, tương phản đã đo ≥ 4,5:1
+     (xem tests/unit/sidebar-theme-reversal.test.ts). */
+  --sidebar-bg: #ffffff;
+  --sidebar-text: #1c1c1e;
+  --sidebar-muted: #55524d;
+  --sidebar-active-bg: #eeebe7;
+  --sidebar-border: #d9d5cf;
   --accent: #1c1c1e;
   --accent2: #2e2e31;
   --accent3: #4a4a4e;
@@ -241,22 +251,26 @@ a,
 }
 
 /* ------------------------------------------------------------------ */
-/* 5. Thanh bên: LUÔN đen than, kể cả giao diện sáng                     */
+/* 5. Thanh bên: theo ĐÚNG chế độ sáng/tối của toàn bộ giao diện          */
+/*    (2026-09-23 — ĐẢO LẠI quyết định "luôn đen than" đã chốt ở GĐ1:     */
+/*    người dùng yêu cầu chế độ sáng phải sáng đồng nhất, kể cả thanh     */
+/*    bên. Chỉ đổi TOKEN (--sidebar-*), không đổi cấu trúc CSS bên dưới   */
+/*    — mọi thứ tự tính lại đúng theo --sidebar-bg/--sidebar-text hiện    */
+/*    hành của tokens.css phần 1–2.) */
 /* ------------------------------------------------------------------ */
 .app-sidebar {
-  color-scheme: dark;
   --text: var(--sidebar-text);
   --muted: var(--sidebar-muted);
   --panel: var(--sidebar-bg);
-  --panel2: #262629;
-  --panel3: #2f2f33;
+  --panel2: color-mix(in srgb, var(--sidebar-bg) 90%, var(--sidebar-text));
+  --panel3: color-mix(in srgb, var(--sidebar-bg) 82%, var(--sidebar-text));
   --border: var(--sidebar-border);
-  --border-strong: #4a4a4f;
-  --accent: #f2efea;
-  --accent2: #ddd9d2;
-  --accent3: #c4bfb7;
-  --accent-soft: rgba(255, 255, 255, 0.08);
-  --on-accent: #1c1c1e;
+  --border-strong: color-mix(in srgb, var(--sidebar-bg) 65%, var(--sidebar-text));
+  --accent: var(--action-bg);
+  --accent2: var(--action-bg-hover);
+  --accent3: color-mix(in srgb, var(--action-bg) 80%, var(--sidebar-bg));
+  --accent-soft: color-mix(in srgb, var(--action-bg) 8%, transparent);
+  --on-accent: var(--action-text);
   border-right-color: var(--sidebar-border);
   background: var(--sidebar-bg);
   color: var(--sidebar-text);
@@ -271,7 +285,7 @@ a,
 }
 
 .app-sidebar .sidebar-item:hover {
-  background: rgba(255, 255, 255, 0.07);
+  background: color-mix(in srgb, var(--sidebar-text) 7%, transparent);
   border-color: transparent;
   color: var(--sidebar-text);
 }
@@ -280,40 +294,40 @@ a,
   border-color: transparent;
   background: var(--sidebar-active-bg);
   box-shadow: none;
-  color: #ffffff;
+  color: var(--sidebar-text);
 }
 
 .app-sidebar .sidebar-item::before,
 .app-sidebar .sidebar-item.is-active::before {
-  background: #f2efea;
+  background: var(--action-bg);
   box-shadow: none;
 }
 
 .app-sidebar .sidebar-item-icon {
-  background: rgba(255, 255, 255, 0.07);
+  background: color-mix(in srgb, var(--sidebar-text) 7%, transparent);
   color: var(--sidebar-muted);
 }
 
 .app-sidebar .sidebar-item.is-active .sidebar-item-icon {
-  background: #f2efea;
-  color: #1c1c1e;
+  background: var(--action-bg);
+  color: var(--action-text);
   box-shadow: none;
 }
 
 .app-sidebar .sidebar-count {
-  background: #f2efea;
-  color: #1c1c1e;
+  background: var(--action-bg);
+  color: var(--action-text);
 }
 
 .app-sidebar .sidebar-version {
-  border-color: #4a4a4f;
+  border-color: var(--sidebar-border);
   background: transparent;
   color: var(--sidebar-muted);
 }
 
 .app-sidebar .developer-signature-card {
-  border-color: #3a3a3d;
-  background: #262629;
+  border-color: var(--sidebar-border);
+  background: var(--panel2);
   box-shadow: none;
 }
 

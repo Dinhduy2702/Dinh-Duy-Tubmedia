@@ -84,7 +84,10 @@ describe('bảng màu ngữ nghĩa (phương án C)', () => {
     const expected: Record<string, string> = {
       '--text-primary': '#1c1c1e',
       '--action-bg': '#1c1c1e',
-      '--sidebar-bg': '#1c1c1e',
+      // 2026-09-23: ĐẢO LẠI quyết định "thanh bên luôn đen than" của GĐ1 — người dùng yêu cầu chế độ
+      // sáng phải sáng đồng nhất, kể cả thanh bên. Xem "thanh bên đổi theo đúng chế độ sáng/tối" bên dưới.
+      '--sidebar-bg': '#ffffff',
+      '--sidebar-text': '#1c1c1e',
       '--surface-app': '#eeebe7',
       '--surface-card': '#ffffff',
       '--border-subtle': '#d9d5cf',
@@ -162,18 +165,30 @@ describe('bảng màu ngữ nghĩa (phương án C)', () => {
         expect(contrast(resolve(map, '--progress-fill'), resolve(map, '--progress-track'))).toBeGreaterThanOrEqual(3);
       });
 
-      it('thanh bên LUÔN đen than: chữ, chữ phụ và mục đang chọn đều đủ tương phản', () => {
-        expect(resolve(map, '--sidebar-bg')).toBe('#1c1c1e');
+      it('thanh bên theo đúng chế độ sáng/tối hiện tại: chữ, chữ phụ và mục đang chọn đều đủ tương phản (≥ 4,5:1)', () => {
+        // 2026-09-23: ĐẢO LẠI quyết định "thanh bên luôn đen than" của GĐ1 — thanh bên nay đổi theo
+        // đúng chế độ sáng/tối, giống mọi phần khác của giao diện.
+        expect(resolve(map, '--sidebar-bg')).toBe(themeName === 'tối' ? '#1c1c1e' : '#ffffff');
         expect(contrast(resolve(map, '--sidebar-text'), resolve(map, '--sidebar-bg'))).toBeGreaterThanOrEqual(4.5);
         expect(contrast(resolve(map, '--sidebar-muted'), resolve(map, '--sidebar-bg'))).toBeGreaterThanOrEqual(4.5);
-        expect(contrast('#ffffff', resolve(map, '--sidebar-active-bg'))).toBeGreaterThanOrEqual(4.5);
+        // Mục đang chọn dùng ĐÚNG --sidebar-text làm màu chữ (không còn ép cứng #ffffff như trước khi
+        // đảo quyết định) — kiểm tra khớp với CSS thật trong tokens.css (.sidebar-item.is-active).
+        expect(contrast(resolve(map, '--sidebar-text'), resolve(map, '--sidebar-active-bg'))).toBeGreaterThanOrEqual(4.5);
       });
     });
   }
 
-  it('giao diện sáng không định nghĩa lại các biến của thanh bên (nên thanh bên luôn tối)', () => {
+  it('giao diện sáng ĐỊNH NGHĨA LẠI đủ 5 biến của thanh bên (đảo quyết định GĐ1 — nay thanh bên đổi theo chế độ, không còn luôn tối)', () => {
     const lightOnly = blocks(':root.light');
-    expect(Object.keys(lightOnly).filter((name) => name.startsWith('--sidebar-'))).toEqual([]);
+    const sidebarKeysInLight = Object.keys(lightOnly).filter((name) => name.startsWith('--sidebar-')).sort();
+    expect(sidebarKeysInLight).toEqual(
+      ['--sidebar-active-bg', '--sidebar-bg', '--sidebar-border', '--sidebar-muted', '--sidebar-text'].sort()
+    );
+    // Giá trị sáng phải THỰC SỰ khác giá trị tối (không phải định nghĩa lại y hệt cho có).
+    const darkOnly = blocks(':root');
+    for (const key of sidebarKeysInLight) {
+      expect(lightOnly[key], `${key} phải khác giá trị tối`).not.toBe(darkOnly[key]);
+    }
   });
 
   it('màu nhấn chính KHÔNG phải đỏ hay xanh dương: là đen than (sáng) và trắng ngà (tối)', () => {

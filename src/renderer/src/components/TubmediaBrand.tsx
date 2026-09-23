@@ -81,16 +81,22 @@ export function TubmediaMark({ size = 44, className, title = 'Tubmedia' }: Tubme
   return <TubmediaLogo variant="mark" width={size} title={title} {...(className ? { className } : {})}/>;
 }
 
-/** Logo ở thanh bên (luôn nền đen than). Khi thanh bên thu hẹp chỉ còn biểu tượng. */
+/**
+ * Logo ở thanh bên. Từ 2026-09-23, thanh bên đổi theo đúng chế độ sáng/tối của toàn bộ giao diện (ĐẢO LẠI
+ * quyết định "luôn nền đen than" của GĐ1) — dùng tone="auto" để logo tự đổi chữ trắng/đen than theo đúng
+ * nền thanh bên hiện tại (xem :root.light trong brand.css), thay vì ép cứng "on-dark".
+ */
 export function TubmediaWordmark({ compact = false }: { compact?: boolean }): React.JSX.Element {
   return <span className={`tm-brand-lockup ${compact ? 'is-compact' : ''}`} role="img" aria-label="Tubmedia">
-    <TubmediaLogo variant="horizontal" tone="on-dark" height={compact ? 48 : 60} className="tm-brand-full" decorative/>
-    <TubmediaLogo variant="mark" tone="on-dark" width={44} className="tm-brand-compact" decorative/>
+    <TubmediaLogo variant="horizontal" tone="auto" height={compact ? 48 : 60} className="tm-brand-full" decorative/>
+    <TubmediaLogo variant="mark" tone="auto" width={44} className="tm-brand-compact" decorative/>
   </span>;
 }
 
 /**
- * Thẻ "Phát triển bởi" (cuối thanh bên và trang Thông tin): nền đen than, không đỏ.
+ * Thẻ "Phát triển bởi" (cuối thanh bên và trang Thông tin): không đỏ; nền/chữ theo đúng chế độ sáng/tối
+ * hiện tại (đen than ở chế độ tối, sáng ở chế độ sáng — dùng chung token --sidebar-bg/--sidebar-text, xem
+ * brand.css và tokens.css; đổi cùng lúc với thanh bên từ 2026-09-23).
  * Vệt sáng chỉ chạy MỘT lần khi mở app (intro, chỉ thẻ ở thanh bên) hoặc mỗi lần trỏ chuột vào thẻ;
  * chỉ dùng transform + opacity; tắt hẳn khi người dùng chọn giảm chuyển động (xem brand.css).
  */
