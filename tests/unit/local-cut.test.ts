@@ -14,6 +14,7 @@ describe('Giai đoạn 6 mục 2 — validateLocalCutRequest (dùng lại parseQ
       filePath: 'C:\\video.mp4',
       outputDirectory: 'C:\\ra',
       accurateCut: false,
+      aspectRatio: 'original',
       startSeconds: 60,
       endSeconds: 150
     });
@@ -57,5 +58,43 @@ describe('Giai đoạn 6 mục 2 — validateLocalCutRequest (dùng lại parseQ
     });
     expect(request.startSeconds).toBe(3723);
     expect(request.endSeconds).toBe(3903);
+  });
+});
+
+describe('Giai đoạn 6 mục 3 (2026-09-24) — aspectRatio (đổi tỉ lệ khung hình, kiểu CapCut)', () => {
+  it("mặc định 'original' khi không gửi aspectRatio", () => {
+    const request = validateLocalCutRequest({
+      filePath: 'a',
+      outputDirectory: 'b',
+      startTime: '0',
+      endTime: '5'
+    });
+    expect(request.aspectRatio).toBe('original');
+  });
+
+  it("chấp nhận cả 3 tỉ lệ hợp lệ: '9:16', '1:1', '16:9'", () => {
+    for (const aspectRatio of ['9:16', '1:1', '16:9'] as const) {
+      const request = validateLocalCutRequest({
+        filePath: 'a',
+        outputDirectory: 'b',
+        startTime: '0',
+        endTime: '5',
+        aspectRatio
+      });
+      expect(request.aspectRatio).toBe(aspectRatio);
+    }
+  });
+
+  it("giá trị aspectRatio không hợp lệ (chuỗi lạ, số, null) đều rơi về 'original' — không báo lỗi, không để trống", () => {
+    for (const bogus of ['4:3', 'square', 123, null, undefined]) {
+      const request = validateLocalCutRequest({
+        filePath: 'a',
+        outputDirectory: 'b',
+        startTime: '0',
+        endTime: '5',
+        aspectRatio: bogus
+      });
+      expect(request.aspectRatio).toBe('original');
+    }
   });
 });

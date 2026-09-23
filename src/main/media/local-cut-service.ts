@@ -1,7 +1,9 @@
 /**
- * Giai đoạn 6 mục 2 (2026-09-23) — "Cắt tệp có sẵn": cắt một đoạn từ video đã có sẵn trên máy, tích hợp
- * vào bước "Xem trước & Cắt". Đơn giản có chủ đích — không hàng đợi, không tạm dừng/tiếp tục, không
+ * Giai đoạn 6 mục 2/3 (2026-09-23/24) — "Cắt tệp có sẵn": cắt một đoạn từ video đã có sẵn trên máy, tích
+ * hợp vào bước "Xem trước & Cắt". Đơn giản có chủ đích — không hàng đợi, không tạm dừng/tiếp tục, không
  * cookie: chỉ MỘT tác vụ ffmpeg chạy trên một tệp cục bộ người dùng tự chọn, có thể hủy.
+ * Mục 3: thêm đổi tỉ lệ khung hình (9:16/1:1/16:9) — nền mờ kiểu CapCut, luôn mã hóa lại (xem
+ * local-cut-command.ts). Tên tệp kết quả có thêm hậu tố tỉ lệ (ví dụ " [9x16]") khi không phải 'original'.
  */
 import { shell } from 'electron';
 import { randomUUID } from 'node:crypto';
@@ -10,7 +12,13 @@ import { access, mkdtemp, readFile, rename, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, extname, join } from 'node:path';
 import { sanitizeProgress } from '@shared/utils/progress-policy.js';
-import { validateLocalCutRequest, type LocalCutStatus, type ValidatedLocalCutRequest } from '@shared/local-cut.js';
+import {
+  LOCAL_CUT_ASPECT_RATIOS,
+  validateLocalCutRequest,
+  type LocalCutAspectRatio,
+  type LocalCutStatus,
+  type ValidatedLocalCutRequest
+} from '@shared/local-cut.js';
 import { ProcessCancelledError, ToolNotFoundError } from '@shared/errors/app-errors.js';
 import type { FileVerifier } from './file-verifier.js';
 import type { Logger } from '../logging/logger.js';
@@ -19,6 +27,7 @@ import type { ToolManager } from '../tools/tool-manager.js';
 import { buildLocalCutArguments, buildLocalFrameExtractArguments } from './local-cut-command.js';
 
 const TERMINAL_PHASES = new Set<LocalCutStatus['phase']>(['completed', 'cancelled', 'failed']);
+const ASPECT_RATIOS = new Set<LocalCutAspectRatio>(LOCAL_CUT_ASPECT_RATIOS);
 const FRAME_TIMEOUT_MS = 20_000;
 const CUT_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 
@@ -44,9 +53,13 @@ export class LocalCutService {
   }
 
   public async previewFrame(rawRequest: unknown): Promise<{ dataUrl: string }> {
-    const candidate = rawRequest as { filePath?: unknown; timestampSeconds?: unknown };
+    const candidate = rawRequest as { filePath?: unknown; timestampSeconds?: unknown; aspectRatio?: unknown };
     const filePath = typeof candidate.filePath === 'string' ? candidate.filePath.trim() : '';
     const timestampSeconds = typeof candidate.timestampSeconds === 'number' ? candidate.timestampSeconds : NaN;
+    const aspectRatio: LocalCutAspectRatio =
+      typeof candidate.aspectRatio === 'string' && ASPECT_RATIOS.has(candidate.aspectRatio as LocalCutAspectRatio)
+        ? (candidate.aspectRatio as LocalCutAspectRatio)
+        : 'original';
 
     if (!filePath || !Number.isFinite(timestampSeconds) || timestampSeconds < 0) {
       throw new Error('Yêu cầu xem trước khung hình không hợp lệ.');
@@ -65,7 +78,7 @@ export class LocalCutService {
         jobId: `local-cut-frame-${randomUUID()}`,
         tool: 'ffmpeg',
         executablePath: ffmpeg.executablePath,
-        args: buildLocalFrameExtractArguments(filePath, timestampSeconds, framePath),
+        args: buildLocalFrameExtractArguments(filePath, timestampSeconds, framePath, aspectRatio),
         priority: 'below_normal',
         timeoutMs: FRAME_TIMEOUT_MS
       });
@@ -110,6 +123,7 @@ export class LocalCutService {
       requestedEndSeconds: request.endSeconds,
       actualDurationSeconds: null,
       accurateCut: request.accurateCut,
+      aspectRatio: request.aspectRatio,
       startedAt: new Date().toISOString(),
       completedAt: null,
       error: null,
@@ -181,13 +195,24 @@ export class LocalCutService {
       throw new Error('Tubmedia không có quyền ghi vào thư mục đã chọn.');
     });
 
+    // Đổi tỉ lệ khung hình LUÔN bắt buộc mã hóa lại (bộ lọc nền mờ là bộ lọc pixel, không thể đi cùng
+    // -c copy) — accurateCut không còn ý nghĩa khi aspectRatio khác 'original', xem local-cut-command.ts.
+    const isReencode = request.accurateCut || request.aspectRatio !== 'original';
+
     status.phase = 'processing';
-    status.message = request.accurateCut ? 'Đang cắt và mã hóa lại đoạn đã chọn.' : 'Đang cắt nhanh đoạn đã chọn.';
+    status.message =
+      request.aspectRatio !== 'original'
+        ? `Đang cắt và đổi tỉ lệ ${request.aspectRatio} (nền mờ kiểu CapCut).`
+        : request.accurateCut
+          ? 'Đang cắt và mã hóa lại đoạn đã chọn.'
+          : 'Đang cắt nhanh đoạn đã chọn.';
     this.publish(active);
 
-    const extension = request.accurateCut ? '.mp4' : extname(request.filePath) || '.mp4';
+    const extension = isReencode ? '.mp4' : extname(request.filePath) || '.mp4';
     const baseName = basename(request.filePath, extname(request.filePath));
-    const outputName = `${baseName} [${Math.round(request.startSeconds)}-${Math.round(request.endSeconds)}]${extension}`;
+    const aspectTag =
+      request.aspectRatio === 'original' ? '' : ` [${request.aspectRatio.replace(':', 'x')}]`;
+    const outputName = `${baseName} [${Math.round(request.startSeconds)}-${Math.round(request.endSeconds)}]${aspectTag}${extension}`;
     const finalOutput = join(request.outputDirectory, outputName);
     const pendingOutput = `${finalOutput}.pending${extension}`;
 
@@ -197,6 +222,7 @@ export class LocalCutService {
       startSeconds: request.startSeconds,
       endSeconds: request.endSeconds,
       accurateCut: request.accurateCut,
+      aspectRatio: request.aspectRatio,
       outputPath: pendingOutput
     });
 

@@ -32,7 +32,7 @@ import type {
 } from '@shared/system-cleanup.js';
 import type { QuickDownloadRequest, QuickDownloadStatus } from '@shared/quick-download.js';
 import type { VideoLinkFilterRequest, VideoLinkFilterResult } from '@shared/video-link-filter.js';
-import type { LocalCutRequest, LocalCutStatus } from '@shared/local-cut.js';
+import type { LocalCutAspectRatio, LocalCutRequest, LocalCutStatus } from '@shared/local-cut.js';
 export interface DesktopApi {
   workbench: {
     state(): Promise<WorkbenchState>;
@@ -199,7 +199,11 @@ export interface DesktopApi {
   };
   localCut: {
     chooseFile(): Promise<string | null>;
-    previewFrame(input: { filePath: string; timestampSeconds: number }): Promise<{ dataUrl: string }>;
+    previewFrame(input: {
+      filePath: string;
+      timestampSeconds: number;
+      aspectRatio?: LocalCutAspectRatio;
+    }): Promise<{ dataUrl: string }>;
     start(input: LocalCutRequest): Promise<LocalCutStatus>;
     status(taskId: string): Promise<LocalCutStatus | null>;
     cancel(taskId: string): Promise<LocalCutStatus | null>;

@@ -799,3 +799,191 @@ test('Giai đoạn 6 mục 2: cắt tệp có sẵn trên máy (không qua tải
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
 });
+
+test('Giai đoạn 6 mục 3: đổi tỉ lệ khung hình khi cắt tệp có sẵn (9:16/1:1/16:9, nền mờ kiểu CapCut)', async () => {
+  const toolsDirectory = resolveToolsDirectoryForTest();
+  test.skip(!toolsDirectory, 'Không tìm thấy ffmpeg/ffprobe trên máy này để chạy bài kiểm thật.');
+
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-local-cut-aspect-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  const outputDirectory = path.join(sandbox, 'ra');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+  fs.mkdirSync(outputDirectory, { recursive: true });
+  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+  db.exec(
+    'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
+  );
+  db.prepare(
+    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+  ).run(
+    'app',
+    JSON.stringify({
+      theme: 'dark',
+      startWithWindows: false,
+      autoCheckAppUpdates: false,
+      autoCheckToolUpdates: false,
+      ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+      ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+    }),
+    new Date().toISOString()
+  );
+  db.close();
+
+  // Nguồn 16:9 (640x360) — chuyển sang 9:16 dọc phải phóng to+mờ làm nền, không được méo/cắt mất video gốc.
+  const sourceFile = path.join(sandbox, 'video-nguon.mp4');
+  const ffmpegResult = spawnSync(
+    path.join(toolsDirectory!, 'ffmpeg.exe'),
+    [
+      '-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=15:duration=10',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:duration=10',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', sourceFile
+    ],
+    { stdio: 'ignore', windowsHide: true, timeout: 60_000 }
+  );
+  expect(ffmpegResult.status, 'ffmpeg phải dựng được video nguồn thử').toBe(0);
+
+  try {
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+        ),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+
+    interface DesktopLocalCutAspectApi {
+      tools: { list: () => Promise<Array<{ name: string; available: boolean }>> };
+      localCut: {
+        previewFrame: (input: {
+          filePath: string;
+          timestampSeconds: number;
+          aspectRatio?: string;
+        }) => Promise<{ dataUrl: string }>;
+        start: (input: {
+          filePath: string;
+          outputDirectory: string;
+          startTime: string;
+          endTime: string;
+          accurateCut: boolean;
+          aspectRatio?: string;
+        }) => Promise<{ taskId: string }>;
+        status: (taskId: string) => Promise<{
+          phase: string;
+          outputPath: string | null;
+          aspectRatio: string;
+        } | null>;
+      };
+    }
+
+    let toolsReady = false;
+    const readyDeadline = Date.now() + 30_000;
+    while (Date.now() < readyDeadline) {
+      const list = await shellWindow.evaluate(
+        () => (window as unknown as { desktop: DesktopLocalCutAspectApi }).desktop.tools.list()
+      );
+      if (list.find((item) => item.name === 'ffmpeg')?.available) {
+        toolsReady = true;
+        break;
+      }
+      await sleep(300);
+    }
+    expect(toolsReady, 'ffmpeg phải sẵn sàng trong 30s').toBe(true);
+
+    // Xem khung hình với aspectRatio khác original phải phản ánh đúng kết quả sau xử lý (nền mờ + giữa).
+    const previewed = await shellWindow.evaluate(
+      (args) => (window as unknown as { desktop: DesktopLocalCutAspectApi }).desktop.localCut.previewFrame(args),
+      { filePath: sourceFile, timestampSeconds: 3, aspectRatio: '9:16' }
+    );
+    expect(previewed.dataUrl.startsWith('data:image/jpeg;base64,')).toBe(true);
+
+    async function runToEnd(request: {
+      filePath: string;
+      outputDirectory: string;
+      startTime: string;
+      endTime: string;
+      accurateCut: boolean;
+      aspectRatio?: string;
+    }) {
+      const started = await shellWindow!.evaluate(
+        (args) => (window as unknown as { desktop: DesktopLocalCutAspectApi }).desktop.localCut.start(args),
+        request
+      );
+      const deadline = Date.now() + 60_000;
+      while (Date.now() < deadline) {
+        const current = await shellWindow!.evaluate(
+          (taskId) => (window as unknown as { desktop: DesktopLocalCutAspectApi }).desktop.localCut.status(taskId),
+          started.taskId
+        );
+        if (current && ['completed', 'failed', 'cancelled'].includes(current.phase)) return current;
+        await sleep(200);
+      }
+      throw new Error('Quá thời gian chờ lượt cắt kết thúc.');
+    }
+
+    const verticalCut = await runToEnd({
+      filePath: sourceFile,
+      outputDirectory,
+      startTime: '00:00:01',
+      endTime: '00:00:05',
+      accurateCut: false, // KHÔNG chọn "cắt chính xác" — vẫn phải bị buộc mã hóa lại vì đổi tỉ lệ.
+      aspectRatio: '9:16'
+    });
+    expect(verticalCut.phase, 'cắt kèm đổi tỉ lệ 9:16 phải hoàn tất').toBe('completed');
+    expect(verticalCut.aspectRatio).toBe('9:16');
+    expect(
+      verticalCut.outputPath && fs.existsSync(verticalCut.outputPath),
+      'tệp đã đổi tỉ lệ phải tồn tại thật'
+    ).toBe(true);
+    expect(verticalCut.outputPath, 'tên tệp phải có hậu tố tỉ lệ').toMatch(/\[9x16\]/);
+
+    // Xác nhận THẬT bằng ffprobe: kích thước đầu ra đúng 1080x1920 (chuẩn xuất Reels/Shorts).
+    const probeOutput = execFileSync(
+      path.join(toolsDirectory!, 'ffprobe.exe'),
+      ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', verticalCut.outputPath!],
+      { encoding: 'utf8', windowsHide: true }
+    ).trim();
+    expect(probeOutput, 'kích thước thật của tệp xuất ra phải đúng 1080x1920').toBe('1080,1920');
+
+    const squareCut = await runToEnd({
+      filePath: sourceFile,
+      outputDirectory,
+      startTime: '00:00:01',
+      endTime: '00:00:04',
+      accurateCut: true,
+      aspectRatio: '1:1'
+    });
+    expect(squareCut.phase, 'cắt kèm đổi tỉ lệ 1:1 phải hoàn tất').toBe('completed');
+    const squareProbe = execFileSync(
+      path.join(toolsDirectory!, 'ffprobe.exe'),
+      ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', squareCut.outputPath!],
+      { encoding: 'utf8', windowsHide: true }
+    ).trim();
+    expect(squareProbe, 'kích thước thật của tệp xuất ra phải đúng 1080x1080').toBe('1080,1080');
+
+    const originalCut = await runToEnd({
+      filePath: sourceFile,
+      outputDirectory,
+      startTime: '00:00:01',
+      endTime: '00:00:04',
+      accurateCut: false
+      // Không gửi aspectRatio: phải mặc định 'original' — tương thích ngược với mục 2 (sao chép nhanh vẫn hoạt động).
+    });
+    expect(originalCut.phase, "cắt với aspectRatio mặc định 'original' vẫn phải hoạt động như mục 2").toBe('completed');
+    expect(originalCut.aspectRatio).toBe('original');
+    expect(originalCut.outputPath, 'không có hậu tố tỉ lệ khi giữ nguyên').not.toMatch(/\[\d+x\d+\]/);
+  } finally {
+    await closeElectronApplication();
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, FileVideo, FolderOpen, ImagePlay, Scissors, Square } from 'lucide-react';
 import type { QuickDownloadStatus } from '@shared/quick-download';
-import type { LocalCutStatus } from '@shared/local-cut';
+import type { LocalCutAspectRatio, LocalCutStatus } from '@shared/local-cut';
 import { parseQuickDownloadTime } from '@shared/local-cut';
 import { StepTabs } from '../components/StepTabs';
 import { Card } from '../components/ui/Card';
@@ -10,6 +10,15 @@ import { safeUiText } from '../utils/ui-error';
 import { useAppStore } from '../stores/app-store';
 
 const TERMINAL_PHASES = new Set<LocalCutStatus['phase']>(['completed', 'cancelled', 'failed']);
+
+// Giai đoạn 6 mục 3 (2026-09-24): đổi tỉ lệ khung hình — nền mờ kiểu CapCut (đã hỏi và được chọn), luôn
+// mã hóa lại nên "cắt chính xác" bị khóa (ẩn ý nghĩa) khi chọn một tỉ lệ khác 'original'.
+const ASPECT_RATIO_OPTIONS: Array<{ value: LocalCutAspectRatio; label: string }> = [
+  { value: 'original', label: 'Giữ nguyên' },
+  { value: '9:16', label: '9:16 (dọc)' },
+  { value: '1:1', label: '1:1 (vuông)' },
+  { value: '16:9', label: '16:9 (ngang)' }
+];
 
 function baseNameOf(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
@@ -24,8 +33,10 @@ function directoryNameOf(path: string): string | null {
  * Tải nhanh (bước ①) chưa có lịch sử nhiều tệp qua IPC, nên trang này cho thấy TRUNG THỰC kết quả tải
  * gần nhất (nếu đã xong). Bộ cắt riêng, đơn giản (Giai đoạn 6 mục 2 — 2026-09-23) cắt một đoạn từ MỘT
  * VIDEO CÓ SẴN TRÊN MÁY (không qua tải) — nhập giờ bắt đầu/kết thúc, xem khung hình thật, chọn sao chép
- * nhanh hoặc cắt chính xác (mã hóa lại). Bộ cắt/chuẩn hóa NHIỀU tệp cùng lúc (Smart Merge) vẫn ở trang
- * Ghép theo Timeline — không lặp lại ở đây. */
+ * nhanh hoặc cắt chính xác (mã hóa lại). Mục 3 (2026-09-24) thêm đổi tỉ lệ khung hình (9:16/1:1/16:9,
+ * nền mờ kiểu CapCut) ngay trong cùng công cụ này — chọn tỉ lệ khác 'original' luôn buộc mã hóa lại nên
+ * ô "cắt chính xác" bị khóa ở trạng thái bật kèm ghi chú. Bộ cắt/chuẩn hóa NHIỀU tệp cùng lúc (Smart
+ * Merge) vẫn ở trang Ghép theo Timeline — không lặp lại ở đây. */
 export function StepPreviewCutPage(): React.JSX.Element {
   const setPage = useAppStore((state) => state.setPage);
   const [latest, setLatest] = useState<QuickDownloadStatus | null>(null);
@@ -36,11 +47,12 @@ export function StepPreviewCutPage(): React.JSX.Element {
   const [startTime, setStartTime] = useState('00:00:00');
   const [endTime, setEndTime] = useState('00:00:10');
   const [accurateCut, setAccurateCut] = useState(false);
+  const [aspectRatio, setAspectRatio] = useState<LocalCutAspectRatio>('original');
 
   const [previewFrames, setPreviewFrames] = useState<{ start: string; end: string } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const previewInvalidationKey = `${sourceFile ?? ''}|${startTime}|${endTime}`;
+  const previewInvalidationKey = `${sourceFile ?? ''}|${startTime}|${endTime}|${aspectRatio}`;
   const previewInvalidationKeyRef = useRef(previewInvalidationKey);
 
   const [status, setStatus] = useState<LocalCutStatus | null>(null);
@@ -135,8 +147,8 @@ export function StepPreviewCutPage(): React.JSX.Element {
     setPreviewError(null);
     try {
       const [startFrame, endFrame] = await Promise.all([
-        window.desktop.localCut.previewFrame({ filePath: sourceFile, timestampSeconds: startSeconds }),
-        window.desktop.localCut.previewFrame({ filePath: sourceFile, timestampSeconds: endSeconds })
+        window.desktop.localCut.previewFrame({ filePath: sourceFile, timestampSeconds: startSeconds, aspectRatio }),
+        window.desktop.localCut.previewFrame({ filePath: sourceFile, timestampSeconds: endSeconds, aspectRatio })
       ]);
       setPreviewFrames({ start: startFrame.dataUrl, end: endFrame.dataUrl });
     } catch (previewErr) {
@@ -157,7 +169,8 @@ export function StepPreviewCutPage(): React.JSX.Element {
         outputDirectory,
         startTime,
         endTime,
-        accurateCut
+        accurateCut,
+        aspectRatio
       });
       setStatus(next);
     } catch (startError) {
@@ -259,17 +272,45 @@ export function StepPreviewCutPage(): React.JSX.Element {
             </label>
           </div>
 
+          <div className="local-cut-aspect-row" role="radiogroup" aria-label="Tỉ lệ khung hình">
+            <span className="local-cut-aspect-row-label">Tỉ lệ khung hình</span>
+            <div className="local-cut-aspect-buttons">
+              {ASPECT_RATIO_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={aspectRatio === option.value}
+                  className={`btn btn-small${aspectRatio === option.value ? ' btn-primary' : ''}`}
+                  disabled={running}
+                  onClick={() => setAspectRatio(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            {aspectRatio !== 'original' && (
+              <small className="local-cut-aspect-note">
+                Nền mờ phóng to từ chính video, video gốc giữ nguyên tỉ lệ ở giữa (kiểu CapCut) — không cắt mất khung hình, không viền đen.
+              </small>
+            )}
+          </div>
+
           <div className="local-cut-options">
             <label>
               <input
                 type="checkbox"
-                checked={accurateCut}
-                disabled={running}
+                checked={aspectRatio !== 'original' || accurateCut}
+                disabled={running || aspectRatio !== 'original'}
                 onChange={(event) => setAccurateCut(event.target.checked)}
               />
               <span>
                 <b>Cắt chính xác từng giây</b>
-                <small>Mã hóa lại (chậm hơn). Bỏ tích: sao chép nhanh, giữ nguyên chất lượng, có thể lệch vài giây quanh điểm cắt gần nhất.</small>
+                <small>
+                  {aspectRatio !== 'original'
+                    ? 'Đổi tỉ lệ khung hình luôn mã hóa lại — không thể sao chép nhanh.'
+                    : 'Mã hóa lại (chậm hơn). Bỏ tích: sao chép nhanh, giữ nguyên chất lượng, có thể lệch vài giây quanh điểm cắt gần nhất.'}
+                </small>
               </span>
             </label>
             <button type="button" className="btn btn-small" disabled={!rangeValid || previewLoading} onClick={() => void loadPreviewFrames()}>

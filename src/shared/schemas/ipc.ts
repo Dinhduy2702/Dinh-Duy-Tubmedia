@@ -292,13 +292,17 @@ export const previewFrameRequestSchema = z
   })
   .strict();
 
-// Giai đoạn 6 mục 2 (2026-09-23): "Cắt tệp có sẵn" — cắt một đoạn từ video đã có sẵn trên máy, không
+// Giai đoạn 6 mục 2/3 (2026-09-23/24): "Cắt tệp có sẵn" — cắt một đoạn từ video đã có sẵn trên máy, không
 // qua tải. filePath không dùng pathSchema (giới hạn 32KB, cho đường dẫn thư mục) vì đây là đường dẫn
 // TỆP — vẫn giới hạn độ dài hợp lý để chặn giá trị bất thường.
+// Mục 3: thêm aspectRatio (đổi tỉ lệ khung hình kiểu CapCut) — enum khớp LOCAL_CUT_ASPECT_RATIOS ở
+// src/shared/local-cut.ts (không import chéo, giữ đúng phong cách tự chứa hiện có của tệp này).
+const localCutAspectRatioSchema = z.enum(['original', '9:16', '1:1', '16:9']).default('original');
 export const localCutPreviewFrameRequestSchema = z
   .object({
     filePath: z.string().trim().min(1).max(4096),
-    timestampSeconds: z.number().min(0).max(86_400)
+    timestampSeconds: z.number().min(0).max(86_400),
+    aspectRatio: localCutAspectRatioSchema.optional()
   })
   .strict();
 export const localCutRequestSchema = z
@@ -307,7 +311,8 @@ export const localCutRequestSchema = z
     outputDirectory: pathSchema,
     startTime: z.string().trim().min(1).max(32),
     endTime: z.string().trim().min(1).max(32),
-    accurateCut: z.boolean().default(false)
+    accurateCut: z.boolean().default(false),
+    aspectRatio: localCutAspectRatioSchema.optional()
   })
   .strict();
 export const localCutTaskSchema = z

@@ -40,6 +40,29 @@
   font-size: 0.8rem;
 }
 
+.local-cut-aspect-row {
+  margin-top: 0.8rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.local-cut-aspect-row-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.local-cut-aspect-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.local-cut-aspect-note {
+  color: var(--muted);
+  display: block;
+}
+
 .local-cut-options {
   display: flex;
   align-items: center;

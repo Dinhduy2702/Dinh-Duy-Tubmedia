@@ -242,3 +242,51 @@ describe('Giai đoạn 6 mục 2 — LocalCutService (cắt tệp có sẵn trê
     ).rejects.toThrow(/không tìm thấy tệp nguồn/i);
   });
 });
+
+describe('Giai doan 6 muc 3 (2026-09-24) - LocalCutService: doi ti le khung hinh (nen mo kieu CapCut)', () => {
+  it('aspectRatio khac original: ten tep co hau to ti le, ffmpeg dung -filter_complex, duoi .mp4 du accurateCut=false', async () => {
+    const fixture = await createFixture();
+    const started = await fixture.service.start({
+      filePath: fixture.sourceFile,
+      outputDirectory: fixture.outputDirectory,
+      startTime: '10',
+      endTime: '20',
+      accurateCut: false,
+      aspectRatio: '9:16'
+    });
+
+    const finished = await waitForTerminal(fixture.service, started.taskId);
+    expect(finished.phase).toBe('completed');
+    expect(finished.aspectRatio).toBe('9:16');
+    expect(finished.outputPath).toContain('[9x16]');
+    expect(finished.outputPath).toMatch(/\.mp4$/);
+
+    const ffmpegCall = fixture.calls.find((call) => call.tool === 'ffmpeg');
+    expect(ffmpegCall?.args).toContain('-filter_complex');
+    expect(ffmpegCall?.args).not.toContain('copy');
+  });
+
+  it('aspectRatio original: ten tep KHONG co hau to ti le (tuong thich nguoc, giu dung hanh vi muc 2)', async () => {
+    const fixture = await createFixture();
+    const started = await fixture.service.start({
+      filePath: fixture.sourceFile,
+      outputDirectory: fixture.outputDirectory,
+      startTime: '10',
+      endTime: '20',
+      accurateCut: false
+    });
+    const finished = await waitForTerminal(fixture.service, started.taskId);
+    expect(finished.phase).toBe('completed');
+    expect(finished.aspectRatio).toBe('original');
+    expect(finished.outputPath).not.toContain('[9x16]');
+    expect(finished.outputPath).not.toMatch(/\[\d+x\d+\]/);
+  });
+
+  it('previewFrame: truyen aspectRatio xuong dung lenh ffmpeg trich khung hinh', async () => {
+    const fixture = await createFixture();
+    await fixture.service.previewFrame({ filePath: fixture.sourceFile, timestampSeconds: 3, aspectRatio: '1:1' });
+    const frameCall = fixture.calls.find((call) => call.tool === 'ffmpeg');
+    expect(frameCall?.args).toContain('-filter_complex');
+    expect(frameCall?.args?.some((arg) => arg.includes('scale=1080:1080'))).toBe(true);
+  });
+});
