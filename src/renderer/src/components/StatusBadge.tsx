@@ -14,7 +14,10 @@ function statusIcon(status: string, tone: NoticeTone): React.JSX.Element {
   if (tone === 'success') return <CheckCircle2 size={SIZE} aria-hidden="true" />;
   if (tone === 'error') return <XCircle size={SIZE} aria-hidden="true" />;
   if (tone === 'warning') return <TriangleAlert size={SIZE} aria-hidden="true" />;
-  if (tone === 'info') return <Loader size={SIZE} aria-hidden="true" />;
+  // Sửa lỗi (2026-09-23): icon "đang chạy" (downloading/processing/verifying/...) chưa từng có lớp
+  // xoay từ khi StatusBadge được tạo — không phải hồi quy của hệ chuyển động Giai đoạn 2a, mà là một
+  // thiếu sót có sẵn từ đầu (đã đối chiếu lịch sử git: file chỉ có đúng một lượt commit).
+  if (tone === 'info') return <Loader className="animate-spin" size={SIZE} aria-hidden="true" />;
   return <CircleMinus size={SIZE} aria-hidden="true" />;
 }
 

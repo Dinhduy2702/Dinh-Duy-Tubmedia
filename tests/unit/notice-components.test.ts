@@ -41,6 +41,15 @@ describe('thành phần thông báo luôn có biểu tượng + chữ, không ch
     expect(badge).toContain('<span>{label}</span>');
   });
 
+  it('Sửa lỗi (2026-09-23) — icon "đang chạy" (downloading/processing/verifying/...) phải xoay', () => {
+    const badge = source('src/renderer/src/components/StatusBadge.tsx');
+    // Icon Loader (mức 'info' — downloading/processing/verifying/normalizing/merging/retrying/...)
+    // trước đây không hề có lớp xoay từ khi file được tạo — trông như đứng yên dù đang thật sự chạy.
+    expect(badge).toMatch(/tone === 'info'\)\s*return\s*<Loader\s+className="animate-spin"/);
+    // Các trạng thái CHỜ (pending/ready/idle/draft) dùng Clock3 — không nên xoay vì không phải "đang chạy".
+    expect(badge).not.toMatch(/<Clock3[^>]*animate-spin/);
+  });
+
   it('thông báo nổi có nhãn mức, biểu tượng, và chỉ lỗi mới không tự tắt', () => {
     const toast = source('src/renderer/src/components/AttentionCenter.tsx');
     expect(toast).toContain('NOTICE_TONE_LABEL[tone]');
