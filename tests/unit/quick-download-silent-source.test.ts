@@ -65,7 +65,10 @@ async function runToEnd(
     quality: 'best',
     mediaMode,
     mode: 'full',
-    accurateCut: false
+    accurateCut: false,
+    // Bài kiểm này chỉ về xác minh luồng âm thanh/hình — tắt credit metadata (Giai đoạn 6 mục 1) để
+    // không thêm một lượt gọi ffmpeg không liên quan vào stub processes.run dùng chung ở trên.
+    embedCredit: false
   });
   await vi.waitFor(
     () => {

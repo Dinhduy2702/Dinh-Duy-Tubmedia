@@ -5,6 +5,7 @@ import { access, mkdir, readFile, readdir, rename, rm, stat, statfs, writeFile }
 import { constants as fsConstants, existsSync } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
 import {
+  formatQuickDownloadTime,
   validateQuickDownloadRequest,
   type QuickDownloadErrorCode,
   type QuickDownloadStatus,
@@ -38,6 +39,8 @@ interface ActiveQuickTask {
   cookiesAttached: boolean;
   compactFilename: boolean;
   genericFallbackTried: boolean;
+  /** Giai đoạn 6 mục 1: tên kênh/nguồn lấy từ yt-dlp (--print before_dl) để ghi credit metadata. */
+  uploaderName: string;
   recentLines: string[];
   lastDiskCheckAt: number;
   diskCheckInFlight: boolean;
@@ -377,6 +380,7 @@ export class QuickDownloadService {
       cookiesAttached: forceCookies && hasConfiguredCookies(this.cookieSettings()),
       compactFilename: false,
       genericFallbackTried: false,
+      uploaderName: '',
       recentLines: [],
       lastDiskCheckAt: 0,
       diskCheckInFlight: false,
@@ -670,6 +674,7 @@ export class QuickDownloadService {
     active.status.phase = 'preparing';
     active.status.progress = 0;
     active.status.title = '';
+    active.uploaderName = '';
     active.status.speed = '';
     active.status.eta = '';
     active.status.downloadedBytes = 0;
@@ -698,6 +703,12 @@ export class QuickDownloadService {
       active.status.phase = 'downloading';
       active.status.message = `Đang tải dữ liệu ${quickMediaLabel(active.request.mediaMode)}.`;
       this.publish(active);
+      return;
+    }
+
+    if (line.startsWith('TUBMEDIA_UPLOADER|')) {
+      const cleanUploader = cleanExternalText(line.slice('TUBMEDIA_UPLOADER|'.length));
+      if (cleanUploader && cleanUploader !== 'NA') active.uploaderName = cleanUploader;
       return;
     }
 
@@ -892,6 +903,10 @@ export class QuickDownloadService {
       throw new Error(`File đầu ra không đạt kiểm tra: ${checked.reasons.join('; ')}`);
     }
 
+    if (active.request.embedCredit) {
+      await this.embedCreditMetadata(active, active.status.outputPath);
+    }
+
     active.status.phase = 'completed';
     active.status.progress = 100;
     active.status.message =
@@ -955,6 +970,78 @@ export class QuickDownloadService {
       const detail = error instanceof Error ? error.message : String(error);
       active.status.warnings.push('Không loại được âm thanh khỏi video; tệp được giữ nguyên gồm cả âm thanh.');
       this.logger.warn('quick-download', 'QUICK_DOWNLOAD_STRIP_AUDIO_FAILED', detail, {
+        jobId: active.status.taskId
+      });
+    }
+  }
+
+  /**
+   * Giai đoạn 6 mục 1 (2026-09-23): ghi nguồn gốc vào METADATA của chính tệp — không chèn chữ lên
+   * hình, không mã hóa lại (chỉ remux -c copy để giữ tốc độ nhanh, đúng lựa chọn đã duyệt). Ghi vào
+   * cả `artist` (tên kênh, nếu có — bỏ qua nếu không lấy được, không để trống/báo lỗi) lẫn `comment`
+   * (khối đầy đủ: nguồn, URL, ngày tải, đoạn đã cắt nếu có) để công cụ nào cũng đọc được ít nhất một
+   * trong hai. Lỗi remux chỉ là cảnh báo — giữ nguyên tệp gốc, không làm hỏng lượt tải.
+   */
+  private async embedCreditMetadata(active: ActiveQuickTask, outputPath: string): Promise<void> {
+    const ffmpeg = this.tools.get('ffmpeg');
+    if (!ffmpeg.executablePath) return;
+
+    const uploader = active.uploaderName.trim();
+    const downloadDate = new Date().toISOString().slice(0, 10);
+    const commentLines = [
+      ...(uploader ? [`Nguồn: ${uploader}`] : []),
+      `URL: ${active.request.url}`,
+      `Ngày tải: ${downloadDate}`,
+      ...(active.status.mode === 'range' &&
+      active.status.requestedStartSeconds !== null &&
+      active.status.requestedEndSeconds !== null
+        ? [
+            `Đoạn đã cắt: ${formatQuickDownloadTime(active.status.requestedStartSeconds)}–${formatQuickDownloadTime(active.status.requestedEndSeconds)}`
+          ]
+        : [])
+    ];
+    const comment = commentLines.join('\n');
+
+    active.status.message = 'Đang ghi thông tin nguồn gốc vào tệp.';
+    this.publish(active);
+
+    const extension = extname(outputPath);
+    const tempOutput = join(dirname(outputPath), `${basename(outputPath, extension)}.credit${extension}`);
+
+    try {
+      const result = await this.processes.run({
+        jobId: active.status.taskId,
+        signal: active.controller.signal,
+        priority: 'below_normal',
+        tool: 'ffmpeg',
+        executablePath: ffmpeg.executablePath,
+        args: [
+          '-y',
+          '-v',
+          'error',
+          '-i',
+          outputPath,
+          '-map',
+          '0',
+          '-c',
+          'copy',
+          ...(uploader ? ['-metadata', `artist=${uploader}`] : []),
+          '-metadata',
+          `comment=${comment}`,
+          tempOutput
+        ],
+        timeoutMs: 30 * 60 * 1000
+      });
+      if (result.code !== 0 || !existsSync(tempOutput)) {
+        throw new Error(result.stderrTail.trim() || `FFmpeg kết thúc với mã ${result.code}.`);
+      }
+      await rename(tempOutput, outputPath);
+    } catch (error) {
+      await rm(tempOutput, { force: true }).catch(() => undefined);
+      if (active.controller.signal.aborted) throw error;
+      const detail = error instanceof Error ? error.message : String(error);
+      active.status.warnings.push('Không ghi được thông tin nguồn gốc vào tệp; tệp được giữ nguyên.');
+      this.logger.warn('quick-download', 'QUICK_DOWNLOAD_CREDIT_METADATA_FAILED', detail, {
         jobId: active.status.taskId
       });
     }

@@ -229,4 +229,63 @@ describe('quick download', () => {
     expect(args).toContain('firefox:default-release');
     expect(args).not.toContain('--cookies');
   });
+
+  describe('Giai đoạn 6 mục 1 — ghi credit vào metadata (embedCredit)', () => {
+    it('defaults embedCredit to true when omitted from the request', () => {
+      const request = validateQuickDownloadRequest({
+        url: 'https://example.com/video',
+        outputDirectory: 'C:\\Downloads',
+        quality: '720p',
+        mode: 'full',
+        accurateCut: false
+      });
+
+      expect(request.embedCredit).toBe(true);
+    });
+
+    it('turns embedCredit off only when explicitly set to false', () => {
+      const request = validateQuickDownloadRequest({
+        url: 'https://example.com/video',
+        outputDirectory: 'C:\\Downloads',
+        quality: '720p',
+        mode: 'full',
+        accurateCut: false,
+        embedCredit: false
+      });
+
+      expect(request.embedCredit).toBe(false);
+    });
+
+    it('asks yt-dlp for the uploader name only when embedCredit is on', () => {
+      const requestOn = validateQuickDownloadRequest({
+        url: 'https://example.com/video',
+        outputDirectory: 'C:\\Downloads',
+        quality: '720p',
+        mode: 'full',
+        accurateCut: false,
+        embedCredit: true
+      });
+      const argsOn = buildQuickDownloadArguments(requestOn, {
+        ffmpegDirectory: 'C:\\tool',
+        tempDirectory: 'C:\\Temp\\quick',
+        runToken: 'credit-on'
+      });
+      expect(argsOn).toContain('before_dl:TUBMEDIA_UPLOADER|%(uploader,channel,uploader_id|)s');
+
+      const requestOff = validateQuickDownloadRequest({
+        url: 'https://example.com/video',
+        outputDirectory: 'C:\\Downloads',
+        quality: '720p',
+        mode: 'full',
+        accurateCut: false,
+        embedCredit: false
+      });
+      const argsOff = buildQuickDownloadArguments(requestOff, {
+        ffmpegDirectory: 'C:\\tool',
+        tempDirectory: 'C:\\Temp\\quick',
+        runToken: 'credit-off'
+      });
+      expect(argsOff.join('|')).not.toContain('TUBMEDIA_UPLOADER');
+    });
+  });
 });

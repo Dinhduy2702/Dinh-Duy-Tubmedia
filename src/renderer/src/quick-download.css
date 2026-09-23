@@ -403,6 +403,34 @@
 .quick-download-mode-row {
   grid-template-columns: minmax(0, 1.5fr) minmax(170px, 0.55fr) minmax(150px, 0.45fr);
 }
+.quick-download-credit-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: 12px;
+  background: var(--panel);
+}
+.quick-download-credit-toggle input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+.quick-download-credit-toggle span {
+  display: grid;
+  gap: 0.1rem;
+}
+.quick-download-credit-toggle b {
+  font-size: 0.68rem;
+}
+.quick-download-credit-toggle small {
+  color: var(--muted);
+  font-size: 0.58rem;
+  line-height: 1.4;
+}
+
 .quick-download-sidecars {
   display: grid;
   grid-template-columns: 1fr minmax(130px, 0.65fr) 1fr 1fr;

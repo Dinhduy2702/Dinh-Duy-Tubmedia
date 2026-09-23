@@ -103,6 +103,7 @@ export function QuickDownloadPanel(): ReactElement {
   const [subtitleLanguage, setSubtitleLanguage] = useState('vi,en');
   const [downloadThumbnail, setDownloadThumbnail] = useState(false);
   const [writeMetadata, setWriteMetadata] = useState(false);
+  const [embedCredit, setEmbedCredit] = useState(true);
   const [useTimeline, setUseTimeline] = useState(() => {
     try {
       return window.localStorage.getItem('tubmedia.quick-download.use-timeline') === 'true';
@@ -317,7 +318,8 @@ export function QuickDownloadPanel(): ReactElement {
         downloadSubtitles,
         subtitleLanguage,
         downloadThumbnail,
-        writeMetadata
+        writeMetadata,
+        embedCredit
       });
       setStatus(next);
     } catch (startError) {
@@ -523,6 +525,22 @@ export function QuickDownloadPanel(): ReactElement {
                   Chọn thư mục
                 </button>
               </div>
+            </label>
+
+            <label className="quick-download-credit-toggle">
+              <input
+                type="checkbox"
+                checked={embedCredit}
+                disabled={running}
+                onChange={(event) => setEmbedCredit(event.target.checked)}
+              />
+              <span>
+                <b>Ghi credit vào tệp</b>
+                <small>
+                  Ghi nguồn gốc (kênh, URL, ngày tải, đoạn đã cắt nếu có) vào metadata ẩn của tệp để tra
+                  lại sau này — không chèn chữ lên hình, không làm chậm tốc độ tải.
+                </small>
+              </span>
             </label>
 
             <InfoDisclosure title="Nâng cao" summary="Loại nội dung, chất lượng, phụ đề, thumbnail, metadata" icon={Settings2}>

@@ -114,6 +114,12 @@ export function buildQuickDownloadArguments(
     'after_move:TUBMEDIA_FILE|%(filepath)s'
   ];
 
+  // Giai đoạn 6 mục 1: lấy tên kênh/nguồn để ghi credit vào metadata sau khi tải xong (chuỗi rỗng nếu
+  // nguồn không có cả 3 trường — không báo lỗi, chỉ bỏ qua dòng "Nguồn" khi ghi metadata).
+  if (request.embedCredit) {
+    args.push('--print', 'before_dl:TUBMEDIA_UPLOADER|%(uploader,channel,uploader_id|)s');
+  }
+
   if (request.mediaMode === 'video-audio') {
     args.push('--merge-output-format', 'mp4');
   } else if (request.mediaMode === 'audio-only') {

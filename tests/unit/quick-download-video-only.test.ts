@@ -71,7 +71,10 @@ async function run(fixture: Awaited<ReturnType<typeof createFixture>>, mediaMode
     quality: 'best',
     mediaMode,
     mode: 'full',
-    accurateCut: false
+    accurateCut: false,
+    // Bài kiểm này chỉ về việc cắt bỏ âm thanh — tắt credit metadata (Giai đoạn 6 mục 1) để không
+    // thêm một lượt gọi ffmpeg không liên quan vào stub processes.run dùng chung ở trên.
+    embedCredit: false
   });
   await vi.waitFor(
     () => expect(['completed', 'failed']).toContain(fixture.service.status(started.taskId)?.phase),

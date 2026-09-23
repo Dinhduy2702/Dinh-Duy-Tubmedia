@@ -28,6 +28,11 @@ export interface QuickDownloadRequest {
   subtitleLanguage?: string;
   downloadThumbnail?: boolean;
   writeMetadata?: boolean;
+  /**
+   * Giai đoạn 6 mục 1 (2026-09-23): ghi nguồn gốc vào METADATA của chính tệp video (không chèn chữ
+   * lên hình, không mã hóa lại — chỉ remux -c copy để giữ tốc độ nhanh). Mặc định BẬT theo đặc tả.
+   */
+  embedCredit?: boolean;
 }
 
 export type QuickDownloadPhase =
@@ -73,13 +78,14 @@ export interface QuickDownloadStatus {
 
 export type ValidatedQuickDownloadRequest = Omit<
   QuickDownloadRequest,
-  'mediaMode' | 'downloadSubtitles' | 'subtitleLanguage' | 'downloadThumbnail' | 'writeMetadata'
+  'mediaMode' | 'downloadSubtitles' | 'subtitleLanguage' | 'downloadThumbnail' | 'writeMetadata' | 'embedCredit'
 > & {
   mediaMode: QuickDownloadMediaMode;
   downloadSubtitles: boolean;
   subtitleLanguage: string;
   downloadThumbnail: boolean;
   writeMetadata: boolean;
+  embedCredit: boolean;
   startSeconds: number | null;
   endSeconds: number | null;
 };
@@ -198,6 +204,8 @@ export function validateQuickDownloadRequest(value: unknown): ValidatedQuickDown
       : 'vi,en';
   const downloadThumbnail = candidate.downloadThumbnail === true;
   const writeMetadata = candidate.writeMetadata === true;
+  // Mặc định BẬT theo đặc tả — chỉ tắt khi người dùng bỏ tích rõ ràng (giá trị false tường minh).
+  const embedCredit = candidate.embedCredit !== false;
   let startSeconds: number | null = null;
   let endSeconds: number | null = null;
 
@@ -227,6 +235,7 @@ export function validateQuickDownloadRequest(value: unknown): ValidatedQuickDown
     subtitleLanguage,
     downloadThumbnail,
     writeMetadata,
+    embedCredit,
     startSeconds,
     endSeconds
   };

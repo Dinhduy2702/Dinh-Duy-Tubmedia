@@ -274,7 +274,8 @@ export const quickDownloadRequestSchema = z
     downloadSubtitles: z.boolean().default(false),
     subtitleLanguage: z.string().trim().max(64).default('vi,en'),
     downloadThumbnail: z.boolean().default(false),
-    writeMetadata: z.boolean().default(false)
+    writeMetadata: z.boolean().default(false),
+    embedCredit: z.boolean().default(true)
   })
   .strict();
 export const quickDownloadTaskSchema = z
