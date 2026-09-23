@@ -10,8 +10,10 @@ const required = [
   'src/shared/system-cleanup.ts',
   'src/main/system/system-cleanup-service.ts',
   'src/main/system/cleanup-scanner.ts',
+  'src/main/system/cleanup-quarantine.ts',
   'src/renderer/src/components/SystemCleanupPanel.tsx',
-  'tests/unit/system-cleanup-policy.test.ts'
+  'tests/unit/system-cleanup-policy.test.ts',
+  'tests/unit/cleanup-quarantine.test.ts'
 ];
 
 for (const relative of required) {
@@ -129,6 +131,7 @@ const cleanupPage = read('src/renderer/src/pages/SystemCleanupPage.tsx');
 const cleanupPanel = read('src/renderer/src/components/SystemCleanupPanel.tsx');
 const scanner = read('src/main/system/cleanup-scanner.ts');
 const service = read('src/main/system/system-cleanup-service.ts');
+const quarantine = read('src/main/system/cleanup-quarantine.ts');
 const cleanupSource = read('src/shared/system-cleanup.ts');
 const packageJson = JSON.parse(read('package.json'));
 const categories = readArrayLiteral(cleanupSource, 'system-cleanup.ts', 'SYSTEM_CLEANUP_CATEGORIES');
@@ -158,19 +161,27 @@ const checks = [
       !/scope\s*:\s*z\.enum/.test(schemas)
   ],
   [
-    'main registers cleanup handlers in registerIpc, including openStorageSettings via shell.openExternal',
+    'main registers cleanup handlers in registerIpc, including openStorageSettings via shell.openExternal and quarantine list/restore',
     /new\s+SystemCleanupService\s*\(/.test(registerIpc) &&
       registerIpc.includes('IPC.systemCleanup.start') &&
       /ctx\.queue\.activeCount\s*\(\s*\)/.test(registerIpc) &&
       registerIpc.includes('IPC.systemCleanup.openStorageSettings') &&
-      registerIpc.includes("shell.openExternal('ms-settings:storagesense')")
+      registerIpc.includes("shell.openExternal('ms-settings:storagesense')") &&
+      registerIpc.includes('new QuarantineStore(') &&
+      registerIpc.includes('IPC.systemCleanup.quarantineList') &&
+      registerIpc.includes('IPC.systemCleanup.quarantineRestore') &&
+      registerIpc.includes('purgeExpired')
   ],
   [
-    'preload exposes cleanup (including openStorageSettings) only inside window.desktop',
+    'preload exposes cleanup (openStorageSettings, quarantineList, quarantineRestore) only inside window.desktop',
     /systemCleanup\s*:/.test(preload) &&
       /systemCleanup\s*:/.test(apiTypes) &&
       preload.includes('openStorageSettings') &&
-      apiTypes.includes('openStorageSettings')
+      apiTypes.includes('openStorageSettings') &&
+      preload.includes('quarantineList') &&
+      preload.includes('quarantineRestore') &&
+      apiTypes.includes('quarantineList') &&
+      apiTypes.includes('quarantineRestore')
   ],
   ['cleanup page renders the cleanup panel', /<SystemCleanupPanel\s*\/>/.test(cleanupPage)],
   [
@@ -226,14 +237,45 @@ const checks = [
       scanner.includes('mtimeMs')
   ],
   [
-    'GĐ4a rejects the delete mode with a clear message — only estimate/scan is implemented',
-    service.includes("request.mode === 'clean'") && service.includes('Giai đoạn 4b') &&
-      cleanupPanel.includes('disabled') &&
-      cleanupPanel.includes('chưa mở ở bản này')
-  ],
-  [
     'scanner supports cooperative cancellation mid-scan (not just between categories)',
     scanner.includes('CleanupScanCancelledError') && scanner.includes('shouldCancel')
+  ],
+  [
+    'GĐ4b: mode "clean" re-scans fresh at delete time and quarantines through QuarantineStore (no direct rm/unlink)',
+    (() => {
+      const serviceCode = stripComments(service);
+      return (
+        serviceCode.includes('runClean') &&
+        serviceCode.includes('this.quarantine.quarantineFile') &&
+        !/\brm\(|unlink\(/.test(serviceCode)
+      );
+    })()
+  ],
+  [
+    'QuarantineStore re-verifies safety (assertSafeCleanupPath + lstat) before ever touching a real file, never overwrites on restore',
+    (() => {
+      const quarantineCode = stripComments(quarantine);
+      return (
+        quarantineCode.includes('assertSafeCleanupPath') &&
+        quarantineCode.includes('isSymbolicLink') &&
+        quarantineCode.includes('resolveNonCollidingPath') &&
+        quarantineCode.includes('copyFileVerified') &&
+        quarantineCode.includes('QUARANTINE_RETENTION_DAYS')
+      );
+    })()
+  ],
+  [
+    'delete UI goes through a real confirm dialog (not window.confirm) with a per-category breakdown, gated on a fresh matching scan',
+    cleanupPanel.includes('<ConfirmDialog') &&
+      cleanupPanel.includes('disabled={!canClean}') &&
+      cleanupPanel.includes('lastScannedKey === currentScanKey') &&
+      !/window\.(?:confirm|prompt|alert)\(/.test(cleanupPanel)
+  ],
+  [
+    'UI offers a restore ("hoàn tác") flow for quarantined items — not just a one-way delete',
+    cleanupPanel.includes('quarantineList') &&
+      cleanupPanel.includes('quarantineRestore') &&
+      cleanupPanel.includes('Hoàn tác')
   ]
 ];
 

@@ -37,6 +37,7 @@ import {
   workbenchSlotSchema,
   systemCleanupRequestSchema,
   systemCleanupRunSchema,
+  systemCleanupQuarantineRestoreSchema,
   videoLinkFilterRequestSchema,
   quickDownloadRequestSchema,
   quickDownloadTaskSchema,
@@ -52,29 +53,74 @@ import { openPathBlockReason } from '../security/open-path-policy.js';
 import { saveTextTypeFor, withRequiredExtension } from '../files/save-text-file-policy.js';
 
 import { SystemCleanupService } from '../system/system-cleanup-service.js';
+import { QuarantineStore } from '../system/cleanup-quarantine.js';
+import { resolveCleanupEnvironmentPaths, type CleanupEnvironmentPaths } from '../system/cleanup-scanner.js';
 import { VideoLinkFilterService } from '../media/video-link-filter-service.js';
 type MaybePromise<T> = T | Promise<T>;
 
+/**
+ * CHỈ dùng để kiểm thử end-to-end thật (script/e2e riêng, không phải Playwright test:e2e chính) mà
+ * KHÔNG đụng %TEMP%/%LOCALAPPDATA%/%APPDATA% thật của máy đang chạy — trỏ môi trường quét sang một
+ * sandbox giả hoàn toàn. Biến này không tồn tại và không có tác dụng gì trong bản phát hành thật.
+ */
+function resolveCleanupEnvironmentOverride(): (() => CleanupEnvironmentPaths) | null {
+  const raw = process.env.TUBMEDIA_E2E_CLEANUP_ENV_JSON;
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<CleanupEnvironmentPaths>;
+    if (
+      typeof parsed.tempDir !== 'string' ||
+      typeof parsed.localAppData !== 'string' ||
+      typeof parsed.roamingAppData !== 'string'
+    ) {
+      return null;
+    }
+    const fixed: CleanupEnvironmentPaths = {
+      tempDir: parsed.tempDir,
+      localAppData: parsed.localAppData,
+      roamingAppData: parsed.roamingAppData
+    };
+    return () => fixed;
+  } catch {
+    return null;
+  }
+}
+
 export function registerIpc(ctx: AppContext): void {
   // TUBMEDIA_FEATURE_SERVICES
-  const systemCleanup = new SystemCleanupService(() => {
-    const settings = ctx.settings.get();
-    const projects = ctx.projects.list(true);
-    const quick = ctx.quickDownload.cleanupRoots();
-    const trackedTempFiles = projects.flatMap((project) =>
-      ctx.itemRepo
-        .list(project.id)
-        .map((item) => item.clipFile)
-        .filter((path): path is string => typeof path === 'string' && path.length > 0)
+  const cleanupQuarantine = new QuarantineStore(join(ctx.userData, 'cleanup-quarantine'));
+  void cleanupQuarantine.purgeExpired().catch((error: unknown) => {
+    ctx.logger.warn(
+      'cleanup-quarantine',
+      'PURGE_EXPIRED_FAILED',
+      'Không dọn được khu cách ly quá hạn lúc khởi động.',
+      { metadata: { error: error instanceof Error ? error.message : String(error) } }
     );
-    return {
-      sourceFolders: [settings.defaultSourceFolder, ...projects.map((project) => project.sourceFolder)],
-      tempFolders: [settings.defaultTempFolder, ...projects.map((project) => project.tempFolder)],
-      trackedTempFiles,
-      quickOutputFolders: quick.outputDirectories,
-      quickTempRoots: [quick.tempRoot]
-    };
   });
+
+  const systemCleanup = new SystemCleanupService(
+    () => {
+      const settings = ctx.settings.get();
+      const projects = ctx.projects.list(true);
+      const quick = ctx.quickDownload.cleanupRoots();
+      const trackedTempFiles = projects.flatMap((project) =>
+        ctx.itemRepo
+          .list(project.id)
+          .map((item) => item.clipFile)
+          .filter((path): path is string => typeof path === 'string' && path.length > 0)
+      );
+      return {
+        sourceFolders: [settings.defaultSourceFolder, ...projects.map((project) => project.sourceFolder)],
+        tempFolders: [settings.defaultTempFolder, ...projects.map((project) => project.tempFolder)],
+        trackedTempFiles,
+        quickOutputFolders: quick.outputDirectories,
+        quickTempRoots: [quick.tempRoot]
+      };
+    },
+    resolveCleanupEnvironmentOverride() ?? resolveCleanupEnvironmentPaths,
+    cleanupQuarantine
+  );
   const videoLinkFilter = new VideoLinkFilterService(ctx.tools, ctx.logger);
 
   const handle = <Input, Output>(
@@ -418,6 +464,11 @@ export function registerIpc(ctx: AppContext): void {
   noArgs(IPC.systemCleanup.openStorageSettings, async () => {
     await shell.openExternal('ms-settings:storagesense');
   });
+  // GĐ4b: danh sách/hoàn tác khu cách ly — xem src/main/system/cleanup-quarantine.ts.
+  noArgs(IPC.systemCleanup.quarantineList, () => cleanupQuarantine.listActive());
+  handle(IPC.systemCleanup.quarantineRestore, systemCleanupQuarantineRestoreSchema, ({ ids }) =>
+    cleanupQuarantine.restore(ids)
+  );
 
   // TUBMEDIA_VIDEO_LINK_FILTER_HANDLERS
   noArgs(IPC.videoFilter.chooseLinksFile, async () => {

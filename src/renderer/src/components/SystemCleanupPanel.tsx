@@ -1,11 +1,14 @@
-import { AlertTriangle, CheckCircle2, HardDrive, ShieldCheck, Sparkles } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, HardDrive, RotateCcw, ShieldCheck, Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { safeUiText } from '../utils/ui-error';
 import { showNotice } from '../utils/notify';
 import { progressFillStyle } from '../utils/progress-style';
+import { ConfirmDialog } from './ConfirmDialog';
 import {
+  QUARANTINE_RETENTION_DAYS,
   SYSTEM_CLEANUP_ADMIN_INFO_ITEMS,
   SYSTEM_CLEANUP_CATEGORIES,
+  type QuarantineEntry,
   type SystemCleanupCategoryId,
   type SystemCleanupFindingClassification,
   type SystemCleanupStatus
@@ -123,26 +126,27 @@ function scanKey(categories: readonly SystemCleanupCategoryId[]): string {
 
 function cleanupStatusMessage(status: SystemCleanupStatus): string {
   const category = SYSTEM_CLEANUP_CATEGORIES.find((item) => status.message.includes(item.id));
+  const verb = status.mode === 'clean' ? 'dọn' : 'quét';
 
   if (!terminalPhases.has(status.phase)) {
-    return category ? `Đang quét: ${category.label}` : 'Đang quét và tính dung lượng...';
+    return category ? `Đang ${verb}: ${category.label}` : `Đang ${verb}...`;
   }
 
   if (status.phase === 'completed') {
-    return 'Quét dung lượng hoàn tất';
+    return status.mode === 'clean' ? 'Dọn dẹp hoàn tất' : 'Quét dung lượng hoàn tất';
   }
 
   if (status.phase === 'cancelled') {
     return 'Đã dừng theo yêu cầu';
   }
 
-  return status.phase === 'failed' ? 'Quét không hoàn tất' : status.message;
+  return status.phase === 'failed' ? `${status.mode === 'clean' ? 'Dọn dẹp' : 'Quét'} không hoàn tất` : status.message;
 }
 
 const FINDING_META: Record<SystemCleanupFindingClassification, { title: string; description: string }> = {
   'safe-to-delete': {
     title: 'Có thể xóa bằng Tubmedia',
-    description: 'Chỉ các mục thuộc allowlist mới được đưa vào lệnh dọn (khi Giai đoạn 4b mở khóa xóa).'
+    description: 'Chỉ các mục thuộc allowlist mới được đưa vào lệnh dọn — chuyển vào khu cách ly, có thể hoàn tác.'
   },
   review: {
     title: 'Cần người dùng xem lại',
@@ -154,6 +158,10 @@ const FINDING_META: Record<SystemCleanupFindingClassification, { title: string; 
   }
 };
 
+function daysLeft(expiresAt: string): number {
+  return Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000)));
+}
+
 export function SystemCleanupPanel(): React.JSX.Element {
   const defaultSelection = useMemo(
     () => SYSTEM_CLEANUP_CATEGORIES.filter((item) => item.defaultSelected).map((item) => item.id),
@@ -164,6 +172,11 @@ export function SystemCleanupPanel(): React.JSX.Element {
   const [activeRequestKey, setActiveRequestKey] = useState<string | null>(null);
   const [lastScannedKey, setLastScannedKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
+  const [quarantineEntries, setQuarantineEntries] = useState<QuarantineEntry[]>([]);
+  const [quarantineSelected, setQuarantineSelected] = useState<Set<string>>(new Set());
+  const [quarantineBusy, setQuarantineBusy] = useState(false);
 
   const running = Boolean(status && !terminalPhases.has(status.phase));
   const currentScanKey = scanKey(selected);
@@ -176,6 +189,20 @@ export function SystemCleanupPanel(): React.JSX.Element {
   const overallNeed = needMeta(selectedEstimatedBytes);
   const scannedUpToDate =
     !running && lastScannedKey === currentScanKey && status?.mode === 'estimate' && status.phase === 'completed';
+  const canClean = scannedUpToDate && selectedEstimatedBytes > 0;
+
+  async function loadQuarantine(): Promise<void> {
+    try {
+      const entries = await window.desktop.systemCleanup.quarantineList();
+      setQuarantineEntries(entries);
+    } catch (loadError) {
+      setError(safeUiText(loadError, 'Không đọc được danh sách đã cách ly.'));
+    }
+  }
+
+  useEffect(() => {
+    void loadQuarantine();
+  }, []);
 
   useEffect(() => {
     if (!status || terminalPhases.has(status.phase)) {
@@ -190,7 +217,7 @@ export function SystemCleanupPanel(): React.JSX.Element {
           setStatus(next);
         }
       } catch (pollError) {
-        setError(safeUiText(pollError, 'Không đọc được tiến trình quét dọn dẹp.'));
+        setError(safeUiText(pollError, 'Không đọc được tiến trình.'));
       }
     }, 600);
 
@@ -200,6 +227,11 @@ export function SystemCleanupPanel(): React.JSX.Element {
   useEffect(() => {
     if (status?.phase === 'completed' && status.mode === 'estimate' && activeRequestKey) {
       setLastScannedKey(activeRequestKey);
+    }
+
+    if (status?.phase === 'completed' && status.mode === 'clean') {
+      setLastScannedKey(null);
+      void loadQuarantine();
     }
   }, [activeRequestKey, status?.mode, status?.phase]);
 
@@ -235,6 +267,21 @@ export function SystemCleanupPanel(): React.JSX.Element {
     }
   }
 
+  async function confirmClean(): Promise<void> {
+    setCleaning(true);
+    setError(null);
+
+    try {
+      const next = await window.desktop.systemCleanup.start({ mode: 'clean', categories: selected });
+      setStatus(next);
+      setConfirmOpen(false);
+    } catch (cleanError) {
+      setError(safeUiText(cleanError, 'Không thể bắt đầu dọn dẹp.'));
+    } finally {
+      setCleaning(false);
+    }
+  }
+
   async function cancel(): Promise<void> {
     if (!status) {
       return;
@@ -259,15 +306,64 @@ export function SystemCleanupPanel(): React.JSX.Element {
     }
   }
 
+  function toggleQuarantineSelected(id: string): void {
+    setQuarantineSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function restoreQuarantine(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+
+    setQuarantineBusy(true);
+    setError(null);
+
+    try {
+      const outcomes = await window.desktop.systemCleanup.quarantineRestore(ids);
+      const restored = outcomes.filter((item) => item.ok).length;
+      const failed = outcomes.length - restored;
+
+      if (restored > 0) {
+        showNotice(
+          'success',
+          `Đã hoàn tác ${restored} mục`,
+          failed > 0 ? `${failed} mục không hoàn tác được — xem chi tiết bên dưới.` : 'File đã trở lại đúng vị trí gốc.'
+        );
+      } else {
+        showNotice('warning', 'Không hoàn tác được mục nào', 'Xem chi tiết bên dưới để biết lý do.');
+      }
+
+      setQuarantineSelected(new Set());
+      await loadQuarantine();
+    } catch (restoreError) {
+      setError(safeUiText(restoreError, 'Không thể hoàn tác.'));
+    } finally {
+      setQuarantineBusy(false);
+    }
+  }
+
+  const confirmDetails = selected
+    .map((id) => {
+      const result = resultById.get(id);
+      if (!result || result.matchedItems === 0) return null;
+      const category = SYSTEM_CLEANUP_CATEGORIES.find((item) => item.id === id);
+      return `${category?.label ?? id}: ${result.matchedItems.toLocaleString('vi-VN')} tệp, ${formatBytes(result.estimatedBytes)}`;
+    })
+    .filter((line): line is string => line !== null);
+
   return (
     <section className="card system-cleanup-panel" data-testid="system-cleanup-panel">
       <div className="system-cleanup-heading">
         <div>
           <span className="system-cleanup-eyebrow">DỌN FILE RÁC CÓ KIỂM SOÁT</span>
-          <h2>Quét dung lượng, xem độ an toàn — chưa xóa</h2>
+          <h2>Quét dung lượng, xem độ an toàn rồi mới xóa</h2>
           <p>
-            Tubmedia phân loại từng vùng dữ liệu và ước tính dung lượng. Đây là Giai đoạn 4a: chỉ quét và
-            phân loại, xóa thật sẽ mở ở Giai đoạn 4b sau khi bạn xem kỹ kết quả này.
+            Tubmedia phân loại từng vùng dữ liệu, ước tính dung lượng và khóa nút xóa cho đến khi hoàn
+            tất một lần quét đúng với lựa chọn hiện tại. Xóa thật đi qua khu cách ly riêng — có thể hoàn
+            tác trong {QUARANTINE_RETENTION_DAYS} ngày trước khi bị dọn vĩnh viễn.
           </p>
         </div>
 
@@ -302,19 +398,19 @@ export function SystemCleanupPanel(): React.JSX.Element {
           </span>
           <div>
             <small>Quy tắc an toàn</small>
-            <strong>Chỉ quét trong tài khoản hiện tại</strong>
+            <strong>Chỉ dọn trong tài khoản hiện tại</strong>
             <em>Không đụng Windows Temp, Windows Update hay các khu vực cần quyền quản trị.</em>
           </div>
         </article>
 
         <article>
           <span className="cleanup-summary-icon">
-            {scannedUpToDate ? <CheckCircle2 size={18} /> : <AlertTriangle size={18} />}
+            {canClean ? <CheckCircle2 size={18} /> : <AlertTriangle size={18} />}
           </span>
           <div>
-            <small>Trạng thái quét</small>
-            <strong>{scannedUpToDate ? 'Đã quét xong lựa chọn hiện tại' : 'Chưa quét đúng lựa chọn'}</strong>
-            <em>Xóa thật chưa mở ở bản này (Giai đoạn 4a).</em>
+            <small>Trạng thái xóa</small>
+            <strong>{canClean ? 'Đã quét • Có thể dọn' : 'Phải quét trước'}</strong>
+            <em>{canClean ? 'Lựa chọn hiện tại đã được thống kê.' : 'Nút xóa đang được khóa an toàn.'}</em>
           </div>
         </article>
       </div>
@@ -328,7 +424,7 @@ export function SystemCleanupPanel(): React.JSX.Element {
       <div className="system-cleanup-warning">
         Không quét Desktop, Documents, Downloads, Pictures, Videos, Zalo Received Files, thư mục gốc
         CapCut/Zalo, dữ liệu dự án Tubmedia hay bất kỳ thư mục hệ thống nào. Hãy đóng Chrome, Edge, CapCut
-        và Zalo để số liệu quét chính xác hơn.
+        và Zalo để dọn được nhiều hơn.
       </div>
 
       <div className="system-cleanup-group">
@@ -425,25 +521,31 @@ export function SystemCleanupPanel(): React.JSX.Element {
             </span>
           </div>
 
-          <div className="cleanup-classification-stats" aria-label="Phân loại dữ liệu đã quét">
-            <span className="is-safe">
-              <small>Có thể dọn</small>
-              <b>{formatBytes(status.safeToDeleteBytes ?? status.estimatedBytes)}</b>
-            </span>
-            <span className="is-review">
-              <small>Cần xem lại • không tự xóa</small>
-              <b>{formatBytes(status.reviewBytes ?? 0)}</b>
-            </span>
-            <span className="is-protected">
-              <small>Được bảo vệ • khóa xóa</small>
-              <b>{formatBytes(status.protectedBytes ?? 0)}</b>
-            </span>
-          </div>
+          {status.mode === 'estimate' && (
+            <div className="cleanup-classification-stats" aria-label="Phân loại dữ liệu đã quét">
+              <span className="is-safe">
+                <small>Có thể dọn</small>
+                <b>{formatBytes(status.safeToDeleteBytes ?? status.estimatedBytes)}</b>
+              </span>
+              <span className="is-review">
+                <small>Cần xem lại • không tự xóa</small>
+                <b>{formatBytes(status.reviewBytes ?? 0)}</b>
+              </span>
+              <span className="is-protected">
+                <small>Được bảo vệ • khóa xóa</small>
+                <b>{formatBytes(status.protectedBytes ?? 0)}</b>
+              </span>
+            </div>
+          )}
 
           {status.driveBefore && (
             <div className="cleanup-drive-comparison">
               <span>
-                Trống lúc quét: <b>{formatBytes(status.driveBefore.freeBytes)}</b>
+                Trống trước khi dọn: <b>{formatBytes(status.driveBefore.freeBytes)}</b>
+              </span>
+              <span>
+                Trống sau khi dọn:{' '}
+                <b>{status.driveAfter ? formatBytes(status.driveAfter.freeBytes) : 'Chưa hoàn tất'}</b>
               </span>
             </div>
           )}
@@ -456,7 +558,10 @@ export function SystemCleanupPanel(): React.JSX.Element {
                   const category = SYSTEM_CLEANUP_CATEGORIES.find((item) => item.id === result.id);
                   return (
                     <li key={result.id}>
-                      <b>{category?.label ?? 'Hạng mục'}:</b> ước tính {formatBytes(result.estimatedBytes)}
+                      <b>{category?.label ?? 'Hạng mục'}:</b> {result.matchedItems.toLocaleString('vi-VN')} tệp,
+                      ước tính {formatBytes(result.estimatedBytes)}
+                      {status.mode === 'clean' &&
+                        `, đã dọn ${formatBytes(result.removedBytes)}, bỏ qua ${result.skippedItems} mục`}
                     </li>
                   );
                 })}
@@ -527,10 +632,15 @@ export function SystemCleanupPanel(): React.JSX.Element {
         <button
           type="button"
           className="system-cleanup-button primary"
-          disabled
-          title="Xóa thật sẽ mở ở Giai đoạn 4b, sau khi bạn xem kỹ kết quả quét này và duyệt riêng. Bản này (Giai đoạn 4a) chỉ quét và phân loại."
+          disabled={!canClean}
+          title={
+            canClean
+              ? 'Chỉ xóa các file thuộc allowlist đã quét — chuyển vào khu cách ly, có thể hoàn tác.'
+              : 'Phải quét đúng lựa chọn hiện tại trước khi xóa.'
+          }
+          onClick={() => setConfirmOpen(true)}
         >
-          Dọn dẹp và xóa file đã chọn (chưa mở ở bản này)
+          Dọn dẹp và xóa file đã chọn
         </button>
 
         {running && (
@@ -540,10 +650,80 @@ export function SystemCleanupPanel(): React.JSX.Element {
         )}
       </div>
 
-      <p className="cleanup-action-note">
-        Giai đoạn 4a chỉ quét và phân loại — nút xóa luôn bị khóa. Việc xóa/cách ly/hoàn tác thật sẽ có ở
-        Giai đoạn 4b, sau khi bạn xem kỹ kết quả quét này.
-      </p>
+      {!canClean && !running && (
+        <p className="cleanup-action-note">
+          Nút xóa được khóa cho đến khi quét xong đúng lựa chọn.
+        </p>
+      )}
+
+      {quarantineEntries.length > 0 && (
+        <div className="system-cleanup-quarantine">
+          <div className="system-cleanup-group-title">
+            Đã cách ly gần đây ({quarantineEntries.length} mục — tự xóa vĩnh viễn sau {QUARANTINE_RETENTION_DAYS}{' '}
+            ngày nếu không hoàn tác)
+          </div>
+
+          <ul className="system-cleanup-quarantine-list">
+            {quarantineEntries.map((entry) => (
+              <li key={entry.id}>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={quarantineSelected.has(entry.id)}
+                    disabled={quarantineBusy}
+                    onChange={() => toggleQuarantineSelected(entry.id)}
+                  />
+                  <span>
+                    <b title={entry.originalPath}>{entry.originalPath}</b>
+                    <small>
+                      {formatBytes(entry.bytes)} • còn {daysLeft(entry.expiresAt)} ngày để hoàn tác
+                    </small>
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  className="system-cleanup-button secondary"
+                  disabled={quarantineBusy}
+                  onClick={() => void restoreQuarantine([entry.id])}
+                >
+                  <RotateCcw size={14} /> Hoàn tác
+                </button>
+              </li>
+            ))}
+          </ul>
+
+          <div className="system-cleanup-quarantine-actions">
+            <button
+              type="button"
+              className="system-cleanup-button secondary"
+              disabled={quarantineBusy || quarantineSelected.size === 0}
+              onClick={() => void restoreQuarantine([...quarantineSelected])}
+            >
+              Hoàn tác đã chọn ({quarantineSelected.size})
+            </button>
+            <button
+              type="button"
+              className="system-cleanup-button secondary"
+              disabled={quarantineBusy}
+              onClick={() => void restoreQuarantine(quarantineEntries.map((entry) => entry.id))}
+            >
+              Hoàn tác tất cả
+            </button>
+          </div>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Xóa các file đã chọn?"
+        message={`Tubmedia sẽ chuyển ${formatBytes(selectedEstimatedBytes)} vào khu cách ly riêng — không xóa vĩnh viễn ngay. Bạn có thể hoàn tác trong ${QUARANTINE_RETENTION_DAYS} ngày.`}
+        details={confirmDetails}
+        confirmLabel={`Xóa ${formatBytes(selectedEstimatedBytes)}`}
+        danger
+        busy={cleaning}
+        onConfirm={() => void confirmClean()}
+        onCancel={() => setConfirmOpen(false)}
+      />
     </section>
   );
 }

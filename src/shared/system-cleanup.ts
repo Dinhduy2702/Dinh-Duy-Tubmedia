@@ -114,6 +114,8 @@ export interface SystemCleanupDriveState {
 
 export interface SystemCleanupCategoryResult {
   id: SystemCleanupCategoryId;
+  /** Tổng số file khớp, KHÔNG chỉ số mẫu trong `findings` — dùng để hiển thị "X tệp" trước khi xóa. */
+  matchedItems: number;
   estimatedBytes: number;
   removedBytes: number;
   removedItems: number;
@@ -155,6 +157,34 @@ export interface SystemCleanupStatus {
 }
 
 const CATEGORY_IDS = new Set<SystemCleanupCategoryId>(SYSTEM_CLEANUP_CATEGORIES.map((item) => item.id));
+
+/** Số ngày giữ một mục trong khu cách ly trước khi bị xóa vĩnh viễn — xem cleanup-quarantine.ts. */
+export const QUARANTINE_RETENTION_DAYS = 14;
+
+/**
+ * GĐ4b: một mục đã bị "xóa" qua Dọn dẹp máy nhưng thực chất chỉ được DI CHUYỂN vào khu cách ly riêng
+ * của Tubmedia trong userData (không dùng Windows Recycle Bin) — xem src/main/system/cleanup-quarantine.ts.
+ * Có thể hoàn tác cho tới `expiresAt`; sau đó bị xóa vĩnh viễn (purgedAt được đặt).
+ */
+export interface QuarantineEntry {
+  id: string;
+  runId: string;
+  categoryId: SystemCleanupCategoryId;
+  originalPath: string;
+  bytes: number;
+  quarantinedAt: string;
+  expiresAt: string;
+  restoredAt: string | null;
+  restoredPath: string | null;
+  purgedAt: string | null;
+}
+
+export interface QuarantineRestoreOutcome {
+  id: string;
+  ok: boolean;
+  restoredPath?: string;
+  message?: string;
+}
 
 export function validateSystemCleanupRequest(value: unknown): SystemCleanupRequest {
   if (!value || typeof value !== 'object') {

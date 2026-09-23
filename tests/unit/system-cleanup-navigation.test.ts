@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 const root = process.cwd();
 const read = (relativePath: string): string => readFileSync(join(root, relativePath), 'utf8');
 
-describe('giao diện dọn dẹp máy (GĐ4a — bỏ UAC/wholeMachine, chỉ quét/phân loại)', () => {
+describe('giao diện dọn dẹp máy (bỏ UAC/wholeMachine; quét → xác nhận → cách ly → hoàn tác)', () => {
   it('có mục điều hướng và route riêng', () => {
     const sidebar = read('src/renderer/src/layout/Sidebar.tsx');
     const app = read('src/renderer/src/app/App.tsx');
@@ -28,17 +28,32 @@ describe('giao diện dọn dẹp máy (GĐ4a — bỏ UAC/wholeMachine, chỉ q
     expect(panel).toContain('Dọn dẹp và xóa file đã chọn');
   });
 
-  it('GĐ4a: nút xóa luôn bị khóa cứng, không còn phụ thuộc kết quả quét (chưa cho xóa thật)', () => {
+  it('khóa thao tác xóa cho đến khi quét đúng lựa chọn, rồi mở qua hộp xác nhận (không dùng window.confirm)', () => {
     const panel = read('src/renderer/src/components/SystemCleanupPanel.tsx');
 
-    const buttonBlock = panel.slice(
-      panel.indexOf('className="system-cleanup-button primary"'),
-      panel.indexOf('className="system-cleanup-button primary"') + 400
-    );
-
-    expect(buttonBlock).toMatch(/\bdisabled\b/);
-    expect(panel).toContain('Giai đoạn 4b');
     expect(panel).toContain('lastScannedKey === currentScanKey');
+    expect(panel).toContain('disabled={!canClean}');
+    expect(panel).toContain('onClick={() => setConfirmOpen(true)}');
+    expect(panel).toContain('<ConfirmDialog');
+    expect(panel).not.toMatch(/window\.(?:confirm|prompt|alert)\(/);
+  });
+
+  it('hộp xác nhận xóa hiển thị rõ số lượng, dung lượng theo từng hạng mục và có thể hoàn tác', () => {
+    const panel = read('src/renderer/src/components/SystemCleanupPanel.tsx');
+
+    expect(panel).toContain('confirmDetails');
+    expect(panel).toContain('result.matchedItems');
+    expect(panel).toContain('QUARANTINE_RETENTION_DAYS');
+    expect(panel).toContain('khu cách ly');
+  });
+
+  it('có mục "đã cách ly gần đây" với hoàn tác từng mục, hoàn tác đã chọn và hoàn tác tất cả', () => {
+    const panel = read('src/renderer/src/components/SystemCleanupPanel.tsx');
+
+    expect(panel).toContain('quarantineList');
+    expect(panel).toContain('quarantineRestore');
+    expect(panel).toContain('Hoàn tác đã chọn');
+    expect(panel).toContain('Hoàn tác tất cả');
   });
 
   it('không còn quét toàn máy hay huy hiệu yêu cầu UAC (đã bỏ theo quyết định 2026-09-21)', () => {

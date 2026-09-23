@@ -104,7 +104,9 @@ export const IPC = {
     start: 'system-cleanup:start',
     status: 'system-cleanup:status',
     cancel: 'system-cleanup:cancel',
-    openStorageSettings: 'system-cleanup:open-storage-settings'
+    openStorageSettings: 'system-cleanup:open-storage-settings',
+    quarantineList: 'system-cleanup:quarantine-list',
+    quarantineRestore: 'system-cleanup:quarantine-restore'
   },
   quickDownload: {
     defaults: 'quick-download:defaults',

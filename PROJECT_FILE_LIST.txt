@@ -188,6 +188,7 @@ scripts/verify-audit-behavior.mjs
 scripts/verify-audit-hardening.mjs
 scripts/verify-bundled-aria2-v133.mjs
 scripts/verify-cleanup-navigation-ui.mjs
+scripts/verify-cleanup-quarantine.mjs
 scripts/verify-core-resilience-1.3.0.mjs
 scripts/verify-differential-updater-v133.mjs
 scripts/verify-download-recovery-r49.mjs
@@ -291,6 +292,7 @@ src/main/settings/hardware-service.ts
 src/main/settings/settings-service.ts
 src/main/storage/path-service.ts
 src/main/storage/workbench-storage.ts
+src/main/system/cleanup-quarantine.ts
 src/main/system/cleanup-scanner.ts
 src/main/system/system-cleanup-service.ts
 src/main/system/system-stats-service.ts
@@ -432,6 +434,7 @@ tests/unit/app-update-version.test.ts
 tests/unit/batch-error-aggregation-r18.test.ts
 tests/unit/brand-layout.test.ts
 tests/unit/brand-logo.test.ts
+tests/unit/cleanup-quarantine.test.ts
 tests/unit/cleanup-scanner.test.ts
 tests/unit/clip-engine-mute-copy.test.ts
 tests/unit/color-tokens.test.ts

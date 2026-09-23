@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,6 +7,7 @@ import {
   assertSafeCleanupPath,
   categoryTargets,
   CleanupScanCancelledError,
+  listCategoryFiles,
   scanTarget,
   scanTubmediaResidue,
   type CleanupEnvironmentPaths
@@ -32,6 +34,16 @@ describe('cleanup-scanner: assertSafeCleanupPath (cổng an toàn cuối cùng)'
   it('rejects empty/invalid paths', () => {
     expect(() => assertSafeCleanupPath('')).toThrow();
     expect(() => assertSafeCleanupPath('   ')).toThrow();
+  });
+
+  it('blocks ANY bare drive root, not just the system drive (ví dụ "D:\\", không chỉ ổ hệ thống)', () => {
+    for (const candidate of ['D:\\', 'E:', 'z:', 'Z:\\']) {
+      expect(() => assertSafeCleanupPath(candidate)).toThrow(/gốc ổ đĩa/);
+    }
+  });
+
+  it('does NOT block an ordinary subfolder on a non-system drive', () => {
+    expect(() => assertSafeCleanupPath('D:\\some-folder\\cache')).not.toThrow();
   });
 
   it('allows an ordinary nested folder', () => {
@@ -298,5 +310,86 @@ describe('cleanup-scanner: scanTubmediaResidue (chỉ nhận diện dữ liệu 
     expect(result.errors.length).toBeGreaterThan(0);
     expect(result.errors[0]).toMatch(/quá rộng\/nguy hiểm/);
     void goodRoot;
+  });
+});
+
+describe('cleanup-scanner: ma trận đường dẫn hiểm (GĐ4b — junction, vòng lặp symlink)', () => {
+  let sandbox = '';
+
+  beforeEach(async () => {
+    sandbox = await mkdtemp(join(tmpdir(), 'tubmedia-cleanup-danger-'));
+  });
+
+  afterEach(async () => {
+    await rm(sandbox, { recursive: true, force: true });
+  });
+
+  it('never descends into a directory junction, even one pointing outside the scanned root', async () => {
+    const scanRoot = join(sandbox, 'scan-root');
+    const outsideSecret = join(sandbox, 'outside-secret');
+    await mkdir(scanRoot, { recursive: true });
+    await mkdir(outsideSecret, { recursive: true });
+    const canary = join(outsideSecret, 'canary.txt');
+    await writeFile(canary, 'TUYỆT ĐỐI không được đụng vào');
+
+    try {
+      const { symlink: createLink } = await import('node:fs/promises');
+      await createLink(outsideSecret, join(scanRoot, 'junction-out'), 'junction');
+    } catch {
+      return; // Máy/tài khoản không cho tạo junction — bỏ qua an toàn, không coi là thất bại.
+    }
+
+    const files = await listCategoryFiles({ path: scanRoot });
+    expect(files.some((f) => f.path.includes('canary.txt'))).toBe(false);
+    expect(files.every((f) => !f.path.startsWith(outsideSecret))).toBe(true);
+    // Canary vẫn còn nguyên — không hề bị quét/đụng tới.
+    expect(existsSync(canary)).toBe(true);
+  });
+
+  it('terminates and returns nothing through a self-referential symlink loop (never hangs, never stack-overflows)', async () => {
+    const scanRoot = join(sandbox, 'loop-root');
+    await mkdir(scanRoot, { recursive: true });
+    await writeFile(join(scanRoot, 'real.txt'), Buffer.alloc(42));
+
+    try {
+      const { symlink: createLink } = await import('node:fs/promises');
+      // Vòng lặp: thư mục con "loop" trỏ ngược lại chính scanRoot.
+      await createLink(scanRoot, join(scanRoot, 'loop'), 'junction');
+    } catch {
+      return;
+    }
+
+    const files = await listCategoryFiles({ path: scanRoot });
+    // Chỉ đếm đúng 1 file thật — vòng lặp không được theo, không đếm lặp lại real.txt qua "loop".
+    expect(files).toHaveLength(1);
+    expect(files[0]?.path).toBe(join(scanRoot, 'real.txt'));
+  });
+
+  it('a tracked residue file that is itself a symlink pointing at a real document is skipped entirely', async () => {
+    const tempRoot = join(sandbox, 'temp-root');
+    await mkdir(tempRoot, { recursive: true });
+    await writeFile(join(tempRoot, '.tubmedia-owned.json'), JSON.stringify({ owner: 'Tubmedia', version: 1 }));
+
+    const realDocument = join(sandbox, 'real-document.docx');
+    await writeFile(realDocument, 'tài liệu thật của người dùng');
+    const trackedSymlinkPath = join(tempRoot, 'clip-1-fake.mp4');
+
+    try {
+      const { symlink: createLink } = await import('node:fs/promises');
+      await createLink(realDocument, trackedSymlinkPath);
+    } catch {
+      return;
+    }
+
+    const result = await scanTubmediaResidue({
+      sourceFolders: [],
+      tempFolders: [tempRoot],
+      trackedTempFiles: [trackedSymlinkPath],
+      quickOutputFolders: [],
+      quickTempRoots: []
+    });
+
+    expect(result.estimatedBytes).toBe(0);
+    expect(existsSync(realDocument)).toBe(true);
   });
 });

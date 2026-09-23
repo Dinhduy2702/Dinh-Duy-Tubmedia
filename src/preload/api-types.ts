@@ -24,7 +24,12 @@ import type {
   WorkbenchState
 } from '@shared/types/domain.js';
 
-import type { SystemCleanupRequest, SystemCleanupStatus } from '@shared/system-cleanup.js';
+import type {
+  QuarantineEntry,
+  QuarantineRestoreOutcome,
+  SystemCleanupRequest,
+  SystemCleanupStatus
+} from '@shared/system-cleanup.js';
 import type { QuickDownloadRequest, QuickDownloadStatus } from '@shared/quick-download.js';
 import type { VideoLinkFilterRequest, VideoLinkFilterResult } from '@shared/video-link-filter.js';
 export interface DesktopApi {
@@ -167,6 +172,8 @@ export interface DesktopApi {
     status(runId: string): Promise<SystemCleanupStatus | null>;
     cancel(runId: string): Promise<SystemCleanupStatus | null>;
     openStorageSettings(): Promise<void>;
+    quarantineList(): Promise<QuarantineEntry[]>;
+    quarantineRestore(ids: string[]): Promise<QuarantineRestoreOutcome[]>;
   };
   quickDownload: {
     defaults(): Promise<{ outputDirectory: string }>;

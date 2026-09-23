@@ -30,16 +30,22 @@ check('UI displays estimated storage', panel.includes('Dung lượng tìm thấy
 check('UI displays safety levels', panel.includes('Rất an toàn') && panel.includes('An toàn có kiểm soát'));
 check('UI displays cleanup urgency', panel.includes('Mức độ cần dọn'));
 check(
-  'GĐ4a: delete button stays visible but is permanently disabled, no UAC/whole-machine controls remain',
+  'delete button is gated on a fresh matching scan (disabled={!canClean}) and opens a real confirm dialog, no whole-machine/UAC controls remain',
   panel.includes('Dọn dẹp và xóa file đã chọn') &&
-    /disabled\s*$/m.test(panel) &&
+    panel.includes('disabled={!canClean}') &&
+    panel.includes('<ConfirmDialog') &&
     !panel.includes('Quét và phân loại toàn bộ máy') &&
     !panel.includes('wholeMachine') &&
-    !panel.includes('systemCleanupRequiresAdmin')
+    !panel.includes('systemCleanupRequiresAdmin') &&
+    !/window\.(?:confirm|prompt|alert)\(/.test(panel)
 );
 check(
   'admin-required maintenance is listed as info-only with a link to Windows Storage Sense',
   panel.includes('SYSTEM_CLEANUP_ADMIN_INFO_ITEMS') && panel.includes('openStorageSettings')
+);
+check(
+  'quarantine/restore UI is wired (list + restore selected/all)',
+  panel.includes('quarantineList') && panel.includes('quarantineRestore') && panel.includes('Hoàn tác tất cả')
 );
 check('dangerous user folders remain documented as protected', panel.includes('Zalo Received Files'));
 check('cleanup safety styles exist', css.includes('.cleanup-safety-guide'));

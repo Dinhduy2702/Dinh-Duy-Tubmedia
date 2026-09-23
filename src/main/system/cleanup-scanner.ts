@@ -1,23 +1,30 @@
 /**
- * Bộ quét Dọn dẹp máy — GIAI ĐOẠN 4a (2026-09-23). Thay thế hoàn toàn phần quét của
+ * Bộ quét Dọn dẹp máy — GIAI ĐOẠN 4a/4b (2026-09-23). Thay thế hoàn toàn phần quét/xóa của
  * resources/system-cleanup-helper.ps1 (đã xóa) bằng Node.js thuần: không PowerShell, không
- * Start-Process -Verb RunAs, không cần quyền quản trị. Chỉ đọc (thống kê dung lượng), KHÔNG xóa gì —
- * việc xóa/cách ly/hoàn tác thật sẽ làm ở Giai đoạn 4b.
+ * Start-Process -Verb RunAs, không cần quyền quản trị.
+ *
+ * GĐ4a: chỉ đọc (thống kê dung lượng), không xóa gì.
+ * GĐ4b: thêm listCategoryFiles()/listResidueFiles() — trả về ĐẦY ĐỦ danh sách file khớp (không giới
+ * hạn mẫu như scanTarget()/scanTubmediaResidue() dùng để hiển thị UI) — SystemCleanupService dùng
+ * đúng hai hàm này để cách ly THẬT, đảm bảo số lượng/dung lượng xóa khớp chính xác với số đã quét.
  *
  * An toàn (kế thừa nguyên vẹn từ Assert-SafeTarget/Test-TubmediaOwnershipMarker/Test-TubmediaResidueName
  * trong bản PowerShell cũ, chỉ đổi ngôn ngữ triển khai):
  * - assertSafeCleanupPath(): chặn tuyệt đối các thư mục gốc quá rộng (ổ đĩa, Windows, Users, hồ sơ
- *   người dùng, ProgramData/ProgramFiles) và chặn "Zalo Received Files".
+ *   người dùng, ProgramData/ProgramFiles), MỌI gốc ổ đĩa trần (ví dụ "D:\", không chỉ ổ hệ thống), và
+ *   chặn "Zalo Received Files".
  * - Mọi mục (file lẫn thư mục) đều được lstat() trước khi tính hoặc đi vào — bỏ qua symlink/reparse
- *   point để không bao giờ đi lạc ra ngoài phạm vi cho phép.
+ *   point (bao gồm junction) để không bao giờ đi lạc ra ngoài phạm vi cho phép hay theo vòng lặp.
  * - tubmediaResidue chỉ quét rộng thư mục tạm khi có file đánh dấu sở hữu .tubmedia-owned.json hợp lệ;
  *   tên file phải khớp đúng mẫu nhận diện của Tubmedia (LINK_/QD-/clip-/concat-/.pending); chỉ tính
  *   file cũ hơn 7 ngày.
+ * - GĐ4b: SystemCleanupService gọi lại assertSafeCleanupPath() + lstat() một lần NỮA ngay trước khi
+ *   cách ly từng file thật (không tin tưởng kết quả quét cũ) — chống thay đổi giữa lúc quét và lúc xóa.
  */
 import type { Dirent } from 'node:fs';
-import { lstat, readdir, readFile, statfs } from 'node:fs/promises';
+import { copyFile, lstat, readdir, readFile, rm, statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve, sep } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { SystemCleanupCategoryId, SystemCleanupFinding } from '@shared/system-cleanup.js';
 
 export interface CleanupEnvironmentPaths {
@@ -69,7 +76,7 @@ function checkCancelled(options: ScanOptions): void {
   }
 }
 
-interface FoundFile {
+export interface FoundFile {
   path: string;
   bytes: number;
   mtimeMs: number;
@@ -85,7 +92,7 @@ async function collectFilesRecursively(
     return;
   }
 
-  let entries;
+  let entries: Dirent[];
   try {
     entries = await readdir(root, { withFileTypes: true });
   } catch {
@@ -104,6 +111,8 @@ async function collectFilesRecursively(
     }
 
     if (info.isSymbolicLink()) {
+      // Bỏ qua symlink VÀ junction (Windows báo junction là reparse point / symbolic link qua lstat)
+      // — không bao giờ đi theo, tránh thoát phạm vi cho phép hoặc rơi vào vòng lặp.
       continue;
     }
 
@@ -138,10 +147,13 @@ function normalizeForCompare(path: string): string {
   return resolve(path).replace(/[\\/]+$/, '').toLowerCase();
 }
 
+const BARE_DRIVE_ROOT_PATTERN = /^[a-z]:$/i;
+
 /**
  * Chặn tuyệt đối các thư mục gốc quá rộng/nguy hiểm (ổ đĩa, Windows, hồ sơ người dùng, Users,
- * ProgramData/ProgramFiles) và "Zalo Received Files" — cổng an toàn cuối cùng trước khi quét bất kỳ
- * đường dẫn nào, độc lập với việc đường dẫn đó đến từ đâu (cấu hình cứng hay TubmediaCleanupRoots).
+ * ProgramData/ProgramFiles), MỌI gốc ổ đĩa trần (không chỉ ổ hệ thống — ví dụ "D:\" hay "E:") và
+ * "Zalo Received Files" — cổng an toàn cuối cùng trước khi quét HOẶC xóa bất kỳ đường dẫn nào, độc
+ * lập với việc đường dẫn đó đến từ đâu (cấu hình cứng hay TubmediaCleanupRoots do người dùng cấu hình).
  */
 export function assertSafeCleanupPath(path: string): string {
   if (typeof path !== 'string' || path.trim().length === 0) {
@@ -150,6 +162,10 @@ export function assertSafeCleanupPath(path: string): string {
 
   const resolved = resolve(path);
   const normalized = normalizeForCompare(resolved);
+
+  if (BARE_DRIVE_ROOT_PATTERN.test(normalized)) {
+    throw new Error(`Đã chặn gốc ổ đĩa: ${resolved}`);
+  }
 
   const blocked = new Set<string>();
   for (const key of BLOCKED_ENV_KEYS) {
@@ -272,26 +288,22 @@ export async function categoryTargets(
   }
 }
 
-export interface ScanTargetResult {
-  estimatedBytes: number;
-  findings: SystemCleanupFinding[];
-}
-
-const MAX_SAMPLE_FINDINGS = 20;
-
-/** Quét một vị trí (đệ quy nếu không chỉ định mẫu tên) — chỉ đọc, không xóa gì. */
-export async function scanTarget(target: CleanupTarget, options: ScanOptions = {}): Promise<ScanTargetResult> {
+/**
+ * Toàn bộ file khớp một vị trí quét, KHÔNG giới hạn số lượng — dùng cho cả ước tính (scanTarget lấy
+ * mẫu 20 file lớn nhất từ đây) lẫn cách ly thật ở GĐ4b (cần đúng từng file, không chỉ mẫu hiển thị).
+ */
+export async function listCategoryFiles(target: CleanupTarget, options: ScanOptions = {}): Promise<FoundFile[]> {
   const safePath = assertSafeCleanupPath(target.path);
 
   let rootStat;
   try {
     rootStat = await lstat(safePath);
   } catch {
-    return { estimatedBytes: 0, findings: [] };
+    return [];
   }
 
   if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
-    return { estimatedBytes: 0, findings: [] };
+    return [];
   }
 
   const files: FoundFile[] = [];
@@ -323,6 +335,21 @@ export async function scanTarget(target: CleanupTarget, options: ScanOptions = {
     await collectFilesRecursively(safePath, files, options);
   }
 
+  return files;
+}
+
+export interface ScanTargetResult {
+  matchedItems: number;
+  estimatedBytes: number;
+  findings: SystemCleanupFinding[];
+}
+
+const MAX_SAMPLE_FINDINGS = 20;
+
+/** Quét một vị trí để HIỂN THỊ (mẫu tối đa 20 file lớn nhất) — chỉ đọc, không xóa gì. */
+export async function scanTarget(target: CleanupTarget, options: ScanOptions = {}): Promise<ScanTargetResult> {
+  const files = await listCategoryFiles(target, options);
+
   const estimatedBytes = files.reduce((total, file) => total + file.bytes, 0);
   const findings: SystemCleanupFinding[] = files
     .slice()
@@ -335,11 +362,10 @@ export async function scanTarget(target: CleanupTarget, options: ScanOptions = {
       reason: 'Nằm trong vị trí cache hoặc tệp tạm đã được Tubmedia cho phép.'
     }));
 
-  return { estimatedBytes, findings };
+  return { matchedItems: files.length, estimatedBytes, findings };
 }
 
 const RESIDUE_CUTOFF_DAYS = 7;
-const MAX_RESIDUE_FINDINGS = 80;
 
 function isOldEnough(mtimeMs: number, now: number): boolean {
   return now - mtimeMs >= RESIDUE_CUTOFF_DAYS * 24 * 60 * 60 * 1000;
@@ -373,28 +399,30 @@ async function hasTubmediaOwnershipMarker(root: string): Promise<boolean> {
 function isPathInsideRoot(path: string, root: string): boolean {
   const resolvedPath = normalizeForCompare(path);
   const resolvedRoot = normalizeForCompare(root);
-  return resolvedPath === resolvedRoot || resolvedPath.startsWith(resolvedRoot + sep);
+  return resolvedPath === resolvedRoot || resolvedPath.startsWith(resolvedRoot + '\\') || resolvedPath.startsWith(`${resolvedRoot}/`);
 }
 
-export interface ResidueScanResult {
-  estimatedBytes: number;
-  findings: SystemCleanupFinding[];
+export interface ResidueMatch extends FoundFile {
+  reason: string;
+}
+
+export interface ResidueListResult {
+  matches: ResidueMatch[];
   errors: string[];
 }
 
 /**
- * Quét dữ liệu tải dở/tạm của riêng Tubmedia — tương đương Invoke-TubmediaResidueCleanup trong bản
- * PowerShell cũ (đọc-only, không xóa). `now` cho phép truyền mốc thời gian giả khi viết test.
+ * Toàn bộ file dữ liệu tải dở/tạm của Tubmedia khớp mẫu nhận diện, KHÔNG giới hạn số lượng — dùng cho
+ * cả ước tính (scanTubmediaResidue lấy mẫu 80 file từ đây) lẫn cách ly thật ở GĐ4b.
  */
-export async function scanTubmediaResidue(
+export async function listResidueFiles(
   roots: TubmediaResidueRoots,
   now: number = Date.now(),
   options: ScanOptions = {}
-): Promise<ResidueScanResult> {
+): Promise<ResidueListResult> {
   const seen = new Set<string>();
-  const findings: SystemCleanupFinding[] = [];
+  const matches: ResidueMatch[] = [];
   const errors: string[] = [];
-  let estimatedBytes = 0;
 
   const rootSpecs: { path: string; kind: 'download' | 'temp' | 'quick-temp' }[] = [
     ...roots.sourceFolders.filter(Boolean).map((path) => ({ path, kind: 'download' as const })),
@@ -437,8 +465,8 @@ export async function scanTubmediaResidue(
         if (!/^[a-f0-9]{12}$/i.test(firstSegment)) continue;
       } else {
         const name = file.path.split(/[\\/]/).pop() ?? '';
-        const matches = spec.kind === 'temp' ? matchesTempResidueName(name) : matchesDownloadResidueName(name);
-        if (!matches) continue;
+        const matchesName = spec.kind === 'temp' ? matchesTempResidueName(name) : matchesDownloadResidueName(name);
+        if (!matchesName) continue;
       }
 
       if (!isOldEnough(file.mtimeMs, now)) continue;
@@ -447,16 +475,13 @@ export async function scanTubmediaResidue(
       if (seen.has(key)) continue;
       seen.add(key);
 
-      estimatedBytes += file.bytes;
-      if (findings.length < MAX_RESIDUE_FINDINGS) {
-        const reason =
-          spec.kind === 'quick-temp'
-            ? 'Thư mục tạm Tải nhanh do Tubmedia tạo đã quá 7 ngày.'
-            : spec.kind === 'temp'
-              ? 'Clip/checkpoint tạm do Tubmedia tạo đã quá 7 ngày.'
-              : 'Phần tải dở có dấu nhận diện LINK/QD của Tubmedia đã quá 7 ngày.';
-        findings.push({ path: file.path, bytes: file.bytes, classification: 'safe-to-delete', reason });
-      }
+      const reason =
+        spec.kind === 'quick-temp'
+          ? 'Thư mục tạm Tải nhanh do Tubmedia tạo đã quá 7 ngày.'
+          : spec.kind === 'temp'
+            ? 'Clip/checkpoint tạm do Tubmedia tạo đã quá 7 ngày.'
+            : 'Phần tải dở có dấu nhận diện LINK/QD của Tubmedia đã quá 7 ngày.';
+      matches.push({ ...file, reason });
     }
   }
 
@@ -479,21 +504,46 @@ export async function scanTubmediaResidue(
       if (!isOldEnough(info.mtimeMs, now)) continue;
 
       seen.add(key);
-      estimatedBytes += info.size;
-      if (findings.length < MAX_RESIDUE_FINDINGS) {
-        findings.push({
-          path: resolvedFile,
-          bytes: info.size,
-          classification: 'safe-to-delete',
-          reason: 'Clip tạm cũ vẫn được cơ sở dữ liệu Tubmedia theo dõi chính xác.'
-        });
-      }
+      matches.push({
+        path: resolvedFile,
+        bytes: info.size,
+        mtimeMs: info.mtimeMs,
+        reason: 'Clip tạm cũ vẫn được cơ sở dữ liệu Tubmedia theo dõi chính xác.'
+      });
     } catch {
       continue;
     }
   }
 
-  return { estimatedBytes, findings, errors };
+  return { matches, errors };
+}
+
+const MAX_RESIDUE_FINDINGS = 80;
+
+export interface ResidueScanResult {
+  matchedItems: number;
+  estimatedBytes: number;
+  findings: SystemCleanupFinding[];
+  errors: string[];
+}
+
+/** Quét dữ liệu tải dở/tạm của Tubmedia để HIỂN THỊ (mẫu tối đa 80 file) — chỉ đọc, không xóa gì. */
+export async function scanTubmediaResidue(
+  roots: TubmediaResidueRoots,
+  now: number = Date.now(),
+  options: ScanOptions = {}
+): Promise<ResidueScanResult> {
+  const { matches, errors } = await listResidueFiles(roots, now, options);
+
+  const estimatedBytes = matches.reduce((total, match) => total + match.bytes, 0);
+  const findings: SystemCleanupFinding[] = matches.slice(0, MAX_RESIDUE_FINDINGS).map((match) => ({
+    path: match.path,
+    bytes: match.bytes,
+    classification: 'safe-to-delete',
+    reason: match.reason
+  }));
+
+  return { matchedItems: matches.length, estimatedBytes, findings, errors };
 }
 
 export interface DriveSpaceInfo {
@@ -511,5 +561,21 @@ export async function readDriveSpace(path: string): Promise<DriveSpaceInfo | nul
     };
   } catch {
     return null;
+  }
+}
+
+/**
+ * Sao chép rồi xác minh đúng kích thước trước khi coi là thành công — dùng khi di chuyển file khác ổ
+ * đĩa (rename() báo lỗi EXDEV). KHÔNG tự xóa file gốc — gọi nơi dùng hàm này chịu trách nhiệm xóa gốc
+ * sau khi xác nhận bản sao đúng, để không bao giờ mất dữ liệu giữa chừng nếu sao chép thất bại.
+ */
+export async function copyFileVerified(sourcePath: string, destinationPath: string): Promise<void> {
+  await copyFile(sourcePath, destinationPath);
+
+  const [sourceStat, destinationStat] = await Promise.all([lstat(sourcePath), lstat(destinationPath)]);
+
+  if (sourceStat.size !== destinationStat.size) {
+    await rm(destinationPath, { force: true });
+    throw new Error('Sao chép không khớp kích thước — đã hủy, giữ nguyên file gốc.');
   }
 }
