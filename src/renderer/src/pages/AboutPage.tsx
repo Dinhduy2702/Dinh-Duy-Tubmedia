@@ -10,9 +10,14 @@ import {
   Workflow
 } from 'lucide-react';
 import { APP_NAME, APP_VERSION_LABEL } from '@shared/constants/app';
-import { BrandKit } from '../components/BrandKit';
 import { DeveloperSignature, TubmediaLogo, TubmediaMark } from '../components/TubmediaBrand';
 
+/**
+ * Trang Giới thiệu (người dùng cuối). Mục "Bộ nhận diện" (logo, mã màu, cách dùng đúng/sai) đã bỏ khỏi
+ * đây từ 2026-09-23 theo yêu cầu — đó là tài liệu kỹ thuật cho thiết kế/marketing, không phải thứ người
+ * dùng cuối cần xem. Toàn bộ nội dung đó vẫn còn nguyên trong docs/brand/BO_NHAN_DIEN.md (component
+ * BrandKit.tsx vẫn giữ nguyên, chỉ không còn được import/hiển thị ở đây).
+ */
 export function AboutPage(): React.JSX.Element {
   return <div className="page-shell about-page">
     <section className="about-hero tubmedia-about-hero">
@@ -46,8 +51,6 @@ export function AboutPage(): React.JSX.Element {
       <Feature icon={Code2} title="Ứng dụng máy tính thực thụ" text="Giao diện React giao tiếp với phần xử lý Electron qua cầu nối an toàn; bản phát hành không phụ thuộc máy chủ web."/>
       <Feature icon={ShieldCheck} title="Kiểm tra và cách ly tệp lỗi" text="ffprobe và FFmpeg xác minh tệp tải về; tệp lỗi được đưa vào khu cách ly thay vì báo hoàn tất sai."/>
     </div>
-
-    <BrandKit/>
 
     <section className="responsibility-card">
       <div><ShieldCheck size={21}/></div>

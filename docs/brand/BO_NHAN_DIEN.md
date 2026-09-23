@@ -1,5 +1,10 @@
 # Bộ nhận diện Tubmedia
 
+> Tài liệu kỹ thuật cho thiết kế/marketing — **không hiển thị trong ứng dụng**. Trước 2026-09-23, nội
+> dung này từng hiện ở trang Giới thiệu (mục "Bộ nhận diện", component `BrandKit.tsx`); đã bỏ khỏi giao
+> diện người dùng cuối theo yêu cầu (không phải thứ người dùng cuối cần xem), giữ nguyên đầy đủ ở đây.
+> `BrandKit.tsx` vẫn còn trong mã nguồn (không xóa) — chỉ không còn được `AboutPage.tsx` import/hiển thị.
+
 Logo chuẩn là ảnh `logo-tubmedia.png` do chủ dự án cung cấp (thực chất là JPEG 1024×1024), được vẽ lại thành SVG thuần:
 huy hiệu đỏ bo góc có nút play trắng, chữ **TUB** lớn, **MEDIA** nhỏ hơn bên dưới, thanh đen bo tròn ở dưới cùng.
 Chữ đã chuyển thành đường vẽ; không phụ thuộc phông hay ảnh ngoài.
