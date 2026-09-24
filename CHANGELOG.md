@@ -1,5 +1,6 @@
 # Tubmedia 1.4.0
 
+- Nhận diện thương hiệu mới: tích hợp logo TUB MEDIA chính thức vào thanh bên, trang Giới thiệu và icon taskbar/khay hệ thống/bộ cài (.exe).
 - Giao diện làm mới toàn bộ: điều hướng 3 bước (Tải / Xem trước & Cắt / Ghép & Xuất), bộ màu ngữ nghĩa theo logo, chế độ sáng đồng nhất toàn ứng dụng kể cả thanh bên, thông báo có kiểu riêng theo mức độ, kéo-thả sắp thứ tự đoạn trong Ghép theo Timeline.
 - Thêm cắt tệp có sẵn trên máy (không cần tải lại), hỗ trợ cả cắt nhanh và cắt chính xác.
 - Thêm đổi tỉ lệ khung hình 9:16/1:1/16:9 (nền mờ kiểu CapCut) cho cả Ghép theo Timeline lẫn Cắt tệp có sẵn, cùng preset xuất sẵn theo nền tảng (Shorts/TikTok/Reels, Instagram/Facebook, YouTube/Facebook).
