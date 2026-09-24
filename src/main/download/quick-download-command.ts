@@ -3,8 +3,10 @@ import {
   type QuickDownloadMediaMode,
   type ValidatedQuickDownloadRequest
 } from '@shared/quick-download.js';
-import type { AppSettings } from '@shared/types/domain.js';
 import { YTDLP_PROGRESS_FLAGS } from '../downloader/ytdlp-progress.js';
+// Rà soát toàn diện (2026-09-24) — mục 2.2: logic dựng tham số cookie gộp về dùng chung với các luồng
+// yt-dlp khác (download-engine.ts, preview-frame-command.ts) — không đổi hành vi, chỉ tổ chức lại code.
+import { buildCookieArguments, type CookieArgumentSettings } from '../downloader/ytdlp-cookie-arguments.js';
 
 export interface QuickDownloadCommandPaths {
   ffmpegDirectory: string;
@@ -53,10 +55,7 @@ export function buildFilenamePrefixFromTemplate(rawTemplate: string, now: Date =
   );
 }
 
-export type QuickDownloadAuthentication = Pick<
-  AppSettings,
-  'cookiesFilePath' | 'cookiesBrowser' | 'cookiesBrowserProfile'
->;
+export type QuickDownloadAuthentication = CookieArgumentSettings;
 
 const VIDEO_AUDIO_SELECTORS = {
   best: 'bv*+ba/b',
@@ -188,14 +187,7 @@ export function buildQuickDownloadArguments(
     if (request.accurateCut) args.push('--force-keyframes-at-cuts');
   }
 
-  if (authentication?.cookiesFilePath) {
-    args.push('--cookies', authentication.cookiesFilePath);
-  } else if (authentication && authentication.cookiesBrowser !== 'none') {
-    const browserSpec = authentication.cookiesBrowserProfile
-      ? `${authentication.cookiesBrowser}:${authentication.cookiesBrowserProfile}`
-      : authentication.cookiesBrowser;
-    args.push('--cookies-from-browser', browserSpec);
-  }
+  args.push(...buildCookieArguments(authentication));
 
   if (options.forceGenericExtractor) {
     args.push('--ies', 'generic,default');

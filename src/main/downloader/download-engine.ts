@@ -45,6 +45,10 @@ import type { SettingsService } from '../settings/settings-service.js';
 import type { ToolManager } from '../tools/tool-manager.js';
 import { parseYtDlpProgress, YTDLP_PROGRESS_FLAGS, YTDLP_UTF8_FLAGS } from './ytdlp-progress.js';
 import { buildSafeYtDlpArguments } from './ytdlp-arguments.js';
+// Rà soát toàn diện (2026-09-24) — mục 2.2: logic dựng tham số cookie gộp về dùng chung với các luồng
+// yt-dlp khác (quick-download-command.ts, preview-frame-command.ts) — không đổi hành vi, chỉ tổ chức
+// lại code.
+import { buildCookieArguments } from './ytdlp-cookie-arguments.js';
 import { acceptPathInside } from '../files/path-containment.js';
 
 export interface DownloadProgress {
@@ -1006,13 +1010,8 @@ export class DownloadEngine {
       appSettings,
       this.cookieRequiredJobs.has(job.id)
     );
-    if (attachConfiguredCookies && appSettings.cookiesFilePath) {
-      args.push('--cookies', appSettings.cookiesFilePath);
-    } else if (attachConfiguredCookies && appSettings.cookiesBrowser !== 'none') {
-      const browserSpec = appSettings.cookiesBrowserProfile
-        ? `${appSettings.cookiesBrowser}:${appSettings.cookiesBrowserProfile}`
-        : appSettings.cookiesBrowser;
-      args.push('--cookies-from-browser', browserSpec);
+    if (attachConfiguredCookies) {
+      args.push(...buildCookieArguments(appSettings));
     }
     if (attachConfiguredCookies) {
       this.logger.info(

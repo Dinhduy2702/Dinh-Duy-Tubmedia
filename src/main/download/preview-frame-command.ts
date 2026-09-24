@@ -1,4 +1,6 @@
-import type { AppSettings } from '@shared/types/domain.js';
+// Rà soát toàn diện (2026-09-24) — mục 2.2: logic dựng tham số cookie gộp về dùng chung với các luồng yt-
+// dlp khác (download-engine.ts, quick-download-command.ts) — không đổi hành vi, chỉ tổ chức lại code.
+import { buildCookieArguments, type CookieArgumentSettings } from '../downloader/ytdlp-cookie-arguments.js';
 
 /** Đủ để chắc chắn có ít nhất 1 khung hình hoàn chỉnh; không cần dài hơn — càng ngắn càng ít dữ liệu. */
 export const PREVIEW_WINDOW_SECONDS = 1;
@@ -8,22 +10,7 @@ export interface PreviewFrameCommandPaths {
   workDirectory: string;
 }
 
-export type PreviewFrameCookieSettings = Pick<
-  AppSettings,
-  'cookiesFilePath' | 'cookiesBrowser' | 'cookiesBrowserProfile'
->;
-
-function cookieArguments(settings?: PreviewFrameCookieSettings): string[] {
-  if (!settings) return [];
-  if (settings.cookiesFilePath) return ['--cookies', settings.cookiesFilePath];
-  if (settings.cookiesBrowser !== 'none') {
-    const spec = settings.cookiesBrowserProfile
-      ? `${settings.cookiesBrowser}:${settings.cookiesBrowserProfile}`
-      : settings.cookiesBrowser;
-    return ['--cookies-from-browser', spec];
-  }
-  return [];
-}
+export type PreviewFrameCookieSettings = CookieArgumentSettings;
 
 /**
  * Tải đúng MỘT đoạn rất ngắn (mặc định 1 giây) quanh mốc thời gian đã chọn — chỉ lấy video, chất lượng
@@ -60,7 +47,7 @@ export function buildPreviewFrameDownloadArguments(
     '--download-sections',
     `*${start}-${end}`,
     '--force-keyframes-at-cuts',
-    ...cookieArguments(cookies),
+    ...buildCookieArguments(cookies),
     '--',
     url
   ];
