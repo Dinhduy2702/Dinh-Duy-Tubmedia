@@ -47,7 +47,9 @@ export function recommendDownloadConcurrency(
         plan(1, 2, 2, 1, 'Tối ưu nhất cho máy yếu.'),
         plan(2, 1, 2, 1, 'Chỉ dùng khi cần hai nơi lưu độc lập.'),
         plan(3, 1, 2, 1, 'Ba list chia sẻ hai worker nên sẽ chờ luân phiên.'),
-        plan(4, 1, 2, 1, 'Hỗ trợ nhưng không khuyến nghị chạy đồng thời.')
+        plan(4, 1, 2, 1, 'Hỗ trợ nhưng không khuyến nghị chạy đồng thời.'),
+        plan(5, 1, 2, 1, 'Năm list vẫn chia sẻ đúng hai worker — phần lớn sẽ chờ luân phiên.'),
+        plan(6, 1, 2, 1, 'Sáu list không khuyến nghị cho máy yếu — nên giảm bớt để máy phản hồi tốt.')
       ]
     };
   }
@@ -70,7 +72,9 @@ export function recommendDownloadConcurrency(
         plan(1, 3, 3, 2, 'Một list tận dụng tốt mạng mà vẫn giữ máy phản hồi.'),
         plan(2, 2, 3, 2, 'Hai list được scheduler chia công bằng.'),
         plan(3, 1, 3, 2, 'Ba list, mỗi list một worker.'),
-        plan(4, 1, 3, 2, 'Bốn list được hỗ trợ nhưng một list sẽ thường xuyên chờ.')
+        plan(4, 1, 3, 2, 'Bốn list được hỗ trợ nhưng một list sẽ thường xuyên chờ.'),
+        plan(5, 1, 3, 2, 'Năm list chia sẻ ba worker — chờ luân phiên nhiều hơn.'),
+        plan(6, 1, 3, 2, 'Sáu list không khuyến nghị cho máy phổ thông — nên giảm bớt.')
       ]
     };
   }
@@ -99,7 +103,9 @@ export function recommendDownloadConcurrency(
         plan(1, 4, 4, 3, 'Tốc độ cao nhất khi chỉ có một nơi lưu.'),
         plan(2, 2, 4, 3, 'Khuyến nghị mặc định cho máy workstation.'),
         plan(3, 1, 4, 2, 'Ba list chạy độc lập, một worker mỗi list; còn một worker dự phòng luân phiên.'),
-        plan(4, 1, 4, 2, 'Bốn list chạy công bằng, mỗi list một worker.')
+        plan(4, 1, 4, 2, 'Bốn list chạy công bằng, mỗi list một worker.'),
+        plan(5, 1, 4, 2, 'Năm list vẫn chạy được, mỗi list một worker — theo dõi ổ đĩa/mạng khi dùng đủ.'),
+        plan(6, 1, 4, 2, 'Sáu list — mức tối đa hỗ trợ; theo dõi sát Disk/Network trong Task Manager.')
       ]
     };
   }
@@ -121,14 +127,16 @@ export function recommendDownloadConcurrency(
       plan(1, 3, 3, 2, 'Một list, ba worker.'),
       plan(2, 2, 4, 3, 'Hai list, hai worker mỗi list.'),
       plan(3, 1, 4, 2, 'Ba list, một worker mỗi list.'),
-      plan(4, 1, 4, 2, 'Bốn list, một worker mỗi list.')
+      plan(4, 1, 4, 2, 'Bốn list, một worker mỗi list.'),
+      plan(5, 1, 4, 2, 'Năm list, một worker mỗi list — chờ luân phiên nhiều hơn.'),
+      plan(6, 1, 4, 2, 'Sáu list — mức tối đa hỗ trợ cho máy khá; theo dõi Disk/Network trước khi dùng hết.')
     ]
   };
 }
 
 export function planForListCount(
   recommendation: DownloadConcurrencyRecommendation,
-  listCount: 1 | 2 | 3 | 4,
+  listCount: 1 | 2 | 3 | 4 | 5 | 6,
   fullVerification: boolean
 ): DownloadConcurrencyPlan {
   const selected = recommendation.plans.find((item) => item.listCount === listCount) ?? recommendation.plans[0]!;

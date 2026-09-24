@@ -60,7 +60,16 @@ interface LaneForm {
 }
 
 type LaneMap<T> = Record<DownloadLaneId, T>;
-const LANE_IDS: DownloadLaneId[] = ['download-1', 'download-2', 'download-3', 'download-4'];
+// A1 (2026-09-25): tăng từ 4 lên 6 danh sách song song theo yêu cầu người dùng.
+const LANE_IDS: DownloadLaneId[] = [
+  'download-1',
+  'download-2',
+  'download-3',
+  'download-4',
+  'download-5',
+  'download-6'
+];
+const MAX_LANE_COUNT = 6;
 const ACTIVE = [
   'pending',
   'analyzing',
@@ -92,8 +101,8 @@ function laneNumber(slot: DownloadLaneId): number {
 function clampWorker(value: number): number {
   return Math.max(1, Math.min(16, Math.round(value || 1)));
 }
-function clampCount(value: number): 1 | 2 | 3 | 4 {
-  return Math.max(1, Math.min(4, Math.round(value || 1))) as 1 | 2 | 3 | 4;
+function clampCount(value: number): 1 | 2 | 3 | 4 | 5 | 6 {
+  return Math.max(1, Math.min(6, Math.round(value || 1))) as 1 | 2 | 3 | 4 | 5 | 6;
 }
 function childFolder(base: string, name: string): string {
   return base ? `${base.replace(/[\\/]+$/, '')}\\${name}` : '';
@@ -611,11 +620,11 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
           </button>
           <div className="badge badge-strong">
             <ListPlus size={15} />
-            {laneCount}/4 danh sách
+            {laneCount}/{MAX_LANE_COUNT} danh sách
           </div>
           <button
             className="btn btn-primary"
-            disabled={busy === 'global' || laneCount >= 4}
+            disabled={busy === 'global' || laneCount >= MAX_LANE_COUNT}
             onClick={() => void changeLaneCount(laneCount + 1)}
           >
             <Plus size={16} />
@@ -744,7 +753,7 @@ function PreflightPanel({
 }: {
   hardware: HardwareProfile | null;
   settings: AppSettings | null;
-  laneCount: 1 | 2 | 3 | 4;
+  laneCount: 1 | 2 | 3 | 4 | 5 | 6;
   recommendBusy: boolean;
   onRecommend: () => Promise<void>;
   onReferenceQuality: () => Promise<void>;

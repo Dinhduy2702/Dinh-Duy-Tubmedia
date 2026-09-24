@@ -31,7 +31,7 @@ export function AboutPage(): React.JSX.Element {
         <div className="about-badges">
           <span><BadgeCheck size={15}/>{APP_VERSION_LABEL}</span>
           <span><ShieldCheck size={15}/>Hoạt động cục bộ trên máy tính</span>
-          <span><Workflow size={15}/>1–4 quy trình độc lập</span>
+          <span><Workflow size={15}/>1–6 quy trình độc lập</span>
         </div>
       </div>
       <div className="about-brand-signature"><DeveloperSignature/></div>
@@ -44,8 +44,8 @@ export function AboutPage(): React.JSX.Element {
     </section>
 
     <div className="about-feature-grid">
-      <Feature icon={DownloadCloud} title="Tải đa danh sách" text="Tối đa 4 danh sách độc lập, số luồng tải riêng, nhật ký riêng và giới hạn tổng theo cấu hình máy."/>
-      <Feature icon={Film} title="Tải và ghép nhiều quy trình" text="Tối đa 4 quy trình riêng, hỗ trợ chất lượng từ nhẹ đến cao nhất theo nguồn và chỉ mã hóa lại khi cần."/>
+      <Feature icon={DownloadCloud} title="Tải đa danh sách" text="Tối đa 6 danh sách độc lập, số luồng tải riêng, nhật ký riêng và giới hạn tổng theo cấu hình máy."/>
+      <Feature icon={Film} title="Tải và ghép nhiều quy trình" text="Tối đa 6 quy trình riêng, hỗ trợ chất lượng từ nhẹ đến cao nhất theo nguồn và chỉ mã hóa lại khi cần."/>
       <Feature icon={Cpu} title="Tối ưu theo phần cứng" text="Đọc bộ xử lý, bộ nhớ, bộ xử lý đồ họa và ổ đĩa để đề xuất số luồng tải, số luồng FFmpeg và mức tải phù hợp."/>
       <Feature icon={Database} title="Lưu trạng thái an toàn" text="SQLite lưu hàng đợi, tiến trình, lịch sử và hỗ trợ phục hồi khi ứng dụng bị đóng giữa chừng."/>
       <Feature icon={Code2} title="Ứng dụng máy tính thực thụ" text="Giao diện React giao tiếp với phần xử lý Electron qua cầu nối an toàn; bản phát hành không phụ thuộc máy chủ web."/>

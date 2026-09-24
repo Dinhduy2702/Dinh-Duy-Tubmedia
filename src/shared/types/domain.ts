@@ -231,8 +231,17 @@ export interface QualityProfile {
   builtIn: boolean;
 }
 
-export type DownloadLaneId = 'download-1' | 'download-2' | 'download-3' | 'download-4';
-export type MergeLaneId = 'merge-1' | 'merge-2' | 'merge-3' | 'merge-4';
+// A1 (2026-09-25): tăng từ 4 lên 6 quy trình song song theo yêu cầu người dùng, đã xác nhận
+// SystemLoadGovernor và maxGlobalMergeJobs (trần ghép ĐỒNG THỜI thật, vẫn giữ nguyên 1-4) không phụ
+// thuộc số lane — chỉ tăng số dự án có thể CẤU HÌNH/xếp hàng song song.
+export type DownloadLaneId =
+  | 'download-1'
+  | 'download-2'
+  | 'download-3'
+  | 'download-4'
+  | 'download-5'
+  | 'download-6';
+export type MergeLaneId = 'merge-1' | 'merge-2' | 'merge-3' | 'merge-4' | 'merge-5' | 'merge-6';
 export type DownloadCodecPreference = 'auto' | 'h264' | 'hevc' | 'vp9' | 'av1';
 export type DownloadContainerPreference = 'auto' | 'mp4' | 'mkv';
 export type DownloadCompatibilityMode =
@@ -278,8 +287,10 @@ export interface AppSettings {
   aria2Connections: number;
   maxGlobalDownloadWorkers: number;
   downloadConcurrentFragments: number;
-  downloadLaneCount: 1 | 2 | 3 | 4;
-  mergeLaneCount: 1 | 2 | 3 | 4;
+  // A1 (2026-09-25): tăng từ 4 lên 6 — chỉ số DỰ ÁN CẤU HÌNH song song, KHÔNG phải số ghép chạy đồng
+  // thời thật (đó vẫn là maxGlobalMergeJobs, cố tình giữ nguyên 1-4 theo khuyến nghị phần cứng).
+  downloadLaneCount: 1 | 2 | 3 | 4 | 5 | 6;
+  mergeLaneCount: 1 | 2 | 3 | 4 | 5 | 6;
   maxGlobalMergeJobs: 1 | 2 | 3 | 4;
   downloadCompatibilityMode: DownloadCompatibilityMode;
   /** ADAPTIVE_SETTINGS_HOTFIX8_CONTRACT: optional for backward-compatible saved settings. */
@@ -323,8 +334,10 @@ export interface HardwareProfile {
 }
 
 
+// A1 (2026-09-25): tăng từ 4 lên 6 danh sách/quy trình song song — bảng đề xuất theo phần cứng cũng cần
+// phủ tới 6 (xem thêm plan(5,...)/plan(6,...) mới ở hardware-recommendation.ts).
 export interface DownloadConcurrencyPlan {
-  listCount: 1 | 2 | 3 | 4;
+  listCount: 1 | 2 | 3 | 4 | 5 | 6;
   workersPerList: number;
   globalWorkers: number;
   fullVerificationWorkers: number;
@@ -332,7 +345,7 @@ export interface DownloadConcurrencyPlan {
 }
 
 export interface DownloadConcurrencyRecommendation {
-  recommendedConcurrentLists: 1 | 2 | 3 | 4;
+  recommendedConcurrentLists: 1 | 2 | 3 | 4 | 5 | 6;
   recommendedPerListWorkers: number;
   recommendedSingleListWorkers: number;
   recommendedGlobalWorkers: number;

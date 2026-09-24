@@ -336,7 +336,7 @@ function DownloadSettings({ settings, patch, setError }: { settings: AppSettings
       </>}
     <div className="mt-4"/>
     <Grid>
-      <Select label="Số danh sách hiển thị" value={String(settings.downloadLaneCount)} onChange={(value) => patch('downloadLaneCount', Number(value) as AppSettings['downloadLaneCount'])} options={[["1","1 danh sách"],["2","2 danh sách"],["3","3 danh sách"],["4","4 danh sách"]]}/>
+      <Select label="Số danh sách hiển thị" value={String(settings.downloadLaneCount)} onChange={(value) => patch('downloadLaneCount', Number(value) as AppSettings['downloadLaneCount'])} options={[["1","1 danh sách"],["2","2 danh sách"],["3","3 danh sách"],["4","4 danh sách"],["5","5 danh sách"],["6","6 danh sách"]]}/>
       <Toggle label="Kiểm tra toàn bộ video sau tải bằng FFmpeg (Chuyên sâu)" checked={settings.downloadVerifyEntireFile} onChange={(value) => patch('downloadVerifyEntireFile', value)}/>
     </Grid>
     {!capCutMode && (qualityInvalid || fpsInvalid || videoBitrateInvalid || audioInvalid) && <div className="mt-3 rounded-xl border p-3 text-sm" style={{ borderColor: 'var(--bad)', color: 'var(--bad)' }}>Giới hạn không hợp lệ: giá trị tối thiểu không được lớn hơn giá trị tối đa, trừ khi tối đa bằng 0.</div>}
@@ -413,7 +413,7 @@ function ProcessingSettings({ settings, patch, qualities, setError }: { settings
     <InfoDisclosure className="settings-scope-disclosure mb-5" icon={SlidersHorizontal} title="Phạm vi: Tải & Ghép" summary="Chỉ quyết định video thành phẩm cuối." status="ĐỘC LẬP" tone="good">
       <p className="settings-detail-copy">Link Google Drive trong Tải & Ghép dùng cơ chế tải mặc định/nguyên bản của yt-dlp như code tham chiếu, không ép format source và không chịu giới hạn chất lượng của Tải danh sách. Các lựa chọn bên dưới chỉ quyết định cách tạo thành phẩm cuối.</p>
     </InfoDisclosure>
-    <div className="mb-5 grid gap-4 lg:grid-cols-2"><Select label="Số quy trình tải & ghép hiển thị" value={String(settings.mergeLaneCount)} onChange={(value) => patch('mergeLaneCount', Number(value) as AppSettings['mergeLaneCount'])} options={[["1","1 quy trình"],["2","2 quy trình"],["3","3 quy trình"],["4","4 quy trình"]]}/><Select label="Quy trình ghép hoạt động đồng thời" value={String(settings.maxGlobalMergeJobs)} onChange={(value) => patch('maxGlobalMergeJobs', Number(value) as AppSettings['maxGlobalMergeJobs'])} options={[["1","1 quy trình (mượt nhất)"],["2","2 quy trình"],["3","3 quy trình"],["4","4 quy trình"]]}/></div>
+    <div className="mb-5 grid gap-4 lg:grid-cols-2"><Select label="Số quy trình tải & ghép hiển thị" value={String(settings.mergeLaneCount)} onChange={(value) => patch('mergeLaneCount', Number(value) as AppSettings['mergeLaneCount'])} options={[["1","1 quy trình"],["2","2 quy trình"],["3","3 quy trình"],["4","4 quy trình"],["5","5 quy trình"],["6","6 quy trình"]]}/><Select label="Quy trình ghép hoạt động đồng thời" value={String(settings.maxGlobalMergeJobs)} onChange={(value) => patch('maxGlobalMergeJobs', Number(value) as AppSettings['maxGlobalMergeJobs'])} options={[["1","1 quy trình (mượt nhất)"],["2","2 quy trình"],["3","3 quy trình"],["4","4 quy trình"]]}/></div>
     <details className="settings-inline-note mb-5"><summary>Cách giới hạn quy trình song song hoạt động<ChevronDown size={15}/></summary><p>Khi xuất 4K/HEVC, kiểm tra chuyên sâu hoặc chuẩn hóa nhiều nguồn, nên giữ giới hạn hoạt động thấp. Quy trình vượt giới hạn sẽ chờ lượt và không tranh tài nguyên.</p></details>
     <InfoDisclosure
       className="settings-encoder-disclosure mb-5"

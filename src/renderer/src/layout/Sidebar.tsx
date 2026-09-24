@@ -46,7 +46,7 @@ const groups: Array<{ label: string; items: SidebarItem[] }> = [
       {
         id: 'download-merge',
         label: 'Ghép theo Timeline',
-        hint: 'Ghép đúng thứ tự thành 1 file, tối đa 4 quy trình',
+        hint: 'Ghép đúng thứ tự thành 1 file, tối đa 6 quy trình',
         icon: Sparkles
       },
       { id: 'activity', label: 'Hàng đợi', hint: 'Điều khiển mọi tác vụ', icon: Activity },

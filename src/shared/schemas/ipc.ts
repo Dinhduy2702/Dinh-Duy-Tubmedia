@@ -70,8 +70,24 @@ export const appSettingsSchema = z
     aria2Connections: z.number().int().min(1).max(32),
     maxGlobalDownloadWorkers: z.number().int().min(1).max(16),
     downloadConcurrentFragments: z.number().int().min(1).max(8),
-    downloadLaneCount: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
-    mergeLaneCount: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
+    // A1 (2026-09-25): tăng từ 4 lên 6 lane CẤU HÌNH song song; maxGlobalMergeJobs (trần ghép ĐỒNG THỜI
+    // thật) cố tình giữ nguyên 1-4 theo khuyến nghị phần cứng có sẵn của app.
+    downloadLaneCount: z.union([
+      z.literal(1),
+      z.literal(2),
+      z.literal(3),
+      z.literal(4),
+      z.literal(5),
+      z.literal(6)
+    ]),
+    mergeLaneCount: z.union([
+      z.literal(1),
+      z.literal(2),
+      z.literal(3),
+      z.literal(4),
+      z.literal(5),
+      z.literal(6)
+    ]),
     maxGlobalMergeJobs: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
     downloadCompatibilityMode: z.enum(['source', 'capcut_sdr_1080p', 'capcut_sdr_2k']),
     // ADAPTIVE_SETTINGS_HOTFIX8_SCHEMA
@@ -175,8 +191,16 @@ export const backupCreateSchema = z.object({
 export const backupRestoreSchema = z.object({ path: pathSchema, mode: z.enum(['merge', 'replace']) });
 export const toolNameSchema = z.object({ name: z.enum(['yt-dlp', 'ffmpeg', 'ffprobe', 'ffplay', 'aria2c']) });
 
-const downloadLaneIdSchema = z.enum(['download-1', 'download-2', 'download-3', 'download-4']);
-const mergeLaneIdSchema = z.enum(['merge-1', 'merge-2', 'merge-3', 'merge-4']);
+// A1 (2026-09-25): khớp DownloadLaneId/MergeLaneId ở domain.ts — tăng từ 4 lên 6 lane.
+const downloadLaneIdSchema = z.enum([
+  'download-1',
+  'download-2',
+  'download-3',
+  'download-4',
+  'download-5',
+  'download-6'
+]);
+const mergeLaneIdSchema = z.enum(['merge-1', 'merge-2', 'merge-3', 'merge-4', 'merge-5', 'merge-6']);
 export const workbenchSlotSchema = z.object({
   slot: z.union([downloadLaneIdSchema, mergeLaneIdSchema])
 });

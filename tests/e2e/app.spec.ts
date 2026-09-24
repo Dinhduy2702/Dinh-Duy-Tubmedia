@@ -1668,3 +1668,92 @@ test('B2: hai video cùng tiêu đề khác link đều được tải đầy đ
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
 });
+
+/**
+ * A1 (2026-09-25) — yêu cầu mới đã được duyệt: tăng giới hạn quy trình song song từ 4 lên 6 cho cả "Tải
+ * danh sách" và "Ghép theo Timeline" (maxGlobalMergeJobs — trần GHÉP ĐỒNG THỜI thật — cố tình giữ nguyên
+ * 1-4 theo khuyến nghị phần cứng có sẵn của app, không đổi). Bài kiểm thật này xác nhận toàn bộ đường dây
+ * đã đổi nhất quán: schema IPC thật (không chỉ type TypeScript) chấp nhận 5-6 và vẫn từ chối 7, và nút
+ * "Thêm danh sách"/"Thêm quy trình" trên giao diện thật dừng đúng ở 6 (không đi tiếp lên 7).
+ */
+test('A1: giới hạn quy trình song song đã tăng đúng từ 4 lên 6 (IPC thật + nút bấm thật), không đổi trần ghép đồng thời', async () => {
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-lane-limit-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+  db.exec(
+    'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
+  );
+  db.close();
+
+  try {
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+        ),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+
+    interface DesktopSettingsUpdateApi {
+      settings: { update: (patch: Record<string, unknown>) => Promise<Record<string, unknown>> };
+    }
+    const updateSetting = (patch: Record<string, unknown>): Promise<Record<string, unknown>> =>
+      shellWindow!.evaluate(
+        (p) => (window as unknown as { desktop: DesktopSettingsUpdateApi }).desktop.settings.update(p),
+        patch
+      );
+
+    // ---- Xác nhận qua IPC thật: schema chấp nhận đúng 5 và 6, vẫn từ chối 7 ----
+    for (const key of ['downloadLaneCount', 'mergeLaneCount']) {
+      const at5 = await updateSetting({ [key]: 5 });
+      expect(at5[key], `${key}=5 phải được chấp nhận thật qua IPC`).toBe(5);
+      const at6 = await updateSetting({ [key]: 6 });
+      expect(at6[key], `${key}=6 phải được chấp nhận thật qua IPC`).toBe(6);
+      await expect(
+        updateSetting({ [key]: 7 }),
+        `${key}=7 phải bị từ chối thật qua IPC — giới hạn mới là 6, không phải bỏ giới hạn`
+      ).rejects.toThrow();
+    }
+
+    // ---- Xác nhận maxGlobalMergeJobs KHÔNG bị đổi — vẫn đúng trần cũ 1-4 ----
+    await expect(
+      updateSetting({ maxGlobalMergeJobs: 5 }),
+      'maxGlobalMergeJobs phải KHÔNG đổi theo A1 — vẫn từ chối giá trị ngoài 1-4 (trần ghép đồng thời thật, tách biệt khỏi số lane)'
+    ).rejects.toThrow();
+    const mergeJobsStill4 = await updateSetting({ maxGlobalMergeJobs: 4 });
+    expect(mergeJobsStill4.maxGlobalMergeJobs, 'maxGlobalMergeJobs vẫn nhận tối đa 4 như cũ').toBe(4);
+
+    // ---- Xác nhận qua nút bấm thật trên trang "Ghép theo Timeline": dừng đúng ở 6/6 ----
+    await shellWindow.evaluate(() =>
+      document.querySelector<HTMLElement>('[data-page-id="download-merge"]')?.click()
+    );
+    await shellWindow.waitForTimeout(400);
+    const addMergeButton = shellWindow.getByRole('button', { name: 'Thêm quy trình' });
+    for (let click = 0; click < 6; click += 1) {
+      if (await addMergeButton.isEnabled().catch(() => false)) await addMergeButton.click();
+      await shellWindow.waitForTimeout(200);
+    }
+    const mergeBadgeText = await shellWindow.evaluate(
+      () => document.querySelector('.badge-strong')?.textContent ?? ''
+    );
+    expect(mergeBadgeText, 'thanh Ghép theo Timeline phải dừng đúng ở 6/6, không tiếp tục lên 7').toContain(
+      '6/6'
+    );
+    expect(await addMergeButton.isDisabled(), 'nút "Thêm quy trình" phải bị khóa khi đã đạt đúng 6').toBe(true);
+  } finally {
+    await closeElectronApplication();
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});

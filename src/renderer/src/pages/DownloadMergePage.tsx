@@ -93,7 +93,10 @@ const ASPECT_RATIO_PRESETS: Array<{ value: LocalCutAspectRatio; label: string }>
 type MergeMap<T> = Record<MergeLaneId, T>;
 type WorkflowState = 'idle' | 'running' | 'paused' | 'failed' | 'completed';
 
-const MERGE_IDS: MergeLaneId[] = ['merge-1', 'merge-2', 'merge-3', 'merge-4'];
+// A1 (2026-09-25): tăng từ 4 lên 6 quy trình song song theo yêu cầu người dùng — không đổi
+// maxGlobalMergeJobs (trần ghép ĐỒNG THỜI thật, vẫn 1-4 theo khuyến nghị phần cứng).
+const MERGE_IDS: MergeLaneId[] = ['merge-1', 'merge-2', 'merge-3', 'merge-4', 'merge-5', 'merge-6'];
+const MAX_LANE_COUNT = 6;
 const ACTIVE = [
   'pending',
   'analyzing',
@@ -142,8 +145,8 @@ function mergeErrorTechnical(job: QueueJob, log: LogEntry | null): string {
 function mergeNumber(slot: MergeLaneId): number {
   return Number(slot.slice('merge-'.length));
 }
-function clampCount(value: number): 1 | 2 | 3 | 4 {
-  return Math.max(1, Math.min(4, Math.round(value || 1))) as 1 | 2 | 3 | 4;
+function clampCount(value: number): 1 | 2 | 3 | 4 | 5 | 6 {
+  return Math.max(1, Math.min(6, Math.round(value || 1))) as 1 | 2 | 3 | 4 | 5 | 6;
 }
 function mapOf<T>(factory: (slot: MergeLaneId) => T): MergeMap<T> {
   return Object.fromEntries(MERGE_IDS.map((slot) => [slot, factory(slot)])) as MergeMap<T>;
@@ -1050,11 +1053,11 @@ export function DownloadMergePage(): React.JSX.Element {
           </button>
           <div className="badge badge-strong">
             <Layers3 size={15} />
-            {laneCount}/4 quy trình
+            {laneCount}/{MAX_LANE_COUNT} quy trình
           </div>
           <button
             className="btn btn-primary"
-            disabled={busy === 'global' || laneCount >= 4}
+            disabled={busy === 'global' || laneCount >= MAX_LANE_COUNT}
             onClick={() => void changeLaneCount(laneCount + 1)}
           >
             <Plus size={16} />
