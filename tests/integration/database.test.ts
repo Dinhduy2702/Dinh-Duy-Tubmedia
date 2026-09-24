@@ -191,6 +191,23 @@ describe('cơ sở dữ liệu và lưu trạng thái bền vững', () => {
     database.close();
   });
 
+  it('Giai đoạn 6 mục 4: mặc định aspectRatio="original", lưu đúng preset đã đổi, giá trị lạ rơi về "original"', () => {
+    const { database, projects } = createDatabase();
+    const project = createProject(projects);
+    expect(project.aspectRatio).toBe('original');
+
+    const updated = projects.update(project.id, { aspectRatio: '9:16' });
+    expect(updated.aspectRatio).toBe('9:16');
+    expect(projects.get(project.id)?.aspectRatio).toBe('9:16');
+
+    // Cột DB có DEFAULT 'original' nên hàng cũ (migrate từ bản trước khi có cột này) không bao giờ NULL,
+    // nhưng vẫn kiểm tra map() tự vệ trước một giá trị lạ lọt vào cột (ví dụ chỉnh tay CSDL).
+    database.db.prepare('UPDATE projects SET aspect_ratio=? WHERE id=?').run('4:3-la', project.id);
+    expect(projects.get(project.id)?.aspectRatio).toBe('original');
+    expect(database.integrityCheck()).toEqual(['ok']);
+    database.close();
+  });
+
   it('ghi đè danh sách liên kết thay vì khôi phục dữ liệu cũ', () => {
     const { database, projects } = createDatabase();
     const project = createProject(projects);

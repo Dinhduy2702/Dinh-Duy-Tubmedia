@@ -6082,8 +6082,15 @@ body {
   grid-column: span 2;
 }
 .merge-config-grid > .compact-config-quality,
-.merge-config-grid > .compact-config-profile {
-  grid-column: span 3;
+.merge-config-grid > .compact-config-profile,
+.merge-config-grid > .compact-config-aspect-ratio {
+  grid-column: span 2;
+}
+.merge-aspect-ratio-note {
+  display: block;
+  margin-top: 0.3rem;
+  color: var(--muted);
+  font-size: 0.68rem;
 }
 .compact-config-grid .label {
   margin-bottom: 0.25rem;

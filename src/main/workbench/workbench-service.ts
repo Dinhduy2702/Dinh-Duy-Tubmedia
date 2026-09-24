@@ -224,7 +224,9 @@ export class WorkbenchService {
       finalFileName: value.finalFileName,
       qualityProfileId: value.qualityProfileId,
       resourceProfileId: value.resourceProfileId,
-      exportTimelineTxt: false
+      exportTimelineTxt: false,
+      // Giai đoạn 6 mục 4: preset xuất theo nền tảng — mặc định 'original' khi bản nháp cũ chưa có trường này.
+      aspectRatio: value.aspectRatio ?? 'original'
     };
     return existing ? this.projects.update(existing.id, common) : this.projects.create(common);
   }
@@ -275,7 +277,8 @@ export class WorkbenchService {
       finalFileName: value.finalFileName.trim() || `thanh-pham-${number}`,
       qualityProfileId: value.qualityProfileId,
       resourceProfileId: value.resourceProfileId,
-      exportTimelineTxt: false
+      exportTimelineTxt: false,
+      aspectRatio: value.aspectRatio ?? 'original'
     };
     const project = existing
       ? this.projectRepo.update(existing.id, draft)
@@ -308,7 +311,10 @@ export class WorkbenchService {
       .update(JSON.stringify([
         this.canonicalMergeLinks(value.linksText),
         value.sourceFolder, value.tempFolder, value.outputFolder, value.finalFileName,
-        value.qualityProfileId, value.resourceProfileId, value.timelineOnly === true
+        value.qualityProfileId, value.resourceProfileId, value.timelineOnly === true,
+        // Giai đoạn 6 mục 4: đổi preset tỉ lệ phải làm chữ ký khác đi — nếu không, đổi tỉ lệ rồi bấm chạy
+        // lại sẽ bị coi là "không đổi gì" và dùng lại thành phẩm CŨ (sai tỉ lệ) thay vì xử lý lại.
+        value.aspectRatio ?? 'original'
       ]), 'utf8')
       .digest('hex');
   }
@@ -324,7 +330,8 @@ export class WorkbenchService {
       project.outputFolder === value.outputFolder &&
       project.finalFileName === value.finalFileName &&
       project.qualityProfileId === value.qualityProfileId &&
-      project.resourceProfileId === value.resourceProfileId;
+      project.resourceProfileId === value.resourceProfileId &&
+      project.aspectRatio === (value.aspectRatio ?? 'original');
   }
   public async startMerge(value: DownloadMergeInput): Promise<WorkbenchSlotState> {
     await this.assertDownloadReady();

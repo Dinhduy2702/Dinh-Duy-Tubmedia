@@ -271,6 +271,7 @@ src/main/ipc/register-ipc.ts
 src/main/ipc/wire-error.ts
 src/main/logging/diagnostic-exporter.ts
 src/main/logging/logger.ts
+src/main/media/aspect-ratio-filter.ts
 src/main/media/file-verifier.ts
 src/main/media/local-cut-command.ts
 src/main/media/local-cut-service.ts
@@ -482,6 +483,7 @@ tests/unit/media-analyzer-hdr.test.ts
 tests/unit/media-duration-sanity.test.ts
 tests/unit/merge-checkpoint-file-name.test.ts
 tests/unit/merge-checkpoint-ownership-hotfix13.test.ts
+tests/unit/merge-engine-aspect-ratio.test.ts
 tests/unit/merge-output-integrity.test.ts
 tests/unit/merge-product-name-length.test.ts
 tests/unit/merge-target.test.ts

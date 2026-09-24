@@ -1711,9 +1711,31 @@ export class QueueManager {
       },
       { trustedOutputPath, legacyPendingPaths }
     );
+    // Giai đoạn 6 mục 4 (2026-09-24) — Preset xuất theo nền tảng: bước RIÊNG, chạy SAU khi merge() đã
+    // commit xong thành phẩm gốc như cũ (không đụng tới merge()/checkpoint/recovery). Tệp gốc vẫn còn
+    // nguyên trên đĩa; thành phẩm đã đổi tỉ lệ là tệp MỚI và trở thành outputPath chính của tác vụ vì đó
+    // mới là thứ người dùng đã chọn xuất ra.
+    let finalVideoPath = result.video;
+    if (project.aspectRatio !== 'original') {
+      finalVideoPath = await this.merger.applyAspectRatio(
+        job.id,
+        result.video,
+        project.aspectRatio,
+        project.outputFolder,
+        project.finalFileName,
+        signal,
+        (progress) => {
+          this.updateProgress(job.id, progress.percent, progress.speed, progress.etaSeconds, 'merging', false, {
+            progressStage: 'Đang đổi tỉ lệ khung hình (nền mờ kiểu CapCut)',
+            progressProcessedSeconds: progress.processedSeconds,
+            progressTotalSeconds: progress.totalSeconds
+          });
+        }
+      );
+    }
     this.repo.updateInput(job.id, {
       productName: project.finalFileName,
-      outputPath: result.video,
+      outputPath: finalVideoPath,
       mergeRecoveryMode: result.recoveryMode,
       reusedExistingOutput: result.reusedExisting,
       resultMessage:

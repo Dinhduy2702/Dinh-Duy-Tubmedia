@@ -2,6 +2,11 @@ import { z } from 'zod';
 
 export const idSchema = z.string().uuid();
 export const pathSchema = z.string().trim().min(1).max(32_768);
+// Dùng chung cho "Cắt tệp có sẵn" (Giai đoạn 6 mục 3) VÀ preset xuất theo nền tảng ở Ghép theo Timeline
+// (Giai đoạn 6 mục 4) — cùng một khái niệm tỉ lệ khung hình, cùng cơ chế nền mờ kiểu CapCut khi khác
+// 'original'. Enum khớp LOCAL_CUT_ASPECT_RATIOS ở src/shared/local-cut.ts (không import chéo vào tệp này,
+// giữ đúng phong cách tự chứa hiện có).
+export const aspectRatioSchema = z.enum(['original', '9:16', '1:1', '16:9']).default('original');
 export const projectCreateSchema = z.object({
   name: z.string().trim().min(1).max(160),
   code: z.string().trim().max(80).nullable().optional(),
@@ -12,7 +17,8 @@ export const projectCreateSchema = z.object({
   finalFileName: z.string().trim().min(1).max(220),
   qualityProfileId: z.string().min(1),
   resourceProfileId: z.string().min(1),
-  exportTimelineTxt: z.boolean().optional()
+  exportTimelineTxt: z.boolean().optional(),
+  aspectRatio: aspectRatioSchema
 });
 export const projectUpdateSchema = projectCreateSchema.partial().extend({ id: idSchema });
 export const parseInputSchema = z.object({ text: z.string().max(10_000_000) });
@@ -190,7 +196,9 @@ export const downloadMergeDraftSchema = z.object({
   resourceProfileId: z.string().max(160),
   exportTimelineTxt: z.boolean(),
   /** TUBMEDIA TIMELINE ONLY IPC HOTFIX12 */
-  timelineOnly: z.boolean().default(false)
+  timelineOnly: z.boolean().default(false),
+  /** Giai đoạn 6 mục 4 (2026-09-24): preset xuất theo nền tảng — chỉ đổi tỉ lệ khung hình. */
+  aspectRatio: aspectRatioSchema
 });
 export const downloadMergeSchema = z.object({
   slot: mergeLaneIdSchema,
@@ -203,7 +211,9 @@ export const downloadMergeSchema = z.object({
   qualityProfileId: z.string().min(1).max(160),
   resourceProfileId: z.string().min(1).max(160),
   exportTimelineTxt: z.boolean(),
-  timelineOnly: z.boolean().default(false)
+  timelineOnly: z.boolean().default(false),
+  /** Giai đoạn 6 mục 4 (2026-09-24): preset xuất theo nền tảng — chỉ đổi tỉ lệ khung hình. */
+  aspectRatio: aspectRatioSchema
 });
 
 export const cookieTextSchema = z.object({ text: z.string().min(1).max(20_000_000) });
@@ -295,14 +305,11 @@ export const previewFrameRequestSchema = z
 // Giai đoạn 6 mục 2/3 (2026-09-23/24): "Cắt tệp có sẵn" — cắt một đoạn từ video đã có sẵn trên máy, không
 // qua tải. filePath không dùng pathSchema (giới hạn 32KB, cho đường dẫn thư mục) vì đây là đường dẫn
 // TỆP — vẫn giới hạn độ dài hợp lý để chặn giá trị bất thường.
-// Mục 3: thêm aspectRatio (đổi tỉ lệ khung hình kiểu CapCut) — enum khớp LOCAL_CUT_ASPECT_RATIOS ở
-// src/shared/local-cut.ts (không import chéo, giữ đúng phong cách tự chứa hiện có của tệp này).
-const localCutAspectRatioSchema = z.enum(['original', '9:16', '1:1', '16:9']).default('original');
 export const localCutPreviewFrameRequestSchema = z
   .object({
     filePath: z.string().trim().min(1).max(4096),
     timestampSeconds: z.number().min(0).max(86_400),
-    aspectRatio: localCutAspectRatioSchema.optional()
+    aspectRatio: aspectRatioSchema
   })
   .strict();
 export const localCutRequestSchema = z
@@ -312,7 +319,7 @@ export const localCutRequestSchema = z
     startTime: z.string().trim().min(1).max(32),
     endTime: z.string().trim().min(1).max(32),
     accurateCut: z.boolean().default(false),
-    aspectRatio: localCutAspectRatioSchema.optional()
+    aspectRatio: aspectRatioSchema
   })
   .strict();
 export const localCutTaskSchema = z

@@ -39,6 +39,13 @@ import type { QuarantineService } from '../media/quarantine-service.js';
 import { ensureDirectory } from '../files/ensure-directory.js';
 import { ensureTubmediaOwnedDirectory } from '../files/file-ownership.js';
 import { commitFileWithoutOverwrite } from '../files/non-conflicting-path.js';
+// Giai đoạn 6 mục 4 (2026-09-24): preset xuất theo nền tảng — tái dùng NGUYÊN VẸN bộ lọc nền mờ kiểu
+// CapCut đã làm và xác minh thật ở "Cắt tệp có sẵn" (mục 3). Cố tình KHÔNG chạm vào merge()/checkpoint —
+// đây là một bước xử lý RIÊNG, chạy SAU khi merge() đã hoàn tất và commit xong thành phẩm như cũ, để
+// không đụng tới bất kỳ bất biến nào của hệ thống checkpoint/phục hồi ghép đã có (đã kiểm chứng qua hàng
+// chục bài "Hotfix" trong npm run check).
+import type { LocalCutAspectRatio } from '@shared/local-cut.js';
+import { ASPECT_RATIO_DIMENSIONS, buildAspectRatioFilter } from '../media/aspect-ratio-filter.js';
 
 export interface MergeInput {
   path: string;
@@ -75,6 +82,15 @@ export interface MergeProgress {
   totalSeconds: number;
   currentItem: number;
   itemCount: number;
+}
+
+/** Giai đoạn 6 mục 4: tiến trình của bước đổi tỉ lệ khung hình RIÊNG, chạy sau khi merge() đã xong. */
+export interface AspectRatioConversionProgress {
+  percent: number;
+  speed: string | null;
+  etaSeconds: number | null;
+  processedSeconds: number;
+  totalSeconds: number;
 }
 
 export interface MergeResult {
@@ -1952,5 +1968,110 @@ export class MergeEngine {
     } finally {
       await rm(concatPath, { force: true });
     }
+  }
+
+  /**
+   * Giai đoạn 6 mục 4 (2026-09-24) — "Preset xuất theo nền tảng": đổi tỉ lệ khung hình của MỘT thành
+   * phẩm đã ghép xong (nền mờ kiểu CapCut, tái dùng đúng bộ lọc đã xác minh thật ở mục 3). Đây là bước
+   * RIÊNG, chạy SAU khi merge() đã commit xong thành phẩm gốc — không sửa merge()/checkpoint/recovery.
+   * Tệp gốc (đã ghép) được GIỮ NGUYÊN, không xóa; tệp đã đổi tỉ lệ là một tệp MỚI có hậu tố tỉ lệ trong
+   * tên, dùng commitFileWithoutOverwrite để không bao giờ ghi đè tệp có sẵn.
+   *
+   * Có thể phục hồi (resumable) đơn giản: nếu tệp đích đã tồn tại và qua được kiểm tra, dùng lại luôn,
+   * không xử lý lại — đủ an toàn cho một bước xử lý MỘT lần re-encode (không cần chữ ký checkpoint đầy
+   * đủ như merge() vì đầu vào ở đây luôn là một tệp đã hoàn chỉnh, không phải nhiều nguồn đang ghép dở).
+   */
+  public async applyAspectRatio(
+    jobId: string,
+    inputPath: string,
+    aspectRatio: Exclude<LocalCutAspectRatio, 'original'>,
+    outputFolder: string,
+    finalFileName: string,
+    signal: AbortSignal,
+    onProgress: (progress: AspectRatioConversionProgress) => void
+  ): Promise<string> {
+    const ffmpeg = this.tools.get('ffmpeg');
+    if (!ffmpeg.available || !ffmpeg.executablePath) throw new ToolNotFoundError('ffmpeg');
+
+    const safeName = sanitizeFilename(finalFileName.replace(/\.mp4$/i, ''), 'Thanh-pham');
+    const tag = aspectRatio.replace(':', 'x');
+    const desiredOutput = join(outputFolder, `${safeName} [${tag}].mp4`);
+
+    const alreadyOk = await this.verifier
+      .verify(desiredOutput, 'standard', undefined, { jobId, signal })
+      .then((result) => result.ok)
+      .catch(() => false);
+    if (alreadyOk) return desiredOutput;
+
+    const info = await this.analyzer.analyze(inputPath, jobId);
+    const { width, height } = ASPECT_RATIO_DIMENSIONS[aspectRatio];
+    const pending = join(outputFolder, `${safeName} [${tag}].pending.mp4`);
+    await rm(pending, { force: true }).catch(() => undefined);
+
+    const tracker = new FfmpegProgressTracker(info.duration);
+    const result = await this.processes.run({
+      jobId,
+      tool: 'ffmpeg',
+      executablePath: ffmpeg.executablePath,
+      args: [
+        '-hide_banner',
+        '-y',
+        '-i',
+        inputPath,
+        '-filter_complex',
+        buildAspectRatioFilter(width, height),
+        '-map',
+        '0:a:0?',
+        '-c:v',
+        'libx264',
+        '-preset',
+        'veryfast',
+        '-crf',
+        '18',
+        '-c:a',
+        'aac',
+        '-ar',
+        '48000',
+        '-movflags',
+        '+faststart',
+        '-progress',
+        'pipe:1',
+        '-nostats',
+        pending
+      ],
+      priority: 'below_normal',
+      signal,
+      timeoutMs: 24 * 60 * 60 * 1000,
+      onStdoutLine: (line) => {
+        const snapshot = tracker.update(line);
+        if (!snapshot) return;
+        onProgress({
+          percent: snapshot.percent,
+          speed: snapshot.speed,
+          etaSeconds: snapshot.etaSeconds,
+          processedSeconds: snapshot.processedSeconds,
+          totalSeconds: snapshot.totalSeconds
+        });
+      }
+    });
+
+    if (result.code !== 0) {
+      await rm(pending, { force: true }).catch(() => undefined);
+      throw new MergeFailedError(
+        result.stderrTail.trim() || `FFmpeg kết thúc với mã ${result.code} khi đổi tỉ lệ khung hình.`
+      );
+    }
+
+    const checked = await this.verifier.verify(pending, 'standard', info.duration, {
+      jobId,
+      signal,
+      expectedStreams: { video: true, audio: info.audioCodec !== null }
+    });
+    if (!checked.ok) {
+      await rm(pending, { force: true }).catch(() => undefined);
+      throw new MergeFailedError(`Thành phẩm sau khi đổi tỉ lệ không đạt kiểm tra: ${checked.reasons.join('; ')}`);
+    }
+
+    return commitFileWithoutOverwrite(pending, desiredOutput);
   }
 }

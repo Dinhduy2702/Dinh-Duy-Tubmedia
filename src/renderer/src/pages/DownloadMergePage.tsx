@@ -42,6 +42,7 @@ import type {
   WorkbenchStorageSummary,
   WorkbenchSlotState
 } from '@shared/types/domain';
+import type { LocalCutAspectRatio } from '@shared/local-cut';
 import { parseInputText } from '@shared/utils/input-parser';
 import { sanitizeFilename } from '@shared/utils/filename';
 import { shouldShowInlineBlockingIssue } from '@shared/utils/notification-policy';
@@ -75,7 +76,18 @@ interface MergeForm {
   exportTimelineTxt: boolean;
   /** TUBMEDIA TIMELINE ONLY UI HOTFIX12 */
   timelineOnly: boolean;
+  /** Giai đoạn 6 mục 4 (2026-09-24): preset xuất theo nền tảng — chỉ đổi tỉ lệ khung hình. */
+  aspectRatio: LocalCutAspectRatio;
 }
+
+/** 4 preset phổ biến nhất theo đúng lựa chọn của người dùng — nhãn nêu rõ nền tảng thường dùng từng
+ * tỉ lệ để đúng tinh thần "preset xuất theo nền tảng", dù cơ chế bên trong chỉ đổi tỉ lệ khung hình. */
+const ASPECT_RATIO_PRESETS: Array<{ value: LocalCutAspectRatio; label: string }> = [
+  { value: 'original', label: 'Giữ nguyên tỉ lệ nguồn' },
+  { value: '9:16', label: 'Dọc 9:16 · Shorts/TikTok/Reels' },
+  { value: '1:1', label: 'Vuông 1:1 · Bài đăng Instagram/Facebook' },
+  { value: '16:9', label: 'Ngang 16:9 · YouTube/Facebook' }
+];
 
 type MergeMap<T> = Record<MergeLaneId, T>;
 type WorkflowState = 'idle' | 'running' | 'paused' | 'failed' | 'completed';
@@ -181,7 +193,8 @@ function emptyMerge(
     qualityProfileId: settings?.defaultQualityProfileId ?? qualities[0]?.id ?? 'quality-source-size',
     resourceProfileId: settings?.defaultResourceProfileId ?? resources[0]?.id ?? 'resource-interactive',
     exportTimelineTxt: false,
-    timelineOnly: loadTimelineOnlyMode(slot)
+    timelineOnly: loadTimelineOnlyMode(slot),
+    aspectRatio: 'original'
   };
 }
 function recommendedMergeLimit(hardware: HardwareProfile | null): { pipelines: 1 | 2 | 3 | 4; note: string } {
@@ -744,7 +757,8 @@ export function DownloadMergePage(): React.JSX.Element {
               qualityProfileId: current.project.qualityProfileId,
               resourceProfileId: current.project.resourceProfileId,
               timelineOnly: current.jobs.some((job) => job.type === 'merge' && job.input.timelineOnly === true) || loadTimelineOnlyMode(slot),
-              exportTimelineTxt: false
+              exportTimelineTxt: false,
+              aspectRatio: current.project.aspectRatio
             };
           }
         }
@@ -942,7 +956,8 @@ export function DownloadMergePage(): React.JSX.Element {
             tempFolder: rememberedTemp,
             outputFolder: rememberedOutput,
             qualityProfileId: source.qualityProfileId,
-            resourceProfileId: source.resourceProfileId
+            resourceProfileId: source.resourceProfileId,
+            aspectRatio: source.aspectRatio
           }
         }));
         setActiveLane(target);
@@ -1516,6 +1531,29 @@ function MergeLaneCard({
                 </option>
               ))}
             </select>
+          </label>
+          <label className="compact-config-aspect-ratio">
+            <span className="label">Preset xuất theo nền tảng</span>
+            <select
+              className="select"
+              disabled={locked || form.timelineOnly}
+              value={form.aspectRatio}
+              onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                update((current) => ({ ...current, aspectRatio: event.target.value as LocalCutAspectRatio }))
+              }
+            >
+              {ASPECT_RATIO_PRESETS.map((preset) => (
+                <option key={preset.value} value={preset.value}>
+                  {preset.label}
+                </option>
+              ))}
+            </select>
+            {form.aspectRatio !== 'original' && (
+              <small className="merge-aspect-ratio-note">
+                Nền mờ phóng to từ chính video, video gốc giữ nguyên tỉ lệ ở giữa (kiểu CapCut) — chạy thêm một
+                bước xử lý sau khi ghép xong nên mất thêm thời gian.
+              </small>
+            )}
           </label>
         </div>
         <label className={`merge-timeline-only-option ${form.timelineOnly ? 'is-active' : ''}`}>

@@ -1,3 +1,7 @@
+// Giai đoạn 6 mục 4 (2026-09-24): preset xuất theo nền tảng ở Ghép theo Timeline dùng lại đúng khái niệm
+// tỉ lệ khung hình đã có ở "Cắt tệp có sẵn" (mục 3) — cùng 4 giá trị, cùng cơ chế nền mờ kiểu CapCut.
+import type { LocalCutAspectRatio } from '../local-cut.js';
+
 export type ProjectStatus = 'draft' | 'active' | 'paused' | 'completed' | 'archived' | 'error';
 export type JobStatus =
   | 'pending'
@@ -43,6 +47,8 @@ export interface Project {
   qualityProfileId: string;
   resourceProfileId: string;
   exportTimelineTxt: boolean;
+  /** Giai đoạn 6 mục 4: preset xuất theo nền tảng (chỉ đổi tỉ lệ khung hình, mặc định 'original'). */
+  aspectRatio: LocalCutAspectRatio;
   createdAt: string;
   updatedAt: string;
   archivedAt: string | null;
@@ -59,6 +65,7 @@ export interface ProjectCreateInput {
   qualityProfileId: string;
   resourceProfileId: string;
   exportTimelineTxt?: boolean;
+  aspectRatio?: LocalCutAspectRatio;
 }
 
 export interface ParsedInputLine {
@@ -479,6 +486,8 @@ export interface DownloadMergeInput {
   exportTimelineTxt: boolean;
   /** TUBMEDIA TIMELINE ONLY CONTRACT HOTFIX12 */
   timelineOnly?: boolean;
+  /** Giai đoạn 6 mục 4: preset xuất theo nền tảng (chỉ đổi tỉ lệ khung hình, mặc định 'original'). */
+  aspectRatio?: LocalCutAspectRatio;
 }
 
 export interface WorkbenchSlotState {
