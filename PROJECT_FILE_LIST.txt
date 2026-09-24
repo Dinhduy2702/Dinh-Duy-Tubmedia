@@ -407,6 +407,7 @@ src/shared/utils/filename.ts
 src/shared/utils/hardware-recommendation.ts
 src/shared/utils/input-parser.ts
 src/shared/utils/job-state-machine.ts
+src/shared/utils/media-info-format.ts
 src/shared/utils/merge-target.ts
 src/shared/utils/normalization-match.ts
 src/shared/utils/notice-tone.ts
@@ -481,6 +482,7 @@ tests/unit/local-cut.test.ts
 tests/unit/logger-resilience.test.ts
 tests/unit/media-analyzer-hdr.test.ts
 tests/unit/media-duration-sanity.test.ts
+tests/unit/media-info-format.test.ts
 tests/unit/merge-checkpoint-file-name.test.ts
 tests/unit/merge-checkpoint-ownership-hotfix13.test.ts
 tests/unit/merge-engine-aspect-ratio.test.ts

@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, FileVideo, FolderOpen, ImagePlay, Scissors, Square } from 'lucide-react';
+import { AlertTriangle, FileVideo, FolderOpen, ImagePlay, Info, Scissors, Square } from 'lucide-react';
 import type { QuickDownloadStatus } from '@shared/quick-download';
+import type { MediaInfo } from '@shared/types/domain';
 import type { LocalCutAspectRatio, LocalCutStatus } from '@shared/local-cut';
 import { parseQuickDownloadTime } from '@shared/local-cut';
+import { formatTimestamp } from '@shared/utils/timestamp';
+import { formatBitrate, formatFileSize, formatFps, formatHdr, formatVideoCodec } from '@shared/utils/media-info-format';
 import { StepTabs } from '../components/StepTabs';
 import { Card } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
@@ -40,8 +43,10 @@ function directoryNameOf(path: string): string | null {
  * nền mờ kiểu CapCut) ngay trong cùng công cụ này — chọn tỉ lệ khác 'original' luôn buộc mã hóa lại nên
  * ô "cắt chính xác" bị khóa ở trạng thái bật kèm ghi chú. Mục 4 bước 2 (2026-09-24) đổi nhãn các lựa
  * chọn tỉ lệ thành preset có tên nền tảng (khớp nhãn ở Ghép theo Timeline, bước 1) — không xây UI mới,
- * không đổi cơ chế. Bộ cắt/chuẩn hóa NHIỀU tệp cùng lúc (Smart Merge) vẫn ở trang Ghép theo Timeline —
- * không lặp lại ở đây. */
+ * không đổi cơ chế. Mục 6 (2026-09-24) thêm thẻ "Xem thông tin tệp" — chọn một tệp bất kỳ (không nhất
+ * thiết liên quan tới cắt), hiển thị đầy đủ thông tin kỹ thuật qua MediaAnalyzer/ffprobe (đã có sẵn từ
+ * trước, dùng nội bộ cho luồng ghép, giờ mới đưa ra giao diện lần đầu qua IPC media:analyze). Bộ cắt/
+ * chuẩn hóa NHIỀU tệp cùng lúc (Smart Merge) vẫn ở trang Ghép theo Timeline — không lặp lại ở đây. */
 export function StepPreviewCutPage(): React.JSX.Element {
   const setPage = useAppStore((state) => state.setPage);
   const [latest, setLatest] = useState<QuickDownloadStatus | null>(null);
@@ -53,6 +58,11 @@ export function StepPreviewCutPage(): React.JSX.Element {
   const [endTime, setEndTime] = useState('00:00:10');
   const [accurateCut, setAccurateCut] = useState(false);
   const [aspectRatio, setAspectRatio] = useState<LocalCutAspectRatio>('original');
+
+  const [infoFile, setInfoFile] = useState<string | null>(null);
+  const [info, setInfo] = useState<MediaInfo | null>(null);
+  const [infoLoading, setInfoLoading] = useState(false);
+  const [infoError, setInfoError] = useState<string | null>(null);
 
   const [previewFrames, setPreviewFrames] = useState<{ start: string; end: string } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -143,6 +153,30 @@ export function StepPreviewCutPage(): React.JSX.Element {
       if (selected) setOutputDirectory(selected);
     } catch (chooseError) {
       setError(safeUiText(chooseError, 'Không chọn được thư mục lưu.'));
+    }
+  }
+
+  // Giai đoạn 6 mục 6 (2026-09-24) — "Xem thông tin tệp": dùng lại đúng hộp thoại chọn tệp của "Cắt tệp
+  // có sẵn" (localCut.chooseFile) nhưng KHÔNG liên quan tới việc cắt — chỉ để xem thông tin. Tự động phân
+  // tích ngay sau khi chọn tệp, không cần thêm một cú bấm nữa.
+  async function chooseInfoFile(): Promise<void> {
+    try {
+      const selected = await window.desktop.localCut.chooseFile();
+      if (!selected) return;
+      setInfoFile(selected);
+      setInfo(null);
+      setInfoError(null);
+      setInfoLoading(true);
+      try {
+        const result = await window.desktop.media.analyze(selected);
+        setInfo(result);
+      } catch (analyzeError) {
+        setInfoError(safeUiText(analyzeError, 'Không đọc được thông tin tệp.'));
+      } finally {
+        setInfoLoading(false);
+      }
+    } catch (chooseError) {
+      setInfoError(safeUiText(chooseError, 'Không chọn được tệp.'));
     }
   }
 
@@ -402,6 +436,58 @@ export function StepPreviewCutPage(): React.JSX.Element {
             </div>
           )}
         </>
+      )}
+    </Card>
+
+    <Card icon={Info} title="Xem thông tin tệp" subtitle="Chọn một video bất kỳ để xem đầy đủ thông tin kỹ thuật (độ phân giải, codec, bitrate, dung lượng...)">
+      <div className="local-cut-file-row">
+        <div>
+          {infoFile ? (
+            <>
+              <b>{baseNameOf(infoFile)}</b>
+              <small title={infoFile}>{infoFile}</small>
+            </>
+          ) : (
+            <span style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>Chưa chọn tệp nào</span>
+          )}
+        </div>
+        <button type="button" className="btn btn-small" disabled={infoLoading} onClick={() => void chooseInfoFile()}>
+          {infoFile ? 'Đổi tệp khác' : 'Chọn tệp'}
+        </button>
+      </div>
+
+      {infoLoading && (
+        <p style={{ marginTop: '0.8rem', color: 'var(--muted)', fontSize: '0.8rem' }}>Đang đọc thông tin tệp…</p>
+      )}
+
+      {infoError && (
+        <div className="quick-download-error" role="alert" style={{ marginTop: '0.8rem' }}>
+          <AlertTriangle size={15}/>
+          {infoError}
+        </div>
+      )}
+
+      {info && !infoLoading && (
+        <dl className="local-cut-info-grid">
+          <div><dt>Độ phân giải</dt><dd>{info.width} × {info.height}{info.displayAspectRatio ? ` (${info.displayAspectRatio})` : ''}</dd></div>
+          <div><dt>Thời lượng</dt><dd>{formatTimestamp(info.duration)}</dd></div>
+          <div><dt>Khung hình/giây</dt><dd>{formatFps(info)}</dd></div>
+          <div><dt>Codec hình</dt><dd>{formatVideoCodec(info)}</dd></div>
+          <div><dt>Bitrate hình</dt><dd>{formatBitrate(info.videoBitrate)}</dd></div>
+          <div><dt>Độ sâu màu</dt><dd>{info.bitDepth ? `${info.bitDepth}-bit` : 'Không rõ'}</dd></div>
+          <div><dt>Định dạng điểm ảnh</dt><dd>{info.pixelFormat}</dd></div>
+          <div><dt>HDR</dt><dd>{formatHdr(info)}</dd></div>
+          <div><dt>Codec âm thanh</dt><dd>{info.audioCodec ? info.audioCodec.toUpperCase() : 'Không có âm thanh'}</dd></div>
+          {info.audioCodec && (
+            <>
+              <div><dt>Bitrate âm thanh</dt><dd>{formatBitrate(info.audioBitrate)}</dd></div>
+              <div><dt>Kênh âm thanh</dt><dd>{info.channels ? `${info.channels} kênh${info.channelLayout ? ` (${info.channelLayout})` : ''}` : 'Không rõ'}</dd></div>
+              <div><dt>Tần số lấy mẫu</dt><dd>{info.sampleRate ? `${info.sampleRate} Hz` : 'Không rõ'}</dd></div>
+            </>
+          )}
+          <div><dt>Định dạng tệp</dt><dd>{info.formatName ?? 'Không rõ'}</dd></div>
+          <div><dt>Dung lượng tệp</dt><dd>{formatFileSize(info.fileSize)}</dd></div>
+        </dl>
       )}
     </Card>
   </div>;

@@ -987,3 +987,119 @@ test('Giai đoạn 6 mục 3: đổi tỉ lệ khung hình khi cắt tệp có s
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
 });
+
+test('Giai đoạn 6 mục 6: xem thông tin tệp — media:analyze trả đúng thông số thật của tệp cục bộ bất kỳ', async () => {
+  const toolsDirectory = resolveToolsDirectoryForTest();
+  test.skip(!toolsDirectory, 'Không tìm thấy ffmpeg/ffprobe trên máy này để chạy bài kiểm thật.');
+
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-media-analyze-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+  db.exec(
+    'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
+  );
+  db.prepare(
+    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+  ).run(
+    'app',
+    JSON.stringify({
+      theme: 'dark',
+      startWithWindows: false,
+      autoCheckAppUpdates: false,
+      autoCheckToolUpdates: false,
+      ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+      ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+    }),
+    new Date().toISOString()
+  );
+  db.close();
+
+  // Thông số ĐÃ BIẾT trước, dựng bằng ffmpeg thật — dùng để đối chiếu với kết quả media:analyze thật.
+  const sourceFile = path.join(sandbox, 'video-thong-tin.mp4');
+  const ffmpegResult = spawnSync(
+    path.join(toolsDirectory!, 'ffmpeg.exe'),
+    [
+      '-y', '-f', 'lavfi', '-i', 'testsrc=size=960x540:rate=24:duration=6',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:duration=6',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', '-b:a', '128k', sourceFile
+    ],
+    { stdio: 'ignore', windowsHide: true, timeout: 60_000 }
+  );
+  expect(ffmpegResult.status, 'ffmpeg phải dựng được video thử với thông số đã biết trước').toBe(0);
+  const realFileSize = fs.statSync(sourceFile).size;
+
+  try {
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+        ),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+
+    interface DesktopMediaApi {
+      tools: { list: () => Promise<Array<{ name: string; available: boolean }>> };
+      media: {
+        analyze: (path: string) => Promise<{
+          width: number;
+          height: number;
+          fps: number;
+          duration: number;
+          videoCodec: string;
+          audioCodec: string | null;
+          fileSize: number;
+        }>;
+      };
+    }
+
+    // media:analyze dùng ffprobe (không phải ffmpeg) — phải đợi đúng công cụ cần dùng sẵn sàng.
+    let toolsReady = false;
+    const readyDeadline = Date.now() + 30_000;
+    while (Date.now() < readyDeadline) {
+      const list = await shellWindow.evaluate(
+        () => (window as unknown as { desktop: DesktopMediaApi }).desktop.tools.list()
+      );
+      if (list.find((item) => item.name === 'ffprobe')?.available) {
+        toolsReady = true;
+        break;
+      }
+      await sleep(300);
+    }
+    expect(toolsReady, 'ffprobe phải sẵn sàng trong 30s').toBe(true);
+
+    const info = await shellWindow.evaluate(
+      (filePath) => (window as unknown as { desktop: DesktopMediaApi }).desktop.media.analyze(filePath),
+      sourceFile
+    );
+    expect(info.width, 'chiều rộng thật phải khớp đúng thông số đã dựng').toBe(960);
+    expect(info.height, 'chiều cao thật phải khớp đúng thông số đã dựng').toBe(540);
+    expect(info.fps, 'khung hình/giây thật phải khớp đúng thông số đã dựng').toBe(24);
+    expect(Math.abs(info.duration - 6), 'thời lượng thật phải xấp xỉ đúng 6 giây').toBeLessThanOrEqual(0.5);
+    expect(info.videoCodec, 'codec hình thật phải là h264').toBe('h264');
+    expect(info.audioCodec, 'codec âm thanh thật phải là aac').toBe('aac');
+    expect(info.fileSize, 'dung lượng tệp thật phải khớp đúng fs.stat thật trên đĩa').toBe(realFileSize);
+
+    // Tệp không tồn tại: phải báo lỗi rõ ràng bằng tiếng Việt, không để lộ lỗi ffprobe thô.
+    await expect(
+      shellWindow.evaluate(
+        (filePath) => (window as unknown as { desktop: DesktopMediaApi }).desktop.media.analyze(filePath),
+        path.join(sandbox, 'khong-ton-tai.mp4')
+      )
+    ).rejects.toThrow(/không tìm thấy tệp/i);
+  } finally {
+    await closeElectronApplication();
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});

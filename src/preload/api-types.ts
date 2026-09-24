@@ -8,6 +8,7 @@ import type {
   DownloadMergeInput,
   HardwareProfile,
   LogEntry,
+  MediaInfo,
   ParsedInputLine,
   Project,
   ProjectCreateInput,
@@ -147,7 +148,9 @@ export interface DesktopApi {
     openFolder(): Promise<string>;
   };
   media: {
-    analyze(path: string): Promise<unknown>;
+    // Giai đoạn 6 mục 6 (2026-09-24) — "Xem thông tin tệp": handler đã có sẵn từ trước, chỉ gắn kiểu
+    // đúng (MediaInfo, thay cho unknown) để dùng được từ giao diện.
+    analyze(path: string): Promise<MediaInfo>;
     verifyFile(path: string, level: 'fast' | 'standard' | 'deep'): Promise<unknown>;
     mergeProject(projectId: string): Promise<QueueJob[]>;
   };

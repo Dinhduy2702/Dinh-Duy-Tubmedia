@@ -158,3 +158,32 @@
   display: block;
   word-break: break-all;
 }
+
+/* Giai đoạn 6 mục 6 (2026-09-24) — "Xem thông tin tệp": lưới nhãn/giá trị đơn giản, giống tinh thần
+ * merge-quality-detail-grid đã có, nhưng gọn hơn cho danh sách nhiều dòng thông tin kỹ thuật. */
+.local-cut-info-grid {
+  margin: 0.8rem 0 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.5rem 1rem;
+}
+
+.local-cut-info-grid > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.local-cut-info-grid dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.local-cut-info-grid dd {
+  margin: 0;
+  font-size: 0.78rem;
+  text-align: right;
+}

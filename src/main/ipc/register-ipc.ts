@@ -1,5 +1,5 @@
 import { app, clipboard, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { IPC } from '@shared/contracts/channels.js';
 import { runWithWireErrors } from './wire-error.js';
@@ -371,7 +371,14 @@ export function registerIpc(ctx: AppContext): void {
     return folder;
   });
 
-  handle(IPC.media.analyze, showPathSchema, ({ path }) => ctx.analyzer.analyze(path));
+  // Giai đoạn 6 mục 6 (2026-09-24) — "Xem thông tin tệp": handler này đã có sẵn từ trước (dùng nội bộ
+  // trong luồng ghép, đã bao gồm sẵn fileSize) nhưng chưa từng được đưa ra giao diện. Thêm kiểm tra tệp
+  // tồn tại để báo lỗi rõ ràng bằng tiếng Việt thay vì để lỗi ffprobe thô lọt ra ngoài.
+  handle(IPC.media.analyze, showPathSchema, async ({ path }) => {
+    const fileStat = await stat(path).catch(() => null);
+    if (!fileStat || !fileStat.isFile()) throw new Error('Không tìm thấy tệp.');
+    return ctx.analyzer.analyze(path);
+  });
   handle(IPC.media.verifyFile, verifyFileSchema, ({ path, level }) => ctx.verifier.verify(path, level));
   handle(IPC.media.mergeProject, projectIdSchema, ({ projectId }) => ctx.queue.enqueueProject(projectId));
 
