@@ -1,3 +1,17 @@
+# Tubmedia 1.4.0
+
+- Giao diện làm mới toàn bộ: điều hướng 3 bước (Tải / Xem trước & Cắt / Ghép & Xuất), bộ màu ngữ nghĩa theo logo, chế độ sáng đồng nhất toàn ứng dụng kể cả thanh bên, thông báo có kiểu riêng theo mức độ, kéo-thả sắp thứ tự đoạn trong Ghép theo Timeline.
+- Thêm cắt tệp có sẵn trên máy (không cần tải lại), hỗ trợ cả cắt nhanh và cắt chính xác.
+- Thêm đổi tỉ lệ khung hình 9:16/1:1/16:9 (nền mờ kiểu CapCut) cho cả Ghép theo Timeline lẫn Cắt tệp có sẵn, cùng preset xuất sẵn theo nền tảng (Shorts/TikTok/Reels, Instagram/Facebook, YouTube/Facebook).
+- Thêm xem thông tin chi tiết tệp video: độ phân giải, khung hình/giây, codec, HDR, bitrate...
+- Thêm ghi credit (tên kênh, URL nguồn, ngày tải, đoạn đã cắt nếu có) vào metadata ẩn của tệp Tải nhanh, không chèn chữ lên hình, mặc định bật; chạy ngầm sau khi báo hoàn tất nên không làm treo giao diện.
+- Thêm mẫu đặt tên tệp tùy chỉnh cho Tải nhanh, cấu hình trong Cài đặt.
+- Tải theo khoảng: thêm xem trước khung hình đầu/cuối đoạn trước khi tải.
+- Viết lại hoàn toàn Dọn dẹp máy: bỏ hẳn PowerShell/quyền quản trị; xóa qua khu cách ly riêng, có thể hoàn tác trong 14 ngày thay vì xóa thẳng.
+- Thêm bộ điều tiết tự động tạm hoãn tác vụ mới khi CPU máy đang bận, không ảnh hưởng tác vụ đang chạy dở; đề xuất hồ sơ hiệu năng theo đúng RAM còn trống thay vì RAM tổng máy.
+- Ghi chú phát hành trong bản cập nhật giờ lấy trực tiếp từ CHANGELOG.md cho cả hai quy trình phát hành, tránh lệch nội dung giữa hai nơi.
+- Rà soát toàn diện logic tải/ghép: sửa vài trường hợp hủy giữa chừng bị báo nhầm "thất bại" thay vì "đã hủy" ở bước xác minh; gộp logic dựng tham số cookie yt-dlp dùng chung cho mọi luồng tải để tránh lệch hành vi giữa các luồng.
+
 # Tubmedia 1.3.7
 
 - Sửa lỗi ghép video bị chặn sai khi FFprobe báo 30,000 FPS và 29,996 FPS dù chênh lệch chỉ 0,004 FPS.

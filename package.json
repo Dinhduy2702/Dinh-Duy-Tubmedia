@@ -1,6 +1,6 @@
 {
   "name": "video-download-merge-studio-pro",
-  "version": "1.3.7",
+  "version": "1.4.0",
   "description": "Tubmedia — trung tâm tải, quản lý hàng đợi và chuẩn bị video cho editor với giao diện Studio.",
   "main": "./out/main/index.js",
   "author": "Đình Duy Tubmedia",
