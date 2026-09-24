@@ -56,7 +56,15 @@ const groups: Array<{ label: string; items: SidebarItem[] }> = [
   {
     label: 'CÔNG CỤ',
     items: [
-      { id: 'step-download', label: 'Tải 1 video', hint: 'Tiện ích nhanh: tải một video, chọn đoạn cần dùng', icon: Download, step: 1 },
+      {
+        id: 'step-download',
+        label: 'Tải 1 video',
+        // A2 mục 4 (2026-09-25): làm rõ quan hệ với "Tải danh sách" ở nhóm VIỆC CHÍNH — người dùng mới dễ
+        // nhầm hai lối vào tưởng như trùng việc. Không đổi kiến trúc/không gộp trang, chỉ thêm gợi ý.
+        hint: 'Chỉ 1 video — cần nhiều video cùng lúc thì dùng Tải danh sách ở trên',
+        icon: Download,
+        step: 1
+      },
       { id: 'step-preview-cut', label: 'Xem trước & Cắt', hint: 'Xem và cắt đoạn đã tải', icon: Scissors, step: 2 },
       { id: 'step-merge-export', label: 'Ghép & Xuất', hint: 'Ghép các đoạn và xuất thành phẩm', icon: Sparkles, step: 3 },
       {

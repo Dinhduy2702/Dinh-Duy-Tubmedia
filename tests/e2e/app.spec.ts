@@ -1757,3 +1757,95 @@ test('A1: giới hạn quy trình song song đã tăng đúng từ 4 lên 6 (IPC
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
 });
+
+/**
+ * A2 (2026-09-25) — 3 đề xuất tinh gọn giao diện đã được duyệt (mục 2 đã rút lại vì đọc code xác nhận
+ * không phải lỗi thật): (1) bỏ thẻ "Bộ xử lý" trùng với thanh trên cùng ở trang Chẩn đoán; (3) ẩn nút
+ * "Tiếp tục tất cả"/"Tạm dừng tất cả" ở thanh trên cùng khi đang đứng ngay tại trang Hàng đợi (đã xác
+ * nhận qua code: 2 nút gọi ĐÚNG CÙNG lệnh queue.resumeAll()/pauseAll()); (4) dòng gợi ý "Tải 1 video"
+ * làm rõ quan hệ với "Tải danh sách". Bài kiểm thật này xác nhận cả 3 trên giao diện thật, không chỉ đọc
+ * code — không cần yt-dlp/ffmpeg vì chỉ kiểm tra bố cục/nút bấm, không tải/ghép gì.
+ */
+test('A2: 3 đề xuất tinh gọn giao diện đã duyệt hoạt động đúng trên giao diện thật', async () => {
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-a2-declutter-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+  db.exec(
+    'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
+  );
+  db.close();
+
+  try {
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+        ),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+
+    // ---- Mục 4: dòng gợi ý "Tải 1 video" đã làm rõ quan hệ với "Tải danh sách" ----
+    const stepDownloadTitle = await shellWindow.evaluate(
+      () => document.querySelector<HTMLElement>('[data-page-id="step-download"]')?.title ?? ''
+    );
+    expect(stepDownloadTitle, 'gợi ý ở mục "Tải 1 video" phải nhắc tới "Tải danh sách"').toContain(
+      'Tải danh sách'
+    );
+
+    // ---- Mục 3: nút "Tiếp tục tất cả"/"Tạm dừng tất cả" ở thanh trên cùng VẪN hiện ở trang KHÁC ----
+    await shellWindow.evaluate(() =>
+      document.querySelector<HTMLElement>('[data-page-id="download-workbench"]')?.click()
+    );
+    await shellWindow.waitForTimeout(300);
+    expect(
+      await shellWindow.locator('.topbar-pause').count(),
+      'nút Tiếp tục/Tạm dừng tất cả ở thanh trên cùng phải VẪN hiện ở trang khác Hàng đợi'
+    ).toBe(1);
+
+    // ---- Mục 3: nút đó BỊ ẨN khi đang đứng ngay ở trang Hàng đợi (chỉ còn bản riêng của trang) ----
+    await shellWindow.evaluate(() => document.querySelector<HTMLElement>('[data-page-id="activity"]')?.click());
+    await shellWindow.waitForTimeout(300);
+    expect(
+      await shellWindow.locator('.topbar-pause').count(),
+      'nút Tiếp tục/Tạm dừng tất cả ở thanh trên cùng phải BỊ ẨN khi đang ở đúng trang Hàng đợi'
+    ).toBe(0);
+    const activityPageHasOwnButton = await shellWindow.evaluate(() =>
+      Array.from(document.querySelectorAll('button')).some(
+        (button) => button.textContent?.includes('Tiếp tục tất cả') || button.textContent?.includes('Tạm dừng tất cả')
+      )
+    );
+    expect(activityPageHasOwnButton, 'trang Hàng đợi phải vẫn còn đúng 1 nút riêng của nó').toBe(true);
+
+    // ---- Mục 1: trang Chẩn đoán không còn thẻ "Bộ xử lý" trùng với thanh trên cùng ----
+    await shellWindow.evaluate(() => document.querySelector<HTMLElement>('[data-page-id="diagnostics"]')?.click());
+    await shellWindow.waitForTimeout(300);
+    const diagnosticsSummaryCardCount = await shellWindow.evaluate(
+      () => document.querySelector('.diagnostics-summary')?.children.length ?? 0
+    );
+    expect(diagnosticsSummaryCardCount, 'trang Chẩn đoán chỉ còn đúng 3 thẻ (bỏ thẻ CPU trùng lặp)').toBe(3);
+    const diagnosticsSummaryText = await shellWindow.evaluate(
+      () => document.querySelector('.diagnostics-summary')?.textContent ?? ''
+    );
+    expect(diagnosticsSummaryText, 'thẻ "Bộ xử lý" phải không còn ở trang Chẩn đoán').not.toContain('Bộ xử lý');
+    // Thanh trên cùng vẫn còn đúng số CPU thật (không bị đụng tới, chỉ bỏ bản trùng ở trang).
+    expect(
+      await shellWindow.locator('text=BỘ XỬ LÝ').count(),
+      'thanh trên cùng vẫn phải còn hiện số CPU như trước'
+    ).toBeGreaterThan(0);
+  } finally {
+    await closeElectronApplication();
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});

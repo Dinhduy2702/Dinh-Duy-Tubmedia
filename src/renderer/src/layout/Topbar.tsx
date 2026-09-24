@@ -43,6 +43,7 @@ const ACTIVE = new Set([
 const PAUSED = new Set(['paused', 'interrupted']);
 
 export function Topbar(): React.JSX.Element {
+  const page = useAppStore((state) => state.page);
   const cpuPercent = useAppStore((state) => state.stats?.cpuPercent);
   // VẤN ĐỀ 2 mục 1 (2026-09-22): hiện trạng thái khi bộ điều tiết đang tạm hoãn tác vụ mới vì máy bận.
   const systemLoadThrottled = useAppStore((state) => state.stats?.systemLoadThrottled ?? false);
@@ -252,20 +253,25 @@ export function Topbar(): React.JSX.Element {
           </span>
           {(updateReady || updateAvailable) && <i aria-hidden="true" />}
         </button>
-        <button
-          className="btn btn-primary topbar-pause"
-          disabled={busy || queueSummary.controllableCount === 0}
-          onClick={() => void toggle()}
-        >
-          {busy ? (
-            <LoaderCircle className="animate-spin" size={17} />
-          ) : queueSummary.allPaused ? (
-            <Play size={17} />
-          ) : (
-            <Pause size={17} />
-          )}
-          <span>{queueSummary.allPaused ? 'Tiếp tục tất cả' : 'Tạm dừng tất cả'}</span>
-        </button>
+        {/* A2 mục 3 (2026-09-25): ẩn nút này khi đang đứng ngay ở trang Hàng đợi — trang đó đã có nút
+            "Tiếp tục tất cả"/"Tạm dừng tất cả" riêng, gọi ĐÚNG CÙNG lệnh (queue.resumeAll()/pauseAll()),
+            nên hiện cả hai cùng lúc là trùng lặp. Vẫn hiện đầy đủ ở MỌI trang khác. */}
+        {page !== 'activity' && (
+          <button
+            className="btn btn-primary topbar-pause"
+            disabled={busy || queueSummary.controllableCount === 0}
+            onClick={() => void toggle()}
+          >
+            {busy ? (
+              <LoaderCircle className="animate-spin" size={17} />
+            ) : queueSummary.allPaused ? (
+              <Play size={17} />
+            ) : (
+              <Pause size={17} />
+            )}
+            <span>{queueSummary.allPaused ? 'Tiếp tục tất cả' : 'Tạm dừng tất cả'}</span>
+          </button>
+        )}
         <button
           id="notification-center-trigger"
           className={`btn btn-ghost topbar-icon-button topbar-notification-button ${notificationSummary.open ? 'is-open' : ''} ${notificationSummary.unread > 0 ? 'has-unread' : ''}`}
