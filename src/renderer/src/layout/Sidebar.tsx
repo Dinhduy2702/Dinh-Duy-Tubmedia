@@ -22,13 +22,17 @@ interface SidebarItem {
   label: string;
   hint: string;
   icon: typeof Download;
-  /** Có mặt ở 3 mục đầu của VIỆC CHÍNH: số hiển thị trong vòng tròn thay cho biểu tượng (đặc tả GĐ 2a). */
+  /** Có mặt ở 3 mục "Tải 1 video/Xem trước & Cắt/Ghép & Xuất": đánh dấu icon của mục này hiển thị trong
+   * vòng tròn bước riêng thay vì icon trần như các mục khác (đặc tả GĐ 2a; B4 2026-09-24 đổi nội dung
+   * vòng tròn từ số trần 1/2/3 sang icon đúng chức năng từng bước — vẫn giữ nguyên vòng tròn/màu/chuyển
+   * động cũ). Giá trị số chỉ còn dùng để SẮP THỨ TỰ hiển thị, không còn hiển thị ra giao diện. */
   step?: number;
 }
 
 // Việc CHÍNH thật sự dùng hàng ngày là tải một DANH SÁCH nhiều video rồi GHÉP đúng thứ tự thành 1 file
-// (2 trang cũ, logic không đổi — chỉ đổi vị trí/nhãn cho đúng vai trò). "Tải 1 video" (①②③) chỉ là tiện
-// ích phụ, tải nhanh một video đơn — xem TIEN_DO.md phần "Điều chỉnh thứ tự thanh bên" (2026-09-22).
+// (2 trang cũ, logic không đổi — chỉ đổi vị trí/nhãn cho đúng vai trò). "Tải 1 video" (hành trình 3 bước
+// Tải → Xem trước & Cắt → Ghép & Xuất) chỉ là tiện ích phụ, tải nhanh một video đơn — xem TIEN_DO.md phần
+// "Điều chỉnh thứ tự thanh bên" (2026-09-22).
 const groups: Array<{ label: string; items: SidebarItem[] }> = [
   {
     label: 'VIỆC CHÍNH',
@@ -122,7 +126,13 @@ export function Sidebar(): React.JSX.Element {
                 title={`${label} — ${hint}`}
               >
                 <span className="sidebar-item-icon">
-                  {step ? <span className="sidebar-step-badge" aria-hidden="true">{step}</span> : <Icon size={18} />}
+                  {step ? (
+                    <span className="sidebar-step-badge" aria-hidden="true">
+                      <Icon size={12} />
+                    </span>
+                  ) : (
+                    <Icon size={18} />
+                  )}
                 </span>
                 <span className="sidebar-item-copy">
                   <b>{label}</b>

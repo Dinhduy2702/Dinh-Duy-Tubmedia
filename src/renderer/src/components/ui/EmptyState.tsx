@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 interface EmptyStateProps {
   icon: LucideIcon;
   title: string;
-  description: string;
+  description: ReactNode;
   action?: ReactNode;
 }
 

@@ -23,6 +23,7 @@ import {
   Play,
   Plus,
   RotateCcw,
+  Scissors,
   Settings2,
   ShieldCheck,
   Square,
@@ -449,17 +450,19 @@ function MergeProductionPanel({
   const completedClips = clipJobs.filter((job) => ['completed', 'skipped'].includes(job.status)).length;
   const mergeCompleted = Boolean(mergeJob && ['completed', 'skipped'].includes(mergeJob.status));
 
+  // B4 (2026-09-24): mỗi bước có icon riêng đúng chức năng — trước đây bước CHƯA TỚI (chưa active/done)
+  // hiện số thứ tự trần (index+1); nay luôn hiện icon của chính bước đó bất kể trạng thái.
   const stages = timelineOnly
     ? [
-        { label: 'Tải hoặc dùng lại nguồn', value: downloadJobs.length ? `${completedDownloads}/${downloadJobs.length}` : 'Chờ bắt đầu', active: downloadJobs.some((job) => ACTIVE.includes(job.status)), done: downloadJobs.length > 0 && completedDownloads === downloadJobs.length },
-        { label: 'Đọc thời lượng', value: mergeJob ? `${statusLabel(mergeJob.status)} · ${mergeJob.progress.toFixed(1)}%` : 'Không chạy ghép video', active: Boolean(mergeJob && ACTIVE.includes(mergeJob.status)), done: mergeCompleted },
-        { label: 'Timeline TXT', value: mergeCompleted ? 'Sẵn sàng xem và xuất' : 'Đang chờ metadata nguồn', active: false, done: mergeCompleted }
+        { label: 'Tải hoặc dùng lại nguồn', icon: Download, value: downloadJobs.length ? `${completedDownloads}/${downloadJobs.length}` : 'Chờ bắt đầu', active: downloadJobs.some((job) => ACTIVE.includes(job.status)), done: downloadJobs.length > 0 && completedDownloads === downloadJobs.length },
+        { label: 'Đọc thời lượng', icon: Gauge, value: mergeJob ? `${statusLabel(mergeJob.status)} · ${mergeJob.progress.toFixed(1)}%` : 'Không chạy ghép video', active: Boolean(mergeJob && ACTIVE.includes(mergeJob.status)), done: mergeCompleted },
+        { label: 'Timeline TXT', icon: FileText, value: mergeCompleted ? 'Sẵn sàng xem và xuất' : 'Đang chờ metadata nguồn', active: false, done: mergeCompleted }
       ]
     : [
-        { label: 'Tải nguồn', value: downloadJobs.length ? `${completedDownloads}/${downloadJobs.length}` : 'Chờ bắt đầu', active: downloadJobs.some((job) => ACTIVE.includes(job.status)), done: downloadJobs.length > 0 && completedDownloads === downloadJobs.length },
-        { label: 'Cắt / chuẩn hóa', value: clipJobs.length ? `${completedClips}/${clipJobs.length}` : 'Tự động khi cần', active: clipJobs.some((job) => ACTIVE.includes(job.status)), done: clipJobs.length > 0 && completedClips === clipJobs.length },
-        { label: 'Ghép thành phẩm', value: recoveryMode === 'verified-final' ? 'Đã hậu kiểm và dùng lại' : recoveryMode === 'verified-checkpoint' ? 'Đã tiếp tục từ checkpoint' : mergeJob ? `${statusLabel(mergeJob.status)} · ${mergeJob.progress.toFixed(1)}%` : 'Chờ nguồn', active: Boolean(mergeJob && ACTIVE.includes(mergeJob.status)), done: mergeCompleted },
-        { label: 'Timeline TXT', value: mergeCompleted ? 'Sẵn sàng chọn nơi lưu' : 'Xuất thủ công sau khi ghép', active: false, done: mergeCompleted }
+        { label: 'Tải nguồn', icon: Download, value: downloadJobs.length ? `${completedDownloads}/${downloadJobs.length}` : 'Chờ bắt đầu', active: downloadJobs.some((job) => ACTIVE.includes(job.status)), done: downloadJobs.length > 0 && completedDownloads === downloadJobs.length },
+        { label: 'Cắt / chuẩn hóa', icon: Scissors, value: clipJobs.length ? `${completedClips}/${clipJobs.length}` : 'Tự động khi cần', active: clipJobs.some((job) => ACTIVE.includes(job.status)), done: clipJobs.length > 0 && completedClips === clipJobs.length },
+        { label: 'Ghép thành phẩm', icon: Layers3, value: recoveryMode === 'verified-final' ? 'Đã hậu kiểm và dùng lại' : recoveryMode === 'verified-checkpoint' ? 'Đã tiếp tục từ checkpoint' : mergeJob ? `${statusLabel(mergeJob.status)} · ${mergeJob.progress.toFixed(1)}%` : 'Chờ nguồn', active: Boolean(mergeJob && ACTIVE.includes(mergeJob.status)), done: mergeCompleted },
+        { label: 'Timeline TXT', icon: FileText, value: mergeCompleted ? 'Sẵn sàng chọn nơi lưu' : 'Xuất thủ công sau khi ghép', active: false, done: mergeCompleted }
       ];
   const copyTimelineMark = async (row: TimelineRow): Promise<void> => {
     const text = formatTimelineCopyText(row.start);
@@ -511,7 +514,7 @@ function MergeProductionPanel({
       <ShieldCheck size={17}/><span><b>{recoveryMode === 'verified-final' ? 'Không ghép trùng thành phẩm' : recoveryMode === 'verified-checkpoint' ? 'Đã tiếp tục đúng checkpoint' : 'Đã hậu kiểm thành phẩm'}</b><small>{resultMessage}</small></span>
     </div>}
     <div className="merge-stage-grid">
-        {stages.map((stage, index) => (
+        {stages.map((stage) => (
           <div
             className={`merge-stage ${stage.active ? 'is-active' : ''} ${stage.done ? 'is-done' : ''}`}
             key={stage.label}
@@ -521,10 +524,8 @@ function MergeProductionPanel({
                 <CheckCircle2 size={16} />
               ) : stage.active ? (
                 <LoaderCircle className="animate-spin" size={16} />
-              ) : index === 0 ? (
-                <Download size={16} />
               ) : (
-                <span>{index + 1}</span>
+                <stage.icon size={16} />
               )}
             </span>
             <div>

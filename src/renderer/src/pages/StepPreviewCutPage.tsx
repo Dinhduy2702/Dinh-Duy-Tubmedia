@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, FileVideo, FolderOpen, ImagePlay, Info, Scissors, Square } from 'lucide-react';
+import { AlertTriangle, Download, FileVideo, FolderOpen, ImagePlay, Info, Scissors, Square } from 'lucide-react';
 import type { QuickDownloadStatus } from '@shared/quick-download';
 import type { MediaInfo } from '@shared/types/domain';
 import type { LocalCutAspectRatio, LocalCutStatus } from '@shared/local-cut';
@@ -236,7 +236,19 @@ export function StepPreviewCutPage(): React.JSX.Element {
       <StepTabs current="step-preview-cut"/>
     </div>
 
-    <Card icon={ImagePlay} title="Video vừa tải" subtitle="Kết quả gần nhất từ bước ① Tải">
+    <Card
+      icon={ImagePlay}
+      title="Video vừa tải"
+      subtitle={
+        <>
+          Kết quả gần nhất từ{' '}
+          <span className="tm-step-ref">
+            <Download size={13} aria-hidden="true" />
+            bước Tải
+          </span>
+        </>
+      }
+    >
       {!loaded ? null : ready && latest ? (
         <div className="step-preview-ready">
           <div>
@@ -262,8 +274,22 @@ export function StepPreviewCutPage(): React.JSX.Element {
         <EmptyState
           icon={ImagePlay}
           title="Chưa có video nào tải xong"
-          description="Sang bước ① Tải để tải một video, rồi quay lại đây để xem trước và cắt."
-          action={<button type="button" className="btn btn-primary" onClick={() => setPage('step-download')}>Đi tới bước ① Tải</button>}
+          description={
+            <>
+              Sang{' '}
+              <span className="tm-step-ref">
+                <Download size={13} aria-hidden="true" />
+                bước Tải
+              </span>{' '}
+              để tải một video, rồi quay lại đây để xem trước và cắt.
+            </>
+          }
+          action={
+            <button type="button" className="btn btn-primary" onClick={() => setPage('step-download')}>
+              <Download size={14} aria-hidden="true" />
+              Đi tới bước Tải
+            </button>
+          }
         />
       )}
     </Card>

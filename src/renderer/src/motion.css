@@ -274,7 +274,9 @@
 }
 
 /* ------------------------------------------------------------------ */
-/* 7. Điều hướng 3 bước: dấu số trong vòng tròn ở thanh bên.            */
+/* 7. Điều hướng 3 bước: biểu tượng riêng cho từng bước trong vòng tròn ở thanh bên (B4, 2026-09-24 —    */
+/*    trước đây là số trần 1/2/3, đổi sang icon Download/Scissors/Sparkles đúng chức năng từng bước để   */
+/*    dễ nhận diện bằng mắt hơn; giữ nguyên vòng tròn + màu + chuyển động cũ, chỉ đổi nội dung bên trong). */
 /* ------------------------------------------------------------------ */
 .sidebar-step-badge {
   display: grid;
@@ -300,7 +302,8 @@
 }
 
 /* ------------------------------------------------------------------ */
-/* 8. Trang bước (①②③): tiêu đề + giải thích + thanh bước ở góc phải, lưới thẻ.                    */
+/* 8. Trang bước (Tải/Xem trước & Cắt/Ghép & Xuất): tiêu đề + giải thích + thanh bước ở góc phải, lưới    */
+/*    thẻ.                                                                                                */
 /* ------------------------------------------------------------------ */
 .tm-step-heading {
   display: flex;
@@ -371,6 +374,19 @@
 
 .tm-step-tab:not(.is-active):hover {
   background: var(--surface-sunken, var(--panel2));
+}
+
+/* B4 (2026-09-24): nhắc tới một bước NGAY TRONG CÂU văn bản (vd. "bước Tải") — trước đây có số trần
+   kiểu "①"/"②" đứng trước tên bước; nay thay bằng icon nhỏ đúng chức năng bước đó, căn giữa theo dòng chữ. */
+.tm-step-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  white-space: nowrap;
+}
+
+.tm-step-ref svg {
+  flex: 0 0 auto;
 }
 
 @media (max-width: 920px) {

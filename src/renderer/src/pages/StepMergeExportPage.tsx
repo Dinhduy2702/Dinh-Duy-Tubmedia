@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { FolderOpen, PackageCheck, Sparkles } from 'lucide-react';
+import { FolderOpen, PackageCheck, Scissors, Sparkles } from 'lucide-react';
 import { StepTabs } from '../components/StepTabs';
 import { Card } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
@@ -37,8 +37,22 @@ export function StepMergeExportPage(): React.JSX.Element {
         <EmptyState
           icon={PackageCheck}
           title="Chưa có tác vụ ghép nào"
-          description="Cắt xong ở bước ② thì mở Ghép theo Timeline để tạo và xuất quy trình ghép."
-          action={<button type="button" className="btn btn-primary" onClick={() => setPage('step-preview-cut')}>Quay lại bước ② Xem trước & Cắt</button>}
+          description={
+            <>
+              Cắt xong ở{' '}
+              <span className="tm-step-ref">
+                <Scissors size={13} aria-hidden="true" />
+                bước Xem trước & Cắt
+              </span>{' '}
+              thì mở Ghép theo Timeline để tạo và xuất quy trình ghép.
+            </>
+          }
+          action={
+            <button type="button" className="btn btn-primary" onClick={() => setPage('step-preview-cut')}>
+              <Scissors size={14} aria-hidden="true" />
+              Quay lại bước Xem trước & Cắt
+            </button>
+          }
         />
       ) : (
         <ul className="step-merge-job-list">

@@ -7,11 +7,14 @@ const STEPS: Array<{ id: PageId; step: number; label: string; icon: typeof Downl
   { id: 'step-merge-export', step: 3, label: 'Ghép & Xuất', icon: Sparkles }
 ];
 
-/** Thanh 3 bước ở góc phải tiêu đề trang (đặc tả GĐ 2a): ① Tải → ② Xem trước & Cắt → ③ Ghép & Xuất. */
+/**
+ * Thanh 3 bước ở góc phải tiêu đề trang (đặc tả GĐ 2a): Tải → Xem trước & Cắt → Ghép & Xuất. Mỗi vòng
+ * tròn hiện đúng icon chức năng của bước đó (B4, 2026-09-24 — trước đây là số trần 1/2/3).
+ */
 export function StepTabs({ current }: { current: PageId }): React.JSX.Element {
   const setPage = useAppStore((state) => state.setPage);
   return <nav className="tm-step-tabs" aria-label="3 bước làm video">
-    {STEPS.map(({ id, step, label }) => (
+    {STEPS.map(({ id, label, icon: Icon }) => (
       <button
         key={id}
         type="button"
@@ -19,7 +22,7 @@ export function StepTabs({ current }: { current: PageId }): React.JSX.Element {
         aria-current={current === id ? 'step' : undefined}
         onClick={() => setPage(id)}
       >
-        <span className="sidebar-step-badge" aria-hidden="true">{step}</span>
+        <span className="sidebar-step-badge" aria-hidden="true"><Icon size={12} /></span>
         <span className="tm-step-tab-label">{label}</span>
       </button>
     ))}
