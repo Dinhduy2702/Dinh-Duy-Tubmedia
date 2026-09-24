@@ -142,25 +142,45 @@ jobs:
           if ($ManifestHashes.Count -ne 1 -or $ManifestHashes[0] -ne $ActualSha256) {
             throw 'Installer SHA-256 does not match its checksum file.'
           }
-          @"
-          ## Tubmedia $env:VERSION
-
-          - Sửa lỗi ghép video bị chặn sai khi FFprobe báo 30,000 FPS và 29,996 FPS.
-          - Đồng bộ ngưỡng tương thích concat với ngưỡng normalize hiện có là 0,01 FPS.
-          - Vẫn kiểm tra nghiêm ngặt nominal FPS, time base, codec, profile, extradata và audio layout.
-          - Bổ sung kiểm thử hồi quy cho sai số FPS vô hại và khác biệt chuẩn FPS thực sự.
-
-          ### Xác minh bản phát hành
-
-          - Quy trình build chính thức, typecheck, lint, unit, integration và Windows E2E: PASS
-          - Target commit: $env:GITHUB_SHA
-          - SHA-256: $ActualSha256
-
-          ### Chữ ký Windows
-
-          Bộ cài chưa có chữ ký Authenticode. Windows có thể hiển thị Unknown publisher hoặc SmartScreen.
-          Hãy xác minh SHA-256 trước khi chạy.
-          "@ | Set-Content -LiteralPath release-notes.md -Encoding utf8NoBOM
+          # Giai đoạn 5 (2026-09-24): ghi chú phát hành lấy THẬT từ CHANGELOG.md thay vì gõ tay lặp lại
+          # ở đây — trước đây nội dung phải sửa ở CẢ 2 nơi (CHANGELOG.md và khối heredoc này) mỗi lần
+          # phát hành, đúng kiểu rủi ro "sửa một chỗ quên chỗ khác" đã tìm thấy trong đợt rà soát toàn
+          # diện. verify:stable (đã chạy trong npm.cmd run dist:official ở bước trước) đảm bảo
+          # CHANGELOG.md luôn có mục hợp lệ cho phiên bản đang phát hành trước khi tới bước này.
+          $ChangelogLines = & node scripts/changelog-section.mjs $env:VERSION
+          if ($LASTEXITCODE -ne 0) {
+            throw "Trích ghi chú phát hành từ CHANGELOG.md cho phiên bản $env:VERSION thất bại."
+          }
+          $ChangelogBodyLines = @(@($ChangelogLines) | ForEach-Object { $_.TrimEnd() })
+          while ($ChangelogBodyLines.Count -gt 0 -and [string]::IsNullOrWhiteSpace($ChangelogBodyLines[0])) {
+            $ChangelogBodyLines = $ChangelogBodyLines[1..($ChangelogBodyLines.Count - 1)]
+          }
+          while ($ChangelogBodyLines.Count -gt 0 -and [string]::IsNullOrWhiteSpace($ChangelogBodyLines[-1])) {
+            $ChangelogBodyLines = $ChangelogBodyLines[0..($ChangelogBodyLines.Count - 2)]
+          }
+          if ($ChangelogBodyLines.Count -eq 0) {
+            throw "Mục CHANGELOG.md cho phiên bản $env:VERSION đang trống."
+          }
+          # Dùng mảng dòng riêng lẻ thay vì heredoc: heredoc PowerShell không tự thụt lề lại nội dung
+          # nhiều dòng khi chèn một biến vào giữa, nên các dòng ghi chú phát hành sau dòng đầu sẽ mất
+          # đúng độ thụt lề — mảng dòng tránh hẳn rủi ro này.
+          $NotesLines = @(
+            "## Tubmedia $env:VERSION",
+            ''
+          ) + $ChangelogBodyLines + @(
+            '',
+            '### Xác minh bản phát hành',
+            '',
+            '- Quy trình build chính thức, typecheck, lint, unit, integration và Windows E2E: PASS',
+            "- Target commit: $env:GITHUB_SHA",
+            "- SHA-256: $ActualSha256",
+            '',
+            '### Chữ ký Windows',
+            '',
+            'Bộ cài chưa có chữ ký Authenticode. Windows có thể hiển thị Unknown publisher hoặc SmartScreen.',
+            'Hãy xác minh SHA-256 trước khi chạy.'
+          )
+          ($NotesLines -join "`n") | Set-Content -LiteralPath release-notes.md -Encoding utf8NoBOM
 
       - name: Create verified draft release
         shell: pwsh

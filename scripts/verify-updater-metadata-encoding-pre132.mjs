@@ -41,6 +41,21 @@ check(
   'updater metadata is written by Node as UTF-8'
 );
 
+// Giai đoạn 5 (2026-09-24): ghi chú phát hành PHẢI lấy thật từ CHANGELOG.md — không được để trống hoặc
+// chép tay lặp lại một nơi khác (đúng vấn đề đã tìm thấy ở workflow GitHub Actions phát hành).
+check(
+  /import\s*\{\s*readChangelogSection\s*\}\s*from\s*'\.\/changelog-section\.mjs'/.test(writer),
+  'updater metadata writer sources release notes from CHANGELOG.md'
+);
+check(
+  /throw new Error/.test(writer) && /releaseNotes === null/.test(writer),
+  'updater metadata writer fails loudly when the version is missing from CHANGELOG.md'
+);
+check(
+  /releaseNotes: \|/.test(writer),
+  'updater metadata writer emits releaseNotes as a literal YAML block scalar'
+);
+
 check(
   /hasUtf8Bom/.test(writer) && /Buffer\.from\('version:', 'ascii'\)/.test(writer),
   'writer verifies BOM bytes and exact ASCII version prefix'
@@ -69,6 +84,8 @@ const sample = [
   'path: "Download-video-Tubmedia-Setup-1.3.2-x64.exe"',
   'sha512: AbCdEf123+/=',
   "releaseDate: '2026-08-18T08:00:00.000Z'",
+  'releaseNotes: |',
+  '  - Ghi chú phát hành thật: dấu hai chấm (như: đây) và tiếng Việt phải còn nguyên vẹn.',
   ''
 ].join('\n');
 
@@ -77,6 +94,11 @@ const sampleParsed = yaml.load(sample);
 check(
   sampleParsed?.version === '1.3.2' && sampleParsed?.files?.[0]?.size === 304098822,
   'electron-updater js-yaml parses canonical updater metadata'
+);
+check(
+  sampleParsed?.releaseNotes?.trim() ===
+    '- Ghi chú phát hành thật: dấu hai chấm (như: đây) và tiếng Việt phải còn nguyên vẹn.',
+  'electron-updater js-yaml parses Vietnamese literal block release notes intact'
 );
 
 const latestPath = path.join(cwd, 'release', 'latest.yml');
@@ -116,6 +138,10 @@ if (fs.existsSync(latestPath)) {
   check(
     parsed?.version === pkg.version && Array.isArray(parsed?.files) && parsed.files.length > 0,
     'release/latest.yml matches package version and file schema'
+  );
+  check(
+    typeof parsed?.releaseNotes === 'string' && parsed.releaseNotes.trim().length > 0,
+    'release/latest.yml carries real Vietnamese release notes from CHANGELOG.md'
   );
 }
 

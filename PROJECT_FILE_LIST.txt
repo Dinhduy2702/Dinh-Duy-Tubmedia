@@ -81,6 +81,7 @@ HOTFIX_v0.5.1_CPU_AUTO_VI.md
 HOTFIX_v0.6.1_COOKIES_ON_DEMAND_VI.md
 HOTFIX_v0.6.3_AUTO_TOOLS_GLOBAL_VI.md
 HOTFIX_v0.7.0_TUBMEDIA_PRO_UI_VI.md
+HUONG_DAN_PHAT_HANH_VI.md
 IMPLEMENTATION_REPORT_2026-07-27.md
 IMPLEMENTATION_STATUS.md
 installer/electron-builder-upgrade.nsh
@@ -148,7 +149,6 @@ PATCH_MANIFEST_v1.2.0_FIX10.txt
 PATCH_MANIFEST_v1.2.0_FIX6.txt
 PATCH_MANIFEST_v1.2.0_SMART_MERGE_UI.txt
 PATCH_MANIFEST.txt
-PHAT_HANH_CHINH_THUC_v1.0.0_VI.md
 playwright.config.ts
 QUALITY_PROFILES.md
 README_FIRST_FIXED_VI.txt
@@ -168,12 +168,15 @@ scripts/build-release-windows.ps1
 scripts/build-source-update.ps1
 scripts/bump-version.mjs
 scripts/capture-ui-screenshots.mjs
+scripts/changelog-section.d.mts
+scripts/changelog-section.mjs
 scripts/check-native-build-tools.mjs
 scripts/create-release-config.mjs
 scripts/doctor-windows.ps1
 scripts/ensure-bundled-aria2.ps1
 scripts/generate-installer-blockmap.mjs
 scripts/generate-source-inventory.mjs
+scripts/inject-changelog-release-notes.mjs
 scripts/measure-motion-performance.mjs
 scripts/native-runtime.mjs
 scripts/no-native-rebuild.mjs
@@ -441,6 +444,7 @@ tests/unit/app-update-version.test.ts
 tests/unit/batch-error-aggregation-r18.test.ts
 tests/unit/brand-layout.test.ts
 tests/unit/brand-logo.test.ts
+tests/unit/changelog-section.test.ts
 tests/unit/cleanup-quarantine.test.ts
 tests/unit/cleanup-scanner.test.ts
 tests/unit/clip-engine-mute-copy.test.ts
@@ -471,6 +475,7 @@ tests/unit/fix6-diagnostics-ui.test.ts
 tests/unit/gitignore-secrets.test.ts
 tests/unit/hardware-recommendation.test.ts
 tests/unit/independent-workflow-accordion-1.3.0.test.ts
+tests/unit/inject-changelog-release-notes.test.ts
 tests/unit/input-parser.test.ts
 tests/unit/installer-upgrade.test.ts
 tests/unit/ipc-wire-error.test.ts
