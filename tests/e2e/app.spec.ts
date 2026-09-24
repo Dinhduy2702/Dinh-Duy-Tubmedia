@@ -1179,3 +1179,285 @@ test('Giai đoạn 6 mục 7: mẫu đặt tên tệp Tải nhanh — lưu/đọ
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
 });
+
+/**
+ * B1 (2026-09-24) — yêu cầu mới, ƯU TIÊN CAO NHẤT: nếu máy tắt/app bị đóng đột ngột giữa lúc đang ghép một
+ * quy trình, khi mở lại app phải TỰ ĐỘNG TIẾP TỤC đúng quy trình dang dở, không mất tiến độ, không phải
+ * làm lại từ đầu, thành phẩm cuối cùng vẫn đúng. Cơ chế đã có sẵn từ trước (QueueManager.start() luôn gọi
+ * repo.recoverInterrupted() rồi repo.resetInterrupted() — bất kỳ tác vụ nào còn ở trạng thái đang chạy dở
+ * lúc khởi động lại đều bị đưa về 'pending' để hàng đợi tự chạy lại; MergeEngine có checkpoint
+ * .pending.mp4 + .complete.json để không phải ghép lại từ đầu nếu checkpoint còn hợp lệ) — bài kiểm này
+ * lần đầu xác nhận THẬT bằng 2 tiến trình Electron thật nối tiếp nhau: tiến trình thứ nhất bị taskkill
+ * /T /F đột ngột đúng lúc đang ở trạng thái 'merging' (KHÔNG qua app.quit()/queue.stop() — mô phỏng đúng
+ * mất điện/tắt máy đột ngột, không phải đóng ứng dụng bình thường), tiến trình thứ hai mở lại trỏ ĐÚNG
+ * cùng thư mục dữ liệu (cùng CSDL SQLite, cùng thư mục tạm/checkpoint) và phải tự hoàn tất đúng.
+ */
+test('B1: ghép video tự động tiếp tục đúng sau khi app bị đóng đột ngột (kill thật giữa lúc đang ghép)', async () => {
+  test.setTimeout(240_000);
+  const toolsDirectory = resolveToolsDirectoryForTest();
+  test.skip(!toolsDirectory, 'Không tìm thấy yt-dlp/ffmpeg/ffprobe trên máy này để chạy bài kiểm thật.');
+
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-merge-crash-resume-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+  db.exec(
+    'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
+  );
+  db.prepare(
+    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+  ).run(
+    'app',
+    JSON.stringify({
+      theme: 'dark',
+      startWithWindows: false,
+      autoCheckAppUpdates: false,
+      autoCheckToolUpdates: false,
+      ytdlpPath: path.join(toolsDirectory!, 'yt-dlp.exe'),
+      ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+      ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+    }),
+    new Date().toISOString()
+  );
+  db.close();
+
+  const clipDirectory = path.join(sandbox, 'nguon-that');
+  fs.mkdirSync(clipDirectory, { recursive: true });
+  const makeClip = (name: string, durationSeconds: number): string => {
+    const clipPath = path.join(clipDirectory, name);
+    const result = spawnSync(
+      path.join(toolsDirectory!, 'ffmpeg.exe'),
+      [
+        '-y',
+        '-f', 'lavfi', '-i', `testsrc=size=960x540:rate=24:duration=${durationSeconds}`,
+        '-f', 'lavfi', '-i', `sine=frequency=440:duration=${durationSeconds}`,
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', clipPath
+      ],
+      { stdio: 'ignore', windowsHide: true, timeout: 90_000 }
+    );
+    expect(result.status, `ffmpeg phải dựng được ${name}`).toBe(0);
+    return clipPath;
+  };
+  const clip1Path = makeClip('clip1.mp4', 18);
+  const clip2Path = makeClip('clip2.mp4', 18);
+  const clip1Data = fs.readFileSync(clip1Path);
+  const clip2Data = fs.readFileSync(clip2Path);
+
+  let server: Server | undefined;
+  try {
+    server = createServer((request, response) => {
+      const data = request.url === '/clip2.mp4' ? clip2Data : clip1Data;
+      response.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': String(data.length) });
+      response.end(data);
+    });
+    const port = await new Promise<number>((resolvePort) => {
+      server!.listen(0, '127.0.0.1', () => resolvePort((server!.address() as { port: number }).port));
+    });
+    const clip1Url = `http://127.0.0.1:${port}/clip1.mp4`;
+    const clip2Url = `http://127.0.0.1:${port}/clip2.mp4`;
+
+    const sourceFolder = path.join(sandbox, 'nguon');
+    const tempFolder = path.join(sandbox, 'tam');
+    const outputFolder = path.join(sandbox, 'ket-qua');
+    for (const folder of [sourceFolder, tempFolder, outputFolder]) fs.mkdirSync(folder, { recursive: true });
+
+    const launchEnv = (): Record<string, string> => ({
+      ...Object.fromEntries(
+        Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+      ),
+      NODE_ENV: 'test',
+      TUBMEDIA_E2E: '1',
+      TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+      PLAYWRIGHT_TEST: '1',
+      ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+    });
+
+    interface DesktopMergeCrashApi {
+      tools: { list: () => Promise<Array<{ name: string; available: boolean }>> };
+      workbench: { startMerge: (input: Record<string, unknown>) => Promise<unknown> };
+      queue: {
+        list: () => Promise<
+          Array<{ id: string; type: string; status: string; progress: number; input: Record<string, unknown> }>
+        >;
+      };
+    }
+
+    // ---- Tiến trình Electron THẬT thứ nhất: bắt đầu ghép, giết đột ngột giữa lúc đang 'merging' ----
+    const app1 = await electron.launch({ args: [mainEntry], cwd: projectRoot, env: launchEnv(), timeout: 45_000 });
+    electronApplication = app1;
+    mainProcessId = app1.process().pid;
+    const win1 = await app1.firstWindow({ timeout: 30_000 });
+    shellWindow = win1;
+    await win1.waitForSelector('.app-sidebar', { timeout: 30_000 });
+
+    let toolsReady = false;
+    const toolsDeadline = Date.now() + 30_000;
+    while (Date.now() < toolsDeadline) {
+      const list = await win1.evaluate(
+        () => (window as unknown as { desktop: DesktopMergeCrashApi }).desktop.tools.list()
+      );
+      if (
+        list.find((item) => item.name === 'yt-dlp')?.available &&
+        list.find((item) => item.name === 'ffmpeg')?.available
+      ) {
+        toolsReady = true;
+        break;
+      }
+      await sleep(300);
+    }
+    expect(toolsReady, 'yt-dlp/ffmpeg phải sẵn sàng trong 30s').toBe(true);
+
+    await win1.evaluate(
+      (input) => (window as unknown as { desktop: DesktopMergeCrashApi }).desktop.workbench.startMerge(input),
+      {
+        slot: 'merge-1',
+        name: 'Kiem tra tiep tuc ghep sau khi bi kill',
+        linksText: `${clip1Url}\n${clip2Url}`,
+        sourceFolder,
+        tempFolder,
+        outputFolder,
+        finalFileName: 'Thanh-pham-kiem-tra-kill.mp4',
+        // preset 'slow' cố ý để bước ghép thật có đủ thời gian quan sát trạng thái 'merging' trước khi bị
+        // giết — không dùng preset nhanh nhất vì sẽ ghép xong quá nhanh để bắt kịp giữa chừng.
+        qualityProfileId: 'quality-max-cpu',
+        resourceProfileId: 'resource-balanced',
+        exportTimelineTxt: false,
+        timelineOnly: false,
+        aspectRatio: 'original'
+      }
+    );
+
+    let mergeJobId: string | null = null;
+    let sawMerging = false;
+    const mergingDeadline = Date.now() + 90_000;
+    while (Date.now() < mergingDeadline) {
+      const jobs = await win1.evaluate(
+        () => (window as unknown as { desktop: DesktopMergeCrashApi }).desktop.queue.list()
+      );
+      const mergeJob = jobs.find((job) => job.type === 'merge');
+      if (mergeJob) {
+        mergeJobId = mergeJob.id;
+        if (mergeJob.status === 'merging') {
+          sawMerging = true;
+          // Chờ tới khi tiến độ THẬT (không giả lập) đạt ngưỡng cao — đo thật xác nhận: ở ngưỡng này,
+          // checkpoint ghép cuối (Tubmedia/merge-checkpoints/*.pending.mp4) đã được ghi xong, nên lượt
+          // chạy lại sau khi giết phải TIẾP TỤC đúng từ checkpoint (verified-checkpoint) thay vì ghép lại
+          // từ đầu — đúng trọng tâm "không mất tiến độ" mà yêu cầu B1 đòi hỏi.
+          if (mergeJob.progress >= 70) break;
+        } else if (['completed', 'failed', 'cancelled'].includes(mergeJob.status)) {
+          break;
+        }
+      }
+      await sleep(150);
+    }
+    expect(sawMerging, 'quy trình phải thật sự vào trạng thái đang ghép (merging) trước khi bị giết').toBe(true);
+    expect(mergeJobId, 'phải xác định được đúng tác vụ ghép').not.toBeNull();
+
+    const jobBeforeKill = (
+      await win1.evaluate(() => (window as unknown as { desktop: DesktopMergeCrashApi }).desktop.queue.list())
+    ).find((job) => job.id === mergeJobId);
+    const statusBeforeKill = jobBeforeKill?.status;
+    // Xác nhận THẬT (đọc trực tiếp thư mục tạm, không đoán): checkpoint ghép cuối đã tồn tại trên đĩa
+    // trước khi bị giết — nếu không, ngưỡng tiến độ ở trên chưa đủ cao để bài kiểm này có ý nghĩa.
+    const checkpointFolder = path.join(tempFolder, 'Tubmedia', 'merge-checkpoints');
+    const hasMergeCheckpointBeforeKill =
+      fs.existsSync(checkpointFolder) &&
+      fs.readdirSync(checkpointFolder).some((name) => name.endsWith('.pending.mp4'));
+    expect(
+      hasMergeCheckpointBeforeKill,
+      'checkpoint ghép cuối (Tubmedia/merge-checkpoints/*.pending.mp4) phải đã được ghi xong TRƯỚC khi giết ' +
+        '— nếu không, bài kiểm chưa thật sự chạm tới đúng kịch bản "không mất tiến độ, không ghép lại từ đầu"'
+    ).toBe(true);
+
+    // ---- GIẾT ĐỘT NGỘT: taskkill /T /F toàn bộ cây tiến trình, KHÔNG gọi app.quit()/queue.stop() ----
+    // Đây chính là điểm khác với đóng app bình thường: không có cơ hội chạy bất kỳ dọn dẹp an toàn nào
+    // (queue.stop() — nơi đánh dấu 'interrupted' gọn gàng — sẽ KHÔNG được chạy).
+    forceKillProcessTree(mainProcessId);
+    electronApplication = undefined;
+    shellWindow = undefined;
+    mainProcessId = undefined;
+    await sleep(500);
+
+    // Xác nhận THẬT: ngay sau khi giết, CSDL vẫn còn kẹt ở trạng thái đang chạy dở — KHÔNG phải
+    // 'interrupted' gọn gàng (trạng thái đó chỉ do queue.stop() ghi, và tiến trình đã chết trước khi kịp
+    // chạy tới đó). Nếu giả này sai, bài kiểm chưa mô phỏng đúng kịch bản "tắt máy đột ngột".
+    const dbAfterKill = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+    const rowAfterKill = dbAfterKill.prepare('SELECT status FROM queue_jobs WHERE id = ?').get(mergeJobId) as
+      | { status: string }
+      | undefined;
+    dbAfterKill.close();
+    expect(
+      statusBeforeKill === 'merging' && rowAfterKill?.status === 'merging',
+      `CSDL phải còn kẹt ở 'merging' ngay sau khi giết đột ngột (trước kill: ${String(statusBeforeKill)}, ` +
+        `sau kill: ${String(rowAfterKill?.status)}) — nếu không, bài kiểm này chưa mô phỏng đúng kịch bản ` +
+        'tắt máy đột ngột.'
+    ).toBe(true);
+
+    // ---- Tiến trình Electron THẬT thứ hai: mở lại, TRỎ ĐÚNG cùng thư mục dữ liệu ----
+    const app2 = await electron.launch({ args: [mainEntry], cwd: projectRoot, env: launchEnv(), timeout: 45_000 });
+    electronApplication = app2;
+    mainProcessId = app2.process().pid;
+    const win2 = await app2.firstWindow({ timeout: 30_000 });
+    shellWindow = win2;
+    await win2.waitForSelector('.app-sidebar', { timeout: 30_000 });
+
+    let finalStatus = '';
+    let finalOutputPath = '';
+    let finalRecoveryMode = '';
+    const resumeStartedAt = Date.now();
+    const resumeDeadline = resumeStartedAt + 150_000;
+    while (Date.now() < resumeDeadline) {
+      const jobs = await win2.evaluate(
+        () => (window as unknown as { desktop: DesktopMergeCrashApi }).desktop.queue.list()
+      );
+      const mergeJob = jobs.find((job) => job.id === mergeJobId);
+      if (mergeJob && ['completed', 'failed', 'cancelled'].includes(mergeJob.status)) {
+        finalStatus = mergeJob.status;
+        finalOutputPath = typeof mergeJob.input.outputPath === 'string' ? mergeJob.input.outputPath : '';
+        finalRecoveryMode =
+          typeof mergeJob.input.mergeRecoveryMode === 'string' ? mergeJob.input.mergeRecoveryMode : '(khong co)';
+        break;
+      }
+      await sleep(300);
+    }
+    const resumeElapsedMs = Date.now() - resumeStartedAt;
+
+    expect(
+      finalStatus,
+      'sau khi mở lại app, quy trình ghép dang dở PHẢI tự động tiếp tục và hoàn tất — không được kẹt mãi ở ' +
+        'trạng thái cũ, không được biến mất, không được cần thao tác tay nào của người dùng'
+    ).toBe('completed');
+    // Đúng trọng tâm B1 — "không mất tiến độ, không phải làm lại từ đầu": vì checkpoint ghép cuối đã có
+    // sẵn và hợp lệ trước khi bị giết (xác nhận ở trên), lượt chạy lại PHẢI dùng đúng nó
+    // ('verified-checkpoint') thay vì ghép lại từ đầu ('new-merge') — đo thật xác nhận việc này chỉ mất
+    // vài giây (bỏ qua toàn bộ bước chuẩn hóa + ghép nặng đã làm xong ở lượt trước).
+    expect(
+      finalRecoveryMode,
+      `phải tiếp tục ĐÚNG từ checkpoint đã có (verified-checkpoint), không ghép lại từ đầu — thực tế: ` +
+        `${finalRecoveryMode} (mất ${resumeElapsedMs}ms để hoàn tất sau khi mở lại)`
+    ).toBe('verified-checkpoint');
+    expect(
+      Boolean(finalOutputPath) && fs.existsSync(finalOutputPath),
+      'thành phẩm cuối cùng phải thật sự tồn tại trên đĩa'
+    ).toBe(true);
+
+    // Xác nhận THẬT bằng ffprobe: thành phẩm không hỏng, đọc được, thời lượng hợp lý (2 clip 18 giây ghép
+    // lại — không thiếu đoạn do checkpoint hỏng, không lặp đoạn do ghép đè lên chính nó).
+    const durationOutput = execFileSync(
+      path.join(toolsDirectory!, 'ffprobe.exe'),
+      ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', finalOutputPath],
+      { encoding: 'utf8', windowsHide: true }
+    ).trim();
+    const durationSeconds = Number(durationOutput);
+    expect(Number.isFinite(durationSeconds), 'ffprobe phải đọc được thời lượng thật (tệp không hỏng)').toBe(true);
+    expect(
+      durationSeconds,
+      'thời lượng thành phẩm phải khớp 2 clip 18 giây ghép lại (không thiếu/không lặp đoạn)'
+    ).toBeGreaterThan(30);
+    expect(durationSeconds).toBeLessThan(42);
+  } finally {
+    server?.close();
+    await closeElectronApplication();
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});
