@@ -1723,6 +1723,7 @@ export class QueueManager {
         project.aspectRatio,
         project.outputFolder,
         project.finalFileName,
+        profile,
         signal,
         (progress) => {
           this.updateProgress(job.id, progress.percent, progress.speed, progress.etaSeconds, 'merging', false, {

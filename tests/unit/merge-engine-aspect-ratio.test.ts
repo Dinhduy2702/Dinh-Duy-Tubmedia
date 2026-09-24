@@ -14,8 +14,14 @@ import { ProcessCancelledError } from '../../src/shared/errors/app-errors.js';
 
 const roots: string[] = [];
 
+// Rà soát toàn diện (2026-09-24): applyAspectRatio() giờ nhận resource.processPriority (nhất quán với
+// bước ghép chính) thay vì cố định 'below_normal' — chỉ cần đúng trường processPriority cho các bài kiểm
+// dưới đây, không cần một ResourceProfile đầy đủ.
+const STUB_RESOURCE = { processPriority: 'below_normal' } as never;
+
 interface RunOptions {
   args: string[];
+  priority?: string;
   signal?: AbortSignal;
   onStdoutLine?: (line: string) => void;
 }
@@ -37,10 +43,10 @@ async function createFixture(behaviour: Behaviour = {}) {
   const inputPath = join(root, 'da-ghep.mp4');
   await writeFile(inputPath, 'noi-dung-da-ghep');
 
-  const calls: Array<{ args: string[] }> = [];
+  const calls: Array<{ args: string[]; priority?: string | undefined }> = [];
   const processes = {
     run: vi.fn(async (options: RunOptions) => {
-      calls.push({ args: options.args });
+      calls.push({ args: options.args, priority: options.priority });
       if (behaviour.rejectWith) throw behaviour.rejectWith;
       const code = behaviour.ffmpegExitCode ?? 0;
       const outputPath = options.args.at(-1)!;
@@ -106,6 +112,7 @@ describe('Giai đoạn 6 mục 4 — MergeEngine.applyAspectRatio (preset xuất
       '9:16',
       fixture.outputFolder,
       'Thanh-pham',
+      STUB_RESOURCE,
       new AbortController().signal,
       () => undefined
     );
@@ -119,6 +126,24 @@ describe('Giai đoạn 6 mục 4 — MergeEngine.applyAspectRatio (preset xuất
     expect(call?.args).not.toContain('copy');
   });
 
+  it('dùng ĐÚNG resource.processPriority thay vì cố định below_normal (rà soát toàn diện 2026-09-24)', async () => {
+    // Trước khi sửa: cố định 'below_normal' bất kể hồ sơ hiệu năng người dùng chọn — không nhất quán với
+    // bước ghép chính (dùng resource.processPriority), khiến bước đổi tỉ lệ "chậm lại" ngay sau bước ghép
+    // nhanh trên hồ sơ "Toàn bộ hiệu năng".
+    const fixture = await createFixture();
+    await fixture.engine.applyAspectRatio(
+      'job-priority',
+      fixture.inputPath,
+      '9:16',
+      fixture.outputFolder,
+      'Thanh-pham',
+      { processPriority: 'above_normal' } as never,
+      new AbortController().signal,
+      () => undefined
+    );
+    expect(fixture.calls[0]?.priority).toBe('above_normal');
+  });
+
   it('có thể phục hồi: nếu tệp đích đã hợp lệ từ trước, không chạy lại ffmpeg', async () => {
     const fixture = await createFixture({ alreadyValid: true });
     const desired = join(fixture.outputFolder, 'Thanh-pham [1x1].mp4');
@@ -130,6 +155,7 @@ describe('Giai đoạn 6 mục 4 — MergeEngine.applyAspectRatio (preset xuất
       '1:1',
       fixture.outputFolder,
       'Thanh-pham',
+      STUB_RESOURCE,
       new AbortController().signal,
       () => undefined
     );
@@ -146,6 +172,7 @@ describe('Giai đoạn 6 mục 4 — MergeEngine.applyAspectRatio (preset xuất
         '16:9',
         fixture.outputFolder,
         'Thanh-pham',
+        STUB_RESOURCE,
         new AbortController().signal,
         () => undefined
       )
@@ -162,6 +189,7 @@ describe('Giai đoạn 6 mục 4 — MergeEngine.applyAspectRatio (preset xuất
         '16:9',
         fixture.outputFolder,
         'Thanh-pham',
+        STUB_RESOURCE,
         new AbortController().signal,
         () => undefined
       )
@@ -177,6 +205,7 @@ describe('Giai đoạn 6 mục 4 — MergeEngine.applyAspectRatio (preset xuất
         '9:16',
         fixture.outputFolder,
         'Thanh-pham',
+        STUB_RESOURCE,
         new AbortController().signal,
         () => undefined
       )
@@ -193,6 +222,7 @@ describe('Giai đoạn 6 mục 4 — MergeEngine.applyAspectRatio (preset xuất
         '9:16',
         fixture.outputFolder,
         'Thanh-pham',
+        STUB_RESOURCE,
         new AbortController().signal,
         () => undefined
       )
@@ -207,6 +237,7 @@ describe('Giai đoạn 6 mục 4 — MergeEngine.applyAspectRatio (preset xuất
       '16:9',
       fixture.outputFolder,
       'Thanh-pham.mp4',
+      STUB_RESOURCE,
       new AbortController().signal,
       () => undefined
     );

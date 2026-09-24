@@ -1987,6 +1987,7 @@ export class MergeEngine {
     aspectRatio: Exclude<LocalCutAspectRatio, 'original'>,
     outputFolder: string,
     finalFileName: string,
+    resource: ResourceProfile,
     signal: AbortSignal,
     onProgress: (progress: AspectRatioConversionProgress) => void
   ): Promise<string> {
@@ -2039,7 +2040,11 @@ export class MergeEngine {
         '-nostats',
         pending
       ],
-      priority: 'below_normal',
+      // Rà soát toàn diện (2026-09-24): trước đây cố định 'below_normal' bất kể hồ sơ hiệu năng người
+      // dùng chọn — không nhất quán với bước ghép chính (dùng resource.processPriority), khiến bước đổi
+      // tỉ lệ tự nhiên "chậm lại" ngay sau khi ghép nhanh trên hồ sơ "Toàn bộ hiệu năng". Dùng đúng cùng
+      // một mức ưu tiên với bước ghép chính.
+      priority: resource.processPriority,
       signal,
       timeoutMs: 24 * 60 * 60 * 1000,
       onStdoutLine: (line) => {
