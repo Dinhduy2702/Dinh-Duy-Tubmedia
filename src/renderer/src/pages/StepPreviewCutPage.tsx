@@ -13,11 +13,14 @@ const TERMINAL_PHASES = new Set<LocalCutStatus['phase']>(['completed', 'cancelle
 
 // Giai đoạn 6 mục 3 (2026-09-24): đổi tỉ lệ khung hình — nền mờ kiểu CapCut (đã hỏi và được chọn), luôn
 // mã hóa lại nên "cắt chính xác" bị khóa (ẩn ý nghĩa) khi chọn một tỉ lệ khác 'original'.
+// Mục 4 bước 2 (2026-09-24): đổi nhãn thành preset đặt tên theo nền tảng — khớp đúng ASPECT_RATIO_PRESETS
+// ở DownloadMergePage.tsx (Ghép theo Timeline, bước 1) để nhất quán trong toàn app. Cơ chế bên dưới
+// (LocalCutAspectRatio, bộ lọc nền mờ) hoàn toàn không đổi — chỉ đổi cách gọi tên hiển thị.
 const ASPECT_RATIO_OPTIONS: Array<{ value: LocalCutAspectRatio; label: string }> = [
-  { value: 'original', label: 'Giữ nguyên' },
-  { value: '9:16', label: '9:16 (dọc)' },
-  { value: '1:1', label: '1:1 (vuông)' },
-  { value: '16:9', label: '16:9 (ngang)' }
+  { value: 'original', label: 'Giữ nguyên tỉ lệ nguồn' },
+  { value: '9:16', label: 'Dọc 9:16 · Shorts/TikTok/Reels' },
+  { value: '1:1', label: 'Vuông 1:1 · Instagram/Facebook' },
+  { value: '16:9', label: 'Ngang 16:9 · YouTube/Facebook' }
 ];
 
 function baseNameOf(path: string): string {
@@ -35,8 +38,10 @@ function directoryNameOf(path: string): string | null {
  * VIDEO CÓ SẴN TRÊN MÁY (không qua tải) — nhập giờ bắt đầu/kết thúc, xem khung hình thật, chọn sao chép
  * nhanh hoặc cắt chính xác (mã hóa lại). Mục 3 (2026-09-24) thêm đổi tỉ lệ khung hình (9:16/1:1/16:9,
  * nền mờ kiểu CapCut) ngay trong cùng công cụ này — chọn tỉ lệ khác 'original' luôn buộc mã hóa lại nên
- * ô "cắt chính xác" bị khóa ở trạng thái bật kèm ghi chú. Bộ cắt/chuẩn hóa NHIỀU tệp cùng lúc (Smart
- * Merge) vẫn ở trang Ghép theo Timeline — không lặp lại ở đây. */
+ * ô "cắt chính xác" bị khóa ở trạng thái bật kèm ghi chú. Mục 4 bước 2 (2026-09-24) đổi nhãn các lựa
+ * chọn tỉ lệ thành preset có tên nền tảng (khớp nhãn ở Ghép theo Timeline, bước 1) — không xây UI mới,
+ * không đổi cơ chế. Bộ cắt/chuẩn hóa NHIỀU tệp cùng lúc (Smart Merge) vẫn ở trang Ghép theo Timeline —
+ * không lặp lại ở đây. */
 export function StepPreviewCutPage(): React.JSX.Element {
   const setPage = useAppStore((state) => state.setPage);
   const [latest, setLatest] = useState<QuickDownloadStatus | null>(null);
@@ -272,8 +277,8 @@ export function StepPreviewCutPage(): React.JSX.Element {
             </label>
           </div>
 
-          <div className="local-cut-aspect-row" role="radiogroup" aria-label="Tỉ lệ khung hình">
-            <span className="local-cut-aspect-row-label">Tỉ lệ khung hình</span>
+          <div className="local-cut-aspect-row" role="radiogroup" aria-label="Preset xuất theo nền tảng">
+            <span className="local-cut-aspect-row-label">Preset xuất theo nền tảng</span>
             <div className="local-cut-aspect-buttons">
               {ASPECT_RATIO_OPTIONS.map((option) => (
                 <button
