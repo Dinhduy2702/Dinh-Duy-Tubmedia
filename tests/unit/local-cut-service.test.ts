@@ -20,11 +20,16 @@ interface RunOptions {
   onStdoutLine?: (line: string) => void;
 }
 
+interface VerifyOptions {
+  signal?: AbortSignal;
+}
+
 interface Behaviour {
   ffmpegExitCode?: number;
   verifyOk?: boolean;
   verifyReasons?: string[];
   neverResolveFfmpeg?: boolean;
+  neverResolveVerify?: boolean;
 }
 
 async function createFixture(behaviour: Behaviour = {}) {
@@ -63,13 +68,21 @@ async function createFixture(behaviour: Behaviour = {}) {
     get: vi.fn((name: string) => ({ name, available: true, executablePath: join(root, `${name}.exe`) }))
   };
   const verifier = {
-    verify: vi.fn(() =>
-      Promise.resolve({
+    verify: vi.fn((_path: string, _level: string, _duration: number | undefined, options: VerifyOptions = {}) => {
+      if (behaviour.neverResolveVerify) {
+        // Mô phỏng ĐÚNG hành vi thật của FileVerifier.verify(): nó chuyển tiếp signal xuống
+        // processes.run() nội bộ (đã xác nhận qua đọc code file-verifier.ts thật), nên khi bị hủy giữa
+        // lúc đang xác minh, nó CŨNG ném ProcessCancelledError — không resolve với {ok:false}.
+        return new Promise((_resolve, reject) => {
+          options.signal?.addEventListener('abort', () => reject(new ProcessCancelledError()));
+        });
+      }
+      return Promise.resolve({
         ok: behaviour.verifyOk ?? true,
         reasons: behaviour.verifyReasons ?? [],
         duration: 5
-      })
-    )
+      });
+    })
   };
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
   const service = new LocalCutService(processes as never, tools as never, verifier as never, logger as never);
@@ -226,6 +239,33 @@ describe('Giai đoạn 6 mục 2 — LocalCutService (cắt tệp có sẵn trê
     const finished = await waitForTerminal(fixture.service, started.taskId);
     expect(finished.phase).toBe('cancelled');
     expect(finished.outputPath).toBeNull();
+  });
+
+  it('hủy giữa chừng NGAY LÚC ĐANG XÁC MINH (sau khi cắt xong): vẫn phải là cancelled, không báo nhầm failed', async () => {
+    // Rà soát toàn diện (2026-09-24) — lỗi thật tìm được: bản sửa lỗi hủy giữa chừng ở mục 2 chỉ bọc
+    // quanh bước ffmpeg CẮT, chưa bọc quanh bước gọi verifier.verify() ngay sau đó — verify() cũng ném
+    // ProcessCancelledError khi bị hủy giữa chừng (nó chuyển tiếp signal xuống processes.run() nội bộ),
+    // nên trước khi sửa, hủy đúng lúc đang "verifying" sẽ lọt qua catch chung và bị báo nhầm "failed".
+    const fixture = await createFixture({ neverResolveVerify: true });
+    const started = await fixture.service.start({
+      filePath: fixture.sourceFile,
+      outputDirectory: fixture.outputDirectory,
+      startTime: '0',
+      endTime: '5',
+      accurateCut: false
+    });
+
+    // Đợi tới khi service thực sự đang ở phase 'verifying' rồi mới hủy — đúng cửa sổ hẹp cần tái hiện.
+    const verifyingDeadline = Date.now() + 5000;
+    while (fixture.service.status(started.taskId)?.phase !== 'verifying') {
+      if (Date.now() > verifyingDeadline) throw new Error('Quá thời gian chờ phase verifying.');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    await fixture.service.cancel(started.taskId);
+
+    const finished = await waitForTerminal(fixture.service, started.taskId);
+    expect(finished.phase).toBe('cancelled');
+    expect(finished.error).toBeNull();
   });
 
   it('previewFrame: gọi đúng ffmpeg trên tệp cục bộ, không cần yt-dlp', async () => {

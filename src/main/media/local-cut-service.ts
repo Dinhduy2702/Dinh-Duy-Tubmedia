@@ -279,11 +279,29 @@ export class LocalCutService {
     status.message = 'Đang kiểm tra đoạn vừa cắt.';
     this.publish(active);
 
-    const checked = await this.verifier.verify(pendingOutput, 'standard', expectedDuration, {
-      jobId: status.taskId,
-      signal: active.controller.signal,
-      expectedStreams: { video: true, audio: false }
-    });
+    // Rà soát toàn diện (2026-09-24): FileVerifier.verify() cũng chuyển tiếp signal xuống processes.run()
+    // nội bộ của nó, nên CŨNG ném ProcessCancelledError khi bị hủy đúng lúc đang xác minh — y hệt lý do
+    // đã sửa cho bước ffmpeg cắt ở trên. Thiếu đoạn bắt riêng này, hủy giữa chừng lúc đang "verifying" bị
+    // báo NHẦM thành "failed" thay vì "cancelled" (đã tái hiện bằng test thật trước khi sửa).
+    let checked: Awaited<ReturnType<FileVerifier['verify']>>;
+    try {
+      checked = await this.verifier.verify(pendingOutput, 'standard', expectedDuration, {
+        jobId: status.taskId,
+        signal: active.controller.signal,
+        expectedStreams: { video: true, audio: false }
+      });
+    } catch (error) {
+      if (error instanceof ProcessCancelledError || active.controller.signal.aborted) {
+        await rm(pendingOutput, { force: true }).catch(() => undefined);
+        status.phase = 'cancelled';
+        status.message = 'Đã dừng theo yêu cầu.';
+        status.completedAt = new Date().toISOString();
+        this.publish(active);
+        if (this.active === active) this.active = null;
+        return;
+      }
+      throw error;
+    }
 
     if (!checked.ok) {
       await rm(pendingOutput, { force: true }).catch(() => undefined);
