@@ -1461,3 +1461,210 @@ test('B1: ghép video tự động tiếp tục đúng sau khi app bị đóng �
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
 });
+
+/**
+ * B2 (2026-09-24) — yêu cầu mới: video đã tải rồi không tải lại (cơ chế nhận diện theo source/link + media
+ * ID đã có sẵn — xem media-source-repository.ts, sourceIdentity()/normalizeUrl() ở src/shared/utils/url.ts:
+ * khóa nhận diện luôn dựng từ platform+extractorKey+mediaId (trích từ CHÍNH URL, không gọi API), hoặc hash
+ * của URL đã chuẩn hóa nếu không trích được mediaId — KHÔNG BAO GIỜ dùng title). Yêu cầu kiểm thật trường
+ * hợp cụ thể: hai video CÙNG TIÊU ĐỀ nhưng KHÁC LINK phải đều được tải đầy đủ, không bị bỏ qua nhầm vì
+ * trùng tên. Dùng 2 URL cục bộ có CÙNG tên tệp cuối (".../movie.mp4") ở hai đường dẫn khác nhau — xác nhận
+ * trước bằng yt-dlp thật rằng bộ trích xuất "generic" suy ra CÙNG tiêu đề "movie" cho cả hai (đúng kịch
+ * bản người dùng mô tả), rồi tải thật cả hai qua "Tải danh sách".
+ */
+test('B2: hai video cùng tiêu đề khác link đều được tải đầy đủ, không bị bỏ qua nhầm vì trùng tên', async () => {
+  test.setTimeout(150_000);
+  const toolsDirectory = resolveToolsDirectoryForTest();
+  test.skip(!toolsDirectory, 'Không tìm thấy yt-dlp/ffmpeg/ffprobe trên máy này để chạy bài kiểm thật.');
+
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-duplicate-title-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+  db.exec(
+    'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
+  );
+  db.prepare(
+    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+  ).run(
+    'app',
+    JSON.stringify({
+      theme: 'dark',
+      startWithWindows: false,
+      autoCheckAppUpdates: false,
+      autoCheckToolUpdates: false,
+      ytdlpPath: path.join(toolsDirectory!, 'yt-dlp.exe'),
+      ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+      ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+    }),
+    new Date().toISOString()
+  );
+  db.close();
+
+  // Hai clip THẬT khác nhau (kích thước khác nhau để phân biệt bằng ffprobe sau khi tải xong — chứng
+  // minh không phải cùng một tệp/bị lấy nhầm của nhau).
+  const clipDirectory = path.join(sandbox, 'nguon-that');
+  fs.mkdirSync(clipDirectory, { recursive: true });
+  const makeClip = (name: string, size: string): string => {
+    const clipPath = path.join(clipDirectory, name);
+    const result = spawnSync(
+      path.join(toolsDirectory!, 'ffmpeg.exe'),
+      ['-y', '-f', 'lavfi', '-i', `testsrc=size=${size}:rate=15:duration=3`, '-c:v', 'libx264', '-preset', 'ultrafast', clipPath],
+      { stdio: 'ignore', windowsHide: true, timeout: 60_000 }
+    );
+    expect(result.status, `ffmpeg phải dựng được ${name}`).toBe(0);
+    return clipPath;
+  };
+  const clipAPath = makeClip('a.mp4', '480x270');
+  const clipBPath = makeClip('b.mp4', '960x540');
+  const clipAData = fs.readFileSync(clipAPath);
+  const clipBData = fs.readFileSync(clipBPath);
+
+  let server: Server | undefined;
+  try {
+    server = createServer((request, response) => {
+      const data = request.url?.includes('/b/') ? clipBData : clipAData;
+      const range = request.headers.range;
+      const end = data.length - 1;
+      if (range) {
+        const start = Number(/bytes=(\d*)-/.exec(range)?.[1] ?? 0);
+        response.writeHead(206, {
+          'Content-Type': 'video/mp4',
+          'Content-Range': `bytes ${start}-${end}/${data.length}`,
+          'Content-Length': String(end - start + 1),
+          'Accept-Ranges': 'bytes'
+        });
+        response.end(data.subarray(start));
+      } else {
+        response.writeHead(200, {
+          'Content-Type': 'video/mp4',
+          'Content-Length': String(data.length),
+          'Accept-Ranges': 'bytes'
+        });
+        response.end(data);
+      }
+    });
+    const port = await new Promise<number>((resolvePort) => {
+      server!.listen(0, '127.0.0.1', () => resolvePort((server!.address() as { port: number }).port));
+    });
+    // CÙNG tên tệp cuối ("movie.mp4") ở hai đường dẫn khác nhau — bộ trích xuất "generic" của yt-dlp suy
+    // ra CÙNG tiêu đề "movie" cho cả hai (đã xác nhận thật bằng yt-dlp trước khi viết bài kiểm này).
+    const urlA = `http://127.0.0.1:${port}/videos/a/movie.mp4`;
+    const urlB = `http://127.0.0.1:${port}/videos/b/movie.mp4`;
+
+    const outputFolder = path.join(sandbox, 'ket-qua');
+    const tempFolder = path.join(sandbox, 'tam');
+    for (const folder of [outputFolder, tempFolder]) fs.mkdirSync(folder, { recursive: true });
+
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+        ),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+
+    interface DesktopDownloadDupApi {
+      tools: { list: () => Promise<Array<{ name: string; available: boolean }>> };
+      workbench: { startDownload: (input: Record<string, unknown>) => Promise<unknown> };
+      queue: {
+        list: () => Promise<
+          Array<{ id: string; type: string; status: string; input: Record<string, unknown> }>
+        >;
+      };
+    }
+
+    let toolsReady = false;
+    const toolsDeadline = Date.now() + 30_000;
+    while (Date.now() < toolsDeadline) {
+      const list = await shellWindow.evaluate(
+        () => (window as unknown as { desktop: DesktopDownloadDupApi }).desktop.tools.list()
+      );
+      if (
+        list.find((item) => item.name === 'yt-dlp')?.available &&
+        list.find((item) => item.name === 'ffmpeg')?.available
+      ) {
+        toolsReady = true;
+        break;
+      }
+      await sleep(300);
+    }
+    expect(toolsReady, 'yt-dlp/ffmpeg phải sẵn sàng trong 30s').toBe(true);
+
+    await shellWindow.evaluate(
+      (input) => (window as unknown as { desktop: DesktopDownloadDupApi }).desktop.workbench.startDownload(input),
+      {
+        slot: 'download-1',
+        name: 'Kiem tra 2 video cung tieu de khac link',
+        linksText: `${urlA}\n${urlB}`,
+        outputFolder,
+        tempFolder,
+        resourceProfileId: 'resource-balanced'
+      }
+    );
+
+    let downloadJobs: Array<{ id: string; type: string; status: string; input: Record<string, unknown> }> = [];
+    const deadline = Date.now() + 90_000;
+    while (Date.now() < deadline) {
+      const jobs = await shellWindow.evaluate(
+        () => (window as unknown as { desktop: DesktopDownloadDupApi }).desktop.queue.list()
+      );
+      downloadJobs = jobs.filter((job) => job.type === 'download');
+      if (downloadJobs.length >= 2 && downloadJobs.every((job) => ['completed', 'failed', 'cancelled'].includes(job.status))) {
+        break;
+      }
+      await sleep(300);
+    }
+
+    expect(downloadJobs.length, 'phải tạo ĐÚNG 2 tác vụ tải riêng biệt — không bị gộp thành 1 vì trùng tên').toBe(2);
+    for (const job of downloadJobs) {
+      expect(job.status, `tác vụ tải ${job.id} phải hoàn tất, không được bị bỏ qua/thất bại`).toBe('completed');
+    }
+    // Xác nhận THẬT (đọc tên tệp thật trên đĩa, không đoán): cả hai tệp đúng là có cùng phần tiêu đề
+    // "movie" do yt-dlp suy ra — nếu không, bài kiểm này chưa thật sự chạm đúng kịch bản "cùng tiêu đề".
+    const downloadedNames = fs.readdirSync(outputFolder);
+    expect(
+      downloadedNames.filter((name) => name.startsWith('movie ')).length,
+      `cả hai tệp phải có tiêu đề "movie" giống nhau (tên thật: ${downloadedNames.join(', ')})`
+    ).toBe(2);
+
+    const outputPaths = downloadJobs.map((job) =>
+      typeof job.input.outputPath === 'string' ? job.input.outputPath : ''
+    );
+    expect(outputPaths.every((p) => p && fs.existsSync(p)), 'cả hai tệp đã tải phải thật sự tồn tại trên đĩa').toBe(
+      true
+    );
+    expect(new Set(outputPaths).size, 'hai tệp đã tải phải là HAI tệp KHÁC NHAU, không được ghi đè lên nhau').toBe(
+      2
+    );
+
+    // Xác nhận THẬT bằng ffprobe: hai tệp đúng là NỘI DUNG KHÁC NHAU (kích thước khác nhau như đã dựng),
+    // không phải một tệp được tải rồi bị coi là "đã có" và dùng lại nhầm cho cả hai.
+    const dimensionsOf = (filePath: string): string =>
+      execFileSync(
+        path.join(toolsDirectory!, 'ffprobe.exe'),
+        ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', filePath],
+        { encoding: 'utf8', windowsHide: true }
+      ).trim();
+    const realDimensions = outputPaths.map(dimensionsOf).sort();
+    expect(
+      realDimensions,
+      'hai video tải về phải có kích thước thật đúng như hai nguồn khác nhau (480x270 và 960x540)'
+    ).toEqual(['480,270', '960,540']);
+  } finally {
+    server?.close();
+    await closeElectronApplication();
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});
