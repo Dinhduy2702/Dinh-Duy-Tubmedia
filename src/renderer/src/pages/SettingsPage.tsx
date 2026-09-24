@@ -375,6 +375,14 @@ function DownloadSettings({ settings, patch, setError }: { settings: AppSettings
       <NumberField label="Tổng video tải đồng thời toàn ứng dụng" value={settings.maxGlobalDownloadWorkers} min={1} max={16} onChange={(value) => patch('maxGlobalDownloadWorkers', value)}/>
       <NumberField label="Fragment đồng thời mỗi video" value={settings.downloadConcurrentFragments} min={1} max={8} onChange={(value) => patch('downloadConcurrentFragments', value)}/>
     </Grid>
+
+    <h3 className="mb-3 mt-7 font-black">Tên tệp Tải nhanh</h3>
+    <Grid>
+      <Text label="Mẫu đặt tên tệp" value={settings.quickDownloadFilenameTemplate} onChange={(value) => patch('quickDownloadFilenameTemplate', value)} placeholder="{title} [{id}]"/>
+    </Grid>
+    <p className="settings-detail-copy">
+      Token dùng được: <code>{'{title}'}</code> tên video, <code>{'{channel}'}</code> kênh/tác giả, <code>{'{date}'}</code> ngày tải (hôm nay), <code>{'{id}'}</code> mã video trên nền tảng. Chỉ áp dụng cho Tải nhanh. Nếu tên theo mẫu quá dài hoặc không hợp lệ với Windows, ứng dụng tự động thử lại bằng tên rút gọn an toàn.
+    </p>
   </Block>;
 }
 

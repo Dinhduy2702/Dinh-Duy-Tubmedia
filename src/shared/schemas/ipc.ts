@@ -88,7 +88,20 @@ export const appSettingsSchema = z
     downloadAudioBitrateKbps: z.number().int().min(0).max(512),
     downloadAllowBelowMinimum: z.boolean(),
     downloadVerifyEntireFile: z.boolean(),
-    progressRefreshMs: z.number().int().min(100).max(5000)
+    progressRefreshMs: z.number().int().min(100).max(5000),
+    // Giai đoạn 6 mục 7 (2026-09-24): mẫu đặt tên tệp Tải nhanh — chỉ 4 token {title}/{channel}/{date}/
+    // {id} được thay thế thật; chặn '%' để không ai chèn được cú pháp trường yt-dlp riêng ngoài 4 token
+    // đã định nghĩa, và chặn ký tự Windows cấm/ký tự điều khiển dù --windows-filenames đã tự làm sạch
+    // tên tệp cuối cùng (chặn sớm ở đây cho người dùng phản hồi rõ ràng ngay khi lưu Cài đặt).
+    quickDownloadFilenameTemplate: z
+      .string()
+      .trim()
+      .min(1)
+      .max(120)
+      .refine(
+        (value) => !/[%<>:"/\\|?*]/.test(value) && !Array.from(value).some((char) => char.charCodeAt(0) < 0x20),
+        { message: 'Mẫu tên tệp không được chứa ký tự %, <>:"/\\|?* hoặc ký tự điều khiển.' }
+      )
   })
   .strict();
 export const settingsPatchSchema = appSettingsSchema.partial();

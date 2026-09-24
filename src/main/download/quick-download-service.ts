@@ -135,10 +135,15 @@ function quickMediaLabel(mediaMode: ValidatedQuickDownloadRequest['mediaMode']):
   return mediaMode === 'audio-only' ? 'âm thanh' : 'video';
 }
 
+// Giai đoạn 6 mục 7 (2026-09-24): mẫu tên tệp giờ do người dùng cấu hình nên KHÔNG còn chắc chắn có
+// dấu ngoặc [id] đứng ngay trước "[QD-token]" nữa (ví dụ mẫu chỉ có {channel}, không có {id}) — tách
+// thành 2 bước độc lập thay vì một biểu thức chính quy giả định luôn có đúng 2 nhóm ngoặc, để không lộ
+// "[QD-...]"/khoảng cắt ra ngoài tên hiển thị dù người dùng chọn mẫu nào.
 function titleFromOutputPath(outputPath: string): string | null {
   const withoutExtension = basename(outputPath).replace(/\.[^.]+$/, '');
-  const withoutTokens = withoutExtension.replace(/\s+\[[^\]]+\]\s+\[QD-[^\]]+\]$/, '');
-  return cleanExternalText(withoutTokens) ?? cleanExternalText(withoutExtension);
+  const withoutQdToken = withoutExtension.replace(/\s+\[QD-[^\]]+\]$/, '');
+  const withoutRangeSuffix = withoutQdToken.replace(/\s+\[\d{2}(-\d{2}){3,5}\]$/, '');
+  return cleanExternalText(withoutRangeSuffix) ?? cleanExternalText(withoutExtension);
 }
 
 function isPersistedState(value: unknown): value is PersistedQuickDownloadState {
@@ -521,7 +526,8 @@ export class QuickDownloadService {
           authentication,
           {
             compactFilename: active.compactFilename,
-            forceGenericExtractor: active.genericFallbackTried
+            forceGenericExtractor: active.genericFallbackTried,
+            filenameTemplate: this.settings?.get().quickDownloadFilenameTemplate
           }
         );
 

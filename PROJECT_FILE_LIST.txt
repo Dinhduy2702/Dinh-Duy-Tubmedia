@@ -517,6 +517,7 @@ tests/unit/quality.test.ts
 tests/unit/queue-lane.test.ts
 tests/unit/quick-download-cookie-integration.test.ts
 tests/unit/quick-download-credit-metadata.test.ts
+tests/unit/quick-download-filename-template.test.ts
 tests/unit/quick-download-progress-flags.test.ts
 tests/unit/quick-download-resilience.test.ts
 tests/unit/quick-download-service.test.ts

@@ -1103,3 +1103,79 @@ test('Giai đoạn 6 mục 6: xem thông tin tệp — media:analyze trả đún
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
 });
+
+test('Giai đoạn 6 mục 7: mẫu đặt tên tệp Tải nhanh — lưu/đọc thật qua Cài đặt, từ chối mẫu có ký tự nguy hiểm', async () => {
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-filename-template-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+
+  try {
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+        ),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+
+    interface DesktopSettingsApi {
+      settings: {
+        get: () => Promise<{ quickDownloadFilenameTemplate: string }>;
+        update: (patch: Record<string, unknown>) => Promise<{ quickDownloadFilenameTemplate: string }>;
+      };
+    }
+
+    const before = await shellWindow.evaluate(
+      () => (window as unknown as { desktop: DesktopSettingsApi }).desktop.settings.get()
+    );
+    expect(before.quickDownloadFilenameTemplate, 'mặc định phải khớp đúng hành vi tên tệp cũ').toBe(
+      '{title} [{id}]'
+    );
+
+    const updated = await shellWindow.evaluate(
+      () =>
+        (window as unknown as { desktop: DesktopSettingsApi }).desktop.settings.update({
+          quickDownloadFilenameTemplate: '{channel} - {title} ({date})'
+        })
+    );
+    expect(updated.quickDownloadFilenameTemplate).toBe('{channel} - {title} ({date})');
+
+    const reread = await shellWindow.evaluate(
+      () => (window as unknown as { desktop: DesktopSettingsApi }).desktop.settings.get()
+    );
+    expect(reread.quickDownloadFilenameTemplate, 'phải đọc lại đúng giá trị đã lưu thật vào CSDL').toBe(
+      '{channel} - {title} ({date})'
+    );
+
+    // Mẫu chứa '%' phải bị từ chối thật ở tầng IPC (không chỉ ở bài kiểm đơn vị) — chặn chèn cú pháp
+    // trường yt-dlp ngoài 4 token đã định nghĩa.
+    await expect(
+      shellWindow.evaluate(
+        () =>
+          (window as unknown as { desktop: DesktopSettingsApi }).desktop.settings.update({
+            quickDownloadFilenameTemplate: '%(filepath)s'
+          })
+      )
+    ).rejects.toThrow();
+
+    // Giá trị cũ (hợp lệ) phải còn nguyên sau khi lượt cập nhật không hợp lệ bị từ chối.
+    const afterRejected = await shellWindow.evaluate(
+      () => (window as unknown as { desktop: DesktopSettingsApi }).desktop.settings.get()
+    );
+    expect(afterRejected.quickDownloadFilenameTemplate).toBe('{channel} - {title} ({date})');
+  } finally {
+    await closeElectronApplication();
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});

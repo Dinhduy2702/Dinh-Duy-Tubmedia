@@ -57,7 +57,10 @@ export const defaultAppSettings: AppSettings = {
   downloadAudioBitrateKbps: 0,
   downloadAllowBelowMinimum: false,
   downloadVerifyEntireFile: false,
-  progressRefreshMs: 300
+  progressRefreshMs: 300,
+  // Giai đoạn 6 mục 7: mặc định giữ NGUYÊN hành vi hiện có (tên video + mã video) — người dùng cũ nâng
+  // cấp lên không thấy tên tệp đổi khác cho tới khi tự sửa trong Cài đặt.
+  quickDownloadFilenameTemplate: '{title} [{id}]'
 };
 
 export const builtInResourceProfiles: ResourceProfile[] = [

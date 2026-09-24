@@ -297,6 +297,8 @@ export interface AppSettings {
   downloadAllowBelowMinimum: boolean;
   downloadVerifyEntireFile: boolean;
   progressRefreshMs: number;
+  /** Giai đoạn 6 mục 7 (2026-09-24): mẫu đặt tên tệp cho Tải nhanh — {title}/{channel}/{date}/{id}. */
+  quickDownloadFilenameTemplate: string;
 }
 
 export interface HardwareProfile {
