@@ -136,4 +136,59 @@ describe('user-facing notification boundary', () => {
     expect(issue.steps.length).toBeGreaterThan(0);
     expect(issue.technical).toContain('EPERM');
   });
+
+  // Giai đoạn 3 (2026-09-25) — rà lại bảng kiểm kê sau kiến trúc: các mã có message LUÔN theo một
+  // khuôn cố định (một điểm gọi duy nhất) được thay hẳn message/steps bằng nội dung đã duyệt.
+  it('replaces the whole message for single-shape codes like TOOL_HEALTH_CHECK_FAILED and PROCESS_TIMEOUT', () => {
+    const health = friendlyIssue(encodeTypedMessage('error', 'TOOL_HEALTH_CHECK_FAILED', 'ffmpeg: exit code 3221225781'));
+    expect(health.title).toBe('Công cụ xử lý video hoạt động bất thường');
+    expect(health.message).not.toContain('exit code');
+    expect(health.message).not.toContain('ffmpeg');
+    expect(health.steps.length).toBeGreaterThan(0);
+
+    const timeout = friendlyIssue(encodeTypedMessage('warning', 'PROCESS_TIMEOUT', 'yt-dlp vượt quá thời gian cho phép 300 giây.'));
+    expect(timeout.title).toBe('Một bước xử lý chạy quá lâu');
+    expect(timeout.message).not.toContain('yt-dlp');
+    expect(timeout.steps.length).toBeGreaterThan(0);
+  });
+
+  // SOURCE_REMOVED đã có message viết tay rất tốt từ trước (giữ nguyên) — Giai đoạn 3 chỉ thêm gợi ý
+  // hành động còn thiếu, không đụng vào nội dung đã tốt.
+  it('keeps the already-good SOURCE_REMOVED message but adds the missing action step', () => {
+    const wire = encodeTypedMessage(
+      'neutral',
+      'SOURCE_REMOVED',
+      'Video này đã bị xóa khỏi YouTube nên không thể tải. Tubmedia đã bỏ qua video này.'
+    );
+    const issue = friendlyIssue(wire);
+    expect(issue.title).toBe('Video không còn khả dụng');
+    expect(issue.message).toBe('Video này đã bị xóa khỏi YouTube nên không thể tải. Tubmedia đã bỏ qua video này.');
+    expect(issue.steps).toContain('Hãy kiểm tra lại link hoặc bỏ qua video này.');
+  });
+
+  // Giai đoạn 3 (2026-09-25): PROCESSING_FAILED/MERGE_FAILED đôi khi dùng thẳng stderrTail của FFmpeg —
+  // log FFmpeg có định dạng đặc trưng ("[bộ_mã_hóa @ 0x...]", "Stream #0:0") phải bị chặn khỏi nội dung
+  // chính, nhưng KHÔNG được đụng vào một message đã tốt của cùng mã (vd "Mốc cắt không hợp lệ...").
+  it('blocks raw FFmpeg log output but keeps an already-clear message for the same code', () => {
+    const leaked = friendlyIssue(
+      encodeTypedMessage(
+        'error',
+        'PROCESSING_FAILED',
+        "[libx264 @ 0x55d2a1b2c3d0] frame=  120 fps=0 Stream #0:0: Invalid data found"
+      )
+    );
+    expect(leaked.message).not.toContain('libx264');
+    expect(leaked.message).not.toContain('Stream #0:0');
+
+    const clear = friendlyIssue(
+      encodeTypedMessage(
+        'error',
+        'PROCESSING_FAILED',
+        'Mốc cắt không hợp lệ: thời điểm kết thúc phải lớn hơn thời điểm bắt đầu và các mốc không được âm.'
+      )
+    );
+    expect(clear.message).toBe(
+      'Mốc cắt không hợp lệ: thời điểm kết thúc phải lớn hơn thời điểm bắt đầu và các mốc không được âm.'
+    );
+  });
 });

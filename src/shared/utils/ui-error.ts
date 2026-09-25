@@ -87,6 +87,10 @@ function cleanRemotePrefix(raw: string): string {
 const RAW_OS_ERROR_CODES =
   /\b(?:ENOENT|EACCES|EPERM|EBUSY|EEXIST|ENOSPC|ECONNRESET|ETIMEDOUT|EPIPE|EMFILE|EISDIR|ENOTDIR|EAGAIN|ENOTEMPTY)\b/;
 const RAW_ERROR_CLASS_PREFIX = /\b[A-Z][A-Za-z]*Error:\s/;
+// Giai đoạn 3 (2026-09-25): PROCESSING_FAILED/MERGE_FAILED đôi khi dùng thẳng `stderrTail` của FFmpeg
+// làm message (vd clip-engine.ts, normalize-engine.ts) — log FFmpeg có định dạng đặc trưng không lẫn
+// với câu tiếng Việt bình thường: thẻ "[bộ mã hóa @ 0xĐỊA_CHỈ]" hoặc dòng liệt kê luồng "Stream #0:0".
+const RAW_FFMPEG_LOG_PATTERN = /\[[a-z0-9_]+\s*@\s*0x[0-9a-f]+\]|Stream #\d+:\d+/i;
 
 function isTechnicalText(raw: string): boolean {
   const trimmed = raw.trim();
@@ -109,6 +113,7 @@ function isTechnicalText(raw: string): boolean {
   }
   if (RAW_OS_ERROR_CODES.test(trimmed)) return true;
   if (RAW_ERROR_CLASS_PREFIX.test(trimmed)) return true;
+  if (RAW_FFMPEG_LOG_PATTERN.test(trimmed)) return true;
   return false;
 }
 
@@ -384,7 +389,10 @@ function classifyIssue(value: unknown): FriendlyIssue {
     lower.includes('enoent') ||
     lower.includes('tool_not_found') ||
     lower.includes('tool_health_check_failed') ||
-    lower.includes('thiếu công cụ')
+    lower.includes('thiếu công cụ') ||
+    // Giai đoạn 3 (2026-09-25): ToolNotFoundError tự viết "Không tìm thấy công cụ X." — trước đây
+    // không khớp cụm nào ở đây nên rơi vào nhánh mặc định (tiêu đề chung, gợi ý không đúng chỗ).
+    lower.includes('không tìm thấy công cụ')
   ) {
     return {
       title: 'Thiếu công cụ xử lý video',
@@ -540,27 +548,80 @@ const TYPED_FALLBACK_TITLE: Record<NoticeTone, string> = {
   neutral: 'Đã ghi nhận'
 };
 
+interface KnownCodeFallback {
+  title?: string;
+  message?: string;
+  steps?: string[];
+}
+
 // Giai đoạn 2 (2026-09-25) — Phát hiện kiến trúc số 1: trước đây, một lỗi có MÃ đã biết nhưng nội dung
 // chữ không khớp cụm nào ở classifyIssue() (vd `ToolNotFoundError`, `MergeFailedError` với message tự
 // do không trùng mẫu) bị rơi vào nhánh mặc định RỒI BỊ GHI ĐÈ thành tiêu đề chung chung ("Không thể
 // hoàn tất thao tác") và STEPS BỊ XÓA SẠCH — tệ hơn cả một lỗi lạ không có mã (lỗi lạ vẫn giữ được 3 gợi
-// ý mặc định của classifyIssue()). Bảng này cho MỖI mã đã biết một tiêu đề đúng ngữ cảnh (nói rõ đang
-// làm việc gì) để dùng THAY tiêu đề chung — CHỈ áp dụng khi nội dung không khớp nhánh cụ thể nào (nếu đã
-// khớp, nhánh đó đã có tiêu đề/gợi ý phù hợp riêng, không đụng vào). KHÔNG còn xóa `steps` — giữ nguyên
-// 3 gợi ý mặc định của classifyIssue(), vẫn hữu ích bất kể mã lỗi nào.
-const KNOWN_CODE_FALLBACK_TITLE: Partial<Record<string, string>> = {
-  TOOL_NOT_FOUND: 'Thiếu công cụ xử lý video',
-  TOOL_HEALTH_CHECK_FAILED: 'Công cụ xử lý video hoạt động bất thường',
-  SOURCE_REMOVED: 'Video không còn khả dụng',
-  DOWNLOAD_FAILED: 'Không thể tải xong video',
-  VERIFICATION_FAILED: 'Không thể xác nhận tệp vừa tạo',
-  PROCESSING_FAILED: 'Xử lý video gặp lỗi',
-  MERGE_FAILED: 'Không thể ghép video',
-  UPDATE_FAILED: 'Không thể cập nhật công cụ xử lý video',
-  ROLLBACK_FAILED: 'Không thể khôi phục phiên bản công cụ trước đó',
-  DATABASE_MIGRATION_FAILED: 'Không thể nâng cấp dữ liệu ứng dụng',
-  PROCESS_SPAWN_FAILED: 'Không thể khởi chạy công cụ xử lý video',
-  PROCESS_TIMEOUT: 'Một bước xử lý chạy quá lâu'
+// ý mặc định của classifyIssue()). Bảng này cho MỖI mã đã biết một tiêu đề đúng ngữ cảnh — CHỈ áp dụng
+// khi nội dung không khớp nhánh cụ thể nào (nếu đã khớp, nhánh đó đã có tiêu đề/gợi ý phù hợp riêng).
+//
+// Giai đoạn 3 (2026-09-25) — rà lại bảng kiểm kê Giai đoạn 1 sau khi có kiến trúc trên: với các mã có
+// message LUÔN theo một khuôn cố định (một điểm gọi duy nhất, hoặc mọi biến thể đều na ná nhau về mức
+// "kỹ thuật"), an toàn để thay cả `message`/`steps` bằng nội dung đã đề xuất và người dùng đã duyệt.
+// CỐ TÌNH KHÔNG thay `message` cho các mã có nhiều điểm gọi với chất lượng khác nhau (DOWNLOAD_FAILED,
+// PROCESSING_FAILED, MERGE_FAILED) — một vài thông điệp ở đó đã đủ tốt (vd "Mốc cắt không hợp lệ...");
+// thay message hàng loạt sẽ xóa mất phần đã tốt. Các mã đó chỉ nhận `title` chung, message gốc giữ
+// nguyên, dựa vào bước 2 (`isTechnicalText()`) để chặn phần lộ kỹ thuật thô nếu có.
+const KNOWN_CODE_FALLBACK: Partial<Record<string, KnownCodeFallback>> = {
+  // Dự phòng: nhánh "enoent" ở trên đã mở rộng để bắt luôn message gốc "Không tìm thấy công cụ X." nên
+  // trường hợp này hiếm khi còn rơi tới đây — giữ lại phòng khi ToolNotFoundError đổi cách viết sau này.
+  TOOL_NOT_FOUND: { title: 'Thiếu công cụ xử lý video' },
+  TOOL_HEALTH_CHECK_FAILED: {
+    title: 'Công cụ xử lý video hoạt động bất thường',
+    message: 'Một công cụ xử lý video đang hoạt động không bình thường.',
+    steps: ['Mở Trung tâm công cụ.', 'Chọn Sửa chữa tất cả nếu vẫn báo lỗi.']
+  },
+  SOURCE_REMOVED: {
+    title: 'Video không còn khả dụng',
+    steps: ['Hãy kiểm tra lại link hoặc bỏ qua video này.']
+  },
+  DOWNLOAD_FAILED: { title: 'Không thể tải xong video' },
+  VERIFICATION_FAILED: {
+    title: 'Không thể xác nhận tệp vừa tạo',
+    message: 'Tubmedia không thể kiểm tra tệp video vừa tạo — có thể tệp bị lỗi khi ghi.',
+    steps: ['Thử lại thao tác; nếu lặp lại, video nguồn có thể bị hỏng.']
+  },
+  PROCESSING_FAILED: { title: 'Xử lý video gặp lỗi' },
+  MERGE_FAILED: { title: 'Không thể ghép video' },
+  UPDATE_FAILED: {
+    title: 'Không thể cập nhật công cụ xử lý video',
+    message: 'Tubmedia không tải hoặc xác minh được bản cập nhật của công cụ xử lý video.',
+    steps: [
+      'Kiểm tra kết nối mạng rồi thử lại.',
+      'Vẫn có thể dùng phiên bản công cụ hiện tại — không ảnh hưởng tác vụ đang chạy.'
+    ]
+  },
+  ROLLBACK_FAILED: {
+    title: 'Không thể khôi phục phiên bản công cụ trước đó',
+    steps: ['Chạy lại Kiểm tra/Sửa chữa trong Trung tâm công cụ để tải lại công cụ từ đầu.']
+  },
+  DATABASE_MIGRATION_FAILED: {
+    title: 'Không thể nâng cấp dữ liệu ứng dụng',
+    message:
+      'Tubmedia không thể nâng cấp đúng cách dữ liệu ứng dụng khi khởi động. Dữ liệu cũ vẫn được giữ nguyên, chưa bị thay đổi.',
+    steps: [
+      'Khởi động lại ứng dụng.',
+      'Nếu lặp lại, sao lưu thư mục dữ liệu rồi liên hệ hỗ trợ kèm Chi tiết kỹ thuật.'
+    ]
+  },
+  PROCESS_SPAWN_FAILED: {
+    title: 'Không thể khởi chạy công cụ xử lý video',
+    message: 'Tubmedia không thể khởi chạy công cụ xử lý video.',
+    steps: ['Mở Trung tâm công cụ → Kiểm tra lại/Sửa chữa tất cả.', 'Tắt tạm thời phần mềm diệt virus nếu vẫn lỗi.']
+  },
+  PROCESS_TIMEOUT: {
+    title: 'Một bước xử lý chạy quá lâu',
+    message: 'Bước xử lý video này chạy quá lâu nên đã bị dừng để tránh treo ứng dụng.',
+    steps: [
+      'Thử lại; nếu máy đang chạy nhiều việc cùng lúc, hãy giảm số quy trình song song trong Cài đặt.'
+    ]
+  }
 };
 
 function typedRaw(value: unknown): string {
@@ -579,13 +640,15 @@ export function friendlyIssue(value: unknown): FriendlyIssue {
   const typed = readTypedMessage(typedRaw(value));
   if (!typed) return issue;
   const generic = issue.title === GENERIC_FALLBACK_TITLE;
+  if (!generic) return { ...issue, tone: typed.tone, code: typed.code };
+  const known = KNOWN_CODE_FALLBACK[typed.code];
   return {
     ...issue,
     tone: typed.tone,
     code: typed.code,
-    ...(generic
-      ? { title: KNOWN_CODE_FALLBACK_TITLE[typed.code] ?? TYPED_FALLBACK_TITLE[typed.tone] }
-      : {})
+    title: known?.title ?? TYPED_FALLBACK_TITLE[typed.tone],
+    ...(known?.message ? { message: known.message } : {}),
+    ...(known?.steps ? { steps: known.steps } : {})
   };
 }
 
