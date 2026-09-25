@@ -528,6 +528,7 @@ tests/unit/quick-download-progress-flags.test.ts
 tests/unit/quick-download-resilience.test.ts
 tests/unit/quick-download-service.test.ts
 tests/unit/quick-download-silent-source.test.ts
+tests/unit/quick-download-state-persist-race.test.ts
 tests/unit/quick-download-sync.test.ts
 tests/unit/quick-download-video-only.test.ts
 tests/unit/quick-download.test.ts

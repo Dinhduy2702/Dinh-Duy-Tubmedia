@@ -1126,7 +1126,7 @@ export class QuickDownloadService {
     };
     const pending = `${this.statePath}.${process.pid}.pending`;
 
-    const operation = this.persistTail.then(async () => {
+    const writeOnce = async (): Promise<void> => {
       await mkdir(dirname(this.statePath), { recursive: true });
       await writeFile(pending, JSON.stringify(snapshot, null, 2), 'utf8');
       await rename(pending, this.statePath).catch(async (error: NodeJS.ErrnoException) => {
@@ -1134,6 +1134,21 @@ export class QuickDownloadService {
         await rm(this.statePath, { force: true });
         await rename(pending, this.statePath);
       });
+    };
+
+    const operation = this.persistTail.then(async () => {
+      try {
+        await writeOnce();
+      } catch (error) {
+        // TUBMEDIA QUICK DOWNLOAD STATE RACE HOTFIX (2026-09-25): lỗi thật gặp khi phát hành v1.4.0 —
+        // ENOENT trên CI (không lộ trên máy phát triển vì máy nhanh hơn nhiều). mkdir({recursive:true})
+        // ở trên KHÔNG đủ nếu một thao tác KHÁC (ví dụ dọn dẹp thư mục tạm chạy đồng thời) xóa đúng thư
+        // mục đó NGAY SAU khi mkdir() vừa tạo xong nhưng TRƯỚC khi writeFile() kịp chạy — một khoảng hở
+        // TOCTOU thật, không phải "quên mkdir". Thử lại đúng MỘT lần (mkdir lại rồi ghi lại) trước khi
+        // coi là lỗi thật; nếu lần thử lại cũng thất bại thì mới báo lỗi như cũ.
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        await writeOnce();
+      }
     });
 
     this.persistTail = operation.catch((error: unknown) => {
