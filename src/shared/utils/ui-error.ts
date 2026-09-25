@@ -78,6 +78,16 @@ function cleanRemotePrefix(raw: string): string {
     .trim();
 }
 
+// Giai đoạn 2 (2026-09-25) — Phát hiện kiến trúc số 2: các heuristic cũ chỉ bắt JSON/mảng, stack trace
+// và tên lớp lỗi JS — KHÔNG bắt được câu dạng "Nhãn tiếng Việt: LỖI_HỆ_ĐIỀU_HÀNH_THÔ" (vd
+// `merge-engine.ts`: "Không thể commit thành phẩm an toàn: ENOENT: no such file..."), khiến lỗi hệ
+// điều hành/Node.js thô lộ thẳng ra thông báo chính thay vì bị thay bằng câu an toàn. Thêm 2 nhóm mẫu:
+// mã lỗi hệ điều hành/Node.js phổ biến, và tiền tố "TênLớpLỗi:" (SqliteError, AggregateError...) lồng
+// giữa câu.
+const RAW_OS_ERROR_CODES =
+  /\b(?:ENOENT|EACCES|EPERM|EBUSY|EEXIST|ENOSPC|ECONNRESET|ETIMEDOUT|EPIPE|EMFILE|EISDIR|ENOTDIR|EAGAIN|ENOTEMPTY)\b/;
+const RAW_ERROR_CLASS_PREFIX = /\b[A-Z][A-Za-z]*Error:\s/;
+
 function isTechnicalText(raw: string): boolean {
   const trimmed = raw.trim();
   if (!trimmed) return false;
@@ -97,6 +107,8 @@ function isTechnicalText(raw: string): boolean {
   ) {
     return true;
   }
+  if (RAW_OS_ERROR_CODES.test(trimmed)) return true;
+  if (RAW_ERROR_CLASS_PREFIX.test(trimmed)) return true;
   return false;
 }
 
@@ -528,12 +540,27 @@ const TYPED_FALLBACK_TITLE: Record<NoticeTone, string> = {
   neutral: 'Đã ghi nhận'
 };
 
-const TYPED_FALLBACK_STEPS: Record<NoticeTone, string[]> = {
-  error: [],
-  warning: ['Kiểm tra điều kiện nêu trên rồi thử lại.'],
-  info: [],
-  success: [],
-  neutral: []
+// Giai đoạn 2 (2026-09-25) — Phát hiện kiến trúc số 1: trước đây, một lỗi có MÃ đã biết nhưng nội dung
+// chữ không khớp cụm nào ở classifyIssue() (vd `ToolNotFoundError`, `MergeFailedError` với message tự
+// do không trùng mẫu) bị rơi vào nhánh mặc định RỒI BỊ GHI ĐÈ thành tiêu đề chung chung ("Không thể
+// hoàn tất thao tác") và STEPS BỊ XÓA SẠCH — tệ hơn cả một lỗi lạ không có mã (lỗi lạ vẫn giữ được 3 gợi
+// ý mặc định của classifyIssue()). Bảng này cho MỖI mã đã biết một tiêu đề đúng ngữ cảnh (nói rõ đang
+// làm việc gì) để dùng THAY tiêu đề chung — CHỈ áp dụng khi nội dung không khớp nhánh cụ thể nào (nếu đã
+// khớp, nhánh đó đã có tiêu đề/gợi ý phù hợp riêng, không đụng vào). KHÔNG còn xóa `steps` — giữ nguyên
+// 3 gợi ý mặc định của classifyIssue(), vẫn hữu ích bất kể mã lỗi nào.
+const KNOWN_CODE_FALLBACK_TITLE: Partial<Record<string, string>> = {
+  TOOL_NOT_FOUND: 'Thiếu công cụ xử lý video',
+  TOOL_HEALTH_CHECK_FAILED: 'Công cụ xử lý video hoạt động bất thường',
+  SOURCE_REMOVED: 'Video không còn khả dụng',
+  DOWNLOAD_FAILED: 'Không thể tải xong video',
+  VERIFICATION_FAILED: 'Không thể xác nhận tệp vừa tạo',
+  PROCESSING_FAILED: 'Xử lý video gặp lỗi',
+  MERGE_FAILED: 'Không thể ghép video',
+  UPDATE_FAILED: 'Không thể cập nhật công cụ xử lý video',
+  ROLLBACK_FAILED: 'Không thể khôi phục phiên bản công cụ trước đó',
+  DATABASE_MIGRATION_FAILED: 'Không thể nâng cấp dữ liệu ứng dụng',
+  PROCESS_SPAWN_FAILED: 'Không thể khởi chạy công cụ xử lý video',
+  PROCESS_TIMEOUT: 'Một bước xử lý chạy quá lâu'
 };
 
 function typedRaw(value: unknown): string {
@@ -556,7 +583,9 @@ export function friendlyIssue(value: unknown): FriendlyIssue {
     ...issue,
     tone: typed.tone,
     code: typed.code,
-    ...(generic ? { title: TYPED_FALLBACK_TITLE[typed.tone], steps: TYPED_FALLBACK_STEPS[typed.tone] } : {})
+    ...(generic
+      ? { title: KNOWN_CODE_FALLBACK_TITLE[typed.code] ?? TYPED_FALLBACK_TITLE[typed.tone] }
+      : {})
   };
 }
 

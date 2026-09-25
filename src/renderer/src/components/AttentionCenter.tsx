@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { X, Cookie, DownloadCloud } from 'lucide-react';
+import { X, Cookie, Copy, DownloadCloud } from 'lucide-react';
 import {
   ACTION_REQUIRED_WARNING_MIN_DURATION_MS,
   isAttentionNoticeResolved,
   noticeDisplayPolicy
 } from '@shared/utils/notification-policy';
-import { NOTICE_TONE_LABEL, noticeAriaRole } from '@shared/utils/notice-tone';
+import { NOTICE_TONE_LABEL, noticeAriaRole, stripTypedMarker } from '@shared/utils/notice-tone';
 import { ToneIcon } from './ui/ToneIcon';
 import { useAppStore } from '../stores/app-store';
 import { friendlyIssue } from '../utils/ui-error';
@@ -30,6 +30,7 @@ export function AttentionCenter(): React.JSX.Element | null {
   const [phase, setPhase] = useState<Phase>('entering');
   const [paused, setPaused] = useState(false);
   const [cookieOpen, setCookieOpen] = useState(false);
+  const [technicalOpen, setTechnicalOpen] = useState(false);
   const closeTimer = useRef<number | null>(null);
   const removeTimer = useRef<number | null>(null);
   const remainingMs = useRef(0);
@@ -98,6 +99,7 @@ export function AttentionCenter(): React.JSX.Element | null {
   useEffect(() => {
     clearTimers();
     setPaused(false);
+    setTechnicalOpen(false);
     remainingMs.current = duration;
     if (!key) return;
     setPhase('entering');
@@ -134,6 +136,12 @@ export function AttentionCenter(): React.JSX.Element | null {
   const message = issue?.message ?? attention?.message ?? '';
   const steps = issue?.steps ?? attention?.steps ?? [];
   const style = { '--attention-duration': `${duration}ms` } as CSSProperties;
+  // Giai đoạn 2 (2026-09-25) — Phát hiện kiến trúc số 3: `issue.technical` được tính sẵn nhưng trước
+  // đây KHÔNG có nơi nào hiển thị ở khung thông báo chính — người dùng không có cách nào xem/sao chép
+  // chi tiết kỹ thuật gốc để gửi hỗ trợ. Bỏ dấu kiểu nội bộ ([[tm:...]]) trước khi hiện; chỉ hiện khi có
+  // nội dung và khác nội dung thân thiện đã hiện phía trên (tránh lặp vô ích).
+  const technical = issue?.technical ? stripTypedMarker(issue.technical).trim() : '';
+  const showTechnical = technical.length > 0 && technical !== message.trim();
 
   return (
     <>
@@ -187,6 +195,31 @@ export function AttentionCenter(): React.JSX.Element | null {
                 </li>
               ))}
             </ol>
+          )}
+          {showTechnical && (
+            <div className="mt-2">
+              <button
+                className="attention-technical-toggle"
+                type="button"
+                aria-expanded={technicalOpen}
+                onClick={() => setTechnicalOpen((current) => !current)}
+              >
+                {technicalOpen ? 'Ẩn chi tiết kỹ thuật' : 'Xem chi tiết kỹ thuật'}
+              </button>
+              <div className={`attention-technical-wrap ${technicalOpen ? 'is-open' : ''}`}>
+                <div>
+                  <pre className="attention-technical">{technical}</pre>
+                  <button
+                    className="btn btn-small btn-ghost mt-1"
+                    type="button"
+                    onClick={() => void window.desktop.app.writeClipboard(technical)}
+                  >
+                    <Copy size={13} />
+                    Sao chép
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
         </div>
         <button className="attention-close" aria-label="Đóng thông báo" onClick={beginClose}>

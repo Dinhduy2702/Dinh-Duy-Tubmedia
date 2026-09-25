@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { BrowserCookieLockedError } from '../../src/shared/errors/app-errors.js';
+import { BrowserCookieLockedError, ToolNotFoundError } from '../../src/shared/errors/app-errors.js';
+import { encodeTypedMessage } from '../../src/shared/utils/notice-tone.js';
 import { friendlyIssue, safeUiText } from '../../src/shared/utils/ui-error.js';
 
 const completedDownloadResult = {
@@ -65,7 +66,12 @@ describe('user-facing notification boundary', () => {
     const tools = readFileSync('src/renderer/src/pages/ToolsPage.tsx', 'utf8');
     expect(queue).not.toContain('JSON.stringify(detailJob.input');
     expect(queue).not.toContain('<pre>{issue.technical}</pre>');
-    expect(attention).not.toContain('attention-technical');
+    // Giai đoạn 2 (2026-09-25) — Phát hiện kiến trúc số 3: AttentionCenter giờ CÓ hiển thị
+    // issue.technical, nhưng CHỈ trong khung "Chi tiết kỹ thuật" gấp lại mặc định
+    // (attention-technical-wrap + state technicalOpen) — không phải hiện thẳng, không điều kiện.
+    expect(attention).not.toContain('<pre>{issue.technical}</pre>');
+    expect(attention).toContain('attention-technical-wrap');
+    expect(attention).toContain('technicalOpen');
     expect(app).not.toContain('{issue.technical}');
     expect(app).toContain('safeUiText(startupToolMessage');
     expect(boundary).not.toContain('error.stack');
@@ -101,5 +107,33 @@ describe('user-facing notification boundary', () => {
     expect(allSteps).toContain('Task Manager');
     expect(allSteps).toContain('chrome.exe');
     expect(allSteps.toLowerCase()).toContain('kết thúc tác vụ');
+  });
+
+  // Giai đoạn 2 (2026-09-25) — Phát hiện kiến trúc số 1: một lỗi có MÃ đã biết nhưng nội dung chữ
+  // không khớp cụm nào ở classifyIssue() từng bị GHI ĐÈ thành tiêu đề chung chung và MẤT SẠCH gợi ý
+  // hành động — tệ hơn một lỗi lạ không có mã. Xác nhận đã sửa: tiêu đề đúng ngữ cảnh + vẫn còn gợi ý.
+  it('gives a code-aware title and keeps helpful steps for a known error code with no matching phrase', () => {
+    const error = new ToolNotFoundError('ffmpeg');
+    const wire = encodeTypedMessage('error', 'TOOL_NOT_FOUND', error.message);
+    const issue = friendlyIssue(wire);
+    expect(issue.title).toBe('Thiếu công cụ xử lý video');
+    expect(issue.title).not.toBe('Không thể hoàn tất thao tác');
+    expect(issue.steps.length).toBeGreaterThan(0);
+    expect(issue.code).toBe('TOOL_NOT_FOUND');
+  });
+
+  // Giai đoạn 2 (2026-09-25) — Phát hiện kiến trúc số 2: một số message viết tay nhét thẳng lỗi hệ
+  // điều hành thô (vd merge-engine.ts: `Không thể commit thành phẩm an toàn: ${String(error)}`) —
+  // isTechnicalText() cũ không bắt được dạng "Nhãn: LỖI_THÔ" nên lộ nguyên văn ra thông báo chính.
+  it('replaces a leaked raw OS error inside a hand-written message with a safe fallback, keeps it in technical', () => {
+    const raw =
+      "Không thể commit thành phẩm an toàn: EPERM: operation not permitted, rename 'E:\\a.mp4' -> 'E:\\b.mp4'";
+    const wire = encodeTypedMessage('error', 'MERGE_FAILED', raw);
+    const issue = friendlyIssue(wire);
+    expect(issue.title).toBe('Không thể ghép video');
+    expect(issue.message).not.toContain('EPERM');
+    expect(issue.message).not.toContain('E:\\a.mp4');
+    expect(issue.steps.length).toBeGreaterThan(0);
+    expect(issue.technical).toContain('EPERM');
   });
 });
