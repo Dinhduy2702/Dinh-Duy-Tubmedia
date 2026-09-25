@@ -1849,3 +1849,84 @@ test('A2: 3 đề xuất tinh gọn giao diện đã duyệt hoạt động đú
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
 });
+
+/**
+ * Sự cố sau phát hành v1.4.0 (2026-09-25): khi phát hiện bản cập nhật mới, người dùng chỉ thấy trạng thái
+ * đổi ở trang "Cập nhật" — phải TỰ vào đúng trang đó mới biết. Điều tra: thông báo nổi VẪN CÓ (không phải
+ * hoàn toàn không có), nhưng dùng đúng mức "info"/"success" nên tự tắt theo notification-policy.ts
+ * (TRANSIENT_NOTIFICATION_DURATION_MS=4.8s / SUCCESS_NOTIFICATION_DURATION_MS=3.6s) và KHÔNG có nút hành
+ * động nào — chỉ là dòng chữ thoáng qua. Đã sửa: giữ nguyên màu info/success (không đổi thành warning),
+ * nhưng kéo dài thời gian hiện lên tối thiểu 12 giây (dùng chung ACTION_REQUIRED_WARNING_MIN_DURATION_MS
+ * đã có sẵn cho "cảnh báo cần hành động" ở Vấn đề 1 — chặn cookies) và thêm nút "Cập nhật ngay" đi thẳng
+ * tới trang Cập nhật. Bài kiểm thật này dùng hook TUBMEDIA_E2E_FAKE_UPDATE_STATUS_JSON (chỉ có tác dụng
+ * khi đặt tường minh, không tồn tại trong bản phát hành thật) để mô phỏng ĐÚNG sự kiện main process vừa
+ * phát hiện bản cập nhật mới qua kênh IPC thật (window.desktop.events.onUpdateStatus) — không đụng tới
+ * AppUpdateService/electron-updater/mạng thật.
+ */
+test('Sửa lỗi sau phát hành 2026-09-25: phát hiện bản cập nhật hiện thông báo rõ ràng, không tự tắt quá nhanh, có nút "Cập nhật ngay"', async () => {
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-update-notice-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+  db.exec(
+    'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
+  );
+  db.close();
+
+  const fakeUpdateStatus = {
+    state: 'available',
+    currentVersion: '1.0.0',
+    channel: 'stable',
+    supported: true,
+    checkedAt: new Date().toISOString(),
+    message: null,
+    info: { version: '99.9.9', releaseDate: null, releaseName: null, releaseNotes: null },
+    progress: null,
+    error: null
+  };
+
+  try {
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+        ),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+        TUBMEDIA_E2E_FAKE_UPDATE_STATUS_JSON: JSON.stringify(fakeUpdateStatus),
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+
+    const attention = shellWindow.locator('.attention-center');
+    await expect(attention, 'thông báo phát hiện cập nhật phải hiện ra').toBeVisible({ timeout: 10_000 });
+    await expect(attention).toContainText('99.9.9');
+
+    const actionButton = attention.getByRole('button', { name: 'Cập nhật ngay' });
+    await expect(actionButton, 'phải có nút hành động ngay trên thông báo').toBeVisible();
+
+    // Đúng trọng tâm lỗi: KHÔNG được tự tắt trong vài giây đầu (trước đây chỉ 4,8s cho mức "info").
+    // Chờ THẬT 6 giây (không giả lập đồng hồ) rồi xác nhận thông báo vẫn còn — vượt quá mốc cũ.
+    await shellWindow.waitForTimeout(6_000);
+    await expect(attention, 'thông báo không được tự tắt trước ít nhất 12 giây (cảnh báo cần hành động)').toBeVisible();
+
+    // Bấm nút phải dẫn thẳng tới trang Cập nhật, không cần người dùng tự tìm.
+    await actionButton.click();
+    await shellWindow.waitForTimeout(400);
+    const onUpdatesPage = await shellWindow.evaluate(() =>
+      document.body.innerText.includes('Trung tâm cập nhật')
+    );
+    expect(onUpdatesPage, 'bấm nút phải đi thẳng tới trang Cập nhật').toBe(true);
+  } finally {
+    await closeElectronApplication();
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});

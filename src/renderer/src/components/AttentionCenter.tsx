@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { X, Cookie } from 'lucide-react';
-import { isAttentionNoticeResolved, noticeDisplayPolicy } from '@shared/utils/notification-policy';
+import { X, Cookie, DownloadCloud } from 'lucide-react';
+import {
+  ACTION_REQUIRED_WARNING_MIN_DURATION_MS,
+  isAttentionNoticeResolved,
+  noticeDisplayPolicy
+} from '@shared/utils/notification-policy';
 import { NOTICE_TONE_LABEL, noticeAriaRole } from '@shared/utils/notice-tone';
 import { ToneIcon } from './ui/ToneIcon';
 import { useAppStore } from '../stores/app-store';
@@ -11,6 +15,9 @@ type Phase = 'entering' | 'visible' | 'leaving';
 
 const EXIT_DURATION_MS = 280;
 const MIN_REMAINING_MS = 180;
+/* TUBMEDIA_UPDATE_NOTICE_ACTIONABLE (2026-09-25): id do use-desktop-events.ts đặt cho thông báo phát
+ * hiện bản cập nhật ("app-update-available:<version>" / "app-update-downloaded:<version>"). */
+const UPDATE_ATTENTION_ID_PREFIX = 'app-update-';
 
 export function AttentionCenter(): React.JSX.Element | null {
   const error = useAppStore((state) => state.error);
@@ -19,6 +26,7 @@ export function AttentionCenter(): React.JSX.Element | null {
   const queued = useAppStore((state) => state.attentionQueue.length);
   const setError = useAppStore((state) => state.setError);
   const dismissAttention = useAppStore((state) => state.dismissAttention);
+  const setPage = useAppStore((state) => state.setPage);
   const [phase, setPhase] = useState<Phase>('entering');
   const [paused, setPaused] = useState(false);
   const [cookieOpen, setCookieOpen] = useState(false);
@@ -40,6 +48,12 @@ export function AttentionCenter(): React.JSX.Element | null {
     ['AUTHENTICATION_REQUIRED', 'COOKIES_EXPIRED', 'BROWSER_COOKIE_DATABASE_LOCKED'].includes(
       attention?.code ?? ''
     );
+  /* TUBMEDIA_UPDATE_NOTICE_ACTIONABLE (2026-09-25): phát hiện đúng bản cập nhật khiến người dùng phải
+   * tự vào trang Cập nhật mới biết — thông báo trước đây tự tắt sau 4,8s (info) hoặc 3,6s (success),
+   * không có nút bấm nào. Xử lý y hệt "cảnh báo cần hành động" (Vấn đề 1: chặn cookies) — giữ hiện tối
+   * thiểu 12 giây và thêm nút đi thẳng tới Trung tâm cập nhật — nhưng GIỮ NGUYÊN màu info/success đúng
+   * ngữ nghĩa (không đổi thành warning chỉ để mượn thời lượng hiện lâu hơn). */
+  const updateAttention = !error && Boolean(attention?.id?.startsWith(UPDATE_ATTENTION_ID_PREFIX));
   // Quy tắc hiển thị duy nhất (notification-policy.ts): lỗi thật không tự tắt (đóng được, trừ khi nguyên nhân đã
   // được giải quyết); cảnh báo cần hành động hiện tối thiểu 12 giây; mức khác tự tắt nhanh. Trỏ chuột hoặc focus
   // vào thông báo sẽ tạm dừng đồng hồ đếm ngược.
@@ -53,7 +67,9 @@ export function AttentionCenter(): React.JSX.Element | null {
     !error && attentionResolved
   );
   const sticky = display.persistent;
-  const duration = display.durationMs;
+  const duration = updateAttention
+    ? Math.max(display.durationMs, ACTION_REQUIRED_WARNING_MIN_DURATION_MS)
+    : display.durationMs;
 
   const clearTimers = useCallback((): void => {
     if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
@@ -149,6 +165,18 @@ export function AttentionCenter(): React.JSX.Element | null {
             <button className="btn btn-primary mt-3" onClick={() => setCookieOpen(true)}>
               <Cookie size={16} />
               {'Thêm Cookies'}
+            </button>
+          )}
+          {updateAttention && (
+            <button
+              className="btn btn-primary mt-3"
+              onClick={() => {
+                setPage('updates');
+                beginClose();
+              }}
+            >
+              <DownloadCloud size={16} />
+              {'Cập nhật ngay'}
             </button>
           )}
           {steps.length > 0 && (

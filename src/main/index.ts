@@ -13,6 +13,7 @@ import {
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { IPC } from '@shared/contracts/channels.js';
+import type { AppUpdateStatus } from '@shared/types/domain.js';
 import { AppContext } from './app/app-context.js';
 import { registerIpc } from './ipc/register-ipc.js';
 import { createMainWindow } from './windows/main-window.js';
@@ -30,7 +31,7 @@ let shutdownStarted = false;
 let shutdownMode: 'preserve' | 'cancel' = 'preserve';
 let allowWindowClose = false;
 
-const { e2e: isE2E, e2eUserData } = readDevelopmentEnvironment(process.env, app.isPackaged);
+const { e2e: isE2E, e2eUserData, fakeUpdateStatusJson } = readDevelopmentEnvironment(process.env, app.isPackaged);
 
 if (isE2E && e2eUserData) {
   app.setPath('userData', e2eUserData);
@@ -301,6 +302,33 @@ function initializeApplication(): void {
   registerIpc(current);
   mainWindow = createMainWindow();
   wireWindow(mainWindow);
+  // TUBMEDIA E2E FAKE UPDATE STATUS HOOK (2026-09-25): chỉ có tác dụng khi đặt CẢ HAI biến môi trường
+  // e2e tường minh — không tồn tại trong bản phát hành thật. Cho bài kiểm thật mô phỏng ĐÚNG sự kiện
+  // "vừa phát hiện bản cập nhật mới" (lúc khởi động hoặc kiểm tra định kỳ) mà không cần mạng thật/máy
+  // chủ cập nhật thật — AppUpdateService/electron-updater hoàn toàn không bị đụng tới.
+  if (isE2E && fakeUpdateStatusJson) {
+    const fakeStatusJson = fakeUpdateStatusJson;
+    const windowForFakeStatus = mainWindow;
+    try {
+      const fakeStatus = JSON.parse(fakeStatusJson) as AppUpdateStatus;
+      // 'did-finish-load' chỉ báo trang HTML đã tải xong — KHÔNG đảm bảo React đã mount và
+      // useDesktopEvents() đã đăng ký lắng nghe onUpdateStatus (sự kiện gửi quá sớm sẽ bị mất, không ai
+      // nhận). Gửi LẶP LẠI trong vài giây đầu thay vì đúng 1 lần: renderer tự chống lặp thông báo theo
+      // đúng state+version (xem claimUpdateNotice trong use-desktop-events.ts) nên gửi thêm vài lần
+      // không gây hiện thông báo nhiều lần — chỉ đảm bảo CHẮC CHẮN có ít nhất một lượt gửi tới đúng lúc
+      // renderer đã sẵn sàng nhận, không phụ thuộc vào thời điểm chính xác của 'did-finish-load'.
+      let attemptsLeft = 20;
+      const sendFakeStatus = (): void => {
+        attemptsLeft -= 1;
+        if (windowForFakeStatus.isDestroyed()) return;
+        windowForFakeStatus.webContents.send(IPC.events.updateStatus, fakeStatus);
+        if (attemptsLeft > 0) setTimeout(sendFakeStatus, 300);
+      };
+      windowForFakeStatus.webContents.once('did-finish-load', () => setTimeout(sendFakeStatus, 300));
+    } catch (error) {
+      console.error('TUBMEDIA_E2E_FAKE_UPDATE_STATUS_JSON không hợp lệ:', error);
+    }
+  }
   void startupTools.then(async () => {
     await Promise.allSettled([current.tools.healthCheckOptional(), runBackgroundUpdateChecks(current)]);
   });

@@ -153,7 +153,11 @@ describe('quy tắc hiển thị thông báo nổi', () => {
     expect(toast).toContain('onBlurCapture={() => setPaused(false)}');
     expect(toast).toMatch(/if \(!key \|\| sticky \|\| paused \|\| phase !== 'visible'\) return;/);
     expect(toast).toContain('noticeDisplayPolicy(');
-    expect(toast).toContain('const duration = display.durationMs;');
+    // TUBMEDIA_UPDATE_NOTICE_ACTIONABLE (2026-09-25): duration vẫn bắt nguồn từ display.durationMs,
+    // chỉ kéo dài thêm riêng cho thông báo phát hiện cập nhật (không đổi mức/màu, chỉ đổi thời lượng).
+    expect(toast).toContain('display.durationMs');
+    expect(toast).toContain('updateAttention');
+    expect(toast).toContain('ACTION_REQUIRED_WARNING_MIN_DURATION_MS');
   });
 });
 
