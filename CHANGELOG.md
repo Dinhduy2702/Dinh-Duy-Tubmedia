@@ -1,3 +1,11 @@
+# Tubmedia 1.5.0
+
+- Chọn đúng hồ sơ Chrome/Edge khi lấy cookies tự động: liệt kê thật các hồ sơ có trên máy theo tên tài khoản (không còn phải tự gõ tên thư mục kỹ thuật như "Profile 1"), hiển thị rõ đang dùng hồ sơ/tài khoản nào cả trước lẫn sau khi lấy — tránh lấy nhầm cookies của tài khoản không mong muốn khi máy có nhiều hồ sơ Chrome.
+- Thông báo lỗi rõ ràng, dễ hiểu hơn trên toàn ứng dụng: không còn hiện mã lỗi kỹ thuật (ENOENT, log FFmpeg thô, tên lớp lỗi lập trình...) làm nội dung chính — mọi thông báo giờ giải thích cụ thể chuyện gì xảy ra và nên làm gì tiếp theo.
+- Thêm khung "Chi tiết kỹ thuật" ẩn/thu gọn trên thông báo lỗi — bấm mở mới thấy, kèm nút Sao chép, dùng khi cần gửi thông tin cho hỗ trợ mà không làm rối giao diện chính.
+- Sửa thông báo phát hiện cập nhật mới — hiển thị rõ ràng hơn kèm nút Cập nhật ngay, thay vì tự ẩn quá nhanh.
+- Sửa thông báo khi Chrome/Edge khóa dữ liệu đăng nhập — hướng dẫn cụ thể cách mở Task Manager kết thúc tiến trình trình duyệt còn chạy ngầm, thay vì chỉ nói chung chung "đóng hoàn toàn".
+
 # Tubmedia 1.4.0
 
 - Nhận diện thương hiệu mới: tích hợp logo TUB MEDIA chính thức vào thanh bên, trang Giới thiệu và icon taskbar/khay hệ thống/bộ cài (.exe).
