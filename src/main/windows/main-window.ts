@@ -1,6 +1,7 @@
 import { app, BrowserWindow, nativeTheme, shell, type Event as ElectronEvent } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readDevelopmentEnvironment } from '../runtime/development-environment.js';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 
@@ -14,9 +15,9 @@ export function createMainWindow(): BrowserWindow {
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#08090c' : '#f7f7f8',
     title: 'Download video Tubmedia',
     autoHideMenuBar: true,
-    icon: app.isPackaged
-      ? join(process.resourcesPath, 'icon.png')
-      : join(process.cwd(), 'resources', 'icon.png'),
+    // .ico đa lớp (16…256px, hint riêng từng cỡ) để icon cửa sổ/taskbar sắc nét ở mọi tỉ lệ hiển thị;
+    // nằm trong resources/ nên có sẵn ở cả chế độ chạy từ mã nguồn lẫn bản đóng gói (packed vào app files).
+    icon: join(app.getAppPath(), 'resources', 'icon.ico'),
     webPreferences: {
       // Sandboxed preload scripts cannot run native ESM imports. The preload
       // build is therefore emitted as one bundled CommonJS file.
@@ -50,8 +51,9 @@ export function createMainWindow(): BrowserWindow {
     if (url !== current) event.preventDefault();
   });
 
-  if (process.env.ELECTRON_RENDERER_URL) {
-    void window.loadURL(process.env.ELECTRON_RENDERER_URL);
+  const { rendererUrl } = readDevelopmentEnvironment(process.env, app.isPackaged);
+  if (rendererUrl) {
+    void window.loadURL(rendererUrl);
   } else {
     void window.loadFile(join(currentDir, '../renderer/index.html'));
   }

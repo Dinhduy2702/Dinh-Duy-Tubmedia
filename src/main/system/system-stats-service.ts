@@ -15,6 +15,6 @@ export class SystemStatsService {
   public async sample(): Promise<SystemStats> {
     const total = totalmem(); const used = total - freemem(); const disks: SystemStats['disks'] = [];
     for (const mount of [...new Set(this.mounts())]) { try { const fs = await statfs(mount); const totalBytes = Number(fs.blocks) * Number(fs.bsize); const freeBytes = Number(fs.bavail) * Number(fs.bsize); disks.push({ mount, freeBytes, totalBytes, usedPercent: totalBytes ? (1 - freeBytes / totalBytes) * 100 : 0 }); } catch { /* ổ không tồn tại */ } }
-    return { cpuPercent: this.cpuPercent(), memoryUsedBytes: used, memoryTotalBytes: total, memoryPercent: used / total * 100, disks, activeProcesses: this.processes.count(), activeJobs: this.queue.activeCount(), downloadSpeedBytes: 0, encodeFps: 0, sampledAt: new Date().toISOString() };
+    return { cpuPercent: this.cpuPercent(), memoryUsedBytes: used, memoryTotalBytes: total, memoryPercent: used / total * 100, disks, activeProcesses: this.processes.count(), activeJobs: this.queue.activeCount(), downloadSpeedBytes: 0, encodeFps: 0, systemLoadThrottled: this.queue.isSystemLoadThrottled(), sampledAt: new Date().toISOString() };
   }
 }

@@ -44,6 +44,12 @@ import type { ProcessManager } from '../processes/process-manager.js';
 import type { SettingsService } from '../settings/settings-service.js';
 import type { ToolManager } from '../tools/tool-manager.js';
 import { parseYtDlpProgress, YTDLP_PROGRESS_FLAGS, YTDLP_UTF8_FLAGS } from './ytdlp-progress.js';
+import { buildSafeYtDlpArguments } from './ytdlp-arguments.js';
+// Rà soát toàn diện (2026-09-24) — mục 2.2: logic dựng tham số cookie gộp về dùng chung với các luồng
+// yt-dlp khác (quick-download-command.ts, preview-frame-command.ts) — không đổi hành vi, chỉ tổ chức
+// lại code.
+import { buildCookieArguments } from './ytdlp-cookie-arguments.js';
+import { acceptPathInside } from '../files/path-containment.js';
 
 export interface DownloadProgress {
   percent: number;
@@ -919,7 +925,6 @@ export class DownloadEngine {
         : `%(title).165B [%(id)s] [${linkTag}].%(ext)s`
     );
     const args = [
-      source.originalUrl,
       '--no-playlist',
       ...(job.attempts > 0 ? ['--no-cache-dir'] : []),
       ...YTDLP_PROGRESS_FLAGS,
@@ -1005,13 +1010,8 @@ export class DownloadEngine {
       appSettings,
       this.cookieRequiredJobs.has(job.id)
     );
-    if (attachConfiguredCookies && appSettings.cookiesFilePath) {
-      args.push('--cookies', appSettings.cookiesFilePath);
-    } else if (attachConfiguredCookies && appSettings.cookiesBrowser !== 'none') {
-      const browserSpec = appSettings.cookiesBrowserProfile
-        ? `${appSettings.cookiesBrowser}:${appSettings.cookiesBrowserProfile}`
-        : appSettings.cookiesBrowser;
-      args.push('--cookies-from-browser', browserSpec);
+    if (attachConfiguredCookies) {
+      args.push(...buildCookieArguments(appSettings));
     }
     if (attachConfiguredCookies) {
       this.logger.info(
@@ -1087,7 +1087,20 @@ export class DownloadEngine {
         };
         onProgress(latestProgress);
       } else if (line.startsWith('__VDMSP_FILE__:')) {
-        finalPath = line.slice('__VDMSP_FILE__:'.length).trim();
+        // Đường dẫn do yt-dlp báo về chỉ được tin khi nằm hẳn trong thư mục nguồn của danh sách;
+        // dòng giả (vd. từ tiêu đề video) trỏ ra ngoài bị từ chối và rơi về bước tìm tệp theo mã liên kết.
+        const reportedPath = line.slice('__VDMSP_FILE__:'.length).trim();
+        const acceptedPath = acceptPathInside(project.sourceFolder, reportedPath);
+        if (acceptedPath) {
+          finalPath = acceptedPath;
+        } else {
+          this.logger.warn(
+            'download',
+            'YTDLP_OUTPUT_PATH_REJECTED',
+            'Bỏ qua đường dẫn tệp do yt-dlp báo về vì nằm ngoài thư mục nguồn của danh sách.',
+            { jobId: job.id, projectId: project.id, metadata: { reportedPath } }
+          );
+        }
       } else if (line.startsWith('__VDMSP_TITLE__:')) {
         title = cleanExternalText(line.slice('__VDMSP_TITLE__:'.length));
         if (title) {
@@ -1169,7 +1182,8 @@ export class DownloadEngine {
       projectId: project.id,
       tool: 'yt-dlp',
       executablePath: ytdlp.executablePath,
-      args,
+      // --ignore-config đứng đầu, URL đứng cuối sau "--": URL không bao giờ bị hiểu là tùy chọn.
+      args: buildSafeYtDlpArguments(args, source.originalUrl),
       priority: resource.processPriority,
       timeoutMs: 48 * 60 * 60 * 1000,
       signal,

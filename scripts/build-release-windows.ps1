@@ -127,6 +127,15 @@ if (-not $installer) { throw "Không tìm thấy installer EXE trong release." }
 if ($metadataFiles.Count -eq 0) { throw "Không tìm thấy latest.yml/beta.yml. Bộ cập nhật sẽ không hoạt động." }
 if ($blockmapFiles.Count -eq 0) { throw "Không tìm thấy blockmap. Cập nhật vi sai chưa được tạo." }
 
+Run-Step "Chèn ghi chú phát hành thật từ CHANGELOG.md vào latest.yml/beta.yml" {
+  foreach ($metadataFile in $metadataFiles) {
+    & node scripts/inject-changelog-release-notes.mjs --file $metadataFile.FullName --version $package.version
+    if ($LASTEXITCODE -ne 0) {
+      throw "Chèn ghi chú phát hành thất bại cho $($metadataFile.Name)."
+    }
+  }
+}
+
 $files = @($installer) + $metadataFiles + $blockmapFiles
 $manifest = foreach ($file in $files) {
   $hash = Get-FileHashPortable -LiteralPath $file.FullName -Algorithm SHA256

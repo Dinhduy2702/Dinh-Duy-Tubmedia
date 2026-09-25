@@ -1,18 +1,20 @@
-import { AlertTriangle, CheckCircle2, HardDrive, ShieldCheck, Sparkles } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, HardDrive, RotateCcw, ShieldCheck, Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { safeUiText } from '../utils/ui-error';
+import { showNotice } from '../utils/notify';
+import { progressFillStyle } from '../utils/progress-style';
+import { ConfirmDialog } from './ConfirmDialog';
 import {
+  QUARANTINE_RETENTION_DAYS,
+  SYSTEM_CLEANUP_ADMIN_INFO_ITEMS,
   SYSTEM_CLEANUP_CATEGORIES,
-  isInspectionOnlyCleanupCategory,
-  isIrreversibleCleanupSelection,
-  systemCleanupRequiresAdmin,
+  type QuarantineEntry,
   type SystemCleanupCategoryId,
   type SystemCleanupFindingClassification,
-  type SystemCleanupScope,
   type SystemCleanupStatus
 } from '@shared/system-cleanup';
 
-type SafetyTone = 'very-safe' | 'safe' | 'caution' | 'system';
+type SafetyTone = 'very-safe' | 'safe' | 'caution';
 
 interface SafetyMeta {
   label: string;
@@ -28,22 +30,6 @@ interface NeedMeta {
 
 const terminalPhases = new Set(['completed', 'cancelled', 'failed']);
 
-const WHOLE_MACHINE_SCAN_CATEGORIES: SystemCleanupCategoryId[] = [
-  'userTemp',
-  'thumbnailCache',
-  'crashReports',
-  'browserCache',
-  'capcutCache',
-  'zaloCache',
-  'tubmediaResidue',
-  'recycleBin',
-  'windowsTemp',
-  'windowsUpdate',
-  'deliveryOptimization',
-  'componentStore',
-  'diskInventory'
-];
-
 const SAFETY_META: Record<SystemCleanupCategoryId, SafetyMeta> = {
   userTemp: {
     label: 'Rất an toàn',
@@ -57,7 +43,7 @@ const SAFETY_META: Record<SystemCleanupCategoryId, SafetyMeta> = {
   },
   crashReports: {
     label: 'An toàn',
-    description: 'Chỉ xóa báo cáo lỗi cũ, không xóa ứng dụng.',
+    description: 'Chỉ xóa báo cáo lỗi cũ của riêng bạn, không xóa ứng dụng.',
     tone: 'safe'
   },
   browserCache: {
@@ -78,44 +64,8 @@ const SAFETY_META: Record<SystemCleanupCategoryId, SafetyMeta> = {
   tubmediaResidue: {
     label: 'An toàn có kiểm soát',
     description:
-      'Chỉ xóa phần tải dở và clip/thư mục tạm có dấu nhận diện Tubmedia, không đụng thành phẩm; dữ liệu tiếp tục tải quá 7 ngày sẽ mất.',
+      'Chỉ nhận diện phần tải dở và clip/thư mục tạm có dấu nhận diện Tubmedia, không đụng thành phẩm; dữ liệu tiếp tục tải quá 7 ngày sẽ mất.',
     tone: 'caution'
-  },
-  recycleBin: {
-    label: 'Cần kiểm tra',
-    description: 'Tệp trong Thùng rác sẽ bị xóa vĩnh viễn.',
-    tone: 'caution'
-  },
-  windowsTemp: {
-    label: 'An toàn',
-    description: 'Bỏ qua tệp hệ thống hoặc tệp đang bị khóa.',
-    tone: 'safe'
-  },
-  windowsUpdate: {
-    label: 'Cần kiểm tra',
-    description: 'Dịch vụ cập nhật sẽ được dừng tạm rồi khởi động lại.',
-    tone: 'caution'
-  },
-  deliveryOptimization: {
-    label: 'An toàn',
-    description: 'Chỉ dọn cache phân phối cập nhật của Windows.',
-    tone: 'safe'
-  },
-  componentStore: {
-    label: 'Cần kiểm tra',
-    description: 'DISM dọn thành phần Windows cũ và có thể chạy nhiều phút.',
-    tone: 'caution'
-  },
-  diskInventory: {
-    label: 'Chỉ báo cáo',
-    description:
-      'Quét file lớn trên các ổ cố định để phân loại cần xem hoặc được bảo vệ; hạng mục này không có lệnh xóa.',
-    tone: 'safe'
-  },
-  disableHibernate: {
-    label: 'Thay đổi hệ thống',
-    description: 'Tắt Hibernate và xóa hiberfil.sys; chỉ dùng khi thực sự cần.',
-    tone: 'system'
   }
 };
 
@@ -130,15 +80,7 @@ function formatBytes(value: number): string {
   return `${(value / 1024 ** index).toFixed(index >= 3 ? 2 : 1)} ${units[index]}`;
 }
 
-function needMeta(bytes: number, id?: SystemCleanupCategoryId): NeedMeta {
-  if (id === 'disableHibernate') {
-    return {
-      label: 'Chỉ khi cần',
-      description: 'Không nên dùng như một thao tác dọn rác thông thường.',
-      tone: 'high'
-    };
-  }
-
+function needMeta(bytes: number): NeedMeta {
   if (bytes >= 5 * 1024 ** 3) {
     return {
       label: 'Rất nên dọn',
@@ -178,40 +120,33 @@ function needMeta(bytes: number, id?: SystemCleanupCategoryId): NeedMeta {
   };
 }
 
-function scanKey(scope: SystemCleanupScope, categories: readonly SystemCleanupCategoryId[]): string {
-  return `${scope}:${[...categories].sort().join(',')}`;
+function scanKey(categories: readonly SystemCleanupCategoryId[]): string {
+  return [...categories].sort().join(',');
 }
 
 function cleanupStatusMessage(status: SystemCleanupStatus): string {
   const category = SYSTEM_CLEANUP_CATEGORIES.find((item) => status.message.includes(item.id));
+  const verb = status.mode === 'clean' ? 'dọn' : 'quét';
 
   if (!terminalPhases.has(status.phase)) {
-    if (category) {
-      return `${status.mode === 'estimate' ? 'Đang quét' : 'Đang dọn'}: ${category.label}`;
-    }
-
-    return status.mode === 'estimate' ? 'Đang quét và tính dung lượng...' : 'Đang dọn dẹp file đã chọn...';
+    return category ? `Đang ${verb}: ${category.label}` : `Đang ${verb}...`;
   }
 
   if (status.phase === 'completed') {
-    return status.mode === 'estimate' ? 'Quét dung lượng hoàn tất' : 'Dọn dẹp hoàn tất';
+    return status.mode === 'clean' ? 'Dọn dẹp hoàn tất' : 'Quét dung lượng hoàn tất';
   }
 
   if (status.phase === 'cancelled') {
     return 'Đã dừng theo yêu cầu';
   }
 
-  return status.phase === 'failed'
-    ? status.mode === 'estimate'
-      ? 'Quét không hoàn tất'
-      : 'Dọn dẹp không hoàn tất'
-    : status.message;
+  return status.phase === 'failed' ? `${status.mode === 'clean' ? 'Dọn dẹp' : 'Quét'} không hoàn tất` : status.message;
 }
 
 const FINDING_META: Record<SystemCleanupFindingClassification, { title: string; description: string }> = {
   'safe-to-delete': {
     title: 'Có thể xóa bằng Tubmedia',
-    description: 'Chỉ các mục thuộc allowlist mới được đưa vào lệnh dọn.'
+    description: 'Chỉ các mục thuộc allowlist mới được đưa vào lệnh dọn — chuyển vào khu cách ly, có thể hoàn tác.'
   },
   review: {
     title: 'Cần người dùng xem lại',
@@ -223,22 +158,28 @@ const FINDING_META: Record<SystemCleanupFindingClassification, { title: string; 
   }
 };
 
+function daysLeft(expiresAt: string): number {
+  return Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000)));
+}
+
 export function SystemCleanupPanel(): React.JSX.Element {
   const defaultSelection = useMemo(
     () => SYSTEM_CLEANUP_CATEGORIES.filter((item) => item.defaultSelected).map((item) => item.id),
     []
   );
   const [selected, setSelected] = useState<SystemCleanupCategoryId[]>(defaultSelection);
-  const [scope, setScope] = useState<SystemCleanupScope>('currentUser');
   const [status, setStatus] = useState<SystemCleanupStatus | null>(null);
   const [activeRequestKey, setActiveRequestKey] = useState<string | null>(null);
   const [lastScannedKey, setLastScannedKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
+  const [quarantineEntries, setQuarantineEntries] = useState<QuarantineEntry[]>([]);
+  const [quarantineSelected, setQuarantineSelected] = useState<Set<string>>(new Set());
+  const [quarantineBusy, setQuarantineBusy] = useState(false);
 
   const running = Boolean(status && !terminalPhases.has(status.phase));
-  const currentScanKey = scanKey(scope, selected);
-  const requiresAdmin = systemCleanupRequiresAdmin(selected, scope);
-  const cleanableSelected = selected.filter((id) => !isInspectionOnlyCleanupCategory(id));
+  const currentScanKey = scanKey(selected);
 
   const resultById = new Map(status?.results.map((result) => [result.id, result]) ?? []);
   const selectedEstimatedBytes = selected.reduce(
@@ -246,12 +187,22 @@ export function SystemCleanupPanel(): React.JSX.Element {
     0
   );
   const overallNeed = needMeta(selectedEstimatedBytes);
-  const canClean =
-    !running &&
-    cleanableSelected.length > 0 &&
-    lastScannedKey === currentScanKey &&
-    status?.mode === 'estimate' &&
-    status.phase === 'completed';
+  const scannedUpToDate =
+    !running && lastScannedKey === currentScanKey && status?.mode === 'estimate' && status.phase === 'completed';
+  const canClean = scannedUpToDate && selectedEstimatedBytes > 0;
+
+  async function loadQuarantine(): Promise<void> {
+    try {
+      const entries = await window.desktop.systemCleanup.quarantineList();
+      setQuarantineEntries(entries);
+    } catch (loadError) {
+      setError(safeUiText(loadError, 'Không đọc được danh sách đã cách ly.'));
+    }
+  }
+
+  useEffect(() => {
+    void loadQuarantine();
+  }, []);
 
   useEffect(() => {
     if (!status || terminalPhases.has(status.phase)) {
@@ -266,7 +217,7 @@ export function SystemCleanupPanel(): React.JSX.Element {
           setStatus(next);
         }
       } catch (pollError) {
-        setError(safeUiText(pollError, 'Không đọc được tiến trình dọn dẹp.'));
+        setError(safeUiText(pollError, 'Không đọc được tiến trình.'));
       }
     }, 600);
 
@@ -280,6 +231,7 @@ export function SystemCleanupPanel(): React.JSX.Element {
 
     if (status?.phase === 'completed' && status.mode === 'clean') {
       setLastScannedKey(null);
+      void loadQuarantine();
     }
   }, [activeRequestKey, status?.mode, status?.phase]);
 
@@ -294,92 +246,40 @@ export function SystemCleanupPanel(): React.JSX.Element {
     setError(null);
   }
 
-  async function start(
-    mode: 'estimate' | 'clean',
-    categories: SystemCleanupCategoryId[] = selected,
-    requestScope: SystemCleanupScope = scope
-  ): Promise<void> {
+  async function startScan(): Promise<void> {
     setError(null);
 
-    if (categories.length === 0) {
-      setError('Hãy chọn ít nhất một hạng mục.');
+    if (selected.length === 0) {
+      showNotice('warning', 'Chưa chọn hạng mục nào', 'Hãy chọn ít nhất một hạng mục rồi thử lại.');
       return;
     }
 
-    const requestKey = scanKey(requestScope, categories);
-    const executableCategories =
-      mode === 'clean' ? categories.filter((id) => !isInspectionOnlyCleanupCategory(id)) : categories;
-    const categoryItems = SYSTEM_CLEANUP_CATEGORIES.filter((item) => executableCategories.includes(item.id));
-
-    if (mode === 'clean' && lastScannedKey !== requestKey) {
-      setError('Hãy quét dung lượng với đúng phạm vi và hạng mục hiện tại trước khi xóa.');
-      return;
-    }
-
-    if (mode === 'clean' && executableCategories.length === 0) {
-      setError('Các hạng mục đang chọn chỉ dùng để lập báo cáo, không có dữ liệu nào được phép xóa.');
-      return;
-    }
-
-    if (mode === 'clean') {
-      const names = categoryItems.map((item) => `• ${item.label}`).join('\n');
-      const scopeText =
-        requestScope === 'wholeMachine'
-          ? 'Mọi hồ sơ Windows và các ổ đĩa cố định'
-          : 'Tài khoản Windows hiện tại';
-      const confirmed = window.confirm(
-        `Dung lượng dự kiến có thể giải phóng: ${formatBytes(selectedEstimatedBytes)}\n` +
-          `Phạm vi: ${scopeText}\n\n` +
-          `Tubmedia sẽ dọn:\n${names}\n\n` +
-          'Tệp đang được sử dụng sẽ bị bỏ qua. Tiếp tục?'
-      );
-
-      if (!confirmed) {
-        return;
-      }
-
-      if (executableCategories.includes('disableHibernate')) {
-        const phrase = window.prompt(
-          'Tắt ngủ đông sẽ thay đổi tính năng nguồn của Windows.\n' +
-            'Nhập chính xác "TAT NGU DONG" để xác nhận:'
-        );
-
-        if (phrase !== 'TAT NGU DONG') {
-          setError('Đã hủy thao tác tắt chế độ ngủ đông.');
-          return;
-        }
-      }
-
-      if (isIrreversibleCleanupSelection(executableCategories)) {
-        const irreversibleConfirmed = window.confirm(
-          'Lựa chọn có thao tác không thể hoàn tác, ví dụ xóa Thùng rác. Bạn xác nhận tiếp tục?'
-        );
-
-        if (!irreversibleConfirmed) {
-          return;
-        }
-      }
-    }
+    const requestKey = scanKey(selected);
 
     try {
-      setScope(requestScope);
-      setSelected(categories);
       setActiveRequestKey(requestKey);
 
-      const next = await window.desktop.systemCleanup.start({
-        mode,
-        scope: requestScope,
-        categories: executableCategories
-      });
+      const next = await window.desktop.systemCleanup.start({ mode: 'estimate', categories: selected });
 
       setStatus(next);
     } catch (startError) {
-      setError(safeUiText(startError, 'Không thể bắt đầu dọn dẹp.'));
+      setError(safeUiText(startError, 'Không thể bắt đầu quét.'));
     }
   }
 
-  async function scanWholeMachine(): Promise<void> {
-    await start('estimate', WHOLE_MACHINE_SCAN_CATEGORIES, 'wholeMachine');
+  async function confirmClean(): Promise<void> {
+    setCleaning(true);
+    setError(null);
+
+    try {
+      const next = await window.desktop.systemCleanup.start({ mode: 'clean', categories: selected });
+      setStatus(next);
+      setConfirmOpen(false);
+    } catch (cleanError) {
+      setError(safeUiText(cleanError, 'Không thể bắt đầu dọn dẹp.'));
+    } finally {
+      setCleaning(false);
+    }
   }
 
   async function cancel(): Promise<void> {
@@ -398,6 +298,62 @@ export function SystemCleanupPanel(): React.JSX.Element {
     }
   }
 
+  async function openStorageSettings(): Promise<void> {
+    try {
+      await window.desktop.systemCleanup.openStorageSettings();
+    } catch (openError) {
+      setError(safeUiText(openError, 'Không mở được công cụ Dọn dẹp ổ đĩa của Windows.'));
+    }
+  }
+
+  function toggleQuarantineSelected(id: string): void {
+    setQuarantineSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function restoreQuarantine(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+
+    setQuarantineBusy(true);
+    setError(null);
+
+    try {
+      const outcomes = await window.desktop.systemCleanup.quarantineRestore(ids);
+      const restored = outcomes.filter((item) => item.ok).length;
+      const failed = outcomes.length - restored;
+
+      if (restored > 0) {
+        showNotice(
+          'success',
+          `Đã hoàn tác ${restored} mục`,
+          failed > 0 ? `${failed} mục không hoàn tác được — xem chi tiết bên dưới.` : 'File đã trở lại đúng vị trí gốc.'
+        );
+      } else {
+        showNotice('warning', 'Không hoàn tác được mục nào', 'Xem chi tiết bên dưới để biết lý do.');
+      }
+
+      setQuarantineSelected(new Set());
+      await loadQuarantine();
+    } catch (restoreError) {
+      setError(safeUiText(restoreError, 'Không thể hoàn tác.'));
+    } finally {
+      setQuarantineBusy(false);
+    }
+  }
+
+  const confirmDetails = selected
+    .map((id) => {
+      const result = resultById.get(id);
+      if (!result || result.matchedItems === 0) return null;
+      const category = SYSTEM_CLEANUP_CATEGORIES.find((item) => item.id === id);
+      return `${category?.label ?? id}: ${result.matchedItems.toLocaleString('vi-VN')} tệp, ${formatBytes(result.estimatedBytes)}`;
+    })
+    .filter((line): line is string => line !== null);
+
   return (
     <section className="card system-cleanup-panel" data-testid="system-cleanup-panel">
       <div className="system-cleanup-heading">
@@ -405,18 +361,13 @@ export function SystemCleanupPanel(): React.JSX.Element {
           <span className="system-cleanup-eyebrow">DỌN FILE RÁC CÓ KIỂM SOÁT</span>
           <h2>Quét dung lượng, xem độ an toàn rồi mới xóa</h2>
           <p>
-            Tubmedia phân loại từng vùng dữ liệu, ước tính dung lượng và khóa nút xóa cho đến khi hoàn tất một
-            lần quét đúng với lựa chọn hiện tại.
+            Tubmedia phân loại từng vùng dữ liệu, ước tính dung lượng và khóa nút xóa cho đến khi hoàn
+            tất một lần quét đúng với lựa chọn hiện tại. Xóa thật đi qua khu cách ly riêng — có thể hoàn
+            tác trong {QUARANTINE_RETENTION_DAYS} ngày trước khi bị dọn vĩnh viễn.
           </p>
         </div>
 
-        <div className="system-cleanup-admin-badge">
-          {scope === 'wholeMachine'
-            ? 'Toàn máy • cần UAC'
-            : requiresAdmin
-              ? 'Hạng mục cần UAC'
-              : 'Tài khoản hiện tại'}
-        </div>
+        <div className="system-cleanup-admin-badge">Tài khoản hiện tại • không cần quyền quản trị</div>
       </div>
 
       <div className="cleanup-summary-grid" aria-label="Tóm tắt dọn dẹp">
@@ -447,8 +398,8 @@ export function SystemCleanupPanel(): React.JSX.Element {
           </span>
           <div>
             <small>Quy tắc an toàn</small>
-            <strong>Quét rộng, xóa theo allowlist</strong>
-            <em>File lớn ngoài allowlist chỉ được báo cáo.</em>
+            <strong>Chỉ dọn trong tài khoản hiện tại</strong>
+            <em>Không đụng Windows Temp, Windows Update hay các khu vực cần quyền quản trị.</em>
           </div>
         </article>
 
@@ -467,70 +418,76 @@ export function SystemCleanupPanel(): React.JSX.Element {
       <div className="cleanup-safety-guide">
         <span className="safety-very-safe">Rất an toàn: cache và tệp tạm có thể tạo lại</span>
         <span className="safety-safe">An toàn: dữ liệu chẩn đoán hoặc cache cho phép</span>
-        <span className="safety-caution">Cần kiểm tra: xóa vĩnh viễn hoặc tác vụ Windows</span>
-        <span className="safety-system">Thay đổi hệ thống: chỉ dùng khi hiểu rõ</span>
+        <span className="safety-caution">An toàn có kiểm soát: chỉ dữ liệu có dấu nhận diện Tubmedia</span>
       </div>
 
       <div className="system-cleanup-warning">
-        Không xóa Desktop, Documents, Downloads, Pictures, Videos, Zalo Received Files, thư mục gốc
-        CapCut/Zalo, dữ liệu dự án Tubmedia, Windows.old hoặc Restore Point. Hãy đóng Chrome, Edge, CapCut và
-        Zalo để dọn được nhiều hơn.
+        Không quét Desktop, Documents, Downloads, Pictures, Videos, Zalo Received Files, thư mục gốc
+        CapCut/Zalo, dữ liệu dự án Tubmedia hay bất kỳ thư mục hệ thống nào. Hãy đóng Chrome, Edge, CapCut
+        và Zalo để dọn được nhiều hơn.
       </div>
 
-      {(['safe', 'advanced'] as const).map((group) => (
-        <div className="system-cleanup-group" key={group}>
-          <div className="system-cleanup-group-title">
-            {group === 'safe' ? 'Dọn dẹp thông thường' : 'Tùy chọn nâng cao'}
-          </div>
+      <div className="system-cleanup-group">
+        <div className="system-cleanup-group-title">Dọn dẹp trong tài khoản hiện tại</div>
 
-          <div className="system-cleanup-grid">
-            {SYSTEM_CLEANUP_CATEGORIES.filter((item) => item.group === group).map((item) => {
-              const checked = selected.includes(item.id);
-              const result = resultById.get(item.id);
-              const safety = SAFETY_META[item.id];
-              const inspectionOnly = isInspectionOnlyCleanupCategory(item.id);
-              const need = inspectionOnly
-                ? {
-                    label: status?.phase === 'completed' && result ? 'Đã kiểm kê' : 'Chờ quét',
-                    description: 'Kết quả được phân loại bên dưới và không tham gia lệnh xóa.',
-                    tone: 'low' as const
-                  }
-                : needMeta(result?.estimatedBytes ?? 0, item.id);
+        <div className="system-cleanup-grid">
+          {SYSTEM_CLEANUP_CATEGORIES.map((item) => {
+            const checked = selected.includes(item.id);
+            const result = resultById.get(item.id);
+            const safety = SAFETY_META[item.id];
+            const need = needMeta(result?.estimatedBytes ?? 0);
 
-              return (
-                <label className={`system-cleanup-option ${checked ? 'is-selected' : ''}`} key={item.id}>
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    disabled={running}
-                    onChange={() => toggleCategory(item.id)}
-                  />
+            return (
+              <label className={`system-cleanup-option ${checked ? 'is-selected' : ''}`} key={item.id}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={running}
+                  onChange={() => toggleCategory(item.id)}
+                />
 
-                  <span className="system-cleanup-option-copy">
-                    <span className="cleanup-option-title">
-                      <strong>{item.label}</strong>
-                      <b>{formatBytes(result?.estimatedBytes ?? 0)}</b>
-                    </span>
-                    <small>{item.description}</small>
-
-                    <span className="system-cleanup-tags">
-                      <em className={`safety-${safety.tone}`} title={safety.description}>
-                        {safety.label}
-                      </em>
-                      <em className={`need-${need.tone}`} title={need.description}>
-                        {need.label}
-                      </em>
-                      {item.requiresAdmin && <em>Quyền quản trị</em>}
-                      {inspectionOnly && <em>Không tự xóa</em>}
-                      {item.irreversible && <em>Không thể hoàn tác</em>}
-                    </span>
+                <span className="system-cleanup-option-copy">
+                  <span className="cleanup-option-title">
+                    <strong>{item.label}</strong>
+                    <b>{formatBytes(result?.estimatedBytes ?? 0)}</b>
                   </span>
-                </label>
-              );
-            })}
-          </div>
+                  <small>{item.description}</small>
+
+                  <span className="system-cleanup-tags">
+                    <em className={`safety-${safety.tone}`} title={safety.description}>
+                      {safety.label}
+                    </em>
+                    <em className={`need-${need.tone}`} title={need.description}>
+                      {need.label}
+                    </em>
+                  </span>
+                </span>
+              </label>
+            );
+          })}
         </div>
-      ))}
+      </div>
+
+      <div className="system-cleanup-admin-info">
+        <div className="system-cleanup-group-title">Cần quyền quản trị — Tubmedia không tự chạy</div>
+        <p>
+          Các mục dưới đây thuộc khu vực hệ thống dùng chung cho mọi tài khoản trên máy. Tubmedia không
+          còn tự yêu cầu quyền quản trị để xóa nữa — hãy dùng công cụ Dọn dẹp ổ đĩa của chính Windows.
+        </p>
+
+        <ul className="system-cleanup-admin-list">
+          {SYSTEM_CLEANUP_ADMIN_INFO_ITEMS.map((item) => (
+            <li key={item.id}>
+              <b>{item.label}</b>
+              <small>{item.description}</small>
+            </li>
+          ))}
+        </ul>
+
+        <button type="button" className="system-cleanup-button secondary" onClick={() => void openStorageSettings()}>
+          Mở Dọn dẹp ổ đĩa Windows
+        </button>
+      </div>
 
       {error && <div className="system-cleanup-error">{error}</div>}
 
@@ -542,7 +499,7 @@ export function SystemCleanupPanel(): React.JSX.Element {
           </div>
 
           <div className="system-cleanup-progress-track">
-            <span style={{ width: `${status.progress}%` }} />
+            <span style={progressFillStyle(status.progress)} />
           </div>
 
           <div className="system-cleanup-stats">
@@ -581,10 +538,10 @@ export function SystemCleanupPanel(): React.JSX.Element {
             </div>
           )}
 
-          {(status.driveBefore || status.driveAfter) && (
+          {status.driveBefore && (
             <div className="cleanup-drive-comparison">
               <span>
-                Trống trước khi dọn: <b>{formatBytes(status.driveBefore?.freeBytes ?? 0)}</b>
+                Trống trước khi dọn: <b>{formatBytes(status.driveBefore.freeBytes)}</b>
               </span>
               <span>
                 Trống sau khi dọn:{' '}
@@ -601,9 +558,10 @@ export function SystemCleanupPanel(): React.JSX.Element {
                   const category = SYSTEM_CLEANUP_CATEGORIES.find((item) => item.id === result.id);
                   return (
                     <li key={result.id}>
-                      <b>{category?.label ?? 'Hạng mục hệ thống'}:</b> ước tính{' '}
-                      {formatBytes(result.estimatedBytes)}, đã xóa {formatBytes(result.removedBytes)}, bỏ qua{' '}
-                      {result.skippedItems} mục
+                      <b>{category?.label ?? 'Hạng mục'}:</b> {result.matchedItems.toLocaleString('vi-VN')} tệp,
+                      ước tính {formatBytes(result.estimatedBytes)}
+                      {status.mode === 'clean' &&
+                        `, đã dọn ${formatBytes(result.removedBytes)}, bỏ qua ${result.skippedItems} mục`}
                     </li>
                   );
                 })}
@@ -664,18 +622,9 @@ export function SystemCleanupPanel(): React.JSX.Element {
       <div className="system-cleanup-actions">
         <button
           type="button"
-          className="system-cleanup-button secondary whole-machine"
-          disabled={running}
-          onClick={() => void scanWholeMachine()}
-        >
-          Quét và phân loại toàn bộ máy
-        </button>
-
-        <button
-          type="button"
           className="system-cleanup-button secondary"
           disabled={running || selected.length === 0}
-          onClick={() => void start('estimate')}
+          onClick={() => void startScan()}
         >
           Quét mục đã chọn
         </button>
@@ -686,10 +635,10 @@ export function SystemCleanupPanel(): React.JSX.Element {
           disabled={!canClean}
           title={
             canClean
-              ? 'Chỉ xóa các file thuộc allowlist đã quét'
-              : 'Phải quét đúng lựa chọn hiện tại trước khi xóa; kiểm kê toàn máy chỉ dùng để báo cáo'
+              ? 'Chỉ xóa các file thuộc allowlist đã quét — chuyển vào khu cách ly, có thể hoàn tác.'
+              : 'Phải quét đúng lựa chọn hiện tại trước khi xóa.'
           }
-          onClick={() => void start('clean')}
+          onClick={() => setConfirmOpen(true)}
         >
           Dọn dẹp và xóa file đã chọn
         </button>
@@ -703,10 +652,78 @@ export function SystemCleanupPanel(): React.JSX.Element {
 
       {!canClean && !running && (
         <p className="cleanup-action-note">
-          Nút xóa được khóa cho đến khi quét xong đúng lựa chọn. Kiểm kê file lớn luôn chỉ báo cáo và không
-          bao giờ được đưa vào lệnh xóa.
+          Nút xóa được khóa cho đến khi quét xong đúng lựa chọn.
         </p>
       )}
+
+      {quarantineEntries.length > 0 && (
+        <div className="system-cleanup-quarantine">
+          <div className="system-cleanup-group-title">
+            Đã cách ly gần đây ({quarantineEntries.length} mục — tự xóa vĩnh viễn sau {QUARANTINE_RETENTION_DAYS}{' '}
+            ngày nếu không hoàn tác)
+          </div>
+
+          <ul className="system-cleanup-quarantine-list">
+            {quarantineEntries.map((entry) => (
+              <li key={entry.id}>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={quarantineSelected.has(entry.id)}
+                    disabled={quarantineBusy}
+                    onChange={() => toggleQuarantineSelected(entry.id)}
+                  />
+                  <span>
+                    <b title={entry.originalPath}>{entry.originalPath}</b>
+                    <small>
+                      {formatBytes(entry.bytes)} • còn {daysLeft(entry.expiresAt)} ngày để hoàn tác
+                    </small>
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  className="system-cleanup-button secondary"
+                  disabled={quarantineBusy}
+                  onClick={() => void restoreQuarantine([entry.id])}
+                >
+                  <RotateCcw size={14} /> Hoàn tác
+                </button>
+              </li>
+            ))}
+          </ul>
+
+          <div className="system-cleanup-quarantine-actions">
+            <button
+              type="button"
+              className="system-cleanup-button secondary"
+              disabled={quarantineBusy || quarantineSelected.size === 0}
+              onClick={() => void restoreQuarantine([...quarantineSelected])}
+            >
+              Hoàn tác đã chọn ({quarantineSelected.size})
+            </button>
+            <button
+              type="button"
+              className="system-cleanup-button secondary"
+              disabled={quarantineBusy}
+              onClick={() => void restoreQuarantine(quarantineEntries.map((entry) => entry.id))}
+            >
+              Hoàn tác tất cả
+            </button>
+          </div>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Xóa các file đã chọn?"
+        message={`Tubmedia sẽ chuyển ${formatBytes(selectedEstimatedBytes)} vào khu cách ly riêng — không xóa vĩnh viễn ngay. Bạn có thể hoàn tác trong ${QUARANTINE_RETENTION_DAYS} ngày.`}
+        details={confirmDetails}
+        confirmLabel={`Xóa ${formatBytes(selectedEstimatedBytes)}`}
+        danger
+        busy={cleaning}
+        onConfirm={() => void confirmClean()}
+        onCancel={() => setConfirmOpen(false)}
+      />
     </section>
   );
 }

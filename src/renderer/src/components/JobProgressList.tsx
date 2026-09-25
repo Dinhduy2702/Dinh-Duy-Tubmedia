@@ -1,6 +1,7 @@
 import { CheckCircle2, CircleDashed, Download, FileVideo2 } from 'lucide-react';
 import type { QueueJob } from '@shared/types/domain';
 import { shouldAnimateJobProgress } from '@shared/utils/progress-policy';
+import { progressFillStyle } from '../utils/progress-style';
 import { statusLabel } from '../utils/vi-labels';
 
 function inputText(job: QueueJob, key: string): string | null {
@@ -44,7 +45,7 @@ export function JobProgressList({ jobs }: { jobs: QueueJob[] }): React.JSX.Eleme
               <span className="job-progress-status" title={statusLabel(job.status)}>{statusLabel(job.status)}</span>
             </div>
             {url && title !== url && <small title={url}>{url}</small>}
-            <div className={`progress job-progress-bar ${shouldAnimateJobProgress(job.status) ? 'is-animated' : 'is-static'}`}><span style={{ width: `${job.progress}%` }}/></div>
+            <div className={`progress job-progress-bar ${shouldAnimateJobProgress(job.status) ? 'is-animated' : 'is-static'}`}><span style={progressFillStyle(job.progress)}/></div>
             <div className="job-progress-meta">
               <span>{job.progress.toFixed(1)}%</span>
               <span>{job.speed ?? etaLabel(job.etaSeconds)}</span>

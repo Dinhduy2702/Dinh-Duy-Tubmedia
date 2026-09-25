@@ -1,4 +1,4 @@
-import { useEffect, useState, type ChangeEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import {
   ChevronDown,
   Cpu,
@@ -42,6 +42,7 @@ export function SettingsPage(): React.JSX.Element | null {
   const [saving, setSaving] = useState(false);
   const [settingsAction, setSettingsAction] = useState<'detect' | 'recommend' | 'apply' | null>(null);
   const [recommended, setRecommended] = useState<ResourceProfile | null>(null);
+  const lastSaveFailed = useRef(false);
   const concurrency = hardware ? recommendDownloadConcurrency(hardware) : null;
   const currentPlan = concurrency && settings
     ? planForListCount(concurrency, settings.downloadLaneCount, settings.downloadVerifyEntireFile)
@@ -56,8 +57,16 @@ export function SettingsPage(): React.JSX.Element | null {
     try {
       const next = await window.desktop.settings.update(settings);
       setSettings(next);
+      // Lỗi cố định của lần lưu trước còn treo trên màn hình sẽ che mất thông báo thành công này.
+      if (lastSaveFailed.current) {
+        lastSaveFailed.current = false;
+        setError(null);
+      }
       setAttention({ id: createUiEventId('settings-save'), severity: 'success', title: 'Đã lưu cài đặt', message: 'Các thiết lập mới sẽ được áp dụng cho tác vụ tiếp theo.', sticky: false });
-    } catch (error) { setError(messageOf(error)); }
+    } catch (error) {
+      lastSaveFailed.current = true;
+      setError(messageOf(error));
+    }
     finally { setSaving(false); }
   };
   const detect = async (): Promise<void> => {
@@ -162,7 +171,7 @@ function SectionIcon({ name }: { name: Section }): React.JSX.Element {
 }
 
 function General({ settings, patch, qualities, resources }: { settings: AppSettings; patch: Patch; qualities: QualityProfile[]; resources: ResourceProfile[] }): React.JSX.Element {
-  return <Block title="Giao diện và mặc định" icon={MonitorCog}><Grid><Select label="Giao diện" value={settings.theme} onChange={(value) => patch('theme', value as AppSettings['theme'])} options={[['system','Theo giao diện Windows'],['dark','Màu tối'],['light','Màu sáng']]}/><Select label="Khi đóng ứng dụng" value={settings.closeBehavior} onChange={(value) => patch('closeBehavior', value as AppSettings['closeBehavior'])} options={[['ask','Luôn hỏi'],['pause_and_exit','Tạm dừng và đóng'],['cancel_and_exit','Hủy và đóng'],['tray','Thu nhỏ xuống khay hệ thống']]}/><Select label="Thành phẩm Tải & Ghép mặc định" value={settings.defaultQualityProfileId} onChange={(value) => patch('defaultQualityProfileId', value)} options={qualities.map((item) => [item.id, item.name])}/><Select label="Cấu hình tài nguyên mặc định" value={settings.defaultResourceProfileId} onChange={(value) => patch('defaultResourceProfileId', value)} options={resources.map((item) => [item.id, item.name])}/><Toggle label="Thu nhỏ xuống khay hệ thống" checked={settings.minimizeToTray} onChange={(value) => patch('minimizeToTray', value)}/><Toggle label="Khởi động cùng Windows" checked={settings.startWithWindows} onChange={(value) => patch('startWithWindows', value)}/></Grid></Block>;
+  return <Block title="Giao diện và mặc định" icon={MonitorCog}><Grid><Select label="Giao diện" value={settings.theme} onChange={(value) => patch('theme', value as AppSettings['theme'])} options={[['system','Theo giao diện Windows'],['dark','Màu tối'],['light','Màu sáng']]}/><Select label="Cỡ chữ" value={settings.fontSize} onChange={(value) => patch('fontSize', value as AppSettings['fontSize'])} options={[['medium','Vừa (15px, mặc định)'],['large','Lớn'],['xlarge','Rất lớn']]}/><Select label="Khi đóng ứng dụng" value={settings.closeBehavior} onChange={(value) => patch('closeBehavior', value as AppSettings['closeBehavior'])} options={[['ask','Luôn hỏi'],['pause_and_exit','Tạm dừng và đóng'],['cancel_and_exit','Hủy và đóng'],['tray','Thu nhỏ xuống khay hệ thống']]}/><Select label="Thành phẩm Tải & Ghép mặc định" value={settings.defaultQualityProfileId} onChange={(value) => patch('defaultQualityProfileId', value)} options={qualities.map((item) => [item.id, item.name])}/><Select label="Cấu hình tài nguyên mặc định" value={settings.defaultResourceProfileId} onChange={(value) => patch('defaultResourceProfileId', value)} options={resources.map((item) => [item.id, item.name])}/><Toggle label="Giảm hiệu ứng chuyển động" checked={settings.reduceMotion} onChange={(value) => patch('reduceMotion', value)}/><Toggle label="Thu nhỏ xuống khay hệ thống" checked={settings.minimizeToTray} onChange={(value) => patch('minimizeToTray', value)}/><Toggle label="Khởi động cùng Windows" checked={settings.startWithWindows} onChange={(value) => patch('startWithWindows', value)}/></Grid></Block>;
 }
 
 function Performance({ settings, patch, resources, setError }: { settings: AppSettings; patch: Patch; resources: ResourceProfile[]; setError: (error: string | null) => void }): React.JSX.Element {
@@ -327,7 +336,7 @@ function DownloadSettings({ settings, patch, setError }: { settings: AppSettings
       </>}
     <div className="mt-4"/>
     <Grid>
-      <Select label="Số danh sách hiển thị" value={String(settings.downloadLaneCount)} onChange={(value) => patch('downloadLaneCount', Number(value) as AppSettings['downloadLaneCount'])} options={[["1","1 danh sách"],["2","2 danh sách"],["3","3 danh sách"],["4","4 danh sách"]]}/>
+      <Select label="Số danh sách hiển thị" value={String(settings.downloadLaneCount)} onChange={(value) => patch('downloadLaneCount', Number(value) as AppSettings['downloadLaneCount'])} options={[["1","1 danh sách"],["2","2 danh sách"],["3","3 danh sách"],["4","4 danh sách"],["5","5 danh sách"],["6","6 danh sách"]]}/>
       <Toggle label="Kiểm tra toàn bộ video sau tải bằng FFmpeg (Chuyên sâu)" checked={settings.downloadVerifyEntireFile} onChange={(value) => patch('downloadVerifyEntireFile', value)}/>
     </Grid>
     {!capCutMode && (qualityInvalid || fpsInvalid || videoBitrateInvalid || audioInvalid) && <div className="mt-3 rounded-xl border p-3 text-sm" style={{ borderColor: 'var(--bad)', color: 'var(--bad)' }}>Giới hạn không hợp lệ: giá trị tối thiểu không được lớn hơn giá trị tối đa, trừ khi tối đa bằng 0.</div>}
@@ -366,6 +375,14 @@ function DownloadSettings({ settings, patch, setError }: { settings: AppSettings
       <NumberField label="Tổng video tải đồng thời toàn ứng dụng" value={settings.maxGlobalDownloadWorkers} min={1} max={16} onChange={(value) => patch('maxGlobalDownloadWorkers', value)}/>
       <NumberField label="Fragment đồng thời mỗi video" value={settings.downloadConcurrentFragments} min={1} max={8} onChange={(value) => patch('downloadConcurrentFragments', value)}/>
     </Grid>
+
+    <h3 className="mb-3 mt-7 font-black">Tên tệp Tải nhanh</h3>
+    <Grid>
+      <Text label="Mẫu đặt tên tệp" value={settings.quickDownloadFilenameTemplate} onChange={(value) => patch('quickDownloadFilenameTemplate', value)} placeholder="{title} [{id}]"/>
+    </Grid>
+    <p className="settings-detail-copy">
+      Token dùng được: <code>{'{title}'}</code> tên video, <code>{'{channel}'}</code> kênh/tác giả, <code>{'{date}'}</code> ngày tải (hôm nay), <code>{'{id}'}</code> mã video trên nền tảng. Chỉ áp dụng cho Tải nhanh. Nếu tên theo mẫu quá dài hoặc không hợp lệ với Windows, ứng dụng tự động thử lại bằng tên rút gọn an toàn.
+    </p>
   </Block>;
 }
 
@@ -396,7 +413,7 @@ function ProcessingSettings({ settings, patch, qualities, setError }: { settings
     <InfoDisclosure className="settings-scope-disclosure mb-5" icon={SlidersHorizontal} title="Phạm vi: Tải & Ghép" summary="Chỉ quyết định video thành phẩm cuối." status="ĐỘC LẬP" tone="good">
       <p className="settings-detail-copy">Link Google Drive trong Tải & Ghép dùng cơ chế tải mặc định/nguyên bản của yt-dlp như code tham chiếu, không ép format source và không chịu giới hạn chất lượng của Tải danh sách. Các lựa chọn bên dưới chỉ quyết định cách tạo thành phẩm cuối.</p>
     </InfoDisclosure>
-    <div className="mb-5 grid gap-4 lg:grid-cols-2"><Select label="Số quy trình tải & ghép hiển thị" value={String(settings.mergeLaneCount)} onChange={(value) => patch('mergeLaneCount', Number(value) as AppSettings['mergeLaneCount'])} options={[["1","1 quy trình"],["2","2 quy trình"],["3","3 quy trình"],["4","4 quy trình"]]}/><Select label="Quy trình ghép hoạt động đồng thời" value={String(settings.maxGlobalMergeJobs)} onChange={(value) => patch('maxGlobalMergeJobs', Number(value) as AppSettings['maxGlobalMergeJobs'])} options={[["1","1 quy trình (mượt nhất)"],["2","2 quy trình"],["3","3 quy trình"],["4","4 quy trình"]]}/></div>
+    <div className="mb-5 grid gap-4 lg:grid-cols-2"><Select label="Số quy trình tải & ghép hiển thị" value={String(settings.mergeLaneCount)} onChange={(value) => patch('mergeLaneCount', Number(value) as AppSettings['mergeLaneCount'])} options={[["1","1 quy trình"],["2","2 quy trình"],["3","3 quy trình"],["4","4 quy trình"],["5","5 quy trình"],["6","6 quy trình"]]}/><Select label="Quy trình ghép hoạt động đồng thời" value={String(settings.maxGlobalMergeJobs)} onChange={(value) => patch('maxGlobalMergeJobs', Number(value) as AppSettings['maxGlobalMergeJobs'])} options={[["1","1 quy trình (mượt nhất)"],["2","2 quy trình"],["3","3 quy trình"],["4","4 quy trình"]]}/></div>
     <details className="settings-inline-note mb-5"><summary>Cách giới hạn quy trình song song hoạt động<ChevronDown size={15}/></summary><p>Khi xuất 4K/HEVC, kiểm tra chuyên sâu hoặc chuẩn hóa nhiều nguồn, nên giữ giới hạn hoạt động thấp. Quy trình vượt giới hạn sẽ chờ lượt và không tranh tài nguyên.</p></details>
     <InfoDisclosure
       className="settings-encoder-disclosure mb-5"

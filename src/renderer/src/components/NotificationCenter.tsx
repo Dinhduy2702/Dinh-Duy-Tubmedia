@@ -1,10 +1,8 @@
 import {
   Activity,
-  AlertTriangle,
   Bell,
   Check,
   CheckCheck,
-  CheckCircle2,
   Copy,
   ExternalLink,
   FolderOpen,
@@ -15,12 +13,13 @@ import {
   Settings2,
   Trash2,
   Wrench,
-  X,
-  XCircle
+  X
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { Project, QueueJob } from '@shared/types/domain';
-import { isJobNoticeStillBlocking } from '@shared/utils/notification-policy';
+import { isActionRequiredWarning, isJobNoticeStillBlocking } from '@shared/utils/notification-policy';
+import { NOTICE_TONE_LABEL } from '@shared/utils/notice-tone';
+import { ToneIcon } from './ui/ToneIcon';
 import { useShallow } from 'zustand/react/shallow';
 import { useAppStore, type NotificationRecord, type PageId } from '../stores/app-store';
 
@@ -118,13 +117,6 @@ function targetFor(notification: NotificationRecord): { page: PageId; label: str
     return { page: 'diagnostics', label: 'Mở chẩn đoán' };
   }
   return null;
-}
-
-function ToneIcon({ notification }: { notification: NotificationRecord }): React.JSX.Element {
-  if (notification.severity === 'error') return <XCircle size={20} />;
-  if (notification.severity === 'warning') return <AlertTriangle size={20} />;
-  if (notification.severity === 'success') return <CheckCircle2 size={20} />;
-  return <Info size={20} />;
 }
 
 export function NotificationCenter(): React.JSX.Element | null {
@@ -346,10 +338,10 @@ export function NotificationCenter(): React.JSX.Element | null {
               return (
                 <article
                   key={notification.id}
-                  className={`notification-item notification-${notification.severity} ${notification.readAt ? 'is-read' : 'is-unread'} ${notification.pinned ? 'is-pinned' : ''}`}
+                  className={`notification-item tone-${notification.severity} notification-${notification.severity} ${notification.readAt ? 'is-read' : 'is-unread'} ${notification.pinned ? 'is-pinned' : ''}`}
                 >
                   <div className="notification-item-tone" aria-hidden="true">
-                    <ToneIcon notification={notification} />
+                    <ToneIcon tone={notification.severity} />
                   </div>
                   <div className="notification-item-content">
                     <div
@@ -365,11 +357,14 @@ export function NotificationCenter(): React.JSX.Element | null {
                       }}
                     >
                       <div className="notification-item-title-row">
+                        <span className="tone-chip">{NOTICE_TONE_LABEL[notification.severity]}</span>
                         <b>{notification.title}</b>
                         {notification.count > 1 && (
                           <span className="notification-count">×{notification.count}</span>
                         )}
-                        {notification.sticky && <span className="notification-action-label">Cần xử lý</span>}
+                        {(notification.sticky || isActionRequiredWarning(notification)) && (
+                          <span className="notification-action-label">Cần xử lý</span>
+                        )}
                         {notification.pinned && <Pin size={13} aria-label="Đã ghim" />}
                         {!notification.readAt && (
                           <i className="notification-unread-dot" aria-label="Chưa đọc" />

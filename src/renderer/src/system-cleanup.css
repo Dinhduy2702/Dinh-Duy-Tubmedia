@@ -234,6 +234,51 @@
   gap: 0.62rem;
 }
 
+.system-cleanup-admin-info {
+  display: grid;
+  gap: 0.5rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: 13px;
+  padding: 0.82rem;
+}
+
+.system-cleanup-admin-info p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.system-cleanup-admin-list {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.system-cleanup-admin-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  border-radius: 10px;
+  background: var(--panel2);
+  padding: 0.5rem 0.68rem;
+}
+
+.system-cleanup-admin-list b {
+  font-size: 0.82rem;
+}
+
+.system-cleanup-admin-list small {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.system-cleanup-admin-info .system-cleanup-button {
+  justify-self: start;
+}
+
 .system-cleanup-option {
   display: flex;
   gap: 0.68rem;
@@ -566,10 +611,6 @@
   color: var(--text);
 }
 
-.system-cleanup-button.whole-machine {
-  border-color: color-mix(in srgb, var(--accent) 46%, var(--border));
-}
-
 .system-cleanup-button.primary {
   border-color: var(--accent);
   background: var(--accent);
@@ -587,6 +628,74 @@
   color: var(--muted);
   font-size: 0.68rem;
   text-align: right;
+}
+
+.system-cleanup-quarantine {
+  display: grid;
+  gap: 0.58rem;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  padding: 0.82rem;
+  background: var(--panel2);
+}
+
+.system-cleanup-quarantine-list {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.system-cleanup-quarantine-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 0.5rem 0.68rem;
+}
+
+.system-cleanup-quarantine-list label {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.system-cleanup-quarantine-list label span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.system-cleanup-quarantine-list b {
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 46ch;
+}
+
+.system-cleanup-quarantine-list small {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.system-cleanup-quarantine-list button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.system-cleanup-quarantine-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 @media (max-width: 1100px) {

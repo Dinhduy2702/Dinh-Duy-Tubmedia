@@ -1,10 +1,12 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { StringDecoder } from 'node:string_decoder';
 import { copyFile, mkdir, mkdtemp, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 import type { Logger } from '../logging/logger.js';
 import type { ToolManager } from '../tools/tool-manager.js';
+import { processEnvironmentFor } from '../processes/process-manager.js';
 import type {
   VideoLinkFilterLink,
   VideoLinkFilterMove,
@@ -242,7 +244,10 @@ export class VideoLinkFilterService {
 
     try {
       const template = ['%(id)s', '%(title)s', '%(webpage_url)s', '%(extractor_key)s'].join(YTDLP_SEPARATOR);
+      // Danh sách link nằm trong --batch-file nên không có URL nào trên dòng lệnh; --ignore-config
+      // chặn tệp cấu hình yt-dlp trên máy chèn thêm tùy chọn (như --exec).
       const args = [
+        '--ignore-config',
         '--ignore-errors',
         '--quiet',
         '--no-warnings',
@@ -285,6 +290,9 @@ export class VideoLinkFilterService {
     return new Promise((resolvePromise, reject) => {
       const child = spawn(executablePath, args, {
         windowsHide: true,
+        // yt-dlp.exe (PyInstaller) ghi tiêu đề qua pipe bằng code page của Windows nếu không ép UTF-8,
+        // làm hỏng tiếng Việt và khiến chế độ khớp theo tiêu đề không tìm thấy video.
+        env: processEnvironmentFor('yt-dlp'),
         stdio: ['ignore', 'pipe', 'pipe']
       });
       let stdout = '';
@@ -300,21 +308,25 @@ export class VideoLinkFilterService {
         callback();
       };
 
-      const append = (current: string, chunk: Buffer): string => {
+      // StringDecoder giữ lại byte UTF-8 dang dở giữa hai chunk; giải mã từng chunk riêng lẻ sẽ
+      // làm hỏng ký tự tiếng Việt nằm đúng ranh giới chunk.
+      const stdoutDecoder = new StringDecoder('utf8');
+      const stderrDecoder = new StringDecoder('utf8');
+      const append = (current: string, chunk: Buffer, decoder: StringDecoder): string => {
         outputBytes += chunk.length;
         if (outputBytes > MAX_YTDLP_OUTPUT_BYTES) {
           child.kill();
           settle(() => reject(new ProcessingFailedError('yt-dlp trả về quá nhiều dữ liệu khi nhận diện link.')));
           return current;
         }
-        return current + chunk.toString('utf8');
+        return current + decoder.write(chunk);
       };
 
       child.stdout.on('data', (chunk: Buffer) => {
-        stdout = append(stdout, chunk);
+        stdout = append(stdout, chunk, stdoutDecoder);
       });
       child.stderr.on('data', (chunk: Buffer) => {
-        stderr = append(stderr, chunk);
+        stderr = append(stderr, chunk, stderrDecoder);
       });
       child.on('error', (error) => {
         settle(() => reject(error));

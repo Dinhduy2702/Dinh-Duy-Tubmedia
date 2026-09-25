@@ -9,6 +9,11 @@ playwright-report/
 *.sqlite-shm
 *.sqlite-wal
 .env
+.env.*
+*.pfx
+*.p12
+*.pem
+*.key
 
 .release/
 verification-logs/

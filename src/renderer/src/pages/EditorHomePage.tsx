@@ -9,6 +9,7 @@ import {
   Sparkles,
   Wrench
 } from 'lucide-react';
+import { APP_VERSION_LABEL } from '@shared/constants/app';
 import { WorkflowCard } from '../components/WorkflowCard';
 import { useAppStore } from '../stores/app-store';
 
@@ -52,7 +53,7 @@ export function EditorHomePage(): React.JSX.Element {
     <div className="page-shell editor-home-page">
       <section className="editor-hero">
         <div className="editor-hero-copy">
-          <span className="editor-kicker">TUBMEDIA EDITOR STUDIO 1.3</span>
+          <span className="editor-kicker">TUBMEDIA EDITOR STUDIO · {APP_VERSION_LABEL}</span>
           <h1>Tải, kiểm tra và chuẩn bị video trong một quy trình rõ ràng</h1>
           <p>
             Bắt đầu từ một video, nhiều liên kết hoặc một quy trình tải–ghép. Hàng đợi, công cụ,

@@ -4,6 +4,8 @@ import { InvalidInputError } from '@shared/errors/app-errors.js';
 import type { SettingsRepository } from '../database/repositories/settings-repository.js';
 import { builtInQualityProfiles, builtInResourceProfiles, defaultAppSettings } from './defaults.js';
 import type { HardwareService } from './hardware-service.js';
+import type { Logger } from '../logging/logger.js';
+import { assertGuardedSettingsChange, sanitizeGuardedSettings } from '../security/settings-policy.js';
 
 function validateDownloadRanges(settings: AppSettings): void {
   if (settings.downloadCompatibilityMode !== 'source') return;
@@ -41,10 +43,12 @@ function validateDownloadRanges(settings: AppSettings): void {
 
 export class SettingsService {
   private hardwareCache: HardwareProfile | null = null;
+  private readonly reportedDropped = new Set<string>();
 
   public constructor(
     private readonly repo: SettingsRepository,
-    private readonly hardware: HardwareService
+    private readonly hardware: HardwareService,
+    private readonly logger?: Logger
   ) {}
 
   public initialize(): void {
@@ -197,11 +201,26 @@ export class SettingsService {
   }
 
   public get(): AppSettings {
-    return this.repo.getAppSettings(defaultAppSettings);
+    // Giá trị lấy từ database (hoặc từ backup đã khôi phục) không được tin cậy tuyệt đối:
+    // địa chỉ cập nhật và đường dẫn công cụ sai chính sách bị bỏ qua, ứng dụng quay về tự động.
+    const { settings, dropped } = sanitizeGuardedSettings(this.repo.getAppSettings(defaultAppSettings));
+    for (const item of dropped) {
+      const marker = `${item.key}:${item.reason}`;
+      if (this.reportedDropped.has(marker)) continue;
+      this.reportedDropped.add(marker);
+      this.logger?.warn(
+        'settings',
+        'SETTING_REJECTED_BY_POLICY',
+        `Bỏ qua cài đặt ${item.key} đã lưu vì không đạt yêu cầu an toàn: ${item.reason}`
+      );
+    }
+    return settings;
   }
 
   public update(patch: Partial<AppSettings>): AppSettings {
-    const next = { ...this.get(), ...patch };
+    const current = this.get();
+    assertGuardedSettingsChange(current, patch);
+    const next = { ...current, ...patch };
     validateDownloadRanges(next);
     this.repo.saveAppSettings(next);
     if ('startWithWindows' in patch) {

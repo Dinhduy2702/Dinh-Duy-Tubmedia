@@ -41,4 +41,20 @@ describe('url normalize', () => {
     expect(downloadLinkTag('https://youtube.com/watch?v=abc123')).toMatch(/^LINK_[A-F0-9]{12}$/);
   });
 
+  it('rejects non-web schemes instead of forwarding them to yt-dlp', () => {
+    for (const value of [
+      'javascript:alert(1)',
+      'mailto:someone@example.com',
+      'file:///C:/Users/Hi/secret.mp4',
+      'data:text/plain,hello',
+      'magnet:?xt=urn:btih:abc'
+    ]) {
+      expect(normalizeUrl(value)).toBeNull();
+    }
+  });
+
+  it('keeps upgrading http/ftp web links to https', () => {
+    expect(normalizeUrl('http://example.com/video')).toBe('https://example.com/video');
+    expect(normalizeUrl('ftp://example.com/video.mp4')).toBe('https://example.com/video.mp4');
+  });
 });

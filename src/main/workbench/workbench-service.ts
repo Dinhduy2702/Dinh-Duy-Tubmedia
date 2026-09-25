@@ -26,18 +26,24 @@ import { sanitizeFilename } from '@shared/utils/filename.js';
 import { sizeFiles, sizePaths } from '../storage/workbench-storage.js';
 import { cleanupTemporaryArtifacts } from '../files/temporary-cleanup.js';
 
+// A1 (2026-09-25): tăng từ 4 lên 6 lane theo yêu cầu người dùng — thêm hoàn toàn tương thích ngược,
+// không đụng tới 4 lane cũ đã có dữ liệu của người dùng (chỉ thêm phần tử mới vào cuối 2 mảng/bảng).
 const DOWNLOAD_LANES: DownloadLaneId[] = [
   'download-1',
   'download-2',
   'download-3',
-  'download-4'
+  'download-4',
+  'download-5',
+  'download-6'
 ];
 
 const MERGE_LANES: MergeLaneId[] = [
   'merge-1',
   'merge-2',
   'merge-3',
-  'merge-4'
+  'merge-4',
+  'merge-5',
+  'merge-6'
 ];
 
 const SLOT_CODES: Record<WorkbenchSlot, string> = {
@@ -45,10 +51,14 @@ const SLOT_CODES: Record<WorkbenchSlot, string> = {
   'download-2': '__WORKBENCH_DOWNLOAD_2__',
   'download-3': '__WORKBENCH_DOWNLOAD_3__',
   'download-4': '__WORKBENCH_DOWNLOAD_4__',
+  'download-5': '__WORKBENCH_DOWNLOAD_5__',
+  'download-6': '__WORKBENCH_DOWNLOAD_6__',
   'merge-1': '__WORKBENCH_MERGE_1__',
   'merge-2': '__WORKBENCH_MERGE_2__',
   'merge-3': '__WORKBENCH_MERGE_3__',
-  'merge-4': '__WORKBENCH_MERGE_4__'
+  'merge-4': '__WORKBENCH_MERGE_4__',
+  'merge-5': '__WORKBENCH_MERGE_5__',
+  'merge-6': '__WORKBENCH_MERGE_6__'
 };
 
 const LEGACY_CODES: Partial<Record<WorkbenchSlot, string>> = {
@@ -224,7 +234,9 @@ export class WorkbenchService {
       finalFileName: value.finalFileName,
       qualityProfileId: value.qualityProfileId,
       resourceProfileId: value.resourceProfileId,
-      exportTimelineTxt: false
+      exportTimelineTxt: false,
+      // Giai đoạn 6 mục 4: preset xuất theo nền tảng — mặc định 'original' khi bản nháp cũ chưa có trường này.
+      aspectRatio: value.aspectRatio ?? 'original'
     };
     return existing ? this.projects.update(existing.id, common) : this.projects.create(common);
   }
@@ -275,7 +287,8 @@ export class WorkbenchService {
       finalFileName: value.finalFileName.trim() || `thanh-pham-${number}`,
       qualityProfileId: value.qualityProfileId,
       resourceProfileId: value.resourceProfileId,
-      exportTimelineTxt: false
+      exportTimelineTxt: false,
+      aspectRatio: value.aspectRatio ?? 'original'
     };
     const project = existing
       ? this.projectRepo.update(existing.id, draft)
@@ -308,7 +321,10 @@ export class WorkbenchService {
       .update(JSON.stringify([
         this.canonicalMergeLinks(value.linksText),
         value.sourceFolder, value.tempFolder, value.outputFolder, value.finalFileName,
-        value.qualityProfileId, value.resourceProfileId, value.timelineOnly === true
+        value.qualityProfileId, value.resourceProfileId, value.timelineOnly === true,
+        // Giai đoạn 6 mục 4: đổi preset tỉ lệ phải làm chữ ký khác đi — nếu không, đổi tỉ lệ rồi bấm chạy
+        // lại sẽ bị coi là "không đổi gì" và dùng lại thành phẩm CŨ (sai tỉ lệ) thay vì xử lý lại.
+        value.aspectRatio ?? 'original'
       ]), 'utf8')
       .digest('hex');
   }
@@ -324,7 +340,8 @@ export class WorkbenchService {
       project.outputFolder === value.outputFolder &&
       project.finalFileName === value.finalFileName &&
       project.qualityProfileId === value.qualityProfileId &&
-      project.resourceProfileId === value.resourceProfileId;
+      project.resourceProfileId === value.resourceProfileId &&
+      project.aspectRatio === (value.aspectRatio ?? 'original');
   }
   public async startMerge(value: DownloadMergeInput): Promise<WorkbenchSlotState> {
     await this.assertDownloadReady();

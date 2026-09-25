@@ -67,6 +67,29 @@ describe('Tubmedia release update system', () => {
     expect(buildScript).toContain('electron-builder.cmd');
   });
 
+  it('Giai đoạn 5: cả 2 pipeline phát hành đều chèn ghi chú phát hành thật từ CHANGELOG.md vào latest.yml/beta.yml', async () => {
+    const [buildScript, writer, workflow] = await Promise.all([
+      file('scripts/build-release-windows.ps1'),
+      file('scripts/write-updater-metadata-utf8nobom.mjs'),
+      file('.github/workflows/publish-tubmedia-release.yml')
+    ]);
+
+    // Pipeline release:windows: electron-builder tự tạo latest.yml/beta.yml, cần một bước RIÊNG chèn
+    // thêm releaseNotes sau đó — xem inject-changelog-release-notes.mjs.
+    expect(buildScript).toContain('scripts/inject-changelog-release-notes.mjs');
+    expect(buildScript).toContain('--version $package.version');
+
+    // Pipeline dist:official → dist:nsis-safe: write-updater-metadata-utf8nobom.mjs tự viết latest.yml
+    // từ đầu, đã lấy ghi chú phát hành thật từ CHANGELOG.md ngay khi dựng tệp (không cần bước chèn riêng).
+    expect(writer).toContain("from './changelog-section.mjs'");
+    expect(writer).toContain('releaseNotes: |');
+
+    // Workflow GitHub Actions phát hành chính thức: trước đây ghi chú phát hành bị gõ tay riêng ở đây,
+    // tách rời khỏi CHANGELOG.md thật — nay phải trích thật qua CLI dùng chung, không còn heredoc chép tay.
+    expect(workflow).toContain('node scripts/changelog-section.mjs');
+    expect(workflow).not.toContain('Sửa lỗi ghép video bị chặn sai khi FFprobe báo 30,000 FPS');
+  });
+
   it('loads electron-updater through a CommonJS bridge without crashing the ESM main process', async () => {
     const updater = await file('src/main/updates/app-update-service.ts');
 

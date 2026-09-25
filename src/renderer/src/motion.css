@@ -1,0 +1,475 @@
+/* Tubmedia 1.4 — hệ thống chuyển động và responsive (Giai đoạn 2a, hạng mục B).
+   Nạp CUỐI CÙNG (sau tokens.css) để có tiếng nói cuối: định nghĩa lại token chuyển động ở một chỗ,
+   bỏ backdrop-filter/blur nặng, chuyển thanh tiến độ sang transform, và hợp nhất các mốc responsive
+   rải rác trong CSS cũ (920/1100/1440) cho khung chính (thanh bên, phần nội dung).
+
+   Nguyên tắc: chỉ animate transform + opacity. Không animate width/height/top/left/box-shadow/filter.
+   Mở/đóng dùng grid-template-rows 0fr→1fr (đã có ở .info-disclosure-collapse/.attention-technical-wrap). */
+
+/* ------------------------------------------------------------------ */
+/* 1. Token chuyển động — MỘT CHỖ                                        */
+/* ------------------------------------------------------------------ */
+:root {
+  --motion-fast: 120ms;
+  --motion-normal: 220ms;
+  --motion-slow: 360ms;
+  /* Đường cong vào/ra chính (iPhone-like, không nảy). Giữ --ease-out trỏ vào đây để mọi chỗ CSS cũ
+     (transition/animation đã viết bằng var(--ease-out)) tự động dùng đúng đường cong mới, không phải
+     sửa từng chỗ. Phản hồi rất nhỏ (hover 1px, nhấn nút) dùng ease-out thường (nhẹ hơn, không cần độ nảy). */
+  --motion-ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out: var(--motion-ease);
+  --motion-ease-feedback: ease-out;
+}
+
+/* ------------------------------------------------------------------ */
+/* 2. Giảm chuyển động — hệ điều hành HOẶC tùy chọn trong Cài đặt        */
+/* Đưa animation/transition về gần như tức thì (giữ mờ rất nhanh, bỏ hẳn di chuyển/co giãn thấy được). */
+/* ------------------------------------------------------------------ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+:root.reduce-motion *,
+:root.reduce-motion *::before,
+:root.reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* ------------------------------------------------------------------ */
+/* 3. Bỏ backdrop-filter/blur nặng (tốn GPU liên tục khi có lớp phủ mở) */
+/* ------------------------------------------------------------------ */
+.dialog-overlay,
+.cookie-dialog-overlay,
+.confirm-overlay,
+.attention-center,
+.app-topbar {
+  backdrop-filter: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* 4. Thanh tiến độ: tô bằng transform scaleX (compositor-only), không đổi width.
+   Đánh dấu phần tô rộng 100% cố định; JS chỉ đặt transform (xem utils/progress-style.ts). */
+/* ------------------------------------------------------------------ */
+.progress > span {
+  width: 100% !important;
+  transform-origin: left center;
+  transition: transform var(--motion-normal) var(--motion-ease);
+}
+
+/* ------------------------------------------------------------------ */
+/* 5. Mốc responsive hợp nhất: 920 / 1100 / 1440 px cho khung chính.
+   CSS cũ rải rác nhiều mốc khác nhau (760/900/1020/1180/1260…) cho từng mảng nhỏ — vẫn còn tác dụng ở
+   nơi hợp lý; khối này CHỈ chuẩn hóa khung chính (thanh bên, vùng nội dung) và các trang mới (GĐ 2a). */
+/* ------------------------------------------------------------------ */
+.page-shell {
+  width: 100%;
+  max-width: 1600px;
+  margin-inline: auto;
+}
+
+@media (max-width: 1440px) {
+  .page-shell {
+    max-width: 1360px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .app-sidebar {
+    /* CSS cũ (.editor-sidebar) đặt min-width: 248px KHÔNG kèm media query (luôn bật) — phải đè cả
+       min-width, không chỉ width, vì min-width luôn thắng width khi lớn hơn, dù width có !important. */
+    width: 84px !important;
+    min-width: 84px !important;
+    flex-basis: 84px !important;
+  }
+
+  .sidebar-item-copy,
+  .sidebar-group-label,
+  .sidebar-help span {
+    display: none;
+  }
+
+  .sidebar-item {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 920px) {
+  .page-shell {
+    padding: 0.85rem 0.8rem 1.4rem;
+  }
+}
+
+/* Hộp thoại vào bằng scale 0.96→1 (đặc tả GĐ 2a; bản cũ 0.985 quá nhẹ để thấy được). */
+@keyframes tubmedia-dialog-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 8px)) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* 5b. Kích thước chuẩn: ô nhập/nút cao 44px, bo góc 10px; thẻ bo góc 14px; nút chính lớn 52px.
+   Bỏ qua nút nhỏ/nút chỉ biểu tượng (đã có kích thước riêng cho thanh công cụ dày đặc). */
+/* ------------------------------------------------------------------ */
+.input,
+.select,
+.textarea,
+.btn:not(.btn-small):not(.icon-action) {
+  min-height: 44px;
+  border-radius: 10px;
+}
+
+.tm-card,
+.card {
+  border-radius: 14px;
+}
+
+.tm-btn-lg {
+  min-height: 52px;
+  padding-inline: 1.3rem;
+  border-radius: 12px;
+  font-size: 0.95rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* 6. Thành phần dùng chung mới: thẻ, danh sách vào/ra, khung xương, trạng thái trống đầy đủ.       */
+/* ------------------------------------------------------------------ */
+.tm-card {
+  padding: 1.1rem 1.15rem;
+  border: 1px solid var(--border-subtle, var(--border));
+  border-radius: 14px;
+  background: var(--surface-card, var(--panel));
+}
+
+.tm-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-bottom: 0.7rem;
+}
+
+.tm-card-head-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--surface-sunken, var(--panel2));
+  color: var(--text-secondary, var(--muted));
+}
+
+.tm-card-head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.tm-card-head small {
+  display: block;
+  margin-top: 0.1rem;
+  color: var(--text-secondary, var(--muted));
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+/* Danh sách: mục mới hiện dần, mục xóa co lại — chỉ opacity/transform, đóng khung bằng grid-template-rows
+   để chiều cao thu gọn không animate trực tiếp (height là thuộc tính bị cấm animate). */
+.tm-list-row {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition:
+    grid-template-rows var(--motion-normal) var(--motion-ease),
+    opacity var(--motion-normal) var(--motion-ease);
+}
+
+.tm-list-row > * {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.tm-list-row.is-leaving {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+
+.tm-list-row-enter {
+  animation: tm-list-row-enter var(--motion-normal) var(--motion-ease);
+}
+
+@keyframes tm-list-row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Khung xương thay vòng quay khi đang lấy thông tin: chỉ opacity, không dịch chuyển. */
+.tm-skeleton {
+  border-radius: 8px;
+  background: var(--surface-sunken, var(--panel2));
+  animation: tm-skeleton-pulse 1.4s var(--motion-ease) infinite;
+}
+
+@keyframes tm-skeleton-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Trạng thái trống đầy đủ: biểu tượng + câu giải thích + nút hành động. */
+.tm-empty {
+  display: grid;
+  justify-items: center;
+  gap: 0.6rem;
+  padding: 2.2rem 1.2rem;
+  text-align: center;
+}
+
+.tm-empty-icon {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  place-items: center;
+  border-radius: 16px;
+  background: var(--surface-sunken, var(--panel2));
+  color: var(--text-secondary, var(--muted));
+}
+
+.tm-empty h3 {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.tm-empty p {
+  max-width: 42ch;
+  margin: 0;
+  color: var(--text-secondary, var(--muted));
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+/* ------------------------------------------------------------------ */
+/* 7. Điều hướng 3 bước: biểu tượng riêng cho từng bước trong vòng tròn ở thanh bên (B4, 2026-09-24 —    */
+/*    trước đây là số trần 1/2/3, đổi sang icon Download/Scissors/Sparkles đúng chức năng từng bước để   */
+/*    dễ nhận diện bằng mắt hơn; giữ nguyên vòng tròn + màu + chuyển động cũ, chỉ đổi nội dung bên trong). */
+/* ------------------------------------------------------------------ */
+.sidebar-step-badge {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  place-items: center;
+  border: 1px solid var(--sidebar-border, var(--border));
+  border-radius: 999px;
+  color: var(--sidebar-muted, var(--muted));
+  font-size: 0.66rem;
+  font-weight: 900;
+  transition:
+    border-color var(--motion-fast) var(--motion-ease-feedback),
+    background-color var(--motion-fast) var(--motion-ease-feedback),
+    color var(--motion-fast) var(--motion-ease-feedback);
+}
+
+.sidebar-item.is-active .sidebar-step-badge {
+  border-color: transparent;
+  background: var(--sidebar-text, var(--text));
+  color: var(--sidebar-bg, var(--bg));
+}
+
+/* ------------------------------------------------------------------ */
+/* 8. Trang bước (Tải/Xem trước & Cắt/Ghép & Xuất): tiêu đề + giải thích + thanh bước ở góc phải, lưới    */
+/*    thẻ.                                                                                                */
+/* ------------------------------------------------------------------ */
+.tm-step-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.1rem;
+}
+
+.tm-step-heading h1 {
+  margin: 0;
+  font-size: 1.875rem; /* 30px */
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.tm-step-heading p {
+  max-width: 62ch;
+  margin: 0.4rem 0 0;
+  color: var(--text-secondary, var(--muted));
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+.tm-step-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.4rem;
+  padding: 0.3rem;
+  border: 1px solid var(--border-subtle, var(--border));
+  border-radius: 12px;
+  background: var(--surface-card, var(--panel));
+}
+
+.tm-step-tab {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.7rem;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-secondary, var(--muted));
+  font-size: 0.75rem;
+  font-weight: 800;
+  white-space: nowrap;
+  transition:
+    background-color var(--motion-fast) var(--motion-ease-feedback),
+    color var(--motion-fast) var(--motion-ease-feedback);
+}
+
+.tm-step-tab .sidebar-step-badge {
+  border-color: currentColor;
+  color: inherit;
+}
+
+.tm-step-tab.is-active {
+  background: var(--action-bg, var(--accent));
+  color: var(--action-text, #fff);
+}
+
+.tm-step-tab.is-active .sidebar-step-badge {
+  border-color: transparent;
+  background: var(--action-text, #fff);
+  color: var(--action-bg, var(--accent));
+}
+
+.tm-step-tab:not(.is-active):hover {
+  background: var(--surface-sunken, var(--panel2));
+}
+
+/* B4 (2026-09-24): nhắc tới một bước NGAY TRONG CÂU văn bản (vd. "bước Tải") — trước đây có số trần
+   kiểu "①"/"②" đứng trước tên bước; nay thay bằng icon nhỏ đúng chức năng bước đó, căn giữa theo dòng chữ. */
+.tm-step-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  white-space: nowrap;
+}
+
+.tm-step-ref svg {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 920px) {
+  .tm-step-tab span.tm-step-tab-label {
+    display: none;
+  }
+}
+
+.tm-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+@media (max-width: 1100px) {
+  .tm-card-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* 8b. Việc CHÍNH hàng ngày (điều chỉnh 2026-09-22): "Tải danh sách" và "Ghép theo Timeline"
+   (download-workbench, download-merge — logic KHÔNG đổi, chỉ thiết kế lại phần hiển thị, y hệt cách đã
+   làm với trang Cài đặt/Dọn dẹp). Tiêu đề trang 30px đậm đúng đặc tả GĐ 2a (mục 69), tách riêng khỏi
+   `.page-heading h1` dùng chung ở nơi khác (hộp thoại, trang Giới thiệu…) để không đổi những chỗ đó. */
+/* ------------------------------------------------------------------ */
+.download-workbench-page .page-heading h1,
+.download-merge-page .page-heading h1 {
+  font-size: 1.875rem !important; /* 30px */
+  font-weight: 800 !important;
+  letter-spacing: -0.02em !important;
+}
+
+.download-workbench-page .page-heading p,
+.download-merge-page .page-heading p {
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+/* ------------------------------------------------------------------ */
+/* 8c. Kéo-thả sắp lại thứ tự ghép trong "Ghép theo Timeline" (GĐ 2b, HTML5 Drag and Drop có sẵn của
+   trình duyệt — không thêm thư viện). Chỉ áp dụng cho danh sách CHƯA có timeline thật (đang nhập link);
+   không đổi cách tính/định dạng timeline, chỉ đổi thứ tự dòng trong linksText khi thả. */
+/* ------------------------------------------------------------------ */
+.merge-timeline-row.is-reorderable {
+  grid-template-columns: 20px minmax(190px, auto) minmax(0, 1fr);
+  align-items: center;
+  cursor: grab;
+  transition:
+    opacity var(--motion-fast) var(--motion-ease-feedback),
+    transform var(--motion-fast) var(--motion-ease-feedback);
+}
+
+.merge-timeline-row.is-reorderable:active {
+  cursor: grabbing;
+}
+
+.merge-timeline-drag-handle {
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary, var(--muted));
+}
+
+.merge-timeline-row.is-dragging {
+  opacity: 0.45;
+}
+
+.merge-timeline-row.is-drag-over {
+  transform: translateY(2px);
+}
+
+.merge-timeline-row.is-drag-over .merge-timeline-drag-handle {
+  color: var(--action-bg, var(--accent));
+}
+
+/* ------------------------------------------------------------------ */
+/* 9. Cỡ chữ (Cài đặt → Vừa/Lớn/Rất lớn): đổi gốc rem, mọi chữ theo hệ --type-* co giãn theo.        */
+/* ------------------------------------------------------------------ */
+:root[data-font-size='large'] {
+  font-size: 17.5px;
+}
+
+:root[data-font-size='xlarge'] {
+  font-size: 19px;
+}

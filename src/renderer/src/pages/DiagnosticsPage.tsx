@@ -1,4 +1,4 @@
-import { Activity, CircleAlert, Cpu, HardDrive, RefreshCcw, ShieldCheck, Wrench } from 'lucide-react';
+import { Activity, CircleAlert, HardDrive, RefreshCcw, ShieldCheck, Wrench } from 'lucide-react';
 import { useState } from 'react';
 import { useAppStore } from '../stores/app-store';
 import { friendlyIssue, safeUiText } from '../utils/ui-error';
@@ -12,7 +12,6 @@ function bytes(value: number | undefined): string {
 export function DiagnosticsPage(): React.JSX.Element {
   const tools = useAppStore((state) => state.tools);
   const stats = useAppStore((state) => state.stats);
-  const hardware = useAppStore((state) => state.hardware);
   const logs = useAppStore((state) => state.logs);
   const refreshTools = useAppStore((state) => state.refreshTools);
   const pushLogs = useAppStore((state) => state.pushLogs);
@@ -45,8 +44,9 @@ export function DiagnosticsPage(): React.JSX.Element {
         <button className="btn btn-primary" disabled={busy} onClick={() => void refresh()}><RefreshCcw className={busy ? 'animate-spin' : ''} size={17} />{busy ? 'Đang kiểm tra...' : 'Kiểm tra lại'}</button>
       </div>
 
+      {/* A2 mục 1 (2026-09-25): bỏ thẻ "Bộ xử lý" — trùng y hệt số % CPU đã luôn hiện ở thanh trên cùng
+          (mọi trang). Giữ 3 thẻ còn lại vì không trùng thông tin nào ở thanh trên. */}
       <div className="diagnostics-summary mt-5">
-        <div><Cpu size={19} /><span>Bộ xử lý</span><b>{Math.round(stats?.cpuPercent ?? 0)}%</b><small>{hardware?.cpuModel ?? 'Chưa đọc phần cứng'}</small></div>
         <div><Activity size={19} /><span>Tiến trình</span><b>{stats?.activeProcesses ?? 0}</b><small>{stats?.activeJobs ?? 0} tác vụ đang hoạt động</small></div>
         <div><HardDrive size={19} /><span>Bộ nhớ</span><b>{Math.round(stats?.memoryPercent ?? 0)}%</b><small>{bytes(stats?.memoryUsedBytes)} / {bytes(stats?.memoryTotalBytes)}</small></div>
         <div><Wrench size={19} /><span>Công cụ</span><b>{tools.length - unhealthy.length}/{tools.length}</b><small>{unhealthy.length ? 'Có công cụ cần xử lý' : 'Các công cụ chính sẵn sàng'}</small></div>

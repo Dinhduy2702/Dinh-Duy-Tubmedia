@@ -2,6 +2,11 @@ import { z } from 'zod';
 
 export const idSchema = z.string().uuid();
 export const pathSchema = z.string().trim().min(1).max(32_768);
+// Dùng chung cho "Cắt tệp có sẵn" (Giai đoạn 6 mục 3) VÀ preset xuất theo nền tảng ở Ghép theo Timeline
+// (Giai đoạn 6 mục 4) — cùng một khái niệm tỉ lệ khung hình, cùng cơ chế nền mờ kiểu CapCut khi khác
+// 'original'. Enum khớp LOCAL_CUT_ASPECT_RATIOS ở src/shared/local-cut.ts (không import chéo vào tệp này,
+// giữ đúng phong cách tự chứa hiện có).
+export const aspectRatioSchema = z.enum(['original', '9:16', '1:1', '16:9']).default('original');
 export const projectCreateSchema = z.object({
   name: z.string().trim().min(1).max(160),
   code: z.string().trim().max(80).nullable().optional(),
@@ -12,7 +17,8 @@ export const projectCreateSchema = z.object({
   finalFileName: z.string().trim().min(1).max(220),
   qualityProfileId: z.string().min(1),
   resourceProfileId: z.string().min(1),
-  exportTimelineTxt: z.boolean().optional()
+  exportTimelineTxt: z.boolean().optional(),
+  aspectRatio: aspectRatioSchema
 });
 export const projectUpdateSchema = projectCreateSchema.partial().extend({ id: idSchema });
 export const parseInputSchema = z.object({ text: z.string().max(10_000_000) });
@@ -31,6 +37,8 @@ export const appSettingsSchema = z
   .object({
     theme: z.enum(['system', 'light', 'dark']),
     language: z.literal('vi'),
+    fontSize: z.enum(['medium', 'large', 'xlarge']),
+    reduceMotion: z.boolean(),
     minimizeToTray: z.boolean(),
     startWithWindows: z.boolean(),
     closeBehavior: z.enum(['ask', 'pause_and_exit', 'cancel_and_exit', 'tray']),
@@ -62,8 +70,24 @@ export const appSettingsSchema = z
     aria2Connections: z.number().int().min(1).max(32),
     maxGlobalDownloadWorkers: z.number().int().min(1).max(16),
     downloadConcurrentFragments: z.number().int().min(1).max(8),
-    downloadLaneCount: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
-    mergeLaneCount: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
+    // A1 (2026-09-25): tăng từ 4 lên 6 lane CẤU HÌNH song song; maxGlobalMergeJobs (trần ghép ĐỒNG THỜI
+    // thật) cố tình giữ nguyên 1-4 theo khuyến nghị phần cứng có sẵn của app.
+    downloadLaneCount: z.union([
+      z.literal(1),
+      z.literal(2),
+      z.literal(3),
+      z.literal(4),
+      z.literal(5),
+      z.literal(6)
+    ]),
+    mergeLaneCount: z.union([
+      z.literal(1),
+      z.literal(2),
+      z.literal(3),
+      z.literal(4),
+      z.literal(5),
+      z.literal(6)
+    ]),
     maxGlobalMergeJobs: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
     downloadCompatibilityMode: z.enum(['source', 'capcut_sdr_1080p', 'capcut_sdr_2k']),
     // ADAPTIVE_SETTINGS_HOTFIX8_SCHEMA
@@ -80,7 +104,20 @@ export const appSettingsSchema = z
     downloadAudioBitrateKbps: z.number().int().min(0).max(512),
     downloadAllowBelowMinimum: z.boolean(),
     downloadVerifyEntireFile: z.boolean(),
-    progressRefreshMs: z.number().int().min(100).max(5000)
+    progressRefreshMs: z.number().int().min(100).max(5000),
+    // Giai đoạn 6 mục 7 (2026-09-24): mẫu đặt tên tệp Tải nhanh — chỉ 4 token {title}/{channel}/{date}/
+    // {id} được thay thế thật; chặn '%' để không ai chèn được cú pháp trường yt-dlp riêng ngoài 4 token
+    // đã định nghĩa, và chặn ký tự Windows cấm/ký tự điều khiển dù --windows-filenames đã tự làm sạch
+    // tên tệp cuối cùng (chặn sớm ở đây cho người dùng phản hồi rõ ràng ngay khi lưu Cài đặt).
+    quickDownloadFilenameTemplate: z
+      .string()
+      .trim()
+      .min(1)
+      .max(120)
+      .refine(
+        (value) => !/[%<>:"/\\|?*]/.test(value) && !Array.from(value).some((char) => char.charCodeAt(0) < 0x20),
+        { message: 'Mẫu tên tệp không được chứa ký tự %, <>:"/\\|?* hoặc ký tự điều khiển.' }
+      )
   })
   .strict();
 export const settingsPatchSchema = appSettingsSchema.partial();
@@ -154,8 +191,16 @@ export const backupCreateSchema = z.object({
 export const backupRestoreSchema = z.object({ path: pathSchema, mode: z.enum(['merge', 'replace']) });
 export const toolNameSchema = z.object({ name: z.enum(['yt-dlp', 'ffmpeg', 'ffprobe', 'ffplay', 'aria2c']) });
 
-const downloadLaneIdSchema = z.enum(['download-1', 'download-2', 'download-3', 'download-4']);
-const mergeLaneIdSchema = z.enum(['merge-1', 'merge-2', 'merge-3', 'merge-4']);
+// A1 (2026-09-25): khớp DownloadLaneId/MergeLaneId ở domain.ts — tăng từ 4 lên 6 lane.
+const downloadLaneIdSchema = z.enum([
+  'download-1',
+  'download-2',
+  'download-3',
+  'download-4',
+  'download-5',
+  'download-6'
+]);
+const mergeLaneIdSchema = z.enum(['merge-1', 'merge-2', 'merge-3', 'merge-4', 'merge-5', 'merge-6']);
 export const workbenchSlotSchema = z.object({
   slot: z.union([downloadLaneIdSchema, mergeLaneIdSchema])
 });
@@ -188,7 +233,9 @@ export const downloadMergeDraftSchema = z.object({
   resourceProfileId: z.string().max(160),
   exportTimelineTxt: z.boolean(),
   /** TUBMEDIA TIMELINE ONLY IPC HOTFIX12 */
-  timelineOnly: z.boolean().default(false)
+  timelineOnly: z.boolean().default(false),
+  /** Giai đoạn 6 mục 4 (2026-09-24): preset xuất theo nền tảng — chỉ đổi tỉ lệ khung hình. */
+  aspectRatio: aspectRatioSchema
 });
 export const downloadMergeSchema = z.object({
   slot: mergeLaneIdSchema,
@@ -201,7 +248,9 @@ export const downloadMergeSchema = z.object({
   qualityProfileId: z.string().min(1).max(160),
   resourceProfileId: z.string().min(1).max(160),
   exportTimelineTxt: z.boolean(),
-  timelineOnly: z.boolean().default(false)
+  timelineOnly: z.boolean().default(false),
+  /** Giai đoạn 6 mục 4 (2026-09-24): preset xuất theo nền tảng — chỉ đổi tỉ lệ khung hình. */
+  aspectRatio: aspectRatioSchema
 });
 
 export const cookieTextSchema = z.object({ text: z.string().min(1).max(20_000_000) });
@@ -219,6 +268,9 @@ export const clearWorkbenchSchema = z.object({ slot: z.union([downloadLaneIdSche
 export const clearLogsSchema = z.object({ projectId: idSchema.optional() });
 
 // TUBMEDIA_FEATURE_IPC_SCHEMAS
+// GĐ4a (2026-09-23): bỏ hẳn scope 'wholeMachine' và 7 hạng mục cần quyền quản trị/không thể hoàn tác
+// (recycleBin, windowsTemp, windowsUpdate, deliveryOptimization, componentStore, diskInventory,
+// disableHibernate) — xem src/shared/system-cleanup.ts để biết lý do từng mục.
 export const systemCleanupCategorySchema = z.enum([
   'userTemp',
   'thumbnailCache',
@@ -226,25 +278,22 @@ export const systemCleanupCategorySchema = z.enum([
   'browserCache',
   'capcutCache',
   'zaloCache',
-  'tubmediaResidue',
-  'recycleBin',
-  'windowsTemp',
-  'windowsUpdate',
-  'deliveryOptimization',
-  'componentStore',
-  'diskInventory',
-  'disableHibernate'
+  'tubmediaResidue'
 ]);
 export const systemCleanupRequestSchema = z
   .object({
     mode: z.enum(['estimate', 'clean']),
-    scope: z.enum(['currentUser', 'wholeMachine']).default('currentUser'),
-    categories: z.array(systemCleanupCategorySchema).min(1).max(14)
+    categories: z.array(systemCleanupCategorySchema).min(1).max(7)
   })
   .strict();
 export const systemCleanupRunSchema = z
   .object({
     runId: idSchema
+  })
+  .strict();
+export const systemCleanupQuarantineRestoreSchema = z
+  .object({
+    ids: z.array(idSchema).min(1).max(500)
   })
   .strict();
 
@@ -272,10 +321,45 @@ export const quickDownloadRequestSchema = z
     downloadSubtitles: z.boolean().default(false),
     subtitleLanguage: z.string().trim().max(64).default('vi,en'),
     downloadThumbnail: z.boolean().default(false),
-    writeMetadata: z.boolean().default(false)
+    writeMetadata: z.boolean().default(false),
+    embedCredit: z.boolean().default(true)
   })
   .strict();
 export const quickDownloadTaskSchema = z
+  .object({
+    taskId: idSchema
+  })
+  .strict();
+/* Giai đoạn 3 (2026-09-23): mốc thời gian tính bằng giây, không âm, không quá dài một cách bất thường
+   (24 giờ) — chặn giá trị vô lý trước khi truyền cho yt-dlp/ffmpeg. */
+export const previewFrameRequestSchema = z
+  .object({
+    url: z.string().trim().min(1).max(4096),
+    timestampSeconds: z.number().min(0).max(86_400)
+  })
+  .strict();
+
+// Giai đoạn 6 mục 2/3 (2026-09-23/24): "Cắt tệp có sẵn" — cắt một đoạn từ video đã có sẵn trên máy, không
+// qua tải. filePath không dùng pathSchema (giới hạn 32KB, cho đường dẫn thư mục) vì đây là đường dẫn
+// TỆP — vẫn giới hạn độ dài hợp lý để chặn giá trị bất thường.
+export const localCutPreviewFrameRequestSchema = z
+  .object({
+    filePath: z.string().trim().min(1).max(4096),
+    timestampSeconds: z.number().min(0).max(86_400),
+    aspectRatio: aspectRatioSchema
+  })
+  .strict();
+export const localCutRequestSchema = z
+  .object({
+    filePath: z.string().trim().min(1).max(4096),
+    outputDirectory: pathSchema,
+    startTime: z.string().trim().min(1).max(32),
+    endTime: z.string().trim().min(1).max(32),
+    accurateCut: z.boolean().default(false),
+    aspectRatio: aspectRatioSchema
+  })
+  .strict();
+export const localCutTaskSchema = z
   .object({
     taskId: idSchema
   })

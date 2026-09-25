@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { friendlyIssue, safeUiText } from '../utils/ui-error';
 import { isJobNoticeStillBlocking, shouldRouteIssueToAttention } from '@shared/utils/notification-policy';
+import { isNoticeTone } from '@shared/utils/notice-tone';
 import type {
   AppSettings,
   AppUpdateStatus,
@@ -18,6 +19,10 @@ import type {
 
 export type PageId =
   | 'editor-home'
+  /** Điều hướng 3 bước GĐ 2a — hành trình một video: tải → xem trước & cắt → ghép & xuất. */
+  | 'step-download'
+  | 'step-preview-cut'
+  | 'step-merge-export'
   | 'download-workbench'
   | 'filter-by-links'
   | 'download-merge'
@@ -96,6 +101,7 @@ const DAY_MS = 24 * 60 * 60 * 1_000;
 const RETENTION_MS: Record<AttentionSeverity, number> = {
   success: DAY_MS,
   info: 3 * DAY_MS,
+  neutral: 3 * DAY_MS,
   warning: 30 * DAY_MS,
   error: 30 * DAY_MS
 };
@@ -128,7 +134,7 @@ function outputPathFromUnknown(value: unknown): string | null {
 }
 
 function validSeverity(value: unknown): value is AttentionSeverity {
-  return value === 'info' || value === 'success' || value === 'warning' || value === 'error';
+  return isNoticeTone(value);
 }
 
 function normalizeStoredNotification(value: unknown): NotificationRecord | null {
@@ -368,7 +374,10 @@ const initialNotifications = loadNotificationHistory();
 export const useAppStore = create<State>((set, get) => ({
   ready: false,
   loading: false,
-  page: 'editor-home',
+  // Trang mở đầu là "Tải danh sách": việc CHÍNH thật sự dùng hàng ngày (tải một danh sách nhiều video),
+  // trước khi ghép theo Timeline — điều chỉnh 2026-09-22 sau khi người dùng nói rõ chức năng chính.
+  // "Tổng quan" (editor-home) không còn trong danh sách thanh bên nhưng vẫn mở được qua bấm logo.
+  page: 'download-workbench',
   projects: [],
   jobs: [],
   tools: [],
@@ -478,6 +487,7 @@ export const useAppStore = create<State>((set, get) => ({
         severity: issue.tone,
         title: issue.title,
         message: issue.message,
+        ...(issue.code ? { code: issue.code } : {}),
         ...(issue.steps.length > 0 ? { steps: issue.steps } : {}),
         sticky: false
       };

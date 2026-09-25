@@ -1,3 +1,22 @@
+# Tubmedia 1.4.0
+
+- Nhận diện thương hiệu mới: tích hợp logo TUB MEDIA chính thức vào thanh bên, trang Giới thiệu và icon taskbar/khay hệ thống/bộ cài (.exe).
+- Giao diện làm mới toàn bộ: điều hướng 3 bước (Tải / Xem trước & Cắt / Ghép & Xuất), bộ màu ngữ nghĩa theo logo, chế độ sáng đồng nhất toàn ứng dụng kể cả thanh bên, thông báo có kiểu riêng theo mức độ, kéo-thả sắp thứ tự đoạn trong Ghép theo Timeline.
+- Thêm cắt tệp có sẵn trên máy (không cần tải lại), hỗ trợ cả cắt nhanh và cắt chính xác.
+- Thêm đổi tỉ lệ khung hình 9:16/1:1/16:9 (nền mờ kiểu CapCut) cho cả Ghép theo Timeline lẫn Cắt tệp có sẵn, cùng preset xuất sẵn theo nền tảng (Shorts/TikTok/Reels, Instagram/Facebook, YouTube/Facebook).
+- Thêm xem thông tin chi tiết tệp video: độ phân giải, khung hình/giây, codec, HDR, bitrate...
+- Thêm ghi credit (tên kênh, URL nguồn, ngày tải, đoạn đã cắt nếu có) vào metadata ẩn của tệp Tải nhanh, không chèn chữ lên hình, mặc định bật; chạy ngầm sau khi báo hoàn tất nên không làm treo giao diện.
+- Thêm mẫu đặt tên tệp tùy chỉnh cho Tải nhanh, cấu hình trong Cài đặt.
+- Tải theo khoảng: thêm xem trước khung hình đầu/cuối đoạn trước khi tải.
+- Viết lại hoàn toàn Dọn dẹp máy: bỏ hẳn PowerShell/quyền quản trị; xóa qua khu cách ly riêng, có thể hoàn tác trong 14 ngày thay vì xóa thẳng.
+- Thêm bộ điều tiết tự động tạm hoãn tác vụ mới khi CPU máy đang bận, không ảnh hưởng tác vụ đang chạy dở; đề xuất hồ sơ hiệu năng theo đúng RAM còn trống thay vì RAM tổng máy.
+- Ghi chú phát hành trong bản cập nhật giờ lấy trực tiếp từ CHANGELOG.md cho cả hai quy trình phát hành, tránh lệch nội dung giữa hai nơi.
+- Rà soát toàn diện logic tải/ghép: sửa vài trường hợp hủy giữa chừng bị báo nhầm "thất bại" thay vì "đã hủy" ở bước xác minh; gộp logic dựng tham số cookie yt-dlp dùng chung cho mọi luồng tải để tránh lệch hành vi giữa các luồng.
+- Tăng giới hạn quy trình song song từ 4 lên 6 cho cả Tải danh sách và Ghép theo Timeline (không đổi giới hạn ghép chạy đồng thời thật, vẫn tối đa 4 theo khuyến nghị phần cứng).
+- Thay số thứ tự trần bằng icon đúng chức năng ở các bước điều hướng và tiến trình ghép, dễ nhận diện bằng mắt hơn.
+- Gọn giao diện: bỏ vài chỗ hiển thị trùng lặp (số % CPU ở trang Chẩn đoán, nút Tiếp tục tất cả ở Trung tâm tiến trình) và làm rõ hơn khác biệt giữa "Tải 1 video" và "Tải danh sách".
+- Xác nhận thêm độ tin cậy: nếu máy tắt đột ngột giữa lúc đang ghép, mở lại ứng dụng sẽ tự động tiếp tục đúng tiến trình, không mất dữ liệu đã xử lý.
+
 # Tubmedia 1.3.7
 
 - Sửa lỗi ghép video bị chặn sai khi FFprobe báo 30,000 FPS và 29,996 FPS dù chênh lệch chỉ 0,004 FPS.

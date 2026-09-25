@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  SYSTEM_CLEANUP_ADMIN_INFO_ITEMS,
   SYSTEM_CLEANUP_CATEGORIES,
-  isInspectionOnlyCleanupCategory,
-  isIrreversibleCleanupSelection,
-  systemCleanupRequiresAdmin,
   validateSystemCleanupRequest
 } from '../../src/shared/system-cleanup.js';
 
-describe('system cleanup policy', () => {
+describe('system cleanup policy (GĐ4a — bỏ PowerShell/Admin/wholeMachine)', () => {
   it('only accepts category identifiers from the fixed allowlist', () => {
     expect(
       validateSystemCleanupRequest({
@@ -16,7 +14,6 @@ describe('system cleanup policy', () => {
       })
     ).toEqual({
       mode: 'clean',
-      scope: 'currentUser',
       categories: ['userTemp', 'browserCache']
     });
 
@@ -28,54 +25,75 @@ describe('system cleanup policy', () => {
     ).toThrow();
   });
 
-  it('keeps irreversible operations disabled by default', () => {
-    const defaults = SYSTEM_CLEANUP_CATEGORIES.filter((item) => item.defaultSelected);
+  it('never accepts a scope field — wholeMachine scanning was removed with the PowerShell helper', () => {
+    expect(
+      validateSystemCleanupRequest({
+        mode: 'estimate',
+        categories: ['userTemp']
+      })
+    ).not.toHaveProperty('scope');
 
-    expect(defaults.every((item) => !item.irreversible)).toBe(true);
-    expect(SYSTEM_CLEANUP_CATEGORIES.find((item) => item.id === 'disableHibernate')?.defaultSelected).toBe(
-      false
-    );
-    expect(SYSTEM_CLEANUP_CATEGORIES.find((item) => item.id === 'recycleBin')?.defaultSelected).toBe(false);
-  });
-
-  it('requests elevation for administrator categories or a whole-machine scan', () => {
-    expect(systemCleanupRequiresAdmin(['userTemp', 'browserCache'])).toBe(false);
-    expect(systemCleanupRequiresAdmin(['windowsTemp'])).toBe(true);
-    expect(systemCleanupRequiresAdmin(['userTemp'], 'wholeMachine')).toBe(true);
-  });
-
-  it('accepts only the two fixed cleanup scopes', () => {
+    // Một payload cũ còn gửi "scope" (ví dụ bản build trước) không được phép lọt qua validate.
     expect(
       validateSystemCleanupRequest({
         mode: 'estimate',
         scope: 'wholeMachine',
         categories: ['userTemp']
-      }).scope
-    ).toBe('wholeMachine');
+      })
+    ).toEqual({ mode: 'estimate', categories: ['userTemp'] });
+  });
 
+  it('has exactly 7 categories left, none needing admin/UAC and none irreversible', () => {
+    const ids = SYSTEM_CLEANUP_CATEGORIES.map((item) => item.id).sort();
+
+    expect(ids).toEqual(
+      ['browserCache', 'capcutCache', 'crashReports', 'thumbnailCache', 'tubmediaResidue', 'userTemp', 'zaloCache'].sort()
+    );
+
+    for (const item of SYSTEM_CLEANUP_CATEGORIES) {
+      expect(item).not.toHaveProperty('requiresAdmin');
+      expect(item).not.toHaveProperty('irreversible');
+      expect(item).not.toHaveProperty('group');
+    }
+  });
+
+  it('removed the categories that required admin or were irreversible (decision 2026-09-21/23)', () => {
+    const ids = new Set(SYSTEM_CLEANUP_CATEGORIES.map((item) => item.id));
+
+    expect(ids.has('recycleBin' as never)).toBe(false);
+    expect(ids.has('windowsTemp' as never)).toBe(false);
+    expect(ids.has('windowsUpdate' as never)).toBe(false);
+    expect(ids.has('deliveryOptimization' as never)).toBe(false);
+    expect(ids.has('componentStore' as never)).toBe(false);
+    expect(ids.has('diskInventory' as never)).toBe(false);
+    expect(ids.has('disableHibernate' as never)).toBe(false);
+  });
+
+  it('keeps a report-only list of admin-required maintenance with no scan/delete affordance', () => {
+    const ids = SYSTEM_CLEANUP_ADMIN_INFO_ITEMS.map((item) => item.id).sort();
+
+    expect(ids).toEqual(
+      ['componentStore', 'deliveryOptimization', 'windowsTemp', 'windowsUpdate'].sort()
+    );
+
+    for (const item of SYSTEM_CLEANUP_ADMIN_INFO_ITEMS) {
+      expect(typeof item.label).toBe('string');
+      expect(typeof item.description).toBe('string');
+      expect(item.label.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('rejects unknown categories even if they look like admin-info ids', () => {
     expect(() =>
       validateSystemCleanupRequest({
         mode: 'estimate',
-        scope: 'entireDisk',
-        categories: ['userTemp']
+        categories: ['windowsTemp']
       })
     ).toThrow();
   });
 
-  it('recognizes irreversible selections', () => {
-    expect(isIrreversibleCleanupSelection(['userTemp'])).toBe(false);
-    expect(isIrreversibleCleanupSelection(['recycleBin'])).toBe(true);
-    expect(isIrreversibleCleanupSelection(['disableHibernate'])).toBe(true);
-  });
-
-  it('keeps whole-disk inventory report-only and residue cleanup opt-in', () => {
-    expect(isInspectionOnlyCleanupCategory('diskInventory')).toBe(true);
-    expect(isInspectionOnlyCleanupCategory('tubmediaResidue')).toBe(false);
-    expect(SYSTEM_CLEANUP_CATEGORIES.find((item) => item.id === 'diskInventory')?.defaultSelected).toBe(
-      false
-    );
-    expect(SYSTEM_CLEANUP_CATEGORIES.find((item) => item.id === 'tubmediaResidue')?.defaultSelected).toBe(
-      false
-    );
+  it('requires at least one category and rejects an invalid mode', () => {
+    expect(() => validateSystemCleanupRequest({ mode: 'estimate', categories: [] })).toThrow();
+    expect(() => validateSystemCleanupRequest({ mode: 'delete-everything', categories: ['userTemp'] })).toThrow();
   });
 });

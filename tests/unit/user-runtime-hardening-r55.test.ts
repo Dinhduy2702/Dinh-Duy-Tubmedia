@@ -31,13 +31,16 @@ describe('R55 installed-user runtime hardening', () => {
     expect(quick).toContain("active.status.errorCode = 'DISK_FULL'");
   });
 
-  it('never sends full-disk inventory paths to the cleanup command', () => {
-    const panel = read('src/renderer/src/components/SystemCleanupPanel.tsx');
-    const helper = read('resources/system-cleanup-helper.ps1');
+  it('scans Tubmedia residue only with internal identity, never touches Zalo Received Files or system roots (GĐ4a — Node native, no PowerShell)', () => {
+    // GĐ4a (2026-09-23) đã bỏ hẳn resources/system-cleanup-helper.ps1 và diskInventory/wholeMachine —
+    // bài kiểm này chuyển sang xác nhận đúng bất biến an toàn ở bộ quét Node.js thay thế.
+    expect(existsSync(resolve(root, 'resources/system-cleanup-helper.ps1'))).toBe(false);
 
-    expect(panel).toContain('categories.filter((id) => !isInspectionOnlyCleanupCategory(id))');
-    expect(helper).toContain('Inspection-only by policy');
-    expect(helper).toContain('Test-TubmediaOwnershipMarker');
-    expect(helper).toContain('trackedTempFiles');
+    const scanner = read('src/main/system/cleanup-scanner.ts');
+
+    expect(scanner).toContain('hasTubmediaOwnershipMarker');
+    expect(scanner).toContain('trackedTempFiles');
+    expect(scanner).toContain('Zalo Received Files');
+    expect(scanner).toContain('Đã chặn đường dẫn quá rộng/nguy hiểm');
   });
 });

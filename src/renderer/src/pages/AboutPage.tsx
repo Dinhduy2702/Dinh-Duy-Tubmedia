@@ -10,14 +10,20 @@ import {
   Workflow
 } from 'lucide-react';
 import { APP_NAME, APP_VERSION_LABEL } from '@shared/constants/app';
-import { DeveloperSignature, TubmediaMark } from '../components/TubmediaBrand';
+import { DeveloperSignature, TubmediaLogo, TubmediaMark } from '../components/TubmediaBrand';
 
+/**
+ * Trang Giới thiệu (người dùng cuối). Mục "Bộ nhận diện" (logo, mã màu, cách dùng đúng/sai) đã bỏ khỏi
+ * đây từ 2026-09-23 theo yêu cầu — đó là tài liệu kỹ thuật cho thiết kế/marketing, không phải thứ người
+ * dùng cuối cần xem. Toàn bộ nội dung đó vẫn còn nguyên trong docs/brand/BO_NHAN_DIEN.md (component
+ * BrandKit.tsx vẫn giữ nguyên, chỉ không còn được import/hiển thị ở đây).
+ */
 export function AboutPage(): React.JSX.Element {
   return <div className="page-shell about-page">
     <section className="about-hero tubmedia-about-hero">
       <div className="about-hero-orb about-orb-one"/>
       <div className="about-hero-orb about-orb-two"/>
-      <div className="about-app-icon"><TubmediaMark size={58}/></div>
+      <div className="about-app-icon about-app-logo"><TubmediaLogo variant="horizontal" height={92}/></div>
       <div className="about-hero-copy">
         <span className="eyebrow">QUY TRÌNH SÁNG TẠO TUBMEDIA</span>
         <h1>{APP_NAME}</h1>
@@ -25,21 +31,21 @@ export function AboutPage(): React.JSX.Element {
         <div className="about-badges">
           <span><BadgeCheck size={15}/>{APP_VERSION_LABEL}</span>
           <span><ShieldCheck size={15}/>Hoạt động cục bộ trên máy tính</span>
-          <span><Workflow size={15}/>1–4 quy trình độc lập</span>
+          <span><Workflow size={15}/>1–6 quy trình độc lập</span>
         </div>
       </div>
       <div className="about-brand-signature"><DeveloperSignature/></div>
     </section>
 
     <section className="developer-profile tubmedia-developer-profile">
-      <div className="developer-avatar"><TubmediaMark size={42}/></div>
+      <div className="developer-avatar"><TubmediaMark size={44}/></div>
       <div><span>THIẾT KẾ VÀ PHÁT TRIỂN BỞI</span><h2>Đình Duy <strong>Tubmedia</strong></h2><p>Tập trung vào quy trình tải, kiểm tra, quản lý và ghép video dành cho người dùng Windows.</p></div>
       <div className="developer-signature"><Sparkles size={18}/>Dành riêng cho Tubmedia</div>
     </section>
 
     <div className="about-feature-grid">
-      <Feature icon={DownloadCloud} title="Tải đa danh sách" text="Tối đa 4 danh sách độc lập, số luồng tải riêng, nhật ký riêng và giới hạn tổng theo cấu hình máy."/>
-      <Feature icon={Film} title="Tải và ghép nhiều quy trình" text="Tối đa 4 quy trình riêng, hỗ trợ chất lượng từ nhẹ đến cao nhất theo nguồn và chỉ mã hóa lại khi cần."/>
+      <Feature icon={DownloadCloud} title="Tải đa danh sách" text="Tối đa 6 danh sách độc lập, số luồng tải riêng, nhật ký riêng và giới hạn tổng theo cấu hình máy."/>
+      <Feature icon={Film} title="Tải và ghép nhiều quy trình" text="Tối đa 6 quy trình riêng, hỗ trợ chất lượng từ nhẹ đến cao nhất theo nguồn và chỉ mã hóa lại khi cần."/>
       <Feature icon={Cpu} title="Tối ưu theo phần cứng" text="Đọc bộ xử lý, bộ nhớ, bộ xử lý đồ họa và ổ đĩa để đề xuất số luồng tải, số luồng FFmpeg và mức tải phù hợp."/>
       <Feature icon={Database} title="Lưu trạng thái an toàn" text="SQLite lưu hàng đợi, tiến trình, lịch sử và hỗ trợ phục hồi khi ứng dụng bị đóng giữa chừng."/>
       <Feature icon={Code2} title="Ứng dụng máy tính thực thụ" text="Giao diện React giao tiếp với phần xử lý Electron qua cầu nối an toàn; bản phát hành không phụ thuộc máy chủ web."/>

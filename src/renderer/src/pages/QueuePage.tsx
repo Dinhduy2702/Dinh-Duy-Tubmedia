@@ -16,6 +16,9 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { QueueJob } from '@shared/types/domain';
 import type { QuickDownloadStatus } from '@shared/quick-download';
 import { useAppStore } from '../stores/app-store';
+import { showNotice } from '../utils/notify';
+import { detailToneFor, toneTextVar } from '@shared/utils/notice-tone';
+import { progressFillStyle } from '../utils/progress-style';
 import { StatusBadge } from '../components/StatusBadge';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CompactDetail } from '../components/CompactDetail';
@@ -295,7 +298,7 @@ function QueueChildRows({
               <div
                 className={`progress queue-row-progress ${RUNNING.has(job.status) ? 'is-animated' : 'is-static'}`}
               >
-                <span style={{ width: `${Math.max(0, Math.min(100, job.progress))}%` }} />
+                <span style={progressFillStyle(job.progress)} />
               </div>
 
               <div className="queue-row-progress-meta">
@@ -307,14 +310,11 @@ function QueueChildRows({
                 <b
                   title={messageTitle}
                   style={{
-                    color:
-                      issue?.tone === 'warning'
-                        ? 'var(--warn)'
-                        : issue
-                          ? 'var(--bad)'
-                          : job.status === 'skipped' || job.status === 'completed'
-                            ? 'var(--good)'
-                            : 'var(--muted)'
+                    color: issue
+                      ? toneTextVar(issue.tone)
+                      : job.status === 'skipped' || job.status === 'completed'
+                        ? toneTextVar('success')
+                        : 'var(--muted)'
                   }}
                 >
                   {messageTitle}
@@ -322,7 +322,7 @@ function QueueChildRows({
                 {discloseMessage && messageDetail && (
                   <CompactDetail
                     label={issue ? 'Thông tin sự cố' : 'Thông tin kết quả tác vụ'}
-                    tone={issue?.tone === 'warning' ? 'warning' : issue ? 'danger' : 'good'}
+                    tone={issue ? detailToneFor(issue.tone) : 'good'}
                   >
                     <p>{messageDetail}</p>
                     {issue && issue.steps.length > 0 && (
@@ -711,7 +711,7 @@ export function QueuePage({ mode }: { mode: 'downloads' | 'processing' | 'all' }
   const notify = (
     title: string,
     message: string,
-    severity: 'success' | 'warning' | 'info' = 'success'
+    severity: 'success' | 'warning' | 'info' | 'neutral' = 'success'
   ): void => {
     setAttention({ id: createUiEventId('queue-studio'), severity, title, message, sticky: false });
   };
@@ -745,7 +745,7 @@ export function QueuePage({ mode }: { mode: 'downloads' | 'processing' | 'all' }
       notify(
         `${group.title}: ${kind === 'pause' ? 'đã tạm dừng' : kind === 'resume' ? 'đã tiếp tục' : kind === 'retry' ? 'đã thử lại' : 'đã hủy'}`,
         `${completed}/${candidates.length} tác vụ đã nhận lệnh. Các danh sách khác vẫn chạy độc lập.`,
-        completed === candidates.length ? 'success' : 'warning'
+        completed !== candidates.length ? 'warning' : kind === 'pause' || kind === 'cancel' ? 'neutral' : 'success'
       );
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
@@ -769,7 +769,7 @@ export function QueuePage({ mode }: { mode: 'downloads' | 'processing' | 'all' }
         if (next) setQuickStatus(next);
       } else {
         const revealed = await window.desktop.quickDownload.revealOutput(quickStatus.taskId);
-        if (!revealed) setError('File đầu ra của Tải nhanh không còn tồn tại.');
+        if (!revealed) showNotice('warning', 'Không thấy tệp đầu ra', 'Tệp của Tải nhanh có thể đã bị di chuyển hoặc xóa.');
       }
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
@@ -862,7 +862,7 @@ export function QueuePage({ mode }: { mode: 'downloads' | 'processing' | 'all' }
       notify(
         'Đã xóa dữ liệu hàng đợi',
         `Đã xóa ${result.jobsRemoved} tác vụ và ${result.projectsRemoved} khu vực làm việc. Video trên ổ đĩa được giữ nguyên.`,
-        'warning'
+        'success'
       );
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
@@ -881,7 +881,7 @@ export function QueuePage({ mode }: { mode: 'downloads' | 'processing' | 'all' }
       notify(
         allPaused ? 'Đã tiếp tục tất cả' : 'Đã tạm dừng tất cả',
         'Lệnh áp dụng cho download, clip, normalize, merge và Quick Download đang được quản lý.',
-        allPaused ? 'success' : 'warning'
+        allPaused ? 'success' : 'neutral'
       );
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));

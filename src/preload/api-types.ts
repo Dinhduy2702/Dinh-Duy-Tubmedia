@@ -8,6 +8,7 @@ import type {
   DownloadMergeInput,
   HardwareProfile,
   LogEntry,
+  MediaInfo,
   ParsedInputLine,
   Project,
   ProjectCreateInput,
@@ -24,9 +25,15 @@ import type {
   WorkbenchState
 } from '@shared/types/domain.js';
 
-import type { SystemCleanupRequest, SystemCleanupStatus } from '@shared/system-cleanup.js';
+import type {
+  QuarantineEntry,
+  QuarantineRestoreOutcome,
+  SystemCleanupRequest,
+  SystemCleanupStatus
+} from '@shared/system-cleanup.js';
 import type { QuickDownloadRequest, QuickDownloadStatus } from '@shared/quick-download.js';
 import type { VideoLinkFilterRequest, VideoLinkFilterResult } from '@shared/video-link-filter.js';
+import type { LocalCutAspectRatio, LocalCutRequest, LocalCutStatus } from '@shared/local-cut.js';
 export interface DesktopApi {
   workbench: {
     state(): Promise<WorkbenchState>;
@@ -141,7 +148,9 @@ export interface DesktopApi {
     openFolder(): Promise<string>;
   };
   media: {
-    analyze(path: string): Promise<unknown>;
+    // Giai đoạn 6 mục 6 (2026-09-24) — "Xem thông tin tệp": handler đã có sẵn từ trước, chỉ gắn kiểu
+    // đúng (MediaInfo, thay cho unknown) để dùng được từ giao diện.
+    analyze(path: string): Promise<MediaInfo>;
     verifyFile(path: string, level: 'fast' | 'standard' | 'deep'): Promise<unknown>;
     mergeProject(projectId: string): Promise<QueueJob[]>;
   };
@@ -166,6 +175,9 @@ export interface DesktopApi {
     start(input: SystemCleanupRequest): Promise<SystemCleanupStatus>;
     status(runId: string): Promise<SystemCleanupStatus | null>;
     cancel(runId: string): Promise<SystemCleanupStatus | null>;
+    openStorageSettings(): Promise<void>;
+    quarantineList(): Promise<QuarantineEntry[]>;
+    quarantineRestore(ids: string[]): Promise<QuarantineRestoreOutcome[]>;
   };
   quickDownload: {
     defaults(): Promise<{ outputDirectory: string }>;
@@ -177,6 +189,7 @@ export interface DesktopApi {
     resume(taskId: string): Promise<QuickDownloadStatus | null>;
     cancel(taskId: string): Promise<QuickDownloadStatus | null>;
     revealOutput(taskId: string): Promise<boolean>;
+    previewFrame(input: { url: string; timestampSeconds: number }): Promise<{ dataUrl: string }>;
   };
   videoFilter: {
     chooseLinksFile(): Promise<{ path: string; text: string } | null>;
@@ -186,6 +199,18 @@ export interface DesktopApi {
       content: string;
       defaultFolder?: string;
     }): Promise<string | null>;
+  };
+  localCut: {
+    chooseFile(): Promise<string | null>;
+    previewFrame(input: {
+      filePath: string;
+      timestampSeconds: number;
+      aspectRatio?: LocalCutAspectRatio;
+    }): Promise<{ dataUrl: string }>;
+    start(input: LocalCutRequest): Promise<LocalCutStatus>;
+    status(taskId: string): Promise<LocalCutStatus | null>;
+    cancel(taskId: string): Promise<LocalCutStatus | null>;
+    revealOutput(taskId: string): Promise<boolean>;
   };
   updates: {
     status(): Promise<AppUpdateStatus>;

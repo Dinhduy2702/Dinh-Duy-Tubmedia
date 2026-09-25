@@ -24,8 +24,9 @@ describe('Tải nhanh dùng chung hệ thống cookies', () => {
   it('chỉ gắn cookies sau khi nền tảng yêu cầu và tự thử lại một lần', () => {
     expect(service).toContain('QUICK_DOWNLOAD_COOKIES_ATTACHED_ON_DEMAND');
     expect(service).toContain('hasConfiguredCookies(this.cookieSettings())');
-    expect(command).toContain("args.push('--cookies', authentication.cookiesFilePath)");
-    expect(command).toContain("args.push('--cookies-from-browser', browserSpec)");
+    // Rà soát toàn diện (2026-09-24) — mục 2.2: logic dựng tham số cookie đã gộp về buildCookieArguments()
+    // dùng chung (xem tests/unit/ytdlp-cookie-arguments.test.ts cho bài kiểm hành vi đầy đủ của hàm này).
+    expect(command).toContain('buildCookieArguments(authentication)');
   });
 
   it('lưu cookies sẽ tự tiếp tục tác vụ Tải nhanh bị chặn', () => {

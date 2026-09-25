@@ -1,13 +1,15 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { createWriteStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import { access, copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Readable } from 'node:stream';
-import { finished } from 'node:stream/promises';
+import { pipeline } from 'node:stream/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import extract from '@tubmedia/safe-extract-zip';
 import { UpdateFailedError, RollbackFailedError } from '@shared/errors/app-errors.js';
+import { APP_VERSION_LABEL } from '@shared/constants/app.js';
+import { findSha256InSums } from '@shared/utils/sha256-sums.js';
 import type { ToolStatus, ToolUpdateCheck } from '@shared/types/domain.js';
 import type { ToolManager, ToolName } from '../tools/tool-manager.js';
 import type { SettingsService } from '../settings/settings-service.js';
@@ -56,6 +58,13 @@ const GITHUB_HEADERS = {
   Accept: 'application/vnd.github+json',
   'User-Agent': 'Video-Download-Merge-Studio-Pro'
 };
+// Phiên bản lấy từ APP_VERSION_LABEL; trước đây User-Agent gửi đi một placeholder chưa được thay thế.
+const TOOL_UPDATE_USER_AGENT = `Download-video-Tubmedia/${APP_VERSION_LABEL}`;
+const CHECKSUM_FILE_NAMES: Partial<Record<ToolPackage, string>> = {
+  'yt-dlp': 'SHA2-256SUMS',
+  'ffmpeg-suite': 'checksums.sha256'
+};
+const CHECKSUM_REQUEST_TIMEOUT_MS = 30_000;
 const RELEASE_REQUEST_TIMEOUT_MS = 45_000;
 const TOOL_DOWNLOAD_TIMEOUT_MS = 20 * 60_000;
 
@@ -119,7 +128,7 @@ async function tubmediaGitHubHtmlReleaseFallback(apiUrl: string): Promise<Respon
     redirect: 'follow',
     headers: {
       Accept: 'text/html',
-      'User-Agent': 'Download-video-Tubmedia/${targetVersion}'
+      'User-Agent': TOOL_UPDATE_USER_AGENT
     }
   });
 
@@ -145,7 +154,7 @@ async function tubmediaGitHubHtmlReleaseFallback(apiUrl: string): Promise<Respon
     {
       headers: {
         Accept: 'text/html',
-        'User-Agent': 'Download-video-Tubmedia/${targetVersion}'
+        'User-Agent': TOOL_UPDATE_USER_AGENT
       }
     }
   );
@@ -249,7 +258,7 @@ async function tubmediaFetchGitHubRelease(
     const headers = new Headers(init.headers);
     headers.set('Accept', 'application/vnd.github+json');
     headers.set('X-GitHub-Api-Version', '2022-11-28');
-    headers.set('User-Agent', 'Download-video-Tubmedia/${targetVersion}');
+    headers.set('User-Agent', TOOL_UPDATE_USER_AGENT);
 
     const environmentToken = process.env.GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim();
 
@@ -531,7 +540,9 @@ export class ToolUpdateService {
           throw new UpdateFailedError(`Tải ${asset.name} thất bại: HTTP ${response.status}.`);
         }
         await mkdir(dirname(path), { recursive: true });
-        await finished(Readable.fromWeb(response.body as never).pipe(createWriteStream(path)));
+        // pipeline (không phải readable.pipe + finished) để lỗi mạng giữa chừng được đẩy sang
+        // stream ghi; với pipe() lỗi đó làm promise treo mãi cho tới hết thời gian chờ.
+        await pipeline(Readable.fromWeb(response.body as never), createWriteStream(path));
         const fileStat = await stat(path);
         if (fileStat.size <= 0) throw new UpdateFailedError(`${asset.name} tải về bị rỗng.`);
         if (asset.size > 0 && fileStat.size !== asset.size) {
@@ -560,9 +571,47 @@ export class ToolUpdateService {
   }
 
   private async sha256(path: string): Promise<string> {
-    return createHash('sha256')
-      .update(await readFile(path))
-      .digest('hex');
+    // Băm dạng stream: gói FFmpeg ~150–200 MB không còn bị nạp trọn vào RAM.
+    const hash = createHash('sha256');
+    await pipeline(createReadStream(path), hash);
+    return hash.digest('hex');
+  }
+
+  /**
+   * Nguồn dự phòng (GitHub API bị giới hạn → tải trực tiếp / HTML) không có `digest`.
+   * Trước đây gói vẫn được tải cả trăm MB rồi mới bị từ chối vì thiếu SHA-256, nên chức
+   * năng dự phòng không bao giờ cài được. Ở đây lấy SHA-256 từ tệp checksum chính thức
+   * nằm cạnh gói trên cùng bản phát hành (HTTPS), và từ chối sớm nếu không có.
+   */
+  private async ensureAssetDigest(source: PackageSource): Promise<void> {
+    if (source.asset.digest?.toLowerCase().startsWith('sha256:')) return;
+    const checksumName = CHECKSUM_FILE_NAMES[source.packageName];
+    if (checksumName) {
+      try {
+        const checksumUrl = new URL(checksumName, source.asset.browser_download_url).toString();
+        const response = await fetch(checksumUrl, {
+          headers: { 'User-Agent': TOOL_UPDATE_USER_AGENT },
+          redirect: 'follow',
+          signal: AbortSignal.timeout(CHECKSUM_REQUEST_TIMEOUT_MS)
+        });
+        if (response.ok) {
+          const hash = findSha256InSums(await response.text(), source.asset.name);
+          if (hash) {
+            source.asset.digest = `sha256:${hash}`;
+            return;
+          }
+        }
+      } catch (error) {
+        this.logger.warn(
+          'update',
+          'TOOL_CHECKSUM_FILE_UNAVAILABLE',
+          `Không đọc được tệp checksum của ${source.asset.name}: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    }
+    throw new UpdateFailedError(
+      `${source.asset.name} không có SHA-256 được công bố. Từ chối cài đặt để bảo vệ chuỗi cung ứng.`
+    );
   }
 
   private async verifyDigest(asset: GitHubAsset, packagePath: string): Promise<void> {
@@ -638,6 +687,7 @@ export class ToolUpdateService {
   private async updatePackage(packageName: ToolPackage, requiredOnly = false): Promise<void> {
     this.assertPackageIdle(packageName);
     const source = await this.sourceFor(packageName);
+    await this.ensureAssetDigest(source);
     const targetFolder = await this.tools.ensureWritableToolFolder();
     const staging = join(this.managedFolder, '_staging', `${packageName}-${randomUUID()}`);
     const extracted = join(staging, 'extracted');

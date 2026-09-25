@@ -119,7 +119,11 @@ export class HardwareService {
 
   public recommend(profile: HardwareProfile): ResourceProfile {
     const logical = profile.logicalCpuCount;
-    const ramGb = profile.totalMemoryBytes / 1024 ** 3;
+    const totalRamGb = profile.totalMemoryBytes / 1024 ** 3;
+    // VẤN ĐỀ 2 mục 4 (2026-09-22): số worker/luồng dựa theo RAM CÒN TRỐNG lúc bấm "Tạo đề xuất tự động",
+    // khớp với recommendDownloadConcurrency (cùng dùng freeMemoryBytes) — tránh đề xuất như máy đang
+    // rảnh khi RAM thực tế đang bị việc khác chiếm phần lớn.
+    const ramGb = profile.freeMemoryBytes / 1024 ** 3;
     const workstation = logical >= 32 && ramGb >= 64;
     const low = logical <= 8 || ramGb <= 16;
     const concurrency = recommendDownloadConcurrency(profile);
@@ -130,7 +134,7 @@ export class HardwareService {
     return {
       id: `resource-auto-${Date.now()}`,
       name: 'Tự động theo máy',
-      description: `${concurrency.summary} Phát hiện ${logical} logical processors, ${Math.round(ramGb)} GB RAM${hasNvidiaGpu ? ' và GPU NVIDIA' : ''}. Chỉ dùng GPU khi FFmpeg kiểm tra encoder thành công; nếu lỗi sẽ tự quay về CPU.`,
+      description: `${concurrency.summary} Phát hiện ${logical} logical processors, ${Math.round(totalRamGb)} GB RAM (còn trống ${Math.round(ramGb)} GB lúc quét)${hasNvidiaGpu ? ' và GPU NVIDIA' : ''}. Chỉ dùng GPU khi FFmpeg kiểm tra encoder thành công; nếu lỗi sẽ tự quay về CPU.`,
       downloadWorkers: concurrency.recommendedPerListWorkers,
       analyzeWorkers: low ? 1 : 2,
       normalizeWorkers,

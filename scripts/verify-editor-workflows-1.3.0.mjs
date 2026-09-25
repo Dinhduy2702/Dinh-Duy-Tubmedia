@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { isValidVersion } from './version-tools.mjs';
 
 const root = process.cwd();
 const read = (relativePath) => readFileSync(join(root, relativePath), 'utf8');
@@ -31,18 +32,27 @@ function check(label, condition) {
   console.log(`PASS: ${label}`);
 }
 
-check('package version is exactly 1.3.7', files.packageJson.version === '1.3.7');
+check('package version is a valid release version', isValidVersion(files.packageJson.version));
 check(
-  'Editor Studio is the default landing page',
-  files.appStore.includes("page: 'editor-home'") && files.app.includes("page === 'editor-home'")
+  // Điều chỉnh 2026-09-22: "Tải danh sách" + "Ghép theo Timeline" LÀ việc chính hàng ngày thật sự
+  // (không phải "Tải 1 video" ①②③, chỉ là tiện ích phụ) — xem TIEN_DO.md.
+  '"Tải danh sách" (download-workbench) is the default landing page; Editor Home still reachable via logo',
+  files.appStore.includes("page: 'download-workbench'") &&
+    files.app.includes("page === 'download-workbench'") &&
+    files.sidebar.includes("setPage('editor-home')")
 );
 check(
-  'navigation exposes editor home, history and diagnostics',
-  ['editor-home', 'history', 'diagnostics'].every((page) => files.sidebar.includes(`'${page}'`))
+  'navigation exposes the primary daily workflow (tải danh sách + ghép Timeline), the quick single-video journey, history and diagnostics',
+  ['download-workbench', 'download-merge', 'step-download', 'step-preview-cut', 'step-merge-export', 'history', 'diagnostics'].every(
+    (page) => files.sidebar.includes(`'${page}'`)
+  )
 );
 check(
-  'System Cleanup is placed under Advanced Tools',
-  files.sidebar.indexOf("label: 'CÔNG CỤ NÂNG CAO'") < files.sidebar.indexOf("id: 'cleanup'")
+  'VIỆC CHÍNH đứng trước CÔNG CỤ; tải danh sách/ghép Timeline (việc chính hàng ngày) đứng trước "Tải 1 video" (tiện ích phụ) và Dọn dẹp',
+  files.sidebar.indexOf("label: 'VIỆC CHÍNH'") < files.sidebar.indexOf("label: 'CÔNG CỤ'") &&
+    files.sidebar.indexOf("id: 'download-workbench'") < files.sidebar.indexOf("id: 'step-download'") &&
+    files.sidebar.indexOf("id: 'download-merge'") < files.sidebar.indexOf("id: 'cleanup'") &&
+    files.sidebar.indexOf("label: 'CÔNG CỤ'") < files.sidebar.indexOf("id: 'cleanup'")
 );
 check(
   'Editor Home uses actual queue, project, tool and system state',
@@ -134,4 +144,4 @@ check(
     !files.history.includes('Math.random(')
 );
 
-console.log(`Tubmedia 1.3.7 editor workflow verification OK: ${checks.length} checks.`);
+console.log(`Tubmedia ${files.packageJson.version} editor workflow verification OK: ${checks.length} checks.`);

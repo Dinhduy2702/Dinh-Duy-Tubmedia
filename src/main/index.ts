@@ -10,11 +10,13 @@ import {
   Tray,
   type Event as ElectronEvent
 } from 'electron';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { IPC } from '@shared/contracts/channels.js';
 import { AppContext } from './app/app-context.js';
 import { registerIpc } from './ipc/register-ipc.js';
 import { createMainWindow } from './windows/main-window.js';
+import { readDevelopmentEnvironment } from './runtime/development-environment.js';
 import { REQUIRED_TOOL_NAMES } from './tools/tool-manager.js';
 
 let context: AppContext | null = null;
@@ -28,11 +30,17 @@ let shutdownStarted = false;
 let shutdownMode: 'preserve' | 'cancel' = 'preserve';
 let allowWindowClose = false;
 
-const isE2E = process.env.TUBMEDIA_E2E === '1';
-const e2eUserData = process.env.TUBMEDIA_E2E_USER_DATA;
+const { e2e: isE2E, e2eUserData } = readDevelopmentEnvironment(process.env, app.isPackaged);
 
 if (isE2E && e2eUserData) {
   app.setPath('userData', e2eUserData);
+  // Sandbox luôn cả thư mục Tải xuống mặc định trong lúc kiểm thử e2e — QuickDownloadService dùng
+  // app.getPath('downloads') làm thư mục lưu mặc định; nếu không đổi, một kịch bản e2e tải video thật
+  // (không chỉ định rõ outputDirectory) sẽ vô tình ghi vào thư mục Downloads THẬT của máy đang chạy.
+  // Downloads thật của Windows luôn tồn tại sẵn nên chỗ này phải tự tạo thư mục sandbox tương ứng.
+  const e2eDownloads = join(e2eUserData, 'e2e-downloads');
+  mkdirSync(e2eDownloads, { recursive: true });
+  app.setPath('downloads', e2eDownloads);
 }
 
 app.setAppUserModelId('com.tubmedia.download-video');
@@ -46,9 +54,9 @@ function showMainWindow(): void {
 
 function ensureTray(): void {
   if (tray) return;
-  const icon = nativeImage
-    .createFromPath(join(app.getAppPath(), 'resources', 'icon.png'))
-    .resize({ width: 20, height: 20 });
+  // .ico đa lớp (đã hint riêng 16/20/24/32px cho khay hệ thống): không resize() một ảnh lớn (làm mờ),
+  // để Windows tự chọn đúng khung theo tỉ lệ hiển thị màn hình.
+  const icon = nativeImage.createFromPath(join(app.getAppPath(), 'resources', 'icon.ico'));
   tray = new Tray(icon);
   tray.setToolTip('Download video Tubmedia');
   tray.setContextMenu(
@@ -194,11 +202,20 @@ function startStatsTimer(): void {
       !currentWindow.isVisible()
     )
       return;
-    void currentContext.systemStats.sample().then((stats) => {
-      if (!currentWindow.isDestroyed() && currentWindow.isVisible() && !currentWindow.isMinimized()) {
-        currentWindow.webContents.send(IPC.events.systemStats, stats);
-      }
-    });
+    void currentContext.systemStats
+      .sample()
+      .then((stats) => {
+        if (!currentWindow.isDestroyed() && currentWindow.isVisible() && !currentWindow.isMinimized()) {
+          currentWindow.webContents.send(IPC.events.systemStats, stats);
+        }
+      })
+      .catch((error: unknown) => {
+        currentContext.logger.debug(
+          'app',
+          'SYSTEM_STATS_SAMPLE_FAILED',
+          error instanceof Error ? error.message : String(error)
+        );
+      });
   }, 2_000);
 }
 
@@ -210,7 +227,13 @@ function startUpdateScheduler(current: AppContext): void {
       return;
     const checkedAt = status.checkedAt ? Date.parse(status.checkedAt) : 0;
     if (Number.isFinite(checkedAt) && Date.now() - checkedAt < 5 * 60 * 1_000) return;
-    void current.appUpdates.check(true);
+    void current.appUpdates.check(true).catch((error: unknown) => {
+      current.logger.warn(
+        'update',
+        'APP_UPDATE_CHECK_FAILED',
+        error instanceof Error ? error.message : String(error)
+      );
+    });
   };
   updateInitialTimer = setTimeout(check, 25_000);
   updateTimer = setInterval(check, 6 * 60 * 60 * 1_000);
@@ -250,6 +273,15 @@ function initializeApplication(): void {
   const current = new AppContext(prepareForAppUpdate);
   context = current;
   current.initialize();
+  // Lưới an toàn cuối cùng: promise bị từ chối mà không ai bắt (ví dụ trong tác vụ nền) chỉ được ghi
+  // nhật ký thay vì bật hộp thoại lỗi nghiêm trọng của Electron và làm gián đoạn tác vụ đang chạy.
+  process.on('unhandledRejection', (reason: unknown) => {
+    current.logger.error(
+      'app',
+      'UNHANDLED_REJECTION',
+      reason instanceof Error ? (reason.stack ?? reason.message) : String(reason)
+    );
+  });
   const startupTools = connectToolsAtStartup(current)
     .catch((error: unknown) => {
       current.logger.warn(
@@ -299,6 +331,12 @@ if (!lock) {
     .then(initializeApplication)
     .catch((error: unknown) => {
       console.error(error);
+      // Không thoát âm thầm: người dùng cần biết vì sao ứng dụng không mở được
+      // (ví dụ cơ sở dữ liệu hỏng hoặc migration thất bại).
+      dialog.showErrorBox(
+        'Download video Tubmedia không thể khởi động',
+        error instanceof Error ? error.message : String(error)
+      );
       app.quit();
     });
 }
@@ -318,16 +356,42 @@ app.on('before-quit', (event: ElectronEvent) => {
   if (updateInitialTimer) clearTimeout(updateInitialTimer);
 
   void (async () => {
-    await current.quickDownload.shutdown(shutdownMode === 'preserve');
-    await current.queue.stop(shutdownMode === 'preserve');
-    await current.processes.shutdown();
-    await current.logger.flush();
-    current.database.close();
-    if (powerSaveBlockerId !== null && powerSaveBlocker.isStarted(powerSaveBlockerId)) {
-      powerSaveBlocker.stop(powerSaveBlockerId);
-      powerSaveBlockerId = null;
+    // Mỗi bước dọn dẹp phải độc lập: nếu một bước ném lỗi thì các bước sau vẫn chạy
+    // và app.exit(0) luôn được gọi, tránh tiến trình Tubmedia treo ngầm không thoát được.
+    const step = async (name: string, action: () => Promise<void> | void): Promise<void> => {
+      try {
+        await action();
+      } catch (error) {
+        console.error(`Shutdown step "${name}" failed:`, error instanceof Error ? error.message : error);
+      }
+    };
+    try {
+      await step('quickDownload', async () => {
+        await current.quickDownload.shutdown(shutdownMode === 'preserve');
+      });
+      await step('queue', async () => {
+        await current.queue.stop(shutdownMode === 'preserve');
+      });
+      await step('processes', async () => {
+        await current.processes.shutdown();
+      });
+      await step('logger', async () => {
+        await current.logger.flush();
+      });
+      await step('database', () => {
+        current.database.close();
+      });
+      await step('powerSaveBlocker', () => {
+        if (powerSaveBlockerId !== null && powerSaveBlocker.isStarted(powerSaveBlockerId)) {
+          powerSaveBlocker.stop(powerSaveBlockerId);
+          powerSaveBlockerId = null;
+        }
+      });
+      await step('tray', () => {
+        tray?.destroy();
+      });
+    } finally {
+      app.exit(0);
     }
-    tray?.destroy();
-    app.exit(0);
   })();
 });

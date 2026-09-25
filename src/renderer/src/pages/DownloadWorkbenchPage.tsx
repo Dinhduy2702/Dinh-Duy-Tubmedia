@@ -6,6 +6,7 @@ import {
   ClipboardPaste,
   Cookie,
   Cpu,
+  Download,
   FileText,
   FolderOpen,
   Gauge,
@@ -41,11 +42,13 @@ import { FolderField } from '../components/FolderField';
 import { StatusBadge } from '../components/StatusBadge';
 import { CompactLogRow } from '../components/CompactLogRow';
 import { useAppStore } from '../stores/app-store';
+import { showNotice } from '../utils/notify';
 import { createUiEventId } from '../utils/ui-id';
 import { loadWorkbenchPath, saveWorkbenchPath } from '../utils/workbench-path-memory';
 import { friendlyIssue, safeUiText } from '../utils/ui-error';
 import { statusLabel } from '../utils/vi-labels';
 import { QuickDownloadPanel } from '../components/QuickDownloadPanel';
+import { progressFillStyle } from '../utils/progress-style';
 
 interface LaneForm {
   name: string;
@@ -57,7 +60,16 @@ interface LaneForm {
 }
 
 type LaneMap<T> = Record<DownloadLaneId, T>;
-const LANE_IDS: DownloadLaneId[] = ['download-1', 'download-2', 'download-3', 'download-4'];
+// A1 (2026-09-25): tăng từ 4 lên 6 danh sách song song theo yêu cầu người dùng.
+const LANE_IDS: DownloadLaneId[] = [
+  'download-1',
+  'download-2',
+  'download-3',
+  'download-4',
+  'download-5',
+  'download-6'
+];
+const MAX_LANE_COUNT = 6;
 const ACTIVE = [
   'pending',
   'analyzing',
@@ -89,8 +101,8 @@ function laneNumber(slot: DownloadLaneId): number {
 function clampWorker(value: number): number {
   return Math.max(1, Math.min(16, Math.round(value || 1)));
 }
-function clampCount(value: number): 1 | 2 | 3 | 4 {
-  return Math.max(1, Math.min(4, Math.round(value || 1))) as 1 | 2 | 3 | 4;
+function clampCount(value: number): 1 | 2 | 3 | 4 | 5 | 6 {
+  return Math.max(1, Math.min(6, Math.round(value || 1))) as 1 | 2 | 3 | 4 | 5 | 6;
 }
 function childFolder(base: string, name: string): string {
   return base ? `${base.replace(/[\\/]+$/, '')}\\${name}` : '';
@@ -236,7 +248,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
   const notify = (
     title: string,
     message: string,
-    severity: 'info' | 'success' | 'warning' = 'success'
+    severity: 'info' | 'success' | 'warning' | 'neutral' = 'success'
   ): void => {
     setAttention({ id: createUiEventId('action'), severity, title, message });
   };
@@ -342,7 +354,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
         action === 'pause'
           ? 'Các tiến trình của danh sách khác không bị ảnh hưởng.'
           : `Thao tác chỉ áp dụng cho danh sách ${laneNumber(slot)}.`,
-        action === 'cancel' ? 'warning' : 'success'
+        action === 'resume' ? 'success' : 'neutral'
       );
     } catch (error) {
       setError(messageOf(error));
@@ -396,7 +408,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
       notify(
         `Thử lại danh sách ${laneNumber(slot)}`,
         count > 0 ? `Đã đưa ${count} tác vụ về hàng chờ.` : 'Không có tác vụ lỗi cần thử lại.',
-        'info'
+        count > 0 ? 'success' : 'neutral'
       );
     } catch (error) {
       setError(messageOf(error));
@@ -454,7 +466,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
           : false;
       });
       if (hiddenRunning) {
-        setError('Một danh sách sắp bị ẩn vẫn đang chạy. Hãy tạm dừng hoặc hủy riêng danh sách đó trước.');
+        showNotice('warning', 'Danh sách đang chạy', 'Một danh sách sắp bị ẩn vẫn đang chạy. Hãy tạm dừng hoặc hủy riêng danh sách đó trước.');
         return;
       }
     }
@@ -481,11 +493,8 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
       }
       const nextSettings = await window.desktop.settings.update({ downloadLaneCount: nextCount });
       setSettings(nextSettings);
-      notify(
-        'Đã thay đổi số danh sách',
-        `Hiện có ${nextCount} danh sách tải độc lập. Dữ liệu của danh sách bị ẩn vẫn được giữ.`,
-        'info'
-      );
+      // VẤN ĐỀ 1 (2026-09-22): đổi số danh sách hiện ngay trên giao diện (tab mới xuất hiện/mất ngay lập
+      // tức) — không cần thêm thông báo nổi cho một thay đổi đã tự thấy rõ; tránh spam khi bấm nhiều lần.
     } catch (error) {
       setError(messageOf(error));
     } finally {
@@ -591,8 +600,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
   };
 
   return (
-    <div className="page-shell">
-      <QuickDownloadPanel />
+    <div className="page-shell download-workbench-page">
       <header className="page-heading">
         <div>
           <h1>Tải danh sách đa nền tảng</h1>
@@ -612,11 +620,11 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
           </button>
           <div className="badge badge-strong">
             <ListPlus size={15} />
-            {laneCount}/4 danh sách
+            {laneCount}/{MAX_LANE_COUNT} danh sách
           </div>
           <button
             className="btn btn-primary"
-            disabled={busy === 'global' || laneCount >= 4}
+            disabled={busy === 'global' || laneCount >= MAX_LANE_COUNT}
             onClick={() => void changeLaneCount(laneCount + 1)}
           >
             <Plus size={16} />
@@ -697,6 +705,17 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
           })}
       </div>
 
+      {/* "Tải 1 video" là tiện ích phụ (điều chỉnh 2026-09-22) — đặt thu gọn dưới nội dung chính thay vì
+          chiếm đầu trang, vì việc CHÍNH của trang này là tải cả danh sách. */}
+      <InfoDisclosure
+        title="Tiện ích: Tải 1 video"
+        summary="Tải nhanh một video đơn, không cần tạo danh sách"
+        icon={Download}
+        className="mt-4"
+      >
+        <QuickDownloadPanel />
+      </InfoDisclosure>
+
       <CookieManagerDialog
         open={cookieOpen}
         onClose={() => setCookieOpen(false)}
@@ -734,7 +753,7 @@ function PreflightPanel({
 }: {
   hardware: HardwareProfile | null;
   settings: AppSettings | null;
-  laneCount: 1 | 2 | 3 | 4;
+  laneCount: 1 | 2 | 3 | 4 | 5 | 6;
   recommendBusy: boolean;
   onRecommend: () => Promise<void>;
   onReferenceQuality: () => Promise<void>;
@@ -1085,7 +1104,7 @@ function LaneCard({
             </strong>
           </div>
           <div className={`progress progress-large ${state === 'running' ? 'is-animated' : 'is-static'}`}>
-            <span style={{ width: `${progress}%` }} />
+            <span style={progressFillStyle(progress)} />
           </div>
           <div className="progress-meta">
             <span>{progress.toFixed(1)}% toàn danh sách</span>
@@ -1096,7 +1115,12 @@ function LaneCard({
           <button
             className={`btn btn-primary workflow-primary ${state === 'running' ? 'is-running' : ''}`}
             disabled={busy || (state !== 'running' && state !== 'paused' && !canStart)}
-            onClick={() => void primary.action()}
+            onClick={(event) => {
+              // Nút này đổi vai (Bắt đầu → Tạm dừng) ngay tại chỗ; cú click thứ hai của thao tác bấm đôi
+              // sẽ rơi vào nút Tạm dừng và dừng ngay tác vụ vừa khởi động.
+              if (event.detail > 1) return;
+              void primary.action();
+            }}
           >
             {busy ? <LoaderCircle className="animate-spin" size={18} /> : <PrimaryIcon size={18} />}{' '}
             {busy ? 'Đang thực hiện...' : primary.label}

@@ -13,6 +13,9 @@ const panel = read('src/renderer/src/components/QuickDownloadPanel.tsx');
 const shared = read('src/shared/quick-download.ts');
 const service = read('src/main/download/quick-download-service.ts');
 const command = read('src/main/download/quick-download-command.ts');
+// Rà soát toàn diện (2026-09-24) mục 2.2: logic dựng tham số cookie đã gộp về dùng chung với
+// download-engine.ts/preview-frame-command.ts — xem src/main/downloader/ytdlp-cookie-arguments.ts.
+const cookieArguments = read('src/main/downloader/ytdlp-cookie-arguments.ts');
 const context = read('src/main/app/app-context.ts');
 const ipc = read('src/main/ipc/register-ipc.ts');
 const preload = read('src/preload/index.ts');
@@ -145,8 +148,9 @@ check(
   'configured cookies are attached only after the video requests authentication',
   service.includes('QUICK_DOWNLOAD_COOKIES_ATTACHED_ON_DEMAND') &&
     service.includes('hasConfiguredCookies(this.cookieSettings())') &&
-    command.includes("'--cookies'") &&
-    command.includes("'--cookies-from-browser'")
+    command.includes('buildCookieArguments(') &&
+    cookieArguments.includes("'--cookies'") &&
+    cookieArguments.includes("'--cookies-from-browser'")
 );
 check(
   'saving cookies resumes a blocked Quick Download automatically',

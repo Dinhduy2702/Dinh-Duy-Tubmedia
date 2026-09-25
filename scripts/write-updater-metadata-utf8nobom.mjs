@@ -4,6 +4,9 @@ import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { Buffer } from 'node:buffer';
 import { TextDecoder } from 'node:util';
+// Giai đoạn 5 (2026-09-24) — ghi chú phát hành tiếng Việt lấy THẬT từ CHANGELOG.md thay vì để trống hoặc
+// chép tay riêng một nơi khác (đã tìm thấy workflow GitHub Actions từng làm vậy, không đồng bộ).
+import { readChangelogSection } from './changelog-section.mjs';
 
 const cwd = process.cwd();
 
@@ -63,6 +66,23 @@ const sha512 = crypto.createHash('sha512').update(installer).digest('base64');
 const size = installer.length;
 const releaseDate = new Date().toISOString();
 
+// Giai đoạn 5 (2026-09-24): ghi chú phát hành BẮT BUỘC lấy từ CHANGELOG.md thật của đúng phiên bản đang
+// build — verify:stable đã đảm bảo CHANGELOG.md bắt đầu bằng "# Tubmedia <version>" hợp lệ (không còn
+// dòng CHƯA ĐIỀN GHI CHÚ PHÁT HÀNH) trước khi tới bước này trong dist:official, nên thất bại ở đây nghĩa
+// là quy trình phát hành bị gọi sai thứ tự — báo lỗi rõ ràng thay vì lặng lẽ bỏ trống ghi chú.
+const releaseNotes = readChangelogSection(version, path.join(project, 'CHANGELOG.md'));
+if (releaseNotes === null) {
+  throw new Error(
+    `CHANGELOG.md thiếu mục "# Tubmedia ${version}" — không thể ghi ghi chú phát hành vào latest.yml.`
+  );
+}
+if (!releaseNotes) {
+  throw new Error(`Mục "# Tubmedia ${version}" trong CHANGELOG.md đang trống — không có gì để ghi vào latest.yml.`);
+}
+// Khối YAML kiểu literal ("|") giữ nguyên văn nội dung, không cần thoát ký tự — an toàn với dấu ':'/dấu
+// ngoặc kép có thể xuất hiện trong ghi chú tiếng Việt mà một chuỗi có dấu ngoặc kép thông thường sẽ vỡ.
+const releaseNotesBlockLines = releaseNotes.split('\n').map((line) => (line ? `  ${line}` : ''));
+
 const lines = [
   `version: ${version}`,
   'files:',
@@ -72,6 +92,8 @@ const lines = [
   `path: "${installerName}"`,
   `sha512: ${sha512}`,
   `releaseDate: '${releaseDate}'`,
+  'releaseNotes: |',
+  ...releaseNotesBlockLines,
   ''
 ];
 
@@ -110,7 +132,9 @@ if (
   parsed?.files?.[0]?.sha512 !== sha512 ||
   Number(parsed?.files?.[0]?.size) !== size ||
   parsed?.path !== installerName ||
-  parsed?.sha512 !== sha512
+  parsed?.sha512 !== sha512 ||
+  typeof parsed?.releaseNotes !== 'string' ||
+  parsed.releaseNotes.trim() !== releaseNotes.trim()
 ) {
   throw new Error('latest.yml round-trip YAML metadata validation failed');
 }
@@ -121,3 +145,4 @@ console.log(`version=${version}`);
 console.log(`size=${size}`);
 console.log(`sha512=${sha512}`);
 console.log(`firstBytes=${firstBytesHex(bytes)}`);
+console.log(`releaseNotesLines=${releaseNotes.split('\n').length}`);

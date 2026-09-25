@@ -3,8 +3,9 @@ import { app, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { access, mkdir, readFile, readdir, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import { constants as fsConstants, existsSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, extname, join } from 'node:path';
 import {
+  formatQuickDownloadTime,
   validateQuickDownloadRequest,
   type QuickDownloadErrorCode,
   type QuickDownloadStatus,
@@ -13,12 +14,13 @@ import {
 import { ProcessCancelledError, ToolNotFoundError } from '@shared/errors/app-errors.js';
 import { hasConfiguredCookies } from '@shared/utils/cookie-policy.js';
 import { cleanExternalText } from '@shared/utils/text-encoding.js';
-import type { FileVerifier } from '../media/file-verifier.js';
+import { AUDIO_STREAM_MISSING_REASON, type FileVerifier } from '../media/file-verifier.js';
 import type { Logger } from '../logging/logger.js';
 import type { ProcessManager } from '../processes/process-manager.js';
 import type { SettingsService } from '../settings/settings-service.js';
 import type { ToolManager } from '../tools/tool-manager.js';
 import { buildQuickDownloadArguments } from './quick-download-command.js';
+import { acceptPathInside } from '../files/path-containment.js';
 
 import { isExplicitlyRemovedYoutubeSource } from '@shared/utils/download-failure.js';
 
@@ -37,6 +39,8 @@ interface ActiveQuickTask {
   cookiesAttached: boolean;
   compactFilename: boolean;
   genericFallbackTried: boolean;
+  /** Giai đoạn 6 mục 1: tên kênh/nguồn lấy từ yt-dlp (--print before_dl) để ghi credit metadata. */
+  uploaderName: string;
   recentLines: string[];
   lastDiskCheckAt: number;
   diskCheckInFlight: boolean;
@@ -131,10 +135,15 @@ function quickMediaLabel(mediaMode: ValidatedQuickDownloadRequest['mediaMode']):
   return mediaMode === 'audio-only' ? 'âm thanh' : 'video';
 }
 
+// Giai đoạn 6 mục 7 (2026-09-24): mẫu tên tệp giờ do người dùng cấu hình nên KHÔNG còn chắc chắn có
+// dấu ngoặc [id] đứng ngay trước "[QD-token]" nữa (ví dụ mẫu chỉ có {channel}, không có {id}) — tách
+// thành 2 bước độc lập thay vì một biểu thức chính quy giả định luôn có đúng 2 nhóm ngoặc, để không lộ
+// "[QD-...]"/khoảng cắt ra ngoài tên hiển thị dù người dùng chọn mẫu nào.
 function titleFromOutputPath(outputPath: string): string | null {
   const withoutExtension = basename(outputPath).replace(/\.[^.]+$/, '');
-  const withoutTokens = withoutExtension.replace(/\s+\[[^\]]+\]\s+\[QD-[^\]]+\]$/, '');
-  return cleanExternalText(withoutTokens) ?? cleanExternalText(withoutExtension);
+  const withoutQdToken = withoutExtension.replace(/\s+\[QD-[^\]]+\]$/, '');
+  const withoutRangeSuffix = withoutQdToken.replace(/\s+\[\d{2}(-\d{2}){3,5}\]$/, '');
+  return cleanExternalText(withoutRangeSuffix) ?? cleanExternalText(withoutExtension);
 }
 
 function isPersistedState(value: unknown): value is PersistedQuickDownloadState {
@@ -376,6 +385,7 @@ export class QuickDownloadService {
       cookiesAttached: forceCookies && hasConfiguredCookies(this.cookieSettings()),
       compactFilename: false,
       genericFallbackTried: false,
+      uploaderName: '',
       recentLines: [],
       lastDiskCheckAt: 0,
       diskCheckInFlight: false,
@@ -516,7 +526,8 @@ export class QuickDownloadService {
           authentication,
           {
             compactFilename: active.compactFilename,
-            forceGenericExtractor: active.genericFallbackTried
+            forceGenericExtractor: active.genericFallbackTried,
+            filenameTemplate: this.settings?.get().quickDownloadFilenameTemplate
           }
         );
 
@@ -669,6 +680,7 @@ export class QuickDownloadService {
     active.status.phase = 'preparing';
     active.status.progress = 0;
     active.status.title = '';
+    active.uploaderName = '';
     active.status.speed = '';
     active.status.eta = '';
     active.status.downloadedBytes = 0;
@@ -700,8 +712,26 @@ export class QuickDownloadService {
       return;
     }
 
+    if (line.startsWith('TUBMEDIA_UPLOADER|')) {
+      const cleanUploader = cleanExternalText(line.slice('TUBMEDIA_UPLOADER|'.length));
+      if (cleanUploader && cleanUploader !== 'NA') active.uploaderName = cleanUploader;
+      return;
+    }
+
     if (line.startsWith('TUBMEDIA_FILE|')) {
-      active.status.outputPath = line.slice('TUBMEDIA_FILE|'.length);
+      // Chỉ tin đường dẫn nằm hẳn trong thư mục đích; nếu không, bước tìm theo mã (findOutputByToken) sẽ xử lý.
+      const reportedPath = line.slice('TUBMEDIA_FILE|'.length);
+      const acceptedPath = acceptPathInside(active.request.outputDirectory, reportedPath);
+      if (!acceptedPath) {
+        this.logger.warn(
+          'quick-download',
+          'OUTPUT_PATH_REJECTED',
+          'Bỏ qua đường dẫn tệp do yt-dlp báo về vì nằm ngoài thư mục đích.',
+          { jobId: active.status.taskId, metadata: { reportedPath } }
+        );
+        return;
+      }
+      active.status.outputPath = acceptedPath;
       if (!active.status.title) {
         const recoveredTitle = titleFromOutputPath(active.status.outputPath);
         if (recoveredTitle) active.status.title = recoveredTitle;
@@ -837,6 +867,8 @@ export class QuickDownloadService {
       throw new Error('yt-dlp báo hoàn tất nhưng không tìm thấy file đầu ra.');
     }
 
+    if (active.status.mediaMode === 'video-only') await this.stripAudioTrack(active, active.status.outputPath);
+
     active.status.phase = 'verifying';
     active.status.progress = 99.5;
     active.status.message = 'Đang kiểm tra file đầu ra bằng ffprobe/FFmpeg.';
@@ -849,14 +881,28 @@ export class QuickDownloadService {
         ? active.status.requestedEndSeconds - active.status.requestedStartSeconds
         : undefined;
 
-    const checked = await this.verifier.verify(active.status.outputPath, 'standard', expectedDuration, {
-      jobId: active.status.taskId,
-      signal: active.controller.signal,
-      expectedStreams: {
-        video: active.status.mediaMode !== 'audio-only',
-        audio: active.status.mediaMode !== 'video-only'
+    const verifyWith = (audio: boolean): ReturnType<FileVerifier['verify']> =>
+      this.verifier.verify(active.status.outputPath!, 'standard', expectedDuration, {
+        jobId: active.status.taskId,
+        signal: active.controller.signal,
+        expectedStreams: { video: active.status.mediaMode !== 'audio-only', audio }
+      });
+    let checked = await verifyWith(active.status.mediaMode !== 'video-only');
+
+    // Nhiều video hợp lệ vốn không có kênh âm thanh (clip im lặng, hoạt họa, ghi màn hình). yt-dlp đã tải
+    // đúng thứ nguồn cung cấp nên chỉ báo cảnh báo, không đánh dấu thất bại nếu đây là lỗi duy nhất.
+    if (
+      !checked.ok &&
+      active.status.mediaMode === 'video-audio' &&
+      checked.reasons.length === 1 &&
+      checked.reasons[0] === AUDIO_STREAM_MISSING_REASON
+    ) {
+      const silent = await verifyWith(false);
+      if (silent.ok) {
+        checked = silent;
+        active.status.warnings.push('Video nguồn không có kênh âm thanh nên tệp đầu ra chỉ có hình.');
       }
-    });
+    }
 
     active.status.actualDurationSeconds = checked.duration;
     if (!checked.ok) {
@@ -879,6 +925,148 @@ export class QuickDownloadService {
     this.cookieBlockedRequest = null;
     this.publish(active);
     await this.cleanupActive(active, true);
+
+    // Sửa lỗi (2026-09-23): ghi credit KHÔNG được chặn báo "hoàn tất" — trước đây bước này chạy TRƯỚC
+    // khi đặt phase='completed', nên nếu remux ffmpeg chạy lâu hơn dự kiến trên một video thật (file
+    // lớn hơn, đĩa/diệt virus quét tệp mới ghi...), toàn bộ nút trên trang Tải nhanh (đều disabled khi
+    // "running") sẽ bị khóa suốt thời gian đó — đúng như bị báo "app đơ, vòng xoay quay mãi". Giờ chạy
+    // NGẦM sau khi đã báo hoàn tất: người dùng dùng được ứng dụng ngay, credit ghi thêm phía sau.
+    if (active.request.embedCredit) {
+      void this.embedCreditMetadata(active, active.status.outputPath)
+        .then(() => this.publish(active))
+        .catch((error: unknown) => {
+          this.logger.warn(
+            'quick-download',
+            'QUICK_DOWNLOAD_CREDIT_METADATA_BACKGROUND_FAILED',
+            error instanceof Error ? error.message : String(error),
+            { jobId: active.status.taskId }
+          );
+        });
+    }
+  }
+
+  /**
+   * "Chỉ video" chọn luồng `bv*`, nhưng nguồn chỉ có định dạng gộp (liên kết trực tiếp, nhiều mạng xã hội)
+   * thì yt-dlp vẫn trả về tệp có cả âm thanh. Nếu tệp còn âm thanh thì cắt bỏ (copy, không mã hóa lại).
+   */
+  private async stripAudioTrack(active: ActiveQuickTask, outputPath: string): Promise<void> {
+    const ffprobe = this.tools.get('ffprobe');
+    const ffmpeg = this.tools.get('ffmpeg');
+    if (!ffprobe.executablePath || !ffmpeg.executablePath) return;
+    const signal = active.controller.signal;
+    const common = { jobId: active.status.taskId, signal, priority: 'below_normal' as const };
+
+    const probe = await this.processes.run({
+      ...common,
+      tool: 'ffprobe',
+      executablePath: ffprobe.executablePath,
+      args: ['-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=index', '-of', 'csv=p=0', outputPath],
+      timeoutMs: 60_000
+    });
+    // ffprobe lỗi thì để bước kiểm tra đầu ra báo lỗi thật; không có luồng âm thanh thì không cần làm gì.
+    if (probe.code !== 0 || !probe.stdoutTail.trim()) return;
+
+    active.status.phase = 'processing';
+    active.status.message = 'Nguồn chỉ có luồng gộp hình và tiếng: đang loại bỏ âm thanh khỏi video.';
+    this.publish(active);
+
+    const extension = extname(outputPath);
+    const stripped = join(dirname(outputPath), `${basename(outputPath, extension)}.noaudio${extension}`);
+    try {
+      const result = await this.processes.run({
+        ...common,
+        tool: 'ffmpeg',
+        executablePath: ffmpeg.executablePath,
+        args: ['-y', '-v', 'error', '-i', outputPath, '-map', '0:v', '-c', 'copy', '-an', stripped],
+        timeoutMs: 30 * 60 * 1000
+      });
+      if (result.code !== 0 || !existsSync(stripped)) {
+        throw new Error(result.stderrTail.trim() || `FFmpeg kết thúc với mã ${result.code}.`);
+      }
+      await rename(stripped, outputPath);
+    } catch (error) {
+      await rm(stripped, { force: true }).catch(() => undefined);
+      if (signal.aborted) throw error;
+      const detail = error instanceof Error ? error.message : String(error);
+      active.status.warnings.push('Không loại được âm thanh khỏi video; tệp được giữ nguyên gồm cả âm thanh.');
+      this.logger.warn('quick-download', 'QUICK_DOWNLOAD_STRIP_AUDIO_FAILED', detail, {
+        jobId: active.status.taskId
+      });
+    }
+  }
+
+  /**
+   * Giai đoạn 6 mục 1 (2026-09-23): ghi nguồn gốc vào METADATA của chính tệp — không chèn chữ lên
+   * hình, không mã hóa lại (chỉ remux -c copy để giữ tốc độ nhanh, đúng lựa chọn đã duyệt). Ghi vào
+   * cả `artist` (tên kênh, nếu có — bỏ qua nếu không lấy được, không để trống/báo lỗi) lẫn `comment`
+   * (khối đầy đủ: nguồn, URL, ngày tải, đoạn đã cắt nếu có) để công cụ nào cũng đọc được ít nhất một
+   * trong hai. Lỗi remux chỉ là cảnh báo — giữ nguyên tệp gốc, không làm hỏng lượt tải.
+   */
+  private async embedCreditMetadata(active: ActiveQuickTask, outputPath: string): Promise<void> {
+    const ffmpeg = this.tools.get('ffmpeg');
+    if (!ffmpeg.executablePath) return;
+
+    const uploader = active.uploaderName.trim();
+    const downloadDate = new Date().toISOString().slice(0, 10);
+    const commentLines = [
+      ...(uploader ? [`Nguồn: ${uploader}`] : []),
+      `URL: ${active.request.url}`,
+      `Ngày tải: ${downloadDate}`,
+      ...(active.status.mode === 'range' &&
+      active.status.requestedStartSeconds !== null &&
+      active.status.requestedEndSeconds !== null
+        ? [
+            `Đoạn đã cắt: ${formatQuickDownloadTime(active.status.requestedStartSeconds)}–${formatQuickDownloadTime(active.status.requestedEndSeconds)}`
+          ]
+        : [])
+    ];
+    const comment = commentLines.join('\n');
+
+    // KHÔNG cập nhật active.status.message/publish ở đây nữa — bước này chạy NGẦM sau khi đã báo
+    // "hoàn tất" (xem lời gọi ở nơi gọi hàm này); ghi đè message lúc này sẽ khiến trạng thái hiển thị
+    // giật lùi từ "Đã tải xong" về một dòng "đang xử lý" gây hiểu lầm dù phase vẫn là 'completed'.
+    const extension = extname(outputPath);
+    const tempOutput = join(dirname(outputPath), `${basename(outputPath, extension)}.credit${extension}`);
+
+    try {
+      const result = await this.processes.run({
+        jobId: active.status.taskId,
+        signal: active.controller.signal,
+        priority: 'below_normal',
+        tool: 'ffmpeg',
+        executablePath: ffmpeg.executablePath,
+        args: [
+          '-y',
+          '-v',
+          'error',
+          '-i',
+          outputPath,
+          '-map',
+          '0',
+          '-c',
+          'copy',
+          ...(uploader ? ['-metadata', `artist=${uploader}`] : []),
+          '-metadata',
+          `comment=${comment}`,
+          tempOutput
+        ],
+        // Remux -c copy chỉ đổi header container, không mã hóa lại — vài phút là đủ dư cho cả tệp rất
+        // lớn. Chạy nền (không chặn "hoàn tất") nên không cần mốc 30 phút như các bước xử lý chính.
+        timeoutMs: 5 * 60 * 1000
+      });
+      if (result.code !== 0 || !existsSync(tempOutput)) {
+        throw new Error(result.stderrTail.trim() || `FFmpeg kết thúc với mã ${result.code}.`);
+      }
+      await rename(tempOutput, outputPath);
+    } catch (error) {
+      await rm(tempOutput, { force: true }).catch(() => undefined);
+      if (active.controller.signal.aborted) throw error;
+      const detail = error instanceof Error ? error.message : String(error);
+      active.status.warnings.push('Không ghi được thông tin nguồn gốc vào tệp; tệp được giữ nguyên.');
+      this.logger.warn('quick-download', 'QUICK_DOWNLOAD_CREDIT_METADATA_FAILED', detail, {
+        jobId: active.status.taskId
+      });
+    }
   }
 
   private skipRemovedTask(active: ActiveQuickTask): void {

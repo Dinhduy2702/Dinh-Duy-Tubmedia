@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { isValidVersion } from './version-tools.mjs';
 
 const root = process.cwd();
 const panel = readFileSync(join(root, 'src/renderer/src/components/QuickDownloadPanel.tsx'), 'utf8');
@@ -16,7 +17,7 @@ function check(label, condition) {
   console.log(`PASS: ${label}`);
 }
 
-check('version remains 1.3.7', packageJson.version === '1.3.7');
+check('package version is a valid release version', isValidVersion(packageJson.version));
 
 check(
   'start duration is restored',

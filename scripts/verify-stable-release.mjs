@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { isValidVersion } from './version-tools.mjs';
 
 const root = process.cwd();
 const read = (path) => readFile(resolve(root, path), 'utf8');
@@ -10,8 +11,8 @@ const base = spawnSync(process.execPath, ['scripts/verify-release-candidate.mjs'
 });
 if (base.status !== 0) process.exit(base.status ?? 1);
 
-const expectedVersion = '1.3.7';
 const packageJson = JSON.parse(await read('package.json'));
+const expectedVersion = packageJson.version;
 const packageLock = JSON.parse(await read('package-lock.json'));
 const constants = await read('src/shared/constants/app.ts');
 const queue = await read('src/main/queue/queue-manager.ts');
@@ -30,13 +31,13 @@ const confirmDialog = await read('src/renderer/src/components/ConfirmDialog.tsx'
 const preloadApi = await read('src/preload/index.ts');
 
 const checks = [
-  ['package version 1.3.7', packageJson.version === expectedVersion],
+  ['package version is valid', isValidVersion(expectedVersion)],
   [
-    'package-lock version 1.3.7',
+    'package-lock version matches package.json',
     packageLock.version === expectedVersion && packageLock.packages?.['']?.version === expectedVersion
   ],
-  ['renderer label v1.3.7', constants.includes("APP_VERSION_LABEL = 'v1.3.7'")],
-  ['changelog 1.3.7 first', changelog.startsWith('# Tubmedia 1.3.7')],
+  ['renderer label matches package.json', constants.includes(`APP_VERSION_LABEL = 'v${expectedVersion}'`)],
+  ['changelog for this version is first', changelog.startsWith(`# Tubmedia ${expectedVersion}`)],
   [
     'official build derives canonical installer name from package version',
     buildScript.includes('$Version = [string]$Package.version') &&
@@ -143,8 +144,8 @@ const checks = [
 ];
 const failed = checks.filter(([, ok]) => !ok);
 if (failed.length) {
-  console.error('Tubmedia 1.3.7 stable verification failed:');
+  console.error(`Tubmedia ${expectedVersion} stable verification failed:`);
   for (const [name] of failed) console.error(`- ${name}`);
   process.exit(1);
 }
-console.log(`Tubmedia 1.3.7 stable verification OK: ${checks.length} checks.`);
+console.log(`Tubmedia ${expectedVersion} stable verification OK: ${checks.length} checks.`);

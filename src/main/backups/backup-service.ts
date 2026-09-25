@@ -12,6 +12,9 @@ import {
 } from '../database/sqlite.js';
 import type { Logger } from '../logging/logger.js';
 import { InvalidInputError } from '@shared/errors/app-errors.js';
+import { parseJsonOr } from '@shared/utils/safe-json.js';
+import { isSafeMediaUrl } from '@shared/utils/url.js';
+import { sanitizeRestoredAppSettings } from '../security/settings-policy.js';
 
 export interface BackupPreview {
   path: string;
@@ -151,6 +154,59 @@ export class BackupService {
     }
   }
 
+  /**
+   * Backup là tệp không đáng tin: cài đặt vừa nạp phải qua schema và chính sách an toàn (địa chỉ
+   * cập nhật, đường dẫn công cụ). Trường sai bị bỏ để ứng dụng dùng giá trị mặc định.
+   */
+  private sanitizeRestoredSettings(): void {
+    const target = this.database.db;
+    const row = target.prepare("SELECT value_json FROM main.app_settings WHERE key='app'").get() as
+      | { value_json: string }
+      | undefined;
+    if (!row) return;
+    const { value, dropped } = sanitizeRestoredAppSettings(parseJsonOr<unknown>(row.value_json, null));
+    if (dropped.length === 0) return;
+    target
+      .prepare("UPDATE main.app_settings SET value_json=? WHERE key='app'")
+      .run(JSON.stringify(value));
+    this.logger.warn(
+      'backup',
+      'BACKUP_SETTINGS_SANITIZED',
+      `Bỏ qua ${dropped.length} cài đặt trong bản sao lưu vì không đạt yêu cầu an toàn: ${dropped.join(', ')}.`
+    );
+  }
+
+  /**
+   * original_url của nguồn video được đưa thẳng cho yt-dlp. Với dòng đến từ backup mà không phải
+   * địa chỉ http(s) hợp lệ (ví dụ `--exec ...`), dùng normalized_url nếu nó hợp lệ, nếu không thì
+   * để trống để tác vụ báo lỗi thay vì chạy. Cần gọi khi backupdb còn được ATTACH.
+   */
+  private sanitizeRestoredSources(): void {
+    const target = this.database.db;
+    const rows = target
+      .prepare(
+        'SELECT id,original_url,normalized_url FROM main.media_sources WHERE id IN (SELECT id FROM backupdb.media_sources)'
+      )
+      .all() as Array<{ id: string; original_url: unknown; normalized_url: unknown }>;
+    const update = target.prepare('UPDATE main.media_sources SET original_url=?,normalized_url=? WHERE id=?');
+    let repaired = 0;
+    for (const row of rows) {
+      const originalOk = isSafeMediaUrl(row.original_url);
+      const normalizedOk = isSafeMediaUrl(row.normalized_url);
+      if (originalOk && normalizedOk) continue;
+      const safeNormalized = normalizedOk ? String(row.normalized_url) : '';
+      update.run(originalOk ? String(row.original_url) : safeNormalized, safeNormalized, row.id);
+      repaired += 1;
+    }
+    if (repaired > 0) {
+      this.logger.warn(
+        'backup',
+        'BACKUP_SOURCES_SANITIZED',
+        `Đã vô hiệu hóa địa chỉ không hợp lệ của ${repaired} nguồn video trong bản sao lưu.`
+      );
+    }
+  }
+
   public restore(path: string, mode: 'merge' | 'replace'): { projects: number } {
     if (!existsSync(path)) throw new Error(`Không tìm thấy tệp sao lưu: ${path}`);
     const preview = this.preview(path);
@@ -235,6 +291,9 @@ export class BackupService {
             `INSERT OR REPLACE INTO main.${table}(${common.join(',')}) SELECT ${common.join(',')} FROM backupdb.${table}`
           );
         }
+
+        this.sanitizeRestoredSettings();
+        this.sanitizeRestoredSources();
 
         const integrity = target.prepare('PRAGMA main.integrity_check').all() as Array<{ integrity_check: string }>;
         if (integrity.some((row) => row.integrity_check !== 'ok')) {

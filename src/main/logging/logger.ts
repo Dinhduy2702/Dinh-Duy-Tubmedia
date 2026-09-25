@@ -5,6 +5,7 @@ import {
   rmSync,
   statSync
 } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { appendFile, mkdir, rename, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { BrowserWindow } from 'electron';
@@ -117,6 +118,15 @@ export class Logger {
     await this.fileWriteTail;
   }
 
+  private lastPersistFailureAt = 0;
+
+  private reportPersistFailure(error: unknown): void {
+    const now = Date.now();
+    if (now - this.lastPersistFailureAt < 60_000) return;
+    this.lastPersistFailureAt = now;
+    console.error('Không ghi được nhật ký vào SQLite:', error instanceof Error ? error.message : error);
+  }
+
   private write(
     level: LogEntry['level'],
     module: string,
@@ -129,7 +139,7 @@ export class Logger {
     const safeMetadata = context.metadata
       ? (redactSecrets(context.metadata) as Record<string, unknown>)
       : undefined;
-    const entry = this.repo.insert({
+    const payload: Omit<LogEntry, 'id'> = {
       timestamp: new Date().toISOString(),
       level,
       module,
@@ -139,7 +149,17 @@ export class Logger {
       ...(context.jobId ? { jobId: context.jobId } : {}),
       ...(context.attemptId ? { attemptId: context.attemptId } : {}),
       ...(safeMetadata ? { metadata: safeMetadata } : {})
-    });
+    };
+    let entry: LogEntry;
+    try {
+      entry = this.repo.insert(payload);
+    } catch (error) {
+      // Ghi log không bao giờ được làm hỏng luồng nghiệp vụ. Khi đĩa đầy hoặc DB bị khóa/đã đóng,
+      // insert ném lỗi ngay trong các nhánh xử lý DISK_FULL/tắt máy và khiến lỗi lan rộng.
+      // Vẫn ghi file log phụ và gửi lên giao diện để không mất thông tin chẩn đoán.
+      entry = { id: randomUUID(), ...payload };
+      this.reportPersistFailure(error);
+    }
 
     const serialized = `${JSON.stringify(entry)}\n`;
     this.enqueueFile(join(this.logFolder, `${module}.log`), serialized);

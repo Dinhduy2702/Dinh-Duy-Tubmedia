@@ -1,28 +1,55 @@
-import { app } from 'electron';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+/**
+ * GIAI ĐOẠN 4a/4b (2026-09-23): bỏ hẳn PowerShell/Start-Process -Verb RunAs khỏi Dọn dẹp máy — toàn bộ
+ * việc quét/xóa nay chạy bằng Node.js thuần (src/main/system/cleanup-scanner.ts +
+ * cleanup-quarantine.ts), trong tiến trình main, không cần quyền quản trị. Trạng thái mỗi lượt chạy
+ * được giữ trong bộ nhớ (Map), không còn ghi request.json/status.json ra đĩa như trước.
+ *
+ * GĐ4a: mode 'estimate' — chỉ quét và phân loại, không xóa gì.
+ * GĐ4b: mode 'clean' — quét LẠI một lần nữa ngay tại lúc xóa (không tin tưởng số liệu ước tính cũ, dù
+ * cách nhau bao lâu), rồi cách ly (quarantine) THẬT từng file khớp qua QuarantineStore. Không có bước
+ * "xóa vĩnh viễn ngay" — file luôn đi qua khu cách ly trước, có thể hoàn tác trong
+ * QUARANTINE_RETENTION_DAYS ngày trước khi bị dọn vĩnh viễn.
+ */
 import { randomUUID } from 'node:crypto';
 import {
-  systemCleanupRequiresAdmin,
+  SYSTEM_CLEANUP_CATEGORIES,
   validateSystemCleanupRequest,
+  type SystemCleanupCategoryId,
+  type SystemCleanupFinding,
   type SystemCleanupRequest,
   type SystemCleanupStatus
 } from '@shared/system-cleanup.js';
+import {
+  categoryTargets,
+  listCategoryFiles,
+  listResidueFiles,
+  scanTarget,
+  scanTubmediaResidue,
+  readDriveSpace,
+  CleanupScanCancelledError,
+  type CleanupEnvironmentPaths,
+  type FoundFile,
+  type TubmediaResidueRoots
+} from './cleanup-scanner.js';
+import { QUARANTINE_RETENTION_DAYS, type QuarantineStore } from './cleanup-quarantine.js';
 
-export interface TubmediaCleanupRoots {
-  sourceFolders: string[];
-  tempFolders: string[];
-  trackedTempFiles: string[];
-  quickOutputFolders: string[];
-  quickTempRoots: string[];
+export type TubmediaCleanupRoots = TubmediaResidueRoots;
+
+const TERMINAL_PHASES = new Set<SystemCleanupStatus['phase']>(['completed', 'cancelled', 'failed']);
+
+interface RunSnapshot {
+  estimatedBytes: number;
+  removedBytes: number;
+  removedItems: number;
+  skippedItems: number;
+  safeToDeleteBytes: number;
+  findings: SystemCleanupFinding[];
+  results: SystemCleanupStatus['results'];
+  errors: string[];
 }
 
-const TERMINAL_PHASES = new Set(['completed', 'cancelled', 'failed']);
-
-function quotePowerShellLiteral(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
+function categoryLabel(id: SystemCleanupCategoryId): string {
+  return SYSTEM_CLEANUP_CATEGORIES.find((item) => item.id === id)?.label ?? id;
 }
 
 function initialStatus(runId: string, request: SystemCleanupRequest): SystemCleanupStatus {
@@ -31,7 +58,7 @@ function initialStatus(runId: string, request: SystemCleanupRequest): SystemClea
     mode: request.mode,
     phase: 'queued',
     progress: 0,
-    message: 'Đang chuẩn bị tác vụ dọn dẹp.',
+    message: request.mode === 'clean' ? 'Đang chuẩn bị dọn dẹp.' : 'Đang chuẩn bị quét.',
     currentCategory: null,
     processedCategories: 0,
     totalCategories: request.categories.length,
@@ -39,7 +66,6 @@ function initialStatus(runId: string, request: SystemCleanupRequest): SystemClea
     removedBytes: 0,
     removedItems: 0,
     skippedItems: 0,
-    requiresAdmin: systemCleanupRequiresAdmin(request.categories, request.scope),
     startedAt: new Date().toISOString(),
     completedAt: null,
     driveBefore: null,
@@ -54,303 +80,370 @@ function initialStatus(runId: string, request: SystemCleanupRequest): SystemClea
 }
 
 export class SystemCleanupService {
+  private readonly runs = new Map<string, SystemCleanupStatus>();
+  private readonly cancelRequested = new Set<string>();
   private activeRunId: string | null = null;
-  private activeProcess: ChildProcess | null = null;
-  private readonly runRoot = join(app.getPath('userData'), 'system-cleanup-runs');
 
   public constructor(
-    private readonly cleanupRoots: () => TubmediaCleanupRoots = () => ({
-      sourceFolders: [],
-      tempFolders: [],
-      trackedTempFiles: [],
-      quickOutputFolders: [],
-      quickTempRoots: []
-    })
+    private readonly cleanupRoots: () => TubmediaCleanupRoots,
+    private readonly environment: () => CleanupEnvironmentPaths,
+    private readonly quarantine: QuarantineStore
   ) {}
 
   public isActive(): boolean {
     if (!this.activeRunId) return false;
-    if (!this.activeProcess) return true;
-    return this.activeProcess.exitCode === null && !this.activeProcess.killed;
+    const status = this.runs.get(this.activeRunId);
+    return Boolean(status && !TERMINAL_PHASES.has(status.phase));
   }
 
-  public async start(rawRequest: unknown): Promise<SystemCleanupStatus> {
-    const request = validateSystemCleanupRequest(rawRequest);
+  // Không đánh dấu async: hàm này chỉ ném lỗi ĐỒNG BỘ khi kiểm tra đầu vào, và Promise.reject() bên
+  // dưới đảm bảo lỗi luôn đến tay caller dưới dạng Promise bị từ chối (đúng hợp đồng IPC), không bao
+  // giờ ném lỗi đồng bộ ra ngoài — quan trọng vì handle() trong register-ipc.ts và các bài test đều
+  // gọi start() rồi .catch()/await/expect(...).rejects, không bọc try/catch đồng bộ quanh lời gọi.
+  public start(rawRequest: unknown): Promise<SystemCleanupStatus> {
+    let request: SystemCleanupRequest;
 
-    if (this.activeRunId) {
-      const active = await this.status(this.activeRunId);
+    try {
+      request = validateSystemCleanupRequest(rawRequest);
 
-      if (active && !TERMINAL_PHASES.has(active.phase)) {
+      if (this.isActive()) {
         throw new Error('Một tác vụ dọn dẹp khác đang chạy.');
       }
-
-      this.activeRunId = null;
-      this.activeProcess = null;
+    } catch (error) {
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
     }
-
-    await mkdir(this.runRoot, { recursive: true });
-    await this.removeStaleRuns();
 
     const runId = randomUUID();
-    const runDirectory = join(this.runRoot, runId);
-    const requestPath = join(runDirectory, 'request.json');
-    const statusPath = join(runDirectory, 'status.json');
-    const cancelPath = join(runDirectory, 'cancel.requested');
-    const launcherPath = join(runDirectory, 'launch-elevated.ps1');
-    const helperPath = await this.resolveHelperPath();
-
-    await mkdir(runDirectory, { recursive: true });
-    const helperRequest = {
-      ...request,
-      tubmediaRoots: this.normalizeCleanupRoots(this.cleanupRoots())
-    };
-    await writeFile(requestPath, JSON.stringify(helperRequest, null, 2), 'utf8');
-
     const status = initialStatus(runId, request);
-    await writeFile(statusPath, JSON.stringify(status, null, 2), 'utf8');
-
-    const helperArguments = [
-      '-NoProfile',
-      '-NonInteractive',
-      '-ExecutionPolicy',
-      'Bypass',
-      '-File',
-      helperPath,
-      '-RequestPath',
-      requestPath,
-      '-StatusPath',
-      statusPath,
-      '-CancelPath',
-      cancelPath
-    ];
-
+    this.runs.set(runId, status);
     this.activeRunId = runId;
+    this.cancelRequested.delete(runId);
 
-    if (status.requiresAdmin) {
-      const argumentArray = helperArguments.map(quotePowerShellLiteral).join(', ');
+    const run = request.mode === 'clean' ? this.runClean(runId, request) : this.runEstimate(runId, request);
 
-      const launcher = [
-        "$ErrorActionPreference = 'Stop'",
-        'try {',
-        `  $process = Start-Process -FilePath ${quotePowerShellLiteral(
-          this.powerShellPath()
-        )} -ArgumentList @(${argumentArray}) -Verb RunAs -Wait -PassThru -WindowStyle Hidden`,
-        '  exit $process.ExitCode',
-        '} catch {',
-        '  Write-Error $_',
-        '  exit 1223',
-        '}',
-        ''
-      ].join('\r\n');
-
-      await writeFile(launcherPath, launcher, 'utf8');
-      await this.patchStatus(statusPath, {
-        phase: 'waiting-admin',
-        message: 'Đang chờ người dùng xác nhận quyền quản trị Windows.'
+    void run.catch((error: unknown) => {
+      this.patch(runId, {
+        phase: 'failed',
+        message: error instanceof Error ? error.message : 'Dọn dẹp thất bại không rõ nguyên nhân.',
+        completedAt: new Date().toISOString()
       });
-
-      this.activeProcess = spawn(
-        this.powerShellPath(),
-        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', launcherPath],
-        {
-          windowsHide: true,
-          stdio: 'ignore'
-        }
-      );
-    } else {
-      this.activeProcess = spawn(this.powerShellPath(), helperArguments, {
-        windowsHide: true,
-        stdio: 'ignore'
-      });
-    }
-
-    const child = this.activeProcess;
-
-    child.once('error', async (error) => {
-      await this.failIfNotTerminal(statusPath, `Không thể khởi chạy tiến trình dọn dẹp: ${error.message}`);
       this.releaseRun(runId);
     });
 
-    child.once('close', async (code) => {
-      if (code !== 0) {
-        await this.failIfNotTerminal(
-          statusPath,
-          code === 1223
-            ? 'Yêu cầu quyền quản trị đã bị hủy.'
-            : `Tiến trình dọn dẹp kết thúc với mã ${String(code)}.`
-        );
-      }
-
-      this.releaseRun(runId);
-    });
-
-    return (await this.status(runId)) ?? status;
+    return Promise.resolve(status);
   }
 
-  public async status(runId: string): Promise<SystemCleanupStatus | null> {
-    if (!/^[0-9a-f-]{36}$/i.test(runId)) {
-      return null;
-    }
-
-    const statusPath = join(this.runRoot, runId, 'status.json');
-
-    if (!existsSync(statusPath)) {
-      return null;
-    }
-
-    for (let attempt = 0; attempt < 4; attempt += 1) {
-      try {
-        const parsed = JSON.parse(await readFile(statusPath, 'utf8')) as SystemCleanupStatus;
-
-        if (parsed.runId !== runId) {
-          return null;
-        }
-
-        return parsed;
-      } catch {
-        await new Promise((resolve) => setTimeout(resolve, 40));
-      }
-    }
-
-    return null;
+  public status(runId: string): Promise<SystemCleanupStatus | null> {
+    return Promise.resolve(this.runs.get(runId) ?? null);
   }
 
-  public async cancel(runId: string): Promise<SystemCleanupStatus | null> {
-    const current = await this.status(runId);
+  public cancel(runId: string): Promise<SystemCleanupStatus | null> {
+    const current = this.runs.get(runId);
 
     if (!current || TERMINAL_PHASES.has(current.phase)) {
-      return current;
+      return Promise.resolve(current ?? null);
     }
 
-    const cancelPath = join(this.runRoot, runId, 'cancel.requested');
-    await writeFile(cancelPath, new Date().toISOString(), 'utf8');
+    this.cancelRequested.add(runId);
+    this.patch(runId, { message: 'Đã gửi yêu cầu dừng. Đang kết thúc an toàn...' });
 
-    await this.patchStatus(join(this.runRoot, runId, 'status.json'), {
-      message: 'Đã gửi yêu cầu dừng. Tác vụ hệ thống đang chạy sẽ kết thúc an toàn trước khi dừng.'
-    });
+    return Promise.resolve(this.runs.get(runId) ?? null);
+  }
 
-    return this.status(runId);
+  private patch(runId: string, partial: Partial<SystemCleanupStatus>): void {
+    const current = this.runs.get(runId);
+    if (!current) return;
+    this.runs.set(runId, { ...current, ...partial });
   }
 
   private releaseRun(runId: string): void {
     if (this.activeRunId === runId) {
       this.activeRunId = null;
-      this.activeProcess = null;
     }
+    this.cancelRequested.delete(runId);
   }
 
-  private powerShellPath(): string {
-    return join(
-      process.env.SystemRoot ?? 'C:\\Windows',
-      'System32',
-      'WindowsPowerShell',
-      'v1.0',
-      'powershell.exe'
-    );
-  }
+  private async runEstimate(runId: string, request: SystemCleanupRequest): Promise<void> {
+    const env = this.environment();
+    const roots = this.cleanupRoots();
+    const driveBefore = await readDriveSpace(env.tempDir);
 
-  private async resolveHelperPath(): Promise<string> {
-    const candidates = [
-      join(process.resourcesPath, 'system-cleanup-helper.ps1'),
-      join(process.resourcesPath, 'app.asar.unpacked', 'resources', 'system-cleanup-helper.ps1'),
-      join(app.getAppPath(), 'resources', 'system-cleanup-helper.ps1')
-    ];
+    this.patch(runId, { phase: 'scanning', message: 'Đang quét...', driveBefore });
 
-    const source = candidates.find((candidate) => existsSync(candidate));
+    const snapshot: RunSnapshot = {
+      estimatedBytes: 0,
+      removedBytes: 0,
+      removedItems: 0,
+      skippedItems: 0,
+      safeToDeleteBytes: 0,
+      findings: [],
+      results: [],
+      errors: []
+    };
+    let processed = 0;
 
-    if (!source) {
-      throw new Error('Thiếu system-cleanup-helper.ps1 trong gói ứng dụng.');
-    }
+    const shouldCancel = (): boolean => this.cancelRequested.has(runId);
 
-    const localHelperDirectory = join(app.getPath('userData'), 'system-cleanup-helper');
-    const localHelperPath = join(localHelperDirectory, 'system-cleanup-helper.ps1');
-
-    await mkdir(localHelperDirectory, { recursive: true });
-    await copyFile(source, localHelperPath);
-
-    return localHelperPath;
-  }
-
-  private async patchStatus(statusPath: string, patch: Partial<SystemCleanupStatus>): Promise<void> {
-    try {
-      const current = JSON.parse(await readFile(statusPath, 'utf8')) as SystemCleanupStatus;
-
-      await writeFile(statusPath, JSON.stringify({ ...current, ...patch }, null, 2), 'utf8');
-    } catch {
-      // Helper có thể đang ghi cùng lúc; lần polling kế tiếp sẽ đọc lại.
-    }
-  }
-
-  private async failIfNotTerminal(statusPath: string, message: string): Promise<void> {
-    try {
-      const current = JSON.parse(await readFile(statusPath, 'utf8')) as SystemCleanupStatus;
-
-      if (TERMINAL_PHASES.has(current.phase)) {
+    for (const categoryId of request.categories) {
+      if (shouldCancel()) {
+        this.finishCancelled(runId, snapshot);
         return;
       }
 
-      await writeFile(
-        statusPath,
-        JSON.stringify(
-          {
-            ...current,
-            phase: 'failed',
-            message,
-            completedAt: new Date().toISOString(),
-            errors: [...current.errors, message]
-          },
-          null,
-          2
-        ),
-        'utf8'
-      );
-    } catch {
-      // Không còn status file để cập nhật.
-    }
-  }
+      this.patch(runId, { currentCategory: categoryId, message: `Đang quét: ${categoryLabel(categoryId)}` });
 
-  private async removeStaleRuns(): Promise<void> {
-    // Chỉ xóa namespace riêng do Tubmedia tạo, không quét thư mục Temp chung.
-    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      let categoryBytes = 0;
+      let categoryMatchedItems = 0;
+      let categoryFindings: SystemCleanupFinding[] = [];
+      const categoryErrors: string[] = [];
+      let cancelled = false;
 
-    try {
-      const { readdir, stat } = await import('node:fs/promises');
-      const entries = await readdir(this.runRoot, { withFileTypes: true });
+      try {
+        if (categoryId === 'tubmediaResidue') {
+          const outcome = await scanTubmediaResidue(roots, Date.now(), { shouldCancel });
+          categoryBytes = outcome.estimatedBytes;
+          categoryMatchedItems = outcome.matchedItems;
+          categoryFindings = outcome.findings;
+          categoryErrors.push(...outcome.errors);
+        } else {
+          const targets = await categoryTargets(categoryId, env);
 
-      for (const entry of entries) {
-        if (!entry.isDirectory()) {
-          continue;
+          for (const target of targets) {
+            try {
+              const outcome = await scanTarget(target, { shouldCancel });
+              categoryBytes += outcome.estimatedBytes;
+              categoryMatchedItems += outcome.matchedItems;
+              categoryFindings.push(...outcome.findings);
+            } catch (targetError) {
+              if (targetError instanceof CleanupScanCancelledError) {
+                throw targetError;
+              }
+              categoryErrors.push(targetError instanceof Error ? targetError.message : String(targetError));
+            }
+          }
         }
-
-        const fullPath = join(this.runRoot, entry.name);
-        const info = await stat(fullPath);
-
-        if (info.mtimeMs < cutoff) {
-          await rm(fullPath, { recursive: true, force: true });
+      } catch (categoryError) {
+        if (categoryError instanceof CleanupScanCancelledError) {
+          cancelled = true;
+        } else {
+          categoryErrors.push(categoryError instanceof Error ? categoryError.message : String(categoryError));
         }
       }
-    } catch {
-      // Dọn stale là best-effort.
+
+      snapshot.estimatedBytes += categoryBytes;
+      snapshot.safeToDeleteBytes += categoryBytes;
+      snapshot.findings.push(...categoryFindings);
+      snapshot.errors.push(...categoryErrors);
+      snapshot.results.push({
+        matchedItems: categoryMatchedItems,
+        id: categoryId,
+        estimatedBytes: categoryBytes,
+        removedBytes: 0,
+        removedItems: 0,
+        skippedItems: 0,
+        errors: categoryErrors,
+        findings: categoryFindings
+      });
+
+      if (cancelled) {
+        this.finishCancelled(runId, snapshot);
+        return;
+      }
+
+      processed += 1;
+      this.patch(runId, {
+        processedCategories: processed,
+        progress: Math.round((processed / request.categories.length) * 100),
+        estimatedBytes: snapshot.estimatedBytes,
+        safeToDeleteBytes: snapshot.safeToDeleteBytes,
+        findings: snapshot.findings.slice(0, 200),
+        results: snapshot.results
+      });
     }
+
+    this.patch(runId, {
+      phase: 'completed',
+      message: 'Quét dung lượng hoàn tất',
+      progress: 100,
+      currentCategory: null,
+      completedAt: new Date().toISOString(),
+      estimatedBytes: snapshot.estimatedBytes,
+      safeToDeleteBytes: snapshot.safeToDeleteBytes,
+      findings: snapshot.findings.slice(0, 200),
+      results: snapshot.results,
+      errors: snapshot.errors
+    });
+    this.releaseRun(runId);
   }
 
-  private normalizeCleanupRoots(roots: TubmediaCleanupRoots): TubmediaCleanupRoots {
-    const normalize = (values: readonly string[]): string[] => {
-      const unique = new Map<string, string>();
-      for (const value of values.slice(0, 256)) {
-        const clean = typeof value === 'string' ? value.trim() : '';
-        if (!clean) continue;
-        unique.set(clean.toLocaleLowerCase('en-US'), clean);
-      }
-      return [...unique.values()];
-    };
+  private async runClean(runId: string, request: SystemCleanupRequest): Promise<void> {
+    const env = this.environment();
+    const roots = this.cleanupRoots();
+    const driveBefore = await readDriveSpace(env.tempDir);
 
-    return {
-      sourceFolders: normalize(roots.sourceFolders),
-      tempFolders: normalize(roots.tempFolders),
-      trackedTempFiles: normalize(roots.trackedTempFiles),
-      quickOutputFolders: normalize(roots.quickOutputFolders),
-      quickTempRoots: normalize(roots.quickTempRoots)
+    this.patch(runId, { phase: 'cleaning', message: 'Đang dọn dẹp...', driveBefore });
+
+    const snapshot: RunSnapshot = {
+      estimatedBytes: 0,
+      removedBytes: 0,
+      removedItems: 0,
+      skippedItems: 0,
+      safeToDeleteBytes: 0,
+      findings: [],
+      results: [],
+      errors: []
     };
+    let processed = 0;
+
+    const shouldCancel = (): boolean => this.cancelRequested.has(runId);
+
+    for (const categoryId of request.categories) {
+      if (shouldCancel()) {
+        this.finishCancelled(runId, snapshot);
+        return;
+      }
+
+      this.patch(runId, { currentCategory: categoryId, message: `Đang dọn: ${categoryLabel(categoryId)}` });
+
+      let categoryEstimated = 0;
+      let categoryRemovedBytes = 0;
+      let categoryRemovedItems = 0;
+      let categorySkipped = 0;
+      const categoryFindings: SystemCleanupFinding[] = [];
+      const categoryErrors: string[] = [];
+      let cancelled = false;
+
+      try {
+        // Luôn quét LẠI ngay lúc xóa — không tin tưởng một lượt ước tính cũ, dù cách đây bao lâu.
+        let files: FoundFile[];
+
+        if (categoryId === 'tubmediaResidue') {
+          const outcome = await listResidueFiles(roots, Date.now(), { shouldCancel });
+          files = outcome.matches;
+          categoryErrors.push(...outcome.errors);
+        } else {
+          const targets = await categoryTargets(categoryId, env);
+          const collected: FoundFile[] = [];
+
+          for (const target of targets) {
+            try {
+              collected.push(...(await listCategoryFiles(target, { shouldCancel })));
+            } catch (targetError) {
+              if (targetError instanceof CleanupScanCancelledError) {
+                throw targetError;
+              }
+              categoryErrors.push(targetError instanceof Error ? targetError.message : String(targetError));
+            }
+          }
+          files = collected;
+        }
+
+        for (const file of files) {
+          if (shouldCancel()) {
+            throw new CleanupScanCancelledError();
+          }
+
+          categoryEstimated += file.bytes;
+
+          // Kiểm tra lại an toàn NGAY trước khi cách ly từng file — quarantineFile() tự gọi lại
+          // assertSafeCleanupPath()+lstat() một lần nữa bên trong, không tin kết quả quét ở trên.
+          const outcome = await this.quarantine.quarantineFile(file.path, categoryId, runId);
+
+          if (outcome.ok) {
+            categoryRemovedBytes += outcome.entry.bytes;
+            categoryRemovedItems += 1;
+            categoryFindings.push({
+              path: outcome.entry.originalPath,
+              bytes: outcome.entry.bytes,
+              classification: 'safe-to-delete',
+              reason: `Đã chuyển vào khu cách ly — có thể hoàn tác trong ${QUARANTINE_RETENTION_DAYS} ngày.`
+            });
+          } else {
+            categorySkipped += 1;
+            categoryErrors.push(`${file.path}: ${outcome.reason}`);
+          }
+        }
+      } catch (categoryError) {
+        if (categoryError instanceof CleanupScanCancelledError) {
+          cancelled = true;
+        } else {
+          categoryErrors.push(categoryError instanceof Error ? categoryError.message : String(categoryError));
+        }
+      }
+
+      snapshot.estimatedBytes += categoryEstimated;
+      snapshot.removedBytes += categoryRemovedBytes;
+      snapshot.removedItems += categoryRemovedItems;
+      snapshot.skippedItems += categorySkipped;
+      snapshot.safeToDeleteBytes += categoryEstimated;
+      snapshot.findings.push(...categoryFindings);
+      snapshot.errors.push(...categoryErrors);
+      snapshot.results.push({
+        matchedItems: categoryRemovedItems + categorySkipped,
+        id: categoryId,
+        estimatedBytes: categoryEstimated,
+        removedBytes: categoryRemovedBytes,
+        removedItems: categoryRemovedItems,
+        skippedItems: categorySkipped,
+        errors: categoryErrors,
+        findings: categoryFindings
+      });
+
+      if (cancelled) {
+        this.finishCancelled(runId, snapshot);
+        return;
+      }
+
+      processed += 1;
+      this.patch(runId, {
+        processedCategories: processed,
+        progress: Math.round((processed / request.categories.length) * 100),
+        estimatedBytes: snapshot.estimatedBytes,
+        removedBytes: snapshot.removedBytes,
+        removedItems: snapshot.removedItems,
+        skippedItems: snapshot.skippedItems,
+        safeToDeleteBytes: snapshot.safeToDeleteBytes,
+        findings: snapshot.findings.slice(0, 200),
+        results: snapshot.results
+      });
+    }
+
+    const driveAfter = await readDriveSpace(env.tempDir);
+
+    this.patch(runId, {
+      phase: 'completed',
+      message: 'Dọn dẹp hoàn tất',
+      progress: 100,
+      currentCategory: null,
+      completedAt: new Date().toISOString(),
+      estimatedBytes: snapshot.estimatedBytes,
+      removedBytes: snapshot.removedBytes,
+      removedItems: snapshot.removedItems,
+      skippedItems: snapshot.skippedItems,
+      safeToDeleteBytes: snapshot.safeToDeleteBytes,
+      driveAfter,
+      findings: snapshot.findings.slice(0, 200),
+      results: snapshot.results,
+      errors: snapshot.errors
+    });
+    this.releaseRun(runId);
+  }
+
+  private finishCancelled(runId: string, snapshot: RunSnapshot): void {
+    this.patch(runId, {
+      phase: 'cancelled',
+      message: 'Đã dừng theo yêu cầu.',
+      currentCategory: null,
+      completedAt: new Date().toISOString(),
+      estimatedBytes: snapshot.estimatedBytes,
+      removedBytes: snapshot.removedBytes,
+      removedItems: snapshot.removedItems,
+      skippedItems: snapshot.skippedItems,
+      safeToDeleteBytes: snapshot.safeToDeleteBytes,
+      findings: snapshot.findings.slice(0, 200),
+      results: snapshot.results,
+      errors: snapshot.errors
+    });
+    this.releaseRun(runId);
   }
 }

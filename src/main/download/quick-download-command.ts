@@ -3,7 +3,10 @@ import {
   type QuickDownloadMediaMode,
   type ValidatedQuickDownloadRequest
 } from '@shared/quick-download.js';
-import type { AppSettings } from '@shared/types/domain.js';
+import { YTDLP_PROGRESS_FLAGS } from '../downloader/ytdlp-progress.js';
+// Rà soát toàn diện (2026-09-24) — mục 2.2: logic dựng tham số cookie gộp về dùng chung với các luồng
+// yt-dlp khác (download-engine.ts, preview-frame-command.ts) — không đổi hành vi, chỉ tổ chức lại code.
+import { buildCookieArguments, type CookieArgumentSettings } from '../downloader/ytdlp-cookie-arguments.js';
 
 export interface QuickDownloadCommandPaths {
   ffmpegDirectory: string;
@@ -15,12 +18,44 @@ export interface QuickDownloadCommandPaths {
 export interface QuickDownloadCommandOptions {
   compactFilename?: boolean;
   forceGenericExtractor?: boolean;
+  /** Giai đoạn 6 mục 7 (2026-09-24): mẫu đặt tên tệp do người dùng cấu hình trong Cài đặt. */
+  filenameTemplate?: string | undefined;
 }
 
-export type QuickDownloadAuthentication = Pick<
-  AppSettings,
-  'cookiesFilePath' | 'cookiesBrowser' | 'cookiesBrowserProfile'
->;
+// Giai đoạn 6 mục 7 (2026-09-24) — "Mẫu đặt tên tệp": mặc định GIỮ NGUYÊN đúng tên hiện có (tên video +
+// mã video) để không đổi hành vi cho người dùng chưa cấu hình gì trong Cài đặt.
+export const DEFAULT_QUICK_DOWNLOAD_FILENAME_TEMPLATE = '{title} [{id}]';
+
+// Ánh xạ token của Tubmedia sang cú pháp trường yt-dlp thật. {channel} dùng đúng chuỗi dự phòng
+// (uploader → channel → uploader_id) đã dùng ở nơi khác trong tệp này (TUBMEDIA_UPLOADER) để nhất quán
+// khi kênh không có tên hiển thị. {date} KHÔNG phải trường yt-dlp — là NGÀY TẢI (hôm nay), tính sẵn ở
+// tầng ứng dụng rồi chèn như một chuỗi TĨNH, vì yt-dlp chỉ biết ngày ĐĂNG TẢI (upload_date) của nguồn,
+// không biết "hôm nay".
+const FILENAME_TEMPLATE_FIELDS: Record<'title' | 'channel' | 'id', string> = {
+  title: '%(title).80B',
+  channel: '%(uploader,channel,uploader_id|)s',
+  id: '%(id)s'
+};
+
+/**
+ * Biến mẫu tên tệp của người dùng ({title}/{channel}/{date}/{id}) thành PHẦN ĐẦU của mẫu tên tệp yt-dlp
+ * thật. Phần đuôi bắt buộc (khoảng cắt nếu có + "[QD-token]" dùng để tìm lại tệp khi cần) LUÔN được ghép
+ * thêm riêng ở buildQuickDownloadArguments, KHÔNG nằm trong mẫu người dùng chỉnh được — đây là cơ chế nội
+ * bộ (tìm lại tệp đầu ra khi không đọc được đường dẫn trực tiếp từ yt-dlp), đổi/xóa sẽ làm hỏng khả năng
+ * tìm lại tệp đã tải xong.
+ */
+export function buildFilenamePrefixFromTemplate(rawTemplate: string, now: Date = new Date()): string {
+  const template = rawTemplate.trim() || DEFAULT_QUICK_DOWNLOAD_FILENAME_TEMPLATE;
+  const dateText = now.toISOString().slice(0, 10); // YYYY-MM-DD — cố định tại thời điểm bắt đầu tải.
+  // '%' không nằm trong bộ 4 token — loại bỏ trước để không ai (vô tình hay cố ý) chèn được cú pháp
+  // trường yt-dlp khác ngoài 4 token đã định nghĩa (schema Cài đặt cũng đã chặn '%' khi lưu).
+  const withoutPercent = template.replaceAll('%', '');
+  return withoutPercent.replace(/\{(title|channel|date|id)\}/g, (_match, token: string) =>
+    token === 'date' ? dateText : FILENAME_TEMPLATE_FIELDS[token as 'title' | 'channel' | 'id']
+  );
+}
+
+export type QuickDownloadAuthentication = CookieArgumentSettings;
 
 const VIDEO_AUDIO_SELECTORS = {
   best: 'bv*+ba/b',
@@ -63,14 +98,19 @@ export function buildQuickDownloadArguments(
   options: QuickDownloadCommandOptions = {}
 ): string[] {
   const filenameToken = paths.outputToken ?? paths.runToken;
-  const outputTemplate = options.compactFilename
-    ? `Video [%(id)s]${safeRangeSuffix(request)} [QD-${filenameToken}].${extensionFor(request.mediaMode)}`
-    : `%(title).80B [%(id)s]${safeRangeSuffix(request)} [QD-${filenameToken}].${extensionFor(request.mediaMode)}`;
+  // Mẫu tên tệp người dùng (mục 7) CHỈ áp dụng ở nhánh bình thường — nhánh "compactFilename" là lưới an
+  // toàn tự động khi tên theo mẫu quá dài/không hợp lệ với Windows, PHẢI giữ cố định để luôn hoạt động.
+  const filenamePrefix = options.compactFilename
+    ? 'Video [%(id)s]'
+    : buildFilenamePrefixFromTemplate(options.filenameTemplate ?? DEFAULT_QUICK_DOWNLOAD_FILENAME_TEMPLATE);
+  const outputTemplate = `${filenamePrefix}${safeRangeSuffix(request)} [QD-${filenameToken}].${extensionFor(request.mediaMode)}`;
 
   const args = [
     '--ignore-config',
     '--no-playlist',
-    '--newline',
+    // --print làm yt-dlp im lặng: thiếu --progress thì --progress-template không in dòng nào và
+    // thanh tiến độ/tốc độ/ETA đứng ở 0% cho tới khi xong.
+    ...YTDLP_PROGRESS_FLAGS,
     '--no-color',
     '--windows-filenames',
     '--trim-filenames',
@@ -111,6 +151,12 @@ export function buildQuickDownloadArguments(
     'after_move:TUBMEDIA_FILE|%(filepath)s'
   ];
 
+  // Giai đoạn 6 mục 1: lấy tên kênh/nguồn để ghi credit vào metadata sau khi tải xong (chuỗi rỗng nếu
+  // nguồn không có cả 3 trường — không báo lỗi, chỉ bỏ qua dòng "Nguồn" khi ghi metadata).
+  if (request.embedCredit) {
+    args.push('--print', 'before_dl:TUBMEDIA_UPLOADER|%(uploader,channel,uploader_id|)s');
+  }
+
   if (request.mediaMode === 'video-audio') {
     args.push('--merge-output-format', 'mp4');
   } else if (request.mediaMode === 'audio-only') {
@@ -141,19 +187,13 @@ export function buildQuickDownloadArguments(
     if (request.accurateCut) args.push('--force-keyframes-at-cuts');
   }
 
-  if (authentication?.cookiesFilePath) {
-    args.push('--cookies', authentication.cookiesFilePath);
-  } else if (authentication && authentication.cookiesBrowser !== 'none') {
-    const browserSpec = authentication.cookiesBrowserProfile
-      ? `${authentication.cookiesBrowser}:${authentication.cookiesBrowserProfile}`
-      : authentication.cookiesBrowser;
-    args.push('--cookies-from-browser', browserSpec);
-  }
+  args.push(...buildCookieArguments(authentication));
 
   if (options.forceGenericExtractor) {
     args.push('--ies', 'generic,default');
   }
 
-  args.push(request.url);
+  // "--" bảo đảm URL luôn là đối số vị trí, không bao giờ bị yt-dlp hiểu là tùy chọn.
+  args.push('--', request.url);
   return args;
 }

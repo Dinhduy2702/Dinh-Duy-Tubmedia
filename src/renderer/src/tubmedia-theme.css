@@ -586,6 +586,19 @@ html.light .tubmedia-logo-light {
   background: linear-gradient(var(--accent3), var(--accent));
   animation: meter-wave 1.6s ease-in-out infinite;
 }
+/* VẤN ĐỀ 2 mục 1 (2026-09-22): nhãn "Đang giảm tải" khi bộ điều tiết CPU tạm hoãn tác vụ mới. */
+.topbar-load-throttled {
+  margin-left: 0.4rem;
+  border: 1px solid var(--tone-warning-border);
+  border-radius: 999px;
+  background: var(--tone-warning-bg);
+  padding: 0.16rem 0.5rem;
+  color: var(--tone-warning-text);
+  font-size: 0.6rem;
+  font-weight: 850;
+  white-space: nowrap;
+  cursor: help;
+}
 .topbar-sparkline span:nth-child(1) {
   height: 25%;
   animation-delay: -0.5s;
@@ -6069,8 +6082,15 @@ body {
   grid-column: span 2;
 }
 .merge-config-grid > .compact-config-quality,
-.merge-config-grid > .compact-config-profile {
-  grid-column: span 3;
+.merge-config-grid > .compact-config-profile,
+.merge-config-grid > .compact-config-aspect-ratio {
+  grid-column: span 2;
+}
+.merge-aspect-ratio-note {
+  display: block;
+  margin-top: 0.3rem;
+  color: var(--muted);
+  font-size: 0.68rem;
 }
 .compact-config-grid .label {
   margin-bottom: 0.25rem;
@@ -6556,9 +6576,11 @@ body {
 }
 .editor-stat-strip,
 .queue-stat-strip,
+/* A2 mục 1 (2026-09-25): bỏ thẻ "Bộ xử lý" trùng với thanh trên cùng — còn 3 thẻ (Tiến trình/Bộ nhớ/
+   Công cụ), đổi lưới từ 4 cột sang 3 cột cho khớp. */
 .diagnostics-summary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.55rem;
 }
 .editor-stat-strip > div,

@@ -13,6 +13,7 @@ import {
   FileVideo2,
   FolderOpen,
   Gauge,
+  GripVertical,
   HardDrive,
   Layers3,
   ListOrdered,
@@ -22,6 +23,7 @@ import {
   Play,
   Plus,
   RotateCcw,
+  Scissors,
   Settings2,
   ShieldCheck,
   Square,
@@ -41,6 +43,7 @@ import type {
   WorkbenchStorageSummary,
   WorkbenchSlotState
 } from '@shared/types/domain';
+import type { LocalCutAspectRatio } from '@shared/local-cut';
 import { parseInputText } from '@shared/utils/input-parser';
 import { sanitizeFilename } from '@shared/utils/filename';
 import { shouldShowInlineBlockingIssue } from '@shared/utils/notification-policy';
@@ -53,11 +56,14 @@ import { ToolReadinessPanel } from '../components/ToolReadinessPanel';
 import { FolderField } from '../components/FolderField';
 import { StatusBadge } from '../components/StatusBadge';
 import { CompactLogRow } from '../components/CompactLogRow';
+import { EmptyState } from '../components/ui/EmptyState';
 import { useAppStore } from '../stores/app-store';
+import { showNotice } from '../utils/notify';
 import { createUiEventId } from '../utils/ui-id';
 import { loadWorkbenchPath, saveWorkbenchPath } from '../utils/workbench-path-memory';
 import { friendlyIssue } from '../utils/ui-error';
 import { audioModeLabel, jobTypeLabel, statusLabel } from '../utils/vi-labels';
+import { progressFillStyle } from '../utils/progress-style';
 
 interface MergeForm {
   name: string;
@@ -71,12 +77,26 @@ interface MergeForm {
   exportTimelineTxt: boolean;
   /** TUBMEDIA TIMELINE ONLY UI HOTFIX12 */
   timelineOnly: boolean;
+  /** Giai đoạn 6 mục 4 (2026-09-24): preset xuất theo nền tảng — chỉ đổi tỉ lệ khung hình. */
+  aspectRatio: LocalCutAspectRatio;
 }
+
+/** 4 preset phổ biến nhất theo đúng lựa chọn của người dùng — nhãn nêu rõ nền tảng thường dùng từng
+ * tỉ lệ để đúng tinh thần "preset xuất theo nền tảng", dù cơ chế bên trong chỉ đổi tỉ lệ khung hình. */
+const ASPECT_RATIO_PRESETS: Array<{ value: LocalCutAspectRatio; label: string }> = [
+  { value: 'original', label: 'Giữ nguyên tỉ lệ nguồn' },
+  { value: '9:16', label: 'Dọc 9:16 · Shorts/TikTok/Reels' },
+  { value: '1:1', label: 'Vuông 1:1 · Bài đăng Instagram/Facebook' },
+  { value: '16:9', label: 'Ngang 16:9 · YouTube/Facebook' }
+];
 
 type MergeMap<T> = Record<MergeLaneId, T>;
 type WorkflowState = 'idle' | 'running' | 'paused' | 'failed' | 'completed';
 
-const MERGE_IDS: MergeLaneId[] = ['merge-1', 'merge-2', 'merge-3', 'merge-4'];
+// A1 (2026-09-25): tăng từ 4 lên 6 quy trình song song theo yêu cầu người dùng — không đổi
+// maxGlobalMergeJobs (trần ghép ĐỒNG THỜI thật, vẫn 1-4 theo khuyến nghị phần cứng).
+const MERGE_IDS: MergeLaneId[] = ['merge-1', 'merge-2', 'merge-3', 'merge-4', 'merge-5', 'merge-6'];
+const MAX_LANE_COUNT = 6;
 const ACTIVE = [
   'pending',
   'analyzing',
@@ -125,12 +145,16 @@ function mergeErrorTechnical(job: QueueJob, log: LogEntry | null): string {
 function mergeNumber(slot: MergeLaneId): number {
   return Number(slot.slice('merge-'.length));
 }
-function clampCount(value: number): 1 | 2 | 3 | 4 {
-  return Math.max(1, Math.min(4, Math.round(value || 1))) as 1 | 2 | 3 | 4;
+function clampCount(value: number): 1 | 2 | 3 | 4 | 5 | 6 {
+  return Math.max(1, Math.min(6, Math.round(value || 1))) as 1 | 2 | 3 | 4 | 5 | 6;
 }
 function mapOf<T>(factory: (slot: MergeLaneId) => T): MergeMap<T> {
   return Object.fromEntries(MERGE_IDS.map((slot) => [slot, factory(slot)])) as MergeMap<T>;
 }
+/** Khớp downloadMergeSchema: name ≤ 160 ký tự, finalFileName ≤ 220 ký tự. */
+const MERGE_LANE_NAME_MAX_LENGTH = 160;
+const MERGE_FINAL_FILE_NAME_MAX_LENGTH = 220;
+
 function loadTimelineOnlyMode(slot: MergeLaneId): boolean {
   try { return window.localStorage.getItem('tubmedia.merge.timelineOnly.' + slot) === '1'; }
   catch { return false; }
@@ -173,7 +197,8 @@ function emptyMerge(
     qualityProfileId: settings?.defaultQualityProfileId ?? qualities[0]?.id ?? 'quality-source-size',
     resourceProfileId: settings?.defaultResourceProfileId ?? resources[0]?.id ?? 'resource-interactive',
     exportTimelineTxt: false,
-    timelineOnly: loadTimelineOnlyMode(slot)
+    timelineOnly: loadTimelineOnlyMode(slot),
+    aspectRatio: 'original'
   };
 }
 function recommendedMergeLimit(hardware: HardwareProfile | null): { pipelines: 1 | 2 | 3 | 4; note: string } {
@@ -334,7 +359,7 @@ function MergeDetailedProgress({ jobs, timelineOnly }: { jobs: QueueJob[]; timel
         <Gauge size={19} />
       </header>
       <div className={`progress progress-large ${animate ? 'is-animated' : 'is-static'}`}>
-        <span style={{ width: `${progress}%` }} />
+        <span style={progressFillStyle(progress)} />
       </div>
       <div className="merge-progress-grid">
         <div>
@@ -383,15 +408,34 @@ function MergeProductionPanel({
   jobs,
   storage,
   onNotice,
-  setError
+  setError,
+  onReorder
 }: {
   form: MergeForm;
   jobs: QueueJob[];
   storage: WorkbenchStorageSummary | null;
   onNotice: (title: string, message: string, severity?: 'info' | 'success' | 'warning') => void;
   setError: (error: string | null) => void;
+  /** Kéo-thả để sắp lại thứ tự ghép: nhận lại linksText đã đổi thứ tự dòng (không đổi cú pháp/dữ liệu
+   * từng dòng — chỉ đổi thứ tự). Không có thì danh sách hiện chỉ để xem, giữ hành vi cũ. */
+  onReorder?: (nextLinksText: string) => void;
 }): React.JSX.Element {
   const items = parseInputText(form.linksText).filter((item) => item.validity !== 'invalid');
+  // dragIndex chỉ để TÔ hiệu ứng (opacity dòng đang kéo) — không dùng để tính thứ tự khi thả, vì state
+  // React có thể chưa kịp cập nhật giữa dragstart và drop (nhất là khi thả rất nhanh). Vị trí nguồn khi
+  // thả lấy trực tiếp từ event.dataTransfer, không phụ thuộc thời điểm re-render.
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const DRAG_MIME = 'application/x-tubmedia-merge-index';
+
+  function reorderTo(sourceIndex: number, targetIndex: number): void {
+    if (!onReorder || Number.isNaN(sourceIndex) || sourceIndex === targetIndex) return;
+    const next = items.map((item) => item.originalText);
+    const [moved] = next.splice(sourceIndex, 1);
+    if (moved === undefined) return;
+    next.splice(targetIndex, 0, moved);
+    onReorder(next.join('\n'));
+  }
   const downloadJobs = jobs.filter((job) => job.type === 'download');
   const clipJobs = jobs.filter((job) => job.type === 'clip' || job.type === 'normalize');
   const mergeJob = jobs.find((job) => job.type === 'merge');
@@ -409,17 +453,19 @@ function MergeProductionPanel({
   const completedClips = clipJobs.filter((job) => ['completed', 'skipped'].includes(job.status)).length;
   const mergeCompleted = Boolean(mergeJob && ['completed', 'skipped'].includes(mergeJob.status));
 
+  // B4 (2026-09-24): mỗi bước có icon riêng đúng chức năng — trước đây bước CHƯA TỚI (chưa active/done)
+  // hiện số thứ tự trần (index+1); nay luôn hiện icon của chính bước đó bất kể trạng thái.
   const stages = timelineOnly
     ? [
-        { label: 'Tải hoặc dùng lại nguồn', value: downloadJobs.length ? `${completedDownloads}/${downloadJobs.length}` : 'Chờ bắt đầu', active: downloadJobs.some((job) => ACTIVE.includes(job.status)), done: downloadJobs.length > 0 && completedDownloads === downloadJobs.length },
-        { label: 'Đọc thời lượng', value: mergeJob ? `${statusLabel(mergeJob.status)} · ${mergeJob.progress.toFixed(1)}%` : 'Không chạy ghép video', active: Boolean(mergeJob && ACTIVE.includes(mergeJob.status)), done: mergeCompleted },
-        { label: 'Timeline TXT', value: mergeCompleted ? 'Sẵn sàng xem và xuất' : 'Đang chờ metadata nguồn', active: false, done: mergeCompleted }
+        { label: 'Tải hoặc dùng lại nguồn', icon: Download, value: downloadJobs.length ? `${completedDownloads}/${downloadJobs.length}` : 'Chờ bắt đầu', active: downloadJobs.some((job) => ACTIVE.includes(job.status)), done: downloadJobs.length > 0 && completedDownloads === downloadJobs.length },
+        { label: 'Đọc thời lượng', icon: Gauge, value: mergeJob ? `${statusLabel(mergeJob.status)} · ${mergeJob.progress.toFixed(1)}%` : 'Không chạy ghép video', active: Boolean(mergeJob && ACTIVE.includes(mergeJob.status)), done: mergeCompleted },
+        { label: 'Timeline TXT', icon: FileText, value: mergeCompleted ? 'Sẵn sàng xem và xuất' : 'Đang chờ metadata nguồn', active: false, done: mergeCompleted }
       ]
     : [
-        { label: 'Tải nguồn', value: downloadJobs.length ? `${completedDownloads}/${downloadJobs.length}` : 'Chờ bắt đầu', active: downloadJobs.some((job) => ACTIVE.includes(job.status)), done: downloadJobs.length > 0 && completedDownloads === downloadJobs.length },
-        { label: 'Cắt / chuẩn hóa', value: clipJobs.length ? `${completedClips}/${clipJobs.length}` : 'Tự động khi cần', active: clipJobs.some((job) => ACTIVE.includes(job.status)), done: clipJobs.length > 0 && completedClips === clipJobs.length },
-        { label: 'Ghép thành phẩm', value: recoveryMode === 'verified-final' ? 'Đã hậu kiểm và dùng lại' : recoveryMode === 'verified-checkpoint' ? 'Đã tiếp tục từ checkpoint' : mergeJob ? `${statusLabel(mergeJob.status)} · ${mergeJob.progress.toFixed(1)}%` : 'Chờ nguồn', active: Boolean(mergeJob && ACTIVE.includes(mergeJob.status)), done: mergeCompleted },
-        { label: 'Timeline TXT', value: mergeCompleted ? 'Sẵn sàng chọn nơi lưu' : 'Xuất thủ công sau khi ghép', active: false, done: mergeCompleted }
+        { label: 'Tải nguồn', icon: Download, value: downloadJobs.length ? `${completedDownloads}/${downloadJobs.length}` : 'Chờ bắt đầu', active: downloadJobs.some((job) => ACTIVE.includes(job.status)), done: downloadJobs.length > 0 && completedDownloads === downloadJobs.length },
+        { label: 'Cắt / chuẩn hóa', icon: Scissors, value: clipJobs.length ? `${completedClips}/${clipJobs.length}` : 'Tự động khi cần', active: clipJobs.some((job) => ACTIVE.includes(job.status)), done: clipJobs.length > 0 && completedClips === clipJobs.length },
+        { label: 'Ghép thành phẩm', icon: Layers3, value: recoveryMode === 'verified-final' ? 'Đã hậu kiểm và dùng lại' : recoveryMode === 'verified-checkpoint' ? 'Đã tiếp tục từ checkpoint' : mergeJob ? `${statusLabel(mergeJob.status)} · ${mergeJob.progress.toFixed(1)}%` : 'Chờ nguồn', active: Boolean(mergeJob && ACTIVE.includes(mergeJob.status)), done: mergeCompleted },
+        { label: 'Timeline TXT', icon: FileText, value: mergeCompleted ? 'Sẵn sàng chọn nơi lưu' : 'Xuất thủ công sau khi ghép', active: false, done: mergeCompleted }
       ];
   const copyTimelineMark = async (row: TimelineRow): Promise<void> => {
     const text = formatTimelineCopyText(row.start);
@@ -471,7 +517,7 @@ function MergeProductionPanel({
       <ShieldCheck size={17}/><span><b>{recoveryMode === 'verified-final' ? 'Không ghép trùng thành phẩm' : recoveryMode === 'verified-checkpoint' ? 'Đã tiếp tục đúng checkpoint' : 'Đã hậu kiểm thành phẩm'}</b><small>{resultMessage}</small></span>
     </div>}
     <div className="merge-stage-grid">
-        {stages.map((stage, index) => (
+        {stages.map((stage) => (
           <div
             className={`merge-stage ${stage.active ? 'is-active' : ''} ${stage.done ? 'is-done' : ''}`}
             key={stage.label}
@@ -481,10 +527,8 @@ function MergeProductionPanel({
                 <CheckCircle2 size={16} />
               ) : stage.active ? (
                 <LoaderCircle className="animate-spin" size={16} />
-              ) : index === 0 ? (
-                <Download size={16} />
               ) : (
-                <span>{index + 1}</span>
+                <stage.icon size={16} />
               )}
             </span>
             <div>
@@ -496,7 +540,7 @@ function MergeProductionPanel({
       </div>
       <div className="merge-timeline-preview">
         <div className="merge-timeline-heading">
-          <div><b>Timeline theo định dạng dựng</b><small>{timelineOnly ? 'Timeline được tính từ nguồn mà không ghép video; copy từng mốc hoặc chọn Xuất TXT' : 'Copy từng mốc hoặc nhấn biểu tượng Lưu để chọn nơi xuất TXT'}</small></div>
+          <div><b>Timeline theo định dạng dựng</b><small>{timelineOnly ? 'Timeline được tính từ nguồn mà không ghép video; copy từng mốc hoặc chọn Xuất TXT' : hasActualTimeline ? 'Copy từng mốc hoặc nhấn biểu tượng Lưu để chọn nơi xuất TXT' : onReorder ? 'Kéo ⠿ để đổi thứ tự ghép' : 'Copy từng mốc hoặc nhấn biểu tượng Lưu để chọn nơi xuất TXT'}</small></div>
           <span>
             {hasActualTimeline
               ? `${timelineRows.length} mốc thời gian thực`
@@ -504,7 +548,13 @@ function MergeProductionPanel({
           </span>
         </div>
         <div className="merge-timeline-rows scroll">
-          {items.length === 0 && <div className="empty-state">Dán liên kết để xem trước thứ tự ghép.</div>}
+          {items.length === 0 && (
+            <EmptyState
+              icon={ListOrdered}
+              title="Chưa có video nào trong quy trình"
+              description="Dán liên kết (mỗi dòng một link) ở ô bên dưới để xem trước thứ tự ghép tại đây. Kéo ⠿ để sắp lại thứ tự sau khi đã dán."
+            />
+          )}
           {hasActualTimeline
             ? timelineRows.map((row) => (
                 <div className="merge-timeline-row is-actual" key={`${row.index}-${row.start}`}>
@@ -531,7 +581,46 @@ function MergeProductionPanel({
                 </div>
               ))
             : items.map((item, index) => (
-                <div className="merge-timeline-row" key={`${item.lineNumber}-${index}`}>
+                <div
+                  className={`merge-timeline-row ${onReorder ? 'is-reorderable' : ''} ${dragIndex === index ? 'is-dragging' : ''} ${dragOverIndex === index && dragIndex !== null && dragIndex !== index ? 'is-drag-over' : ''}`}
+                  key={`${item.lineNumber}-${index}`}
+                  draggable={Boolean(onReorder)}
+                  onDragStart={
+                    onReorder
+                      ? (event) => {
+                          event.dataTransfer.effectAllowed = 'move';
+                          event.dataTransfer.setData(DRAG_MIME, String(index));
+                          setDragIndex(index);
+                        }
+                      : undefined
+                  }
+                  onDragOver={
+                    onReorder
+                      ? (event) => {
+                          event.preventDefault();
+                          event.dataTransfer.dropEffect = 'move';
+                          setDragOverIndex(index);
+                        }
+                      : undefined
+                  }
+                  onDrop={
+                    onReorder
+                      ? (event) => {
+                          event.preventDefault();
+                          const sourceIndex = Number(event.dataTransfer.getData(DRAG_MIME));
+                          reorderTo(sourceIndex, index);
+                          setDragIndex(null);
+                          setDragOverIndex(null);
+                        }
+                      : undefined
+                  }
+                  onDragEnd={onReorder ? () => { setDragIndex(null); setDragOverIndex(null); } : undefined}
+                >
+                  {onReorder && (
+                    <span className="merge-timeline-drag-handle" aria-hidden="true" title="Kéo để đổi thứ tự ghép">
+                      <GripVertical size={15} />
+                    </span>
+                  )}
                   <div className="merge-timeline-mark">
                     <button disabled aria-label="Mốc thời gian chưa sẵn sàng">
                       <Copy size={13} />
@@ -672,7 +761,8 @@ export function DownloadMergePage(): React.JSX.Element {
               qualityProfileId: current.project.qualityProfileId,
               resourceProfileId: current.project.resourceProfileId,
               timelineOnly: current.jobs.some((job) => job.type === 'merge' && job.input.timelineOnly === true) || loadTimelineOnlyMode(slot),
-              exportTimelineTxt: false
+              exportTimelineTxt: false,
+              aspectRatio: current.project.aspectRatio
             };
           }
         }
@@ -686,7 +776,7 @@ export function DownloadMergePage(): React.JSX.Element {
   const notify = (
     title: string,
     message: string,
-    severity: 'info' | 'success' | 'warning' = 'success'
+    severity: 'info' | 'success' | 'warning' | 'neutral' = 'success'
   ): void => {
     setAttention({ id: createUiEventId('merge-ui'), severity, title, message, sticky: false });
   };
@@ -715,7 +805,8 @@ export function DownloadMergePage(): React.JSX.Element {
           const next = await window.desktop.workbench.saveMergeDraft({
             slot,
             ...forms[slot],
-            name: forms[slot].finalFileName,
+            // Tên hiển thị của quy trình tối đa 160 ký tự; tên tệp thành phẩm (finalFileName) được phép tới 220.
+            name: forms[slot].finalFileName.slice(0, MERGE_LANE_NAME_MAX_LENGTH),
             exportTimelineTxt: false
           });
           if (revisionRef.current[slot] === revision) {
@@ -742,7 +833,8 @@ export function DownloadMergePage(): React.JSX.Element {
       const next = await window.desktop.workbench.startMerge({
         slot,
         ...forms[slot],
-        name: forms[slot].finalFileName,
+        // Tên hiển thị của quy trình tối đa 160 ký tự; tên tệp thành phẩm (finalFileName) được phép tới 220.
+            name: forms[slot].finalFileName.slice(0, MERGE_LANE_NAME_MAX_LENGTH),
         exportTimelineTxt: false
       });
       setStates((current) => ({ ...current, [slot]: next }));
@@ -771,7 +863,7 @@ export function DownloadMergePage(): React.JSX.Element {
         action === 'cancel'
           ? 'Các quy trình ghép khác không bị ảnh hưởng.'
           : 'Hàng đợi và tệp tạm hiện tại được giữ để tiếp tục đúng vị trí.',
-        action === 'cancel' ? 'warning' : 'success'
+        action === 'resume' ? 'success' : 'neutral'
       );
     } catch (error) {
       setError(messageOf(error));
@@ -789,7 +881,7 @@ export function DownloadMergePage(): React.JSX.Element {
       notify(
         `Thử lại quy trình ghép ${mergeNumber(slot)}`,
         count ? `Đã đưa ${count} tác vụ lỗi về hàng chờ.` : 'Không có tác vụ lỗi cần thử lại.',
-        'info'
+        count ? 'success' : 'neutral'
       );
     } catch (error) {
       setError(messageOf(error));
@@ -844,7 +936,9 @@ export function DownloadMergePage(): React.JSX.Element {
           : false;
       });
       if (hiddenRunning) {
-        setError(
+        showNotice(
+          'warning',
+          'Quy trình ghép đang chạy',
           'Một quy trình ghép sắp bị ẩn vẫn đang chạy. Hãy tạm dừng hoặc hủy riêng quy trình đó trước.'
         );
         return;
@@ -866,7 +960,8 @@ export function DownloadMergePage(): React.JSX.Element {
             tempFolder: rememberedTemp,
             outputFolder: rememberedOutput,
             qualityProfileId: source.qualityProfileId,
-            resourceProfileId: source.resourceProfileId
+            resourceProfileId: source.resourceProfileId,
+            aspectRatio: source.aspectRatio
           }
         }));
         setActiveLane(target);
@@ -875,11 +970,8 @@ export function DownloadMergePage(): React.JSX.Element {
       }
       const next = await window.desktop.settings.update({ mergeLaneCount: nextCount });
       setSettings(next);
-      notify(
-        'Đã thay đổi số quy trình ghép',
-        `Hiện có ${nextCount} quy trình tải và ghép độc lập. Dữ liệu quy trình bị ẩn vẫn được giữ.`,
-        'info'
-      );
+      // VẤN ĐỀ 1 (2026-09-22): đổi số quy trình hiện ngay trên giao diện (tab mới xuất hiện/mất ngay lập
+      // tức) — không cần thêm thông báo nổi cho một thay đổi đã tự thấy rõ; tránh spam khi bấm nhiều lần.
     } catch (error) {
       setError(messageOf(error));
     } finally {
@@ -944,7 +1036,7 @@ export function DownloadMergePage(): React.JSX.Element {
   };
 
   return (
-    <div className="page-shell">
+    <div className="page-shell download-merge-page">
       <header className="page-heading">
         <div>
           <h1>Tải & ghép đa nền tảng</h1>
@@ -961,11 +1053,11 @@ export function DownloadMergePage(): React.JSX.Element {
           </button>
           <div className="badge badge-strong">
             <Layers3 size={15} />
-            {laneCount}/4 quy trình
+            {laneCount}/{MAX_LANE_COUNT} quy trình
           </div>
           <button
             className="btn btn-primary"
-            disabled={busy === 'global' || laneCount >= 4}
+            disabled={busy === 'global' || laneCount >= MAX_LANE_COUNT}
             onClick={() => void changeLaneCount(laneCount + 1)}
           >
             <Plus size={16} />
@@ -1344,6 +1436,7 @@ function MergeLaneCard({
                 finalFileName: event.target.value
               }))
             }
+            maxLength={MERGE_FINAL_FILE_NAME_MAX_LENGTH}
             placeholder="Ví dụ: Tong_hop_video_01"
           />
         </label>
@@ -1443,6 +1536,29 @@ function MergeLaneCard({
               ))}
             </select>
           </label>
+          <label className="compact-config-aspect-ratio">
+            <span className="label">Preset xuất theo nền tảng</span>
+            <select
+              className="select"
+              disabled={locked || form.timelineOnly}
+              value={form.aspectRatio}
+              onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                update((current) => ({ ...current, aspectRatio: event.target.value as LocalCutAspectRatio }))
+              }
+            >
+              {ASPECT_RATIO_PRESETS.map((preset) => (
+                <option key={preset.value} value={preset.value}>
+                  {preset.label}
+                </option>
+              ))}
+            </select>
+            {form.aspectRatio !== 'original' && (
+              <small className="merge-aspect-ratio-note">
+                Nền mờ phóng to từ chính video, video gốc giữ nguyên tỉ lệ ở giữa (kiểu CapCut) — chạy thêm một
+                bước xử lý sau khi ghép xong nên mất thêm thời gian.
+              </small>
+            )}
+          </label>
         </div>
         <label className={`merge-timeline-only-option ${form.timelineOnly ? 'is-active' : ''}`}>
           <input type="checkbox" checked={form.timelineOnly} disabled={locked} onChange={(event: ChangeEvent<HTMLInputElement>) => { saveTimelineOnlyMode(slot, event.target.checked); update((current) => ({ ...current, timelineOnly: event.target.checked })); }}/>
@@ -1517,7 +1633,7 @@ function MergeLaneCard({
           <div
             className={`progress progress-large ${activeJob && shouldAnimateJobProgress(activeJob.status) ? 'is-animated' : 'is-static'}`}
           >
-            <span style={{ width: `${progress}%` }} />
+            <span style={progressFillStyle(progress)} />
           </div>
           <div className="progress-meta">
             <span>{progress.toFixed(1)}% toàn quy trình</span>
@@ -1534,6 +1650,7 @@ function MergeLaneCard({
               storage={storage}
               onNotice={onNotice}
               setError={setError}
+              {...(locked ? {} : { onReorder: (text: string) => update((current) => ({ ...current, linksText: text })) })}
             />
           </div>
         </details>
@@ -1541,7 +1658,12 @@ function MergeLaneCard({
           <button
             className={`btn btn-primary workflow-primary ${state === 'running' ? 'is-running' : ''}`}
             disabled={busy || (state !== 'running' && state !== 'paused' && !canStart)}
-            onClick={() => void primary.action()}
+            onClick={(event) => {
+              // Nút này đổi vai (Bắt đầu → Tạm dừng) ngay tại chỗ; cú click thứ hai của thao tác bấm đôi
+              // sẽ rơi vào nút Tạm dừng và dừng ngay tác vụ vừa khởi động.
+              if (event.detail > 1) return;
+              void primary.action();
+            }}
           >
             {busy ? <LoaderCircle className="animate-spin" size={18} /> : <PrimaryIcon size={18} />}
             {busy ? 'Đang thực hiện...' : primary.label}

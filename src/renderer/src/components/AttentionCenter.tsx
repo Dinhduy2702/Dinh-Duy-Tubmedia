@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { AlertTriangle, CheckCircle2, Info, XCircle, X, Cookie } from 'lucide-react';
-import { isAttentionNoticeResolved, notificationDuration } from '@shared/utils/notification-policy';
+import { X, Cookie } from 'lucide-react';
+import { isAttentionNoticeResolved, noticeDisplayPolicy } from '@shared/utils/notification-policy';
+import { NOTICE_TONE_LABEL, noticeAriaRole } from '@shared/utils/notice-tone';
+import { ToneIcon } from './ui/ToneIcon';
 import { useAppStore } from '../stores/app-store';
 import { friendlyIssue } from '../utils/ui-error';
 
@@ -38,9 +40,20 @@ export function AttentionCenter(): React.JSX.Element | null {
     ['AUTHENTICATION_REQUIRED', 'COOKIES_EXPIRED', 'BROWSER_COOKIE_DATABASE_LOCKED'].includes(
       attention?.code ?? ''
     );
-  // Chỉ giữ cố định khi nguyên nhân vẫn đang chặn tác vụ.
-  const sticky = Boolean(error || (attention?.sticky && !attentionResolved));
-  const duration = notificationDuration(tone);
+  // Quy tắc hiển thị duy nhất (notification-policy.ts): lỗi thật không tự tắt (đóng được, trừ khi nguyên nhân đã
+  // được giải quyết); cảnh báo cần hành động hiện tối thiểu 12 giây; mức khác tự tắt nhanh. Trỏ chuột hoặc focus
+  // vào thông báo sẽ tạm dừng đồng hồ đếm ngược.
+  const display = noticeDisplayPolicy(
+    {
+      severity: tone,
+      code: attention?.code ?? issue?.code,
+      sticky: attention?.sticky,
+      steps: attention?.steps ?? issue?.steps
+    },
+    !error && attentionResolved
+  );
+  const sticky = display.persistent;
+  const duration = display.durationMs;
 
   const clearTimers = useCallback((): void => {
     if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
@@ -104,23 +117,16 @@ export function AttentionCenter(): React.JSX.Element | null {
   const title = issue?.title ?? attention?.title ?? 'Thông báo';
   const message = issue?.message ?? attention?.message ?? '';
   const steps = issue?.steps ?? attention?.steps ?? [];
-  const Icon =
-    tone === 'error'
-      ? XCircle
-      : tone === 'warning'
-        ? AlertTriangle
-        : tone === 'success'
-          ? CheckCircle2
-          : Info;
   const style = { '--attention-duration': `${duration}ms` } as CSSProperties;
 
   return (
     <>
       <div
-        className={`attention-center attention-${tone} attention-${phase}`}
+        className={`attention-center tone-${tone} attention-${tone} attention-${phase}`}
         style={style}
-        role={tone === 'error' || tone === 'warning' ? 'alert' : 'status'}
-        aria-live={tone === 'error' || tone === 'warning' ? 'assertive' : 'polite'}
+        data-tone={tone}
+        role={noticeAriaRole(tone)}
+        aria-live={noticeAriaRole(tone) === 'alert' ? 'assertive' : 'polite'}
         aria-atomic="true"
         onMouseEnter={() => setPaused(true)}
         onMouseLeave={() => setPaused(false)}
@@ -129,10 +135,11 @@ export function AttentionCenter(): React.JSX.Element | null {
       >
         <div className="attention-accent" aria-hidden="true" />
         <div className="attention-icon">
-          <Icon size={23} />
+          <ToneIcon tone={tone} size={23} />
         </div>
         <div className="attention-copy min-w-0 flex-1" key={key}>
           <div className="attention-heading">
+            <span className="tone-chip">{NOTICE_TONE_LABEL[tone]}</span>
             <div className="text-sm font-black">{title}</div>
             {sticky && <span className="attention-sticky-label">Cần xử lý</span>}
             {queued > 0 && <span className="attention-queue-label">+{queued}</span>}

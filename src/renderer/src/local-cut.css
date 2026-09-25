@@ -1,0 +1,189 @@
+.local-cut-file-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.local-cut-file-row small {
+  color: var(--muted);
+  display: block;
+  margin-top: 0.15rem;
+  word-break: break-all;
+}
+
+.local-cut-range-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin-top: 0.8rem;
+}
+
+.local-cut-field {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.local-cut-field span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.local-cut-field input[type='text'] {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel2);
+  color: var(--text);
+  padding: 0.5rem 0.65rem;
+  font-size: 0.8rem;
+}
+
+.local-cut-aspect-row {
+  margin-top: 0.8rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.local-cut-aspect-row-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.local-cut-aspect-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.local-cut-aspect-note {
+  color: var(--muted);
+  display: block;
+}
+
+.local-cut-options {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+  margin-top: 0.7rem;
+}
+
+.local-cut-options label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.local-cut-options label small {
+  color: var(--muted);
+  display: block;
+}
+
+.local-cut-preview-frames {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin-top: 0.7rem;
+}
+
+.local-cut-preview-frames figure {
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--panel2);
+}
+
+.local-cut-preview-frames img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  background: #000;
+}
+
+.local-cut-preview-frames figcaption {
+  padding: 0.35rem 0.55rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.local-cut-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-top: 0.9rem;
+}
+
+.local-cut-progress {
+  margin-top: 0.8rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.local-cut-progress .progress {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--panel2);
+  overflow: hidden;
+}
+
+.local-cut-progress .progress span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 220ms ease;
+}
+
+.local-cut-result {
+  margin-top: 0.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.6rem 0.75rem;
+  background: color-mix(in srgb, var(--good) 8%, var(--panel));
+}
+
+.local-cut-result small {
+  color: var(--muted);
+  display: block;
+  word-break: break-all;
+}
+
+/* Giai đoạn 6 mục 6 (2026-09-24) — "Xem thông tin tệp": lưới nhãn/giá trị đơn giản, giống tinh thần
+ * merge-quality-detail-grid đã có, nhưng gọn hơn cho danh sách nhiều dòng thông tin kỹ thuật. */
+.local-cut-info-grid {
+  margin: 0.8rem 0 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.5rem 1rem;
+}
+
+.local-cut-info-grid > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.local-cut-info-grid dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.local-cut-info-grid dd {
+  margin: 0;
+  font-size: 0.78rem;
+  text-align: right;
+}

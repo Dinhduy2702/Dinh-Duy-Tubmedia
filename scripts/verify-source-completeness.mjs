@@ -191,7 +191,8 @@ const validationRelativePaths = strictClean
 for (const path of validationRelativePaths) {
   const extension = extname(path).toLowerCase();
   if (manifest.forbiddenFileExtensions.includes(extension)) {
-    const allowedAsset = path === 'resources/icon.ico';
+    // icon bộ cài + icon bộ nhận diện 1.4 (tên riêng, chưa dùng cho bộ cài/.exe)
+    const allowedAsset = path === 'resources/icon.ico' || path === 'docs/brand/tubmedia-logo.ico';
     if (!allowedAsset) fail(`Source sạch chứa file nhị phân/media bị cấm: ${path}`);
   }
 

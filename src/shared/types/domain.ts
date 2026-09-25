@@ -1,3 +1,7 @@
+// Giai đoạn 6 mục 4 (2026-09-24): preset xuất theo nền tảng ở Ghép theo Timeline dùng lại đúng khái niệm
+// tỉ lệ khung hình đã có ở "Cắt tệp có sẵn" (mục 3) — cùng 4 giá trị, cùng cơ chế nền mờ kiểu CapCut.
+import type { LocalCutAspectRatio } from '../local-cut.js';
+
 export type ProjectStatus = 'draft' | 'active' | 'paused' | 'completed' | 'archived' | 'error';
 export type JobStatus =
   | 'pending'
@@ -43,6 +47,8 @@ export interface Project {
   qualityProfileId: string;
   resourceProfileId: string;
   exportTimelineTxt: boolean;
+  /** Giai đoạn 6 mục 4: preset xuất theo nền tảng (chỉ đổi tỉ lệ khung hình, mặc định 'original'). */
+  aspectRatio: LocalCutAspectRatio;
   createdAt: string;
   updatedAt: string;
   archivedAt: string | null;
@@ -59,6 +65,7 @@ export interface ProjectCreateInput {
   qualityProfileId: string;
   resourceProfileId: string;
   exportTimelineTxt?: boolean;
+  aspectRatio?: LocalCutAspectRatio;
 }
 
 export interface ParsedInputLine {
@@ -224,8 +231,17 @@ export interface QualityProfile {
   builtIn: boolean;
 }
 
-export type DownloadLaneId = 'download-1' | 'download-2' | 'download-3' | 'download-4';
-export type MergeLaneId = 'merge-1' | 'merge-2' | 'merge-3' | 'merge-4';
+// A1 (2026-09-25): tăng từ 4 lên 6 quy trình song song theo yêu cầu người dùng, đã xác nhận
+// SystemLoadGovernor và maxGlobalMergeJobs (trần ghép ĐỒNG THỜI thật, vẫn giữ nguyên 1-4) không phụ
+// thuộc số lane — chỉ tăng số dự án có thể CẤU HÌNH/xếp hàng song song.
+export type DownloadLaneId =
+  | 'download-1'
+  | 'download-2'
+  | 'download-3'
+  | 'download-4'
+  | 'download-5'
+  | 'download-6';
+export type MergeLaneId = 'merge-1' | 'merge-2' | 'merge-3' | 'merge-4' | 'merge-5' | 'merge-6';
 export type DownloadCodecPreference = 'auto' | 'h264' | 'hevc' | 'vp9' | 'av1';
 export type DownloadContainerPreference = 'auto' | 'mp4' | 'mkv';
 export type DownloadCompatibilityMode =
@@ -233,9 +249,13 @@ export type DownloadCompatibilityMode =
   | 'capcut_sdr_1080p'
   | 'capcut_sdr_2k';
 
+export type AppFontSize = 'medium' | 'large' | 'xlarge';
+
 export interface AppSettings {
   theme: 'system' | 'light' | 'dark';
   language: 'vi';
+  fontSize: AppFontSize;
+  reduceMotion: boolean;
   minimizeToTray: boolean;
   startWithWindows: boolean;
   closeBehavior: 'ask' | 'pause_and_exit' | 'cancel_and_exit' | 'tray';
@@ -267,8 +287,10 @@ export interface AppSettings {
   aria2Connections: number;
   maxGlobalDownloadWorkers: number;
   downloadConcurrentFragments: number;
-  downloadLaneCount: 1 | 2 | 3 | 4;
-  mergeLaneCount: 1 | 2 | 3 | 4;
+  // A1 (2026-09-25): tăng từ 4 lên 6 — chỉ số DỰ ÁN CẤU HÌNH song song, KHÔNG phải số ghép chạy đồng
+  // thời thật (đó vẫn là maxGlobalMergeJobs, cố tình giữ nguyên 1-4 theo khuyến nghị phần cứng).
+  downloadLaneCount: 1 | 2 | 3 | 4 | 5 | 6;
+  mergeLaneCount: 1 | 2 | 3 | 4 | 5 | 6;
   maxGlobalMergeJobs: 1 | 2 | 3 | 4;
   downloadCompatibilityMode: DownloadCompatibilityMode;
   /** ADAPTIVE_SETTINGS_HOTFIX8_CONTRACT: optional for backward-compatible saved settings. */
@@ -286,6 +308,8 @@ export interface AppSettings {
   downloadAllowBelowMinimum: boolean;
   downloadVerifyEntireFile: boolean;
   progressRefreshMs: number;
+  /** Giai đoạn 6 mục 7 (2026-09-24): mẫu đặt tên tệp cho Tải nhanh — {title}/{channel}/{date}/{id}. */
+  quickDownloadFilenameTemplate: string;
 }
 
 export interface HardwareProfile {
@@ -310,8 +334,10 @@ export interface HardwareProfile {
 }
 
 
+// A1 (2026-09-25): tăng từ 4 lên 6 danh sách/quy trình song song — bảng đề xuất theo phần cứng cũng cần
+// phủ tới 6 (xem thêm plan(5,...)/plan(6,...) mới ở hardware-recommendation.ts).
 export interface DownloadConcurrencyPlan {
-  listCount: 1 | 2 | 3 | 4;
+  listCount: 1 | 2 | 3 | 4 | 5 | 6;
   workersPerList: number;
   globalWorkers: number;
   fullVerificationWorkers: number;
@@ -319,7 +345,7 @@ export interface DownloadConcurrencyPlan {
 }
 
 export interface DownloadConcurrencyRecommendation {
-  recommendedConcurrentLists: 1 | 2 | 3 | 4;
+  recommendedConcurrentLists: 1 | 2 | 3 | 4 | 5 | 6;
   recommendedPerListWorkers: number;
   recommendedSingleListWorkers: number;
   recommendedGlobalWorkers: number;
@@ -362,6 +388,8 @@ export interface SystemStats {
   activeJobs: number;
   downloadSpeedBytes: number;
   encodeFps: number;
+  /** VẤN ĐỀ 2 mục 1 (2026-09-22): true khi bộ điều tiết CPU đang tạm hoãn tác vụ mới vì máy đang bận. */
+  systemLoadThrottled: boolean;
   sampledAt: string;
 }
 
@@ -473,6 +501,8 @@ export interface DownloadMergeInput {
   exportTimelineTxt: boolean;
   /** TUBMEDIA TIMELINE ONLY CONTRACT HOTFIX12 */
   timelineOnly?: boolean;
+  /** Giai đoạn 6 mục 4: preset xuất theo nền tảng (chỉ đổi tỉ lệ khung hình, mặc định 'original'). */
+  aspectRatio?: LocalCutAspectRatio;
 }
 
 export interface WorkbenchSlotState {
@@ -487,7 +517,7 @@ export interface WorkbenchState {
   mergeLanes: WorkbenchSlotState[];
 }
 
-export type AttentionSeverity = 'info' | 'success' | 'warning' | 'error';
+export type AttentionSeverity = 'info' | 'success' | 'warning' | 'error' | 'neutral';
 export interface AttentionNotice {
   id: string;
   severity: AttentionSeverity;

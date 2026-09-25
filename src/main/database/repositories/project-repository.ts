@@ -7,7 +7,7 @@ interface ProjectRow {
   id: string; name: string; code: string | null; description: string; status: Project['status'];
   source_folder: string; temp_folder: string; output_folder: string; quarantine_folder: string;
   final_file_name: string; quality_profile_id: string; resource_profile_id: string;
-  export_timeline_txt: number;
+  export_timeline_txt: number; aspect_ratio: string;
   created_at: string; updated_at: string; archived_at: string | null;
 }
 function map(row: ProjectRow): Project {
@@ -16,6 +16,11 @@ function map(row: ProjectRow): Project {
     quarantineFolder: row.quarantine_folder, finalFileName: row.final_file_name,
     qualityProfileId: row.quality_profile_id, resourceProfileId: row.resource_profile_id,
     exportTimelineTxt: row.export_timeline_txt === 1,
+    // Giai đoạn 6 mục 4: cột mới có DEFAULT 'original' ở tầng DB nên hàng cũ luôn có giá trị hợp lệ;
+    // vẫn kiểm tra lại ở đây để không bao giờ đưa một chuỗi lạ ra khỏi tầng dữ liệu.
+    aspectRatio: (['original', '9:16', '1:1', '16:9'] as const).includes(row.aspect_ratio as never)
+      ? (row.aspect_ratio as Project['aspectRatio'])
+      : 'original',
     createdAt: row.created_at, updatedAt: row.updated_at, archivedAt: row.archived_at };
 }
 export class ProjectRepository {
@@ -44,22 +49,22 @@ export class ProjectRepository {
     const now = new Date().toISOString();
     const id = randomUUID();
     const quarantineFolder = join(input.tempFolder, '_quarantine');
-    this.db.prepare(`INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,created_at,updated_at,archived_at)
-      VALUES(@id,@name,@code,@description,'draft',@sourceFolder,@tempFolder,@outputFolder,@quarantineFolder,@finalFileName,@qualityProfileId,@resourceProfileId,@exportTimelineTxt,@now,@now,NULL)`).run({
+    this.db.prepare(`INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,aspect_ratio,created_at,updated_at,archived_at)
+      VALUES(@id,@name,@code,@description,'draft',@sourceFolder,@tempFolder,@outputFolder,@quarantineFolder,@finalFileName,@qualityProfileId,@resourceProfileId,@exportTimelineTxt,@aspectRatio,@now,@now,NULL)`).run({
       id, name: input.name, code: input.code ?? null, description: input.description ?? '', sourceFolder: input.sourceFolder,
       tempFolder: input.tempFolder, outputFolder: input.outputFolder, quarantineFolder, finalFileName: input.finalFileName,
       qualityProfileId: input.qualityProfileId, resourceProfileId: input.resourceProfileId,
-      exportTimelineTxt: input.exportTimelineTxt === true ? 1 : 0, now
+      exportTimelineTxt: input.exportTimelineTxt === true ? 1 : 0, aspectRatio: input.aspectRatio ?? 'original', now
     });
     return this.get(id)!;
   }
   public update(id: string, patch: Partial<ProjectCreateInput>): Project {
     const current = this.get(id); if (!current) throw new Error('Dự án không tồn tại.');
     const merged = { ...current, ...patch, updatedAt: new Date().toISOString() };
-    this.db.prepare(`UPDATE projects SET name=?,code=?,description=?,source_folder=?,temp_folder=?,output_folder=?,quarantine_folder=?,final_file_name=?,quality_profile_id=?,resource_profile_id=?,export_timeline_txt=?,updated_at=? WHERE id=?`).run(
+    this.db.prepare(`UPDATE projects SET name=?,code=?,description=?,source_folder=?,temp_folder=?,output_folder=?,quarantine_folder=?,final_file_name=?,quality_profile_id=?,resource_profile_id=?,export_timeline_txt=?,aspect_ratio=?,updated_at=? WHERE id=?`).run(
       merged.name, merged.code, merged.description, merged.sourceFolder, merged.tempFolder, merged.outputFolder,
       join(merged.tempFolder, '_quarantine'), merged.finalFileName, merged.qualityProfileId, merged.resourceProfileId,
-      merged.exportTimelineTxt ? 1 : 0, merged.updatedAt, id
+      merged.exportTimelineTxt ? 1 : 0, merged.aspectRatio ?? 'original', merged.updatedAt, id
     );
     return this.get(id)!;
   }

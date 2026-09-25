@@ -22,6 +22,11 @@ import type { ClipEngine } from '../clips/clip-engine.js';
 import type { MergeEngine } from '../merge/merge-engine.js';
 import type { ProcessManager } from '../processes/process-manager.js';
 import type { Logger } from '../logging/logger.js';
+import {
+  SystemLoadGovernor,
+  DEFAULT_LOAD_GOVERNOR_SUSTAINED_MS,
+  defaultLowPercentFor
+} from './system-load-governor.js';
 import { InvalidInputError, ProcessingFailedError, type AppError } from '@shared/errors/app-errors.js';
 import { cleanupTemporaryArtifacts } from '../files/temporary-cleanup.js';
 import { sanitizeNullableSeconds, sanitizeProgress } from '@shared/utils/progress-policy.js';
@@ -31,6 +36,7 @@ import {
   isCircuitEligibleDownloadFailure
 } from '@shared/utils/download-failure.js';
 import { effectiveMemoryReserveBytes } from '@shared/utils/resource-memory.js';
+import { toneForErrorCode } from '@shared/utils/notice-tone.js';
 
 interface ActiveJob {
   job: QueueJob;
@@ -49,6 +55,14 @@ const PAUSABLE_STATUSES = new Set([
   'merging',
   'retrying',
   'interrupted'
+]);
+const RUNNING_STATUSES = new Set([
+  'analyzing',
+  'downloading',
+  'verifying',
+  'normalizing',
+  'processing',
+  'merging'
 ]);
 const JOB_TYPE_TEXT: Record<JobType, string> = {
   analyze: 'phân tích',
@@ -151,6 +165,9 @@ export class QueueManager {
   private tickRunning = false;
   private paused = false;
   private previousCpu = cpus();
+  // VẤN ĐỀ 2 mục 1 (2026-09-22): một bộ điều tiết theo hồ sơ tài nguyên (ngưỡng cao lấy từ
+  // cpuSoftLimitPercent của chính hồ sơ đó — tôn trọng cấu hình người dùng đã có, không thêm ngưỡng mới).
+  private readonly loadGovernors = new Map<string, SystemLoadGovernor>();
   private window: BrowserWindow | null = null;
   private readonly repeatedFailures = new Map<string, number[]>();
   private readonly cleanupInProgress = new Set<string>();
@@ -572,6 +589,26 @@ export class QueueManager {
     return changed;
   }
 
+  // VẤN ĐỀ 2 mục 1 (2026-09-22): lấy (hoặc tạo mới) bộ điều tiết CPU riêng cho từng hồ sơ tài nguyên —
+  // ngưỡng cao = cpuSoftLimitPercent của chính hồ sơ (tôn trọng giá trị người dùng đã đặt/đề xuất theo
+  // máy), ngưỡng thấp thấp hơn một khoảng an toàn để tạo độ trễ (hysteresis), tránh nhấp nháy bật/tắt.
+  private loadGovernorFor(profile: ResourceProfile): SystemLoadGovernor {
+    const existing = this.loadGovernors.get(profile.id);
+    if (existing) return existing;
+    const governor = new SystemLoadGovernor({
+      highPercent: profile.cpuSoftLimitPercent,
+      lowPercent: defaultLowPercentFor(profile.cpuSoftLimitPercent),
+      sustainedMs: DEFAULT_LOAD_GOVERNOR_SUSTAINED_MS
+    });
+    this.loadGovernors.set(profile.id, governor);
+    return governor;
+  }
+
+  /** true nếu ĐANG giảm tải vì CPU hệ thống cao liên tục — dùng để hiện trạng thái trên giao diện. */
+  public isSystemLoadThrottled(): boolean {
+    return [...this.loadGovernors.values()].some((governor) => governor.isThrottled());
+  }
+
   private async resourcesAllow(
     job: QueueJob,
     profile: ResourceProfile,
@@ -579,8 +616,18 @@ export class QueueManager {
   ): Promise<boolean> {
     const memoryReserve = effectiveMemoryReserveBytes(profile.memoryFreeMinimumBytes, totalmem());
     if (freemem() < memoryReserve) return false;
-    if (['clip', 'normalize', 'merge'].includes(job.type) && cpuPercent > profile.cpuSoftLimitPercent)
-      return false;
+    // VẤN ĐỀ 2 mục 1 (2026-09-22): thay kiểm tra tức thời (cpuPercent > cpuSoftLimitPercent, dễ nhấp
+    // nháy bật/tắt khi CPU dao động quanh ngưỡng) bằng bộ điều tiết có độ trễ hai chiều, dùng ĐÚNG ngưỡng
+    // cpuSoftLimitPercent của hồ sơ làm ngưỡng cao (không đổi hành vi với cấu hình người dùng đã đặt).
+    // Áp dụng cho cả tải lẫn ghép (download cũng dùng ffmpeg để hậu xử lý/tạo bản edit, không chỉ mạng)
+    // — CHỈ chặn tác vụ MỚI bắt đầu, không đụng tác vụ đang chạy. Luôn cho phép ÍT NHẤT một tác vụ toàn
+    // ứng dụng đang chạy (this.active.size === 0) để tránh "đói" hoàn toàn khi máy có vẻ bận nhưng thực
+    // ra Tubmedia chưa làm gì cả.
+    const cpuTypeGated = ['download', 'clip', 'normalize', 'merge'].includes(job.type);
+    if (cpuTypeGated && this.active.size > 0) {
+      const throttled = this.loadGovernorFor(profile).sample(cpuPercent, Date.now());
+      if (throttled) return false;
+    }
     if (job.projectId) {
       for (const targetFolder of this.diskFoldersForJob(job)) {
         try {
@@ -637,6 +684,21 @@ export class QueueManager {
     let all = this.repo.list();
     if (await this.recoverDiskFullProjects(all)) all = this.repo.list();
     const cpuPercent = this.cpuPercent();
+    // VẤN ĐỀ 2 mục 1 (2026-09-22): lấy mẫu bộ điều tiết CHO MỌI HỒ SƠ đang có tác vụ hoạt động, MỖI LƯỢT
+    // tick — không chỉ khi có tác vụ đang CHỜ được xét (resourcesAllow). Nếu chỉ lấy mẫu lúc xét tác vụ
+    // chờ, một hàng đợi có tác vụ chờ luôn bị chặn bởi giới hạn SỐ WORKER (không phải CPU) sẽ không bao
+    // giờ chạm tới bộ điều tiết, khiến đồng hồ "đủ lâu" (sustainedMs) không bao giờ tích lũy được dù CPU
+    // đã cao liên tục thật sự — nhịp tick đều đặn (350ms khi có việc đang chạy) mới là nguồn đếm giờ THẬT
+    // đáng tin cậy, không phụ thuộc độ sâu hàng đợi.
+    const nowForSampling = Date.now();
+    const sampledProfileIds = new Set<string>();
+    for (const activeJob of this.active.values()) {
+      if (!['download', 'clip', 'normalize', 'merge'].includes(activeJob.job.type)) continue;
+      const activeProfile = this.profileFor(activeJob.job);
+      if (sampledProfileIds.has(activeProfile.id)) continue;
+      sampledProfileIds.add(activeProfile.id);
+      this.loadGovernorFor(activeProfile).sample(cpuPercent, nowForSampling);
+    }
     const pending: QueueJob[] = [];
     let stateChanged = false;
     for (const job of all.filter((x) => x.status === 'pending')) {
@@ -704,14 +766,115 @@ export class QueueManager {
     const controller = new AbortController();
     const sourceLock = job.sourceId;
     if (sourceLock) this.sourceLocks.add(sourceLock);
-    const promise = this.execute(job, profile, controller.signal).finally(() => {
-      this.active.delete(job.id);
-      this.progressUpdates.delete(job.id);
-      if (sourceLock) this.sourceLocks.delete(sourceLock);
-      if (job.projectId) this.syncProjectStatus(job.projectId);
-      this.emit();
-    });
+    const promise = this.execute(job, profile, controller.signal)
+      .catch((error: unknown) => this.handleExecutorCrash(job, error))
+      .finally(() => {
+        this.active.delete(job.id);
+        this.progressUpdates.delete(job.id);
+        if (sourceLock) this.sourceLocks.delete(sourceLock);
+        try {
+          if (job.projectId) this.syncProjectStatus(job.projectId);
+          this.emit();
+        } catch (error) {
+          this.logger.error(
+            'queue',
+            'JOB_FINALIZE_FAILED',
+            error instanceof Error ? error.message : String(error),
+            { jobId: job.id, ...(job.projectId ? { projectId: job.projectId } : {}) }
+          );
+        }
+      });
     this.active.set(job.id, { job, controller, promise, sourceLock });
+  }
+
+  /**
+   * execute() đã tự phân loại mọi lỗi nghiệp vụ. Đây là lưới an toàn cho lỗi hạ tầng
+   * (SQLite lỗi, tác vụ bị xóa giữa chừng...). Nếu không bắt ở đây, promise bị từ chối
+   * không ai lắng nghe sẽ trở thành unhandled rejection trong main process, và tác vụ
+   * có thể kẹt vĩnh viễn ở trạng thái đang chạy dù không còn worker nào xử lý.
+   */
+  private handleExecutorCrash(job: QueueJob, error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    this.logger.error('queue', 'JOB_EXECUTOR_CRASHED', message, {
+      jobId: job.id,
+      ...(job.projectId ? { projectId: job.projectId } : {})
+    });
+    try {
+      const current = this.repo.get(job.id);
+      if (
+        current &&
+        !TERMINAL_STATUSES.has(current.status) &&
+        current.status !== 'paused' &&
+        current.status !== 'interrupted'
+      ) {
+        this.emitProgress(
+          this.repo.update(job.id, {
+            status: 'failed',
+            errorCode: 'UNHANDLED_ERROR',
+            errorMessage: message,
+            finishedAt: new Date().toISOString()
+          })
+        );
+      }
+    } catch {
+      // Tác vụ đã bị xóa hoặc DB không ghi được; đã có nhật ký ở trên.
+    }
+  }
+
+  /**
+   * Chờ rồi đưa tác vụ đang 'retrying' về 'pending'. Khác với setTimeout thuần:
+   * - thời gian chờ bị ngắt ngay khi tác vụ bị hủy hoặc ứng dụng đóng (trước đây
+   *   việc đóng ứng dụng/xóa tác vụ có thể phải chờ tới ~75 giây);
+   * - nếu người dùng đã tạm dừng tác vụ trong lúc chờ thì giữ nguyên trạng thái tạm
+   *   dừng thay vì tự ý chạy lại;
+   * - nếu bị hủy trong lúc chờ thì đánh dấu 'cancelled' thay vì để 'retrying' vĩnh viễn.
+   */
+  private async requeueAfterDelay(
+    jobId: string,
+    signal: AbortSignal,
+    delayMs: number,
+    patch: { errorCode?: string | null; errorMessage?: string | null },
+    inputPatch: Record<string, unknown>
+  ): Promise<void> {
+    await new Promise<void>((resolve) => {
+      if (signal.aborted) {
+        resolve();
+        return;
+      }
+      const onAbort = (): void => {
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        signal.removeEventListener('abort', onAbort);
+        resolve();
+      }, delayMs);
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+    const current = this.repo.get(jobId);
+    if (!current) return;
+    if (signal.aborted) {
+      // Đóng ứng dụng kiểu "giữ lại" đã đặt 'interrupted' từ trước; chỉ xử lý khi còn 'retrying'.
+      if (current.status === 'retrying') {
+        this.emitProgress(
+          this.repo.update(jobId, {
+            status: 'cancelled',
+            errorCode: 'PROCESS_CANCELLED',
+            errorMessage: 'Tác vụ đã bị hủy.',
+            finishedAt: new Date().toISOString()
+          })
+        );
+      }
+      return;
+    }
+    // Nếu người dùng bấm Tiếp tục ngay trong lúc chờ, resumeActiveJobState có thể đã đặt
+    // một trạng thái "đang chạy" dù chưa có tiến trình nào. Đưa về 'retrying' để hợp lệ hóa.
+    if (RUNNING_STATUSES.has(current.status)) {
+      this.repo.update(jobId, { status: 'retrying' });
+    } else if (current.status !== 'retrying') {
+      return;
+    }
+    this.repo.update(jobId, { status: 'pending', ...patch }, inputPatch);
   }
 
   private syncProjectStatus(projectId: string): void {
@@ -1032,13 +1195,9 @@ export class QueueManager {
                   : ['Mở mục Công cụ.', 'Chọn Kiểm tra lại hoặc Sửa chữa tất cả.'];
     const notice: AttentionNotice = {
       id: `blocking-${scope}-${code}`,
-      severity:
-        code === 'DISK_FULL' ||
-        code === 'PERMISSION_DENIED' ||
-        code === 'SOURCE_RATE_LIMITED' ||
-        code === 'NETWORK_CIRCUIT_OPEN'
-          ? 'warning'
-          : 'error',
+      // Mức lấy từ bảng mức theo mã lỗi (notice-tone.ts): hết dung lượng và không có quyền ghi là LỖI
+      // (không tự tắt), giới hạn tốc độ / mạng không ổn định / cần đăng nhập là CẢNH BÁO cần hành động.
+      severity: toneForErrorCode(code),
       title,
       message,
       code,
@@ -1231,23 +1390,18 @@ export class QueueManager {
             ...(job.projectId ? { projectId: job.projectId } : {})
           }
         );
-        await new Promise((resolve) => setTimeout(resolve, 350));
-        if (!signal.aborted) {
-          this.repo.update(
-            job.id,
-            {
-              status: 'pending',
-              errorCode: null,
-              errorMessage: null
-            },
-            {
-              resumeStatus: null,
-              cookieFailureConfirmed: true,
-              cookieRetryRequested: true,
-              progressStage: 'Đang thử lại bằng cookies đã cấu hình'
-            }
-          );
-        }
+        await this.requeueAfterDelay(
+          job.id,
+          signal,
+          350,
+          { errorCode: null, errorMessage: null },
+          {
+            resumeStatus: null,
+            cookieFailureConfirmed: true,
+            cookieRetryRequested: true,
+            progressStage: 'Đang thử lại bằng cookies đã cấu hình'
+          }
+        );
         return;
       }
       if (
@@ -1389,10 +1543,7 @@ export class QueueManager {
           ...(job.projectId ? { projectId: job.projectId } : {}),
           metadata: { nextAttempt: job.attempts + 2, maxAttempts: job.maxAttempts }
         });
-        await new Promise((resolve) => setTimeout(resolve, retryDelayMs(job.attempts + 1)));
-        if (!signal.aborted) {
-          this.repo.update(job.id, { status: 'pending' }, { resumeStatus: null });
-        }
+        await this.requeueAfterDelay(job.id, signal, retryDelayMs(job.attempts + 1), {}, { resumeStatus: null });
       } else {
         const circuitEligible = isCircuitEligibleDownloadFailure(job.type, appError);
         const finalMessage = circuitEligible
@@ -1560,9 +1711,32 @@ export class QueueManager {
       },
       { trustedOutputPath, legacyPendingPaths }
     );
+    // Giai đoạn 6 mục 4 (2026-09-24) — Preset xuất theo nền tảng: bước RIÊNG, chạy SAU khi merge() đã
+    // commit xong thành phẩm gốc như cũ (không đụng tới merge()/checkpoint/recovery). Tệp gốc vẫn còn
+    // nguyên trên đĩa; thành phẩm đã đổi tỉ lệ là tệp MỚI và trở thành outputPath chính của tác vụ vì đó
+    // mới là thứ người dùng đã chọn xuất ra.
+    let finalVideoPath = result.video;
+    if (project.aspectRatio !== 'original') {
+      finalVideoPath = await this.merger.applyAspectRatio(
+        job.id,
+        result.video,
+        project.aspectRatio,
+        project.outputFolder,
+        project.finalFileName,
+        profile,
+        signal,
+        (progress) => {
+          this.updateProgress(job.id, progress.percent, progress.speed, progress.etaSeconds, 'merging', false, {
+            progressStage: 'Đang đổi tỉ lệ khung hình (nền mờ kiểu CapCut)',
+            progressProcessedSeconds: progress.processedSeconds,
+            progressTotalSeconds: progress.totalSeconds
+          });
+        }
+      );
+    }
     this.repo.updateInput(job.id, {
       productName: project.finalFileName,
-      outputPath: result.video,
+      outputPath: finalVideoPath,
       mergeRecoveryMode: result.recoveryMode,
       reusedExistingOutput: result.reusedExisting,
       resultMessage:
@@ -1877,15 +2051,27 @@ export class QueueManager {
 
   public async resumeAll(): Promise<void> {
     const projectIds = new Set<string>();
+    let firstError: Error | null = null;
     for (const job of this.repo.list()) {
       if (!['paused', 'interrupted'].includes(job.status)) continue;
-      await this.resume(job.id, false);
-      if (job.projectId) projectIds.add(job.projectId);
+      // Một tác vụ lỗi khi tiếp tục (đã bị xóa/đổi trạng thái, PowerShell resume thất bại...)
+      // không được chặn các tác vụ còn lại, và nhất là không được để cờ paused kẹt ở true.
+      try {
+        await this.resume(job.id, false);
+        if (job.projectId) projectIds.add(job.projectId);
+      } catch (error) {
+        if (error instanceof InvalidInputError) {
+          this.logger.warn('queue', 'RESUME_ALL_JOB_SKIPPED', error.message, { jobId: job.id });
+        } else {
+          firstError ??= error instanceof Error ? error : new Error(String(error));
+        }
+      }
     }
     this.paused = false;
     for (const projectId of projectIds) this.projects.setStatus(projectId, 'active');
     this.logger.info('queue', 'ALL_WORKFLOWS_RESUMED', 'Đã tiếp tục tất cả danh sách tải và quy trình ghép.');
     this.emit();
+    if (firstError) throw firstError;
   }
   public async pause(jobId: string, emitChange = true): Promise<void> {
     /* TUBMEDIA_V132_PAUSE_TERMINAL_NOOP_HOTFIX */
@@ -2162,6 +2348,7 @@ export class QueueManager {
     return removed;
   }
   public async cancelAllAndWait(timeoutMs = 15_000): Promise<number> {
+    const wasPaused = this.paused;
     this.paused = true;
     const targets = this.repo.list().filter((job) => !TERMINAL_STATUSES.has(job.status));
     for (const job of targets) this.cancel(job.id, false);
@@ -2172,6 +2359,8 @@ export class QueueManager {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     if (this.active.size > 0) {
+      // Không để hàng đợi bị "đóng băng" vĩnh viễn chỉ vì lần hủy này hết thời gian chờ.
+      this.paused = wasPaused;
       throw new Error('Một số tiến trình nền chưa dừng hoàn toàn. Hãy chờ vài giây rồi thử xóa lại.');
     }
 

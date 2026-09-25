@@ -5,12 +5,14 @@ import { join } from 'node:path';
 import type { AppUpdater, ProgressInfo, UpdateInfo } from 'electron-updater';
 import type { AppUpdateReleaseInfo, AppUpdateStatus } from '@shared/types/domain.js';
 import { IPC } from '@shared/contracts/channels.js';
+import { AppError } from '@shared/errors/app-errors.js';
 import { sanitizeProgress } from '@shared/utils/progress-policy.js';
 import { compareAppVersions, isNewerAppVersion } from '@shared/app-version.js';
 import type { SettingsService } from '../settings/settings-service.js';
 import type { QueueManager } from '../queue/queue-manager.js';
 import type { BackupService } from '../backups/backup-service.js';
 import type { Logger } from '../logging/logger.js';
+import { feedUrlError } from '../security/settings-policy.js';
 
 type AutoUpdater = AppUpdater;
 type ElectronUpdaterModule = { autoUpdater?: AppUpdater };
@@ -93,6 +95,7 @@ export class AppUpdateService {
   private silentCheck = false;
   private updater: AutoUpdater | null = null;
   private networkCheckInFlight: Promise<void> | null = null;
+  private downloadInFlight: Promise<AppUpdateStatus> | null = null;
   private feedUnavailableForSession = false;
   private feedUnavailableLogged = false;
   private configuredChannel = '';
@@ -380,6 +383,17 @@ export class AppUpdateService {
     return this.status;
   }
   public async download(): Promise<AppUpdateStatus> {
+    // Bấm "Cập nhật ngay" lần nữa khi đang tải không được chạy lại check() (có thể đặt trạng thái
+    // về 'available' giữa chừng) hay gọi downloadUpdate() lần hai; dùng chung một lượt tải.
+    if (this.downloadInFlight) return this.downloadInFlight;
+    const run = this.downloadOnce().finally(() => {
+      this.downloadInFlight = null;
+    });
+    this.downloadInFlight = run;
+    return run;
+  }
+
+  private async downloadOnce(): Promise<AppUpdateStatus> {
     const currentVersion = app.getVersion();
 
     if (this.status.state === 'downloaded' && isNewerAppVersion(this.status.info?.version, currentVersion)) {
@@ -391,7 +405,8 @@ export class AppUpdateService {
     }
 
     if (this.status.state !== 'available' || !isNewerAppVersion(this.status.info?.version, currentVersion)) {
-      throw new Error(
+      throw new AppError(
+        'UPDATE_NOT_NEWER',
         this.status.message ?? 'Không có phiên bản mới hơn để tải. Tubmedia không cho phép hạ cấp.'
       );
     }
@@ -427,7 +442,7 @@ export class AppUpdateService {
         error: technicalMessage
       };
       this.emit(status);
-      throw new Error(status.message ?? 'Không thể tải bản cập nhật.');
+      throw new AppError('UPDATE_DOWNLOAD_FAILED', status.message ?? 'Không thể tải bản cập nhật.', true);
     }
   }
 
@@ -436,13 +451,15 @@ export class AppUpdateService {
       this.status.state !== 'downloaded' ||
       !isNewerAppVersion(this.status.info?.version, app.getVersion())
     ) {
-      throw new Error(
+      throw new AppError(
+        'UPDATE_NOT_NEWER',
         'Chỉ có thể cài phiên bản mới hơn phiên bản đang chạy. Tubmedia đã chặn thao tác hạ cấp.'
       );
     }
 
     if (this.hasActiveWork()) {
-      throw new Error(
+      throw new AppError(
+        'UPDATE_BLOCKED_ACTIVE_WORK',
         'Hãy tạm dừng hoặc hoàn tất mọi tác vụ tải, cắt, ghép và Tải nhanh trước khi cập nhật.'
       );
     }
@@ -468,7 +485,11 @@ export class AppUpdateService {
         message: 'Bản cập nhật vẫn được giữ. Tubmedia chưa thể chuẩn bị cài đặt an toàn.',
         error: technicalMessage
       });
-      throw new Error('Chưa thể chuẩn bị cập nhật an toàn. Hãy đóng tác vụ đang chạy rồi thử lại.');
+      throw new AppError(
+        'UPDATE_INSTALL_PREPARATION_FAILED',
+        'Chưa thể chuẩn bị cập nhật an toàn. Hãy đóng tác vụ đang chạy rồi thử lại.',
+        true
+      );
     }
   }
   private baseStatus(state: AppUpdateStatus['state'], message: string): AppUpdateStatus {
@@ -642,6 +663,9 @@ export class AppUpdateService {
     if (parsed.protocol !== 'https:') {
       throw new Error('Địa chỉ nhận bản cập nhật ứng dụng bắt buộc dùng HTTPS.');
     }
+    // Lớp phòng thủ thứ hai: dù giá trị đến từ đâu, chỉ cài bản cập nhật từ máy chủ mặc định.
+    const feedPolicyError = feedUrlError(feed);
+    if (feedPolicyError) throw new Error(feedPolicyError);
     const normalizedFeed = parsed.toString();
     if (normalizedFeed === this.configuredFeed) return;
     updater.setFeedURL({ provider: 'generic', url: normalizedFeed });

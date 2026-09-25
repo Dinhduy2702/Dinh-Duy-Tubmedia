@@ -1,6 +1,7 @@
 import { Download, FileJson, Search } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { QueueJob } from '@shared/types/domain';
+import { buildCsv } from '@shared/utils/csv';
 import { useAppStore } from '../stores/app-store';
 import { StatusBadge } from '../components/StatusBadge';
 import { jobTypeLabel } from '../utils/vi-labels';
@@ -10,10 +11,6 @@ const TERMINAL = new Set(['completed', 'skipped', 'cancelled', 'failed', 'interr
 function text(job: QueueJob, key: string): string {
   const value = job.input[key];
   return typeof value === 'string' ? value : '';
-}
-
-function escapeCsv(value: string): string {
-  return `"${value.replaceAll('"', '""')}"`;
 }
 
 async function saveFile(name: string, content: string): Promise<void> {
@@ -64,7 +61,7 @@ export function HistoryPage(): React.JSX.Element {
     ]);
     await saveFile(
       `tubmedia-history-${new Date().toISOString().slice(0, 10)}.csv`,
-      [header, ...rows].map((row) => row.map(escapeCsv).join(',')).join('\n')
+      buildCsv([header, ...rows])
     );
   };
 

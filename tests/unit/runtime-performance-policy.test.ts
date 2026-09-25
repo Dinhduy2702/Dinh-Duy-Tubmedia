@@ -19,7 +19,10 @@ describe('v1 runtime performance and lifecycle policy', () => {
     ]);
     expect(center).toContain('const attentionResolved = attention');
     expect(center).toContain('isAttentionNoticeResolved(attention, jobs)');
-    expect(center).toContain('Boolean(error || (attention?.sticky && !attentionResolved))');
+    // Lỗi thật vẫn nằm lại cho tới khi được giải quyết; quy tắc nay nằm ở noticeDisplayPolicy (có test hành vi).
+    expect(center).toContain('noticeDisplayPolicy(');
+    expect(center).toContain('!error && attentionResolved');
+    expect(policy).toContain('isPersistentNoticeTone(notice.severity) && !resolved');
     expect(center).toContain("if (!attentionResolved || !attention || phase === 'leaving') return;");
     expect(center).toContain("type Phase = 'entering' | 'visible' | 'leaving'");
     expect(policy).toContain('SUCCESS_NOTIFICATION_DURATION_MS');

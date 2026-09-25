@@ -373,5 +373,12 @@ DROP TABLE source_project_scope_map;
 UPDATE projects
 SET quarantine_folder = rtrim(temp_folder, '\\/') || '\\_quarantine';
 `
+  },
+  {
+    version: 7,
+    name: 'merge_export_aspect_ratio_preset',
+    up: `
+ALTER TABLE projects ADD COLUMN aspect_ratio TEXT NOT NULL DEFAULT 'original';
+`
   }
 ];

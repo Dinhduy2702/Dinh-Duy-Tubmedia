@@ -133,6 +133,10 @@ describe('verified merge recovery decision matrix', () => {
     expect(workbench).toContain('const legacyPendingPaths = unchanged && existing');
     expect(workbench).toContain("if (!unchanged) this.input.import(project.id, value.linksText, 'replace')");
     expect(workbench).toContain('value.timelineOnly === true');
+    // Giai đoạn 6 mục 4 (2026-09-24): đổi preset tỉ lệ phải làm chữ ký khác đi, nếu không đổi tỉ lệ rồi
+    // chạy lại sẽ bị coi là "không đổi gì" và dùng lại thành phẩm CŨ (sai tỉ lệ) qua trustedOutputPath.
+    expect(workbench).toContain("value.aspectRatio ?? 'original'");
+    expect(workbench).toContain("project.aspectRatio === (value.aspectRatio ?? 'original')");
     expect(ownership.includes("'merge-checkpoints'") || ownership.includes('"merge-checkpoints"')).toBe(true);
     expect(merge).toContain('parsed.signature !== signature');
     expect(merge).toContain('Math.round(file.mtimeMs)');

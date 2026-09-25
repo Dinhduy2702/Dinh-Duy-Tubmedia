@@ -103,7 +103,10 @@ export const IPC = {
   systemCleanup: {
     start: 'system-cleanup:start',
     status: 'system-cleanup:status',
-    cancel: 'system-cleanup:cancel'
+    cancel: 'system-cleanup:cancel',
+    openStorageSettings: 'system-cleanup:open-storage-settings',
+    quarantineList: 'system-cleanup:quarantine-list',
+    quarantineRestore: 'system-cleanup:quarantine-restore'
   },
   quickDownload: {
     defaults: 'quick-download:defaults',
@@ -114,12 +117,21 @@ export const IPC = {
     pause: 'quick-download:pause',
     resume: 'quick-download:resume',
     cancel: 'quick-download:cancel',
-    revealOutput: 'quick-download:reveal-output'
+    revealOutput: 'quick-download:reveal-output',
+    previewFrame: 'quick-download:preview-frame'
   },
   videoFilter: {
     chooseLinksFile: 'video-filter:choose-links-file',
     run: 'video-filter:run',
     saveReport: 'video-filter:save-report'
+  },
+  localCut: {
+    chooseFile: 'local-cut:choose-file',
+    previewFrame: 'local-cut:preview-frame',
+    start: 'local-cut:start',
+    status: 'local-cut:status',
+    cancel: 'local-cut:cancel',
+    revealOutput: 'local-cut:reveal-output'
   },
   updates: {
     status: 'updates:status',

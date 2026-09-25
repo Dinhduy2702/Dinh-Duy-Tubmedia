@@ -113,7 +113,10 @@ const api: DesktopApi = {
   systemCleanup: {
     start: (input) => invoke(IPC.systemCleanup.start, input),
     status: (runId) => invoke(IPC.systemCleanup.status, { runId }),
-    cancel: (runId) => invoke(IPC.systemCleanup.cancel, { runId })
+    cancel: (runId) => invoke(IPC.systemCleanup.cancel, { runId }),
+    openStorageSettings: () => invoke(IPC.systemCleanup.openStorageSettings),
+    quarantineList: () => invoke(IPC.systemCleanup.quarantineList),
+    quarantineRestore: (ids) => invoke(IPC.systemCleanup.quarantineRestore, { ids })
   },
   quickDownload: {
     defaults: () => invoke(IPC.quickDownload.defaults),
@@ -125,12 +128,21 @@ const api: DesktopApi = {
     pause: (taskId) => invoke(IPC.quickDownload.pause, { taskId }),
     resume: (taskId) => invoke(IPC.quickDownload.resume, { taskId }),
     cancel: (taskId) => invoke(IPC.quickDownload.cancel, { taskId }),
-    revealOutput: (taskId) => invoke(IPC.quickDownload.revealOutput, { taskId })
+    revealOutput: (taskId) => invoke(IPC.quickDownload.revealOutput, { taskId }),
+    previewFrame: (input) => invoke(IPC.quickDownload.previewFrame, input)
   },
   videoFilter: {
     chooseLinksFile: () => invoke(IPC.videoFilter.chooseLinksFile),
     run: (input) => invoke(IPC.videoFilter.run, input),
     saveReport: (input) => invoke(IPC.videoFilter.saveReport, input)
+  },
+  localCut: {
+    chooseFile: () => invoke(IPC.localCut.chooseFile),
+    previewFrame: (input) => invoke(IPC.localCut.previewFrame, input),
+    start: (input) => invoke(IPC.localCut.start, input),
+    status: (taskId) => invoke(IPC.localCut.status, { taskId }),
+    cancel: (taskId) => invoke(IPC.localCut.cancel, { taskId }),
+    revealOutput: (taskId) => invoke(IPC.localCut.revealOutput, { taskId })
   },
   updates: {
     status: () => invoke(IPC.updates.status),

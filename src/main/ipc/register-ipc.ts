@@ -1,7 +1,8 @@
 import { app, clipboard, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { IPC } from '@shared/contracts/channels.js';
+import { runWithWireErrors } from './wire-error.js';
 import {
   backupCreateSchema,
   browserCookieSchema,
@@ -36,9 +37,14 @@ import {
   workbenchSlotSchema,
   systemCleanupRequestSchema,
   systemCleanupRunSchema,
+  systemCleanupQuarantineRestoreSchema,
   videoLinkFilterRequestSchema,
   quickDownloadRequestSchema,
-  quickDownloadTaskSchema
+  quickDownloadTaskSchema,
+  previewFrameRequestSchema,
+  localCutPreviewFrameRequestSchema,
+  localCutRequestSchema,
+  localCutTaskSchema
 } from '@shared/schemas/ipc.js';
 import type { AppSettings } from '@shared/types/domain.js';
 import { InvalidInputError } from '@shared/errors/app-errors.js';
@@ -46,32 +52,81 @@ import type { ZodType } from 'zod';
 import { exportSanitizedLogTree } from '../logging/diagnostic-exporter.js';
 import { redactSecrets } from '@shared/utils/secret-redaction.js';
 import type { AppContext } from '../app/app-context.js';
+import { openPathBlockReason } from '../security/open-path-policy.js';
+import { saveTextTypeFor, withRequiredExtension } from '../files/save-text-file-policy.js';
 
 import { SystemCleanupService } from '../system/system-cleanup-service.js';
+import { QuarantineStore } from '../system/cleanup-quarantine.js';
+import { resolveCleanupEnvironmentPaths, type CleanupEnvironmentPaths } from '../system/cleanup-scanner.js';
 import { VideoLinkFilterService } from '../media/video-link-filter-service.js';
+import { LocalCutService } from '../media/local-cut-service.js';
 type MaybePromise<T> = T | Promise<T>;
+
+/**
+ * CHỈ dùng để kiểm thử end-to-end thật (script/e2e riêng, không phải Playwright test:e2e chính) mà
+ * KHÔNG đụng %TEMP%/%LOCALAPPDATA%/%APPDATA% thật của máy đang chạy — trỏ môi trường quét sang một
+ * sandbox giả hoàn toàn. Biến này không tồn tại và không có tác dụng gì trong bản phát hành thật.
+ */
+function resolveCleanupEnvironmentOverride(): (() => CleanupEnvironmentPaths) | null {
+  const raw = process.env.TUBMEDIA_E2E_CLEANUP_ENV_JSON;
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<CleanupEnvironmentPaths>;
+    if (
+      typeof parsed.tempDir !== 'string' ||
+      typeof parsed.localAppData !== 'string' ||
+      typeof parsed.roamingAppData !== 'string'
+    ) {
+      return null;
+    }
+    const fixed: CleanupEnvironmentPaths = {
+      tempDir: parsed.tempDir,
+      localAppData: parsed.localAppData,
+      roamingAppData: parsed.roamingAppData
+    };
+    return () => fixed;
+  } catch {
+    return null;
+  }
+}
 
 export function registerIpc(ctx: AppContext): void {
   // TUBMEDIA_FEATURE_SERVICES
-  const systemCleanup = new SystemCleanupService(() => {
-    const settings = ctx.settings.get();
-    const projects = ctx.projects.list(true);
-    const quick = ctx.quickDownload.cleanupRoots();
-    const trackedTempFiles = projects.flatMap((project) =>
-      ctx.itemRepo
-        .list(project.id)
-        .map((item) => item.clipFile)
-        .filter((path): path is string => typeof path === 'string' && path.length > 0)
+  const cleanupQuarantine = new QuarantineStore(join(ctx.userData, 'cleanup-quarantine'));
+  void cleanupQuarantine.purgeExpired().catch((error: unknown) => {
+    ctx.logger.warn(
+      'cleanup-quarantine',
+      'PURGE_EXPIRED_FAILED',
+      'Không dọn được khu cách ly quá hạn lúc khởi động.',
+      { metadata: { error: error instanceof Error ? error.message : String(error) } }
     );
-    return {
-      sourceFolders: [settings.defaultSourceFolder, ...projects.map((project) => project.sourceFolder)],
-      tempFolders: [settings.defaultTempFolder, ...projects.map((project) => project.tempFolder)],
-      trackedTempFiles,
-      quickOutputFolders: quick.outputDirectories,
-      quickTempRoots: [quick.tempRoot]
-    };
   });
+
+  const systemCleanup = new SystemCleanupService(
+    () => {
+      const settings = ctx.settings.get();
+      const projects = ctx.projects.list(true);
+      const quick = ctx.quickDownload.cleanupRoots();
+      const trackedTempFiles = projects.flatMap((project) =>
+        ctx.itemRepo
+          .list(project.id)
+          .map((item) => item.clipFile)
+          .filter((path): path is string => typeof path === 'string' && path.length > 0)
+      );
+      return {
+        sourceFolders: [settings.defaultSourceFolder, ...projects.map((project) => project.sourceFolder)],
+        tempFolders: [settings.defaultTempFolder, ...projects.map((project) => project.tempFolder)],
+        trackedTempFiles,
+        quickOutputFolders: quick.outputDirectories,
+        quickTempRoots: [quick.tempRoot]
+      };
+    },
+    resolveCleanupEnvironmentOverride() ?? resolveCleanupEnvironmentPaths,
+    cleanupQuarantine
+  );
   const videoLinkFilter = new VideoLinkFilterService(ctx.tools, ctx.logger);
+  const localCut = new LocalCutService(ctx.processes, ctx.tools, ctx.verifier, ctx.logger);
 
   const handle = <Input, Output>(
     channel: string,
@@ -80,14 +135,14 @@ export function registerIpc(ctx: AppContext): void {
   ): void => {
     ipcMain.handle(channel, (event: IpcMainInvokeEvent, raw: unknown) => {
       ctx.sender.assert(event);
-      return handler(schema.parse(raw));
+      return runWithWireErrors(() => handler(schema.parse(raw)));
     });
   };
 
   const noArgs = <Output>(channel: string, handler: () => MaybePromise<Output>): void => {
     ipcMain.handle(channel, (event: IpcMainInvokeEvent) => {
       ctx.sender.assert(event);
-      return handler();
+      return runWithWireErrors(() => handler());
     });
   };
 
@@ -109,7 +164,11 @@ export function registerIpc(ctx: AppContext): void {
     };
   });
   noArgs(IPC.app.getSystemStats, () => ctx.systemStats.sample());
-  handle(IPC.app.showPath, showPathSchema, ({ path }) => shell.openPath(path));
+  handle(IPC.app.showPath, showPathSchema, ({ path }) => {
+    const blocked = openPathBlockReason(path);
+    if (blocked) throw new InvalidInputError(blocked);
+    return shell.openPath(path);
+  });
   noArgs(IPC.app.readClipboard, () => clipboard.readText());
   handle(IPC.app.writeClipboard, clipboardTextSchema, ({ text }) => {
     clipboard.writeText(text);
@@ -223,14 +282,14 @@ export function registerIpc(ctx: AppContext): void {
     return result.canceled ? null : (result.filePaths[0] ?? null);
   });
   handle(IPC.dialogs.saveTextFile, saveTextFileSchema, async ({ defaultName, content, defaultFolder }) => {
+    // Đuôi lấy theo tên gợi ý (.txt/.csv/.json); trước đây luôn ép .txt nên CSV thành ".csv.txt".
+    const type = saveTextTypeFor(defaultName);
     const result = await dialog.showSaveDialog({
       defaultPath: defaultFolder ? join(defaultFolder, defaultName) : defaultName,
-      filters: [{ name: 'Tệp văn bản', extensions: ['txt'] }]
+      filters: [{ name: type.filterName, extensions: [type.extension] }]
     });
     if (result.canceled || !result.filePath) return null;
-    const filePath = result.filePath.toLowerCase().endsWith('.txt')
-      ? result.filePath
-      : `${result.filePath}.txt`;
+    const filePath = withRequiredExtension(result.filePath, type.extension);
     await writeFile(filePath, content, 'utf8');
     return filePath;
   });
@@ -312,7 +371,14 @@ export function registerIpc(ctx: AppContext): void {
     return folder;
   });
 
-  handle(IPC.media.analyze, showPathSchema, ({ path }) => ctx.analyzer.analyze(path));
+  // Giai đoạn 6 mục 6 (2026-09-24) — "Xem thông tin tệp": handler này đã có sẵn từ trước (dùng nội bộ
+  // trong luồng ghép, đã bao gồm sẵn fileSize) nhưng chưa từng được đưa ra giao diện. Thêm kiểm tra tệp
+  // tồn tại để báo lỗi rõ ràng bằng tiếng Việt thay vì để lỗi ffprobe thô lọt ra ngoài.
+  handle(IPC.media.analyze, showPathSchema, async ({ path }) => {
+    const fileStat = await stat(path).catch(() => null);
+    if (!fileStat || !fileStat.isFile()) throw new Error('Không tìm thấy tệp.');
+    return ctx.analyzer.analyze(path);
+  });
   handle(IPC.media.verifyFile, verifyFileSchema, ({ path, level }) => ctx.verifier.verify(path, level));
   handle(IPC.media.mergeProject, projectIdSchema, ({ projectId }) => ctx.queue.enqueueProject(projectId));
 
@@ -390,7 +456,13 @@ export function registerIpc(ctx: AppContext): void {
 
   // TUBMEDIA_SYSTEM_CLEANUP_HANDLERS
   handle(IPC.systemCleanup.start, systemCleanupRequestSchema, (request) => {
-    if (ctx.queue.activeCount() > 0 || ctx.processes.count() > 0 || ctx.quickDownload.isActive()) {
+    // Chỉ chế độ xóa cần chặn khi còn tác vụ chạy. Xem trước (estimate) chỉ đọc dung lượng; trước đây
+    // nó cũng bị chặn ngay sau khi mở app vì các tiến trình kiểm tra công cụ lúc khởi động (yt-dlp
+    // --version, ffprobe...) được tính là "đang chạy", kèm thông báo sai là còn tác vụ tải/ghép.
+    if (
+      request.mode === 'clean' &&
+      (ctx.queue.activeCount() > 0 || ctx.processes.count() > 0 || ctx.quickDownload.isActive())
+    ) {
       throw new InvalidInputError(
         'Không thể dọn dẹp khi Tubmedia còn tác vụ tải, cắt, chuẩn hóa, ghép hoặc tải nhanh đang chạy.'
       );
@@ -399,6 +471,16 @@ export function registerIpc(ctx: AppContext): void {
   });
   handle(IPC.systemCleanup.status, systemCleanupRunSchema, ({ runId }) => systemCleanup.status(runId));
   handle(IPC.systemCleanup.cancel, systemCleanupRunSchema, ({ runId }) => systemCleanup.cancel(runId));
+  // GĐ4a: các hạng mục cần quyền quản trị (Windows Temp, cache Update, Delivery Optimization,
+  // Component Store) không còn được Tubmedia tự chạy — chỉ mở công cụ Dọn dẹp ổ đĩa của Windows.
+  noArgs(IPC.systemCleanup.openStorageSettings, async () => {
+    await shell.openExternal('ms-settings:storagesense');
+  });
+  // GĐ4b: danh sách/hoàn tác khu cách ly — xem src/main/system/cleanup-quarantine.ts.
+  noArgs(IPC.systemCleanup.quarantineList, () => cleanupQuarantine.listActive());
+  handle(IPC.systemCleanup.quarantineRestore, systemCleanupQuarantineRestoreSchema, ({ ids }) =>
+    cleanupQuarantine.restore(ids)
+  );
 
   // TUBMEDIA_VIDEO_LINK_FILTER_HANDLERS
   noArgs(IPC.videoFilter.chooseLinksFile, async () => {
@@ -470,9 +552,30 @@ export function registerIpc(ctx: AppContext): void {
   handle(IPC.quickDownload.pause, quickDownloadTaskSchema, ({ taskId }) => ctx.quickDownload.pause(taskId));
   handle(IPC.quickDownload.resume, quickDownloadTaskSchema, ({ taskId }) => ctx.quickDownload.resume(taskId));
   handle(IPC.quickDownload.cancel, quickDownloadTaskSchema, ({ taskId }) => ctx.quickDownload.cancel(taskId));
+  handle(IPC.quickDownload.previewFrame, previewFrameRequestSchema, (request) =>
+    ctx.previewFrame.extractFrame(request)
+  );
   handle(IPC.quickDownload.revealOutput, quickDownloadTaskSchema, ({ taskId }) =>
     ctx.quickDownload.revealOutput(taskId)
   );
+
+  // TUBMEDIA_LOCAL_CUT_HANDLERS — Giai đoạn 6 mục 2: cắt tệp video đã có sẵn trên máy, không qua tải.
+  noArgs(IPC.localCut.chooseFile, async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [
+        { name: 'Tệp video', extensions: ['mp4', 'mkv', 'mov', 'webm', 'avi', 'ts', 'm4v', 'flv'] }
+      ]
+    });
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+  handle(IPC.localCut.previewFrame, localCutPreviewFrameRequestSchema, (request) =>
+    localCut.previewFrame(request)
+  );
+  handle(IPC.localCut.start, localCutRequestSchema, (request) => localCut.start(request));
+  handle(IPC.localCut.status, localCutTaskSchema, ({ taskId }) => localCut.status(taskId));
+  handle(IPC.localCut.cancel, localCutTaskSchema, ({ taskId }) => localCut.cancel(taskId));
+  handle(IPC.localCut.revealOutput, localCutTaskSchema, ({ taskId }) => localCut.revealOutput(taskId));
 
   noArgs(IPC.updates.status, () => ctx.appUpdates.getStatus());
   noArgs(IPC.updates.check, () => ctx.appUpdates.check());
