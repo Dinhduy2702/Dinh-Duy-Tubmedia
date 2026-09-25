@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { BrowserCookieLockedError } from '../../src/shared/errors/app-errors.js';
 import { friendlyIssue, safeUiText } from '../../src/shared/utils/ui-error.js';
 
 const completedDownloadResult = {
@@ -85,5 +86,20 @@ describe('user-facing notification boundary', () => {
     expect(forbidden.title).toContain('Máy chủ video');
     expect(fragment.tone).toBe('warning');
     expect(fragment.title).toContain('Luồng tải video');
+  });
+
+  it('tells the user how to finish closing a browser that keeps the cookie database locked', () => {
+    // Sự cố thật 2026-09-25: đóng cửa sổ Chrome/Edge KHÔNG đủ — trình duyệt có thể vẫn chạy ẩn
+    // trong nền (xác nhận bằng kiểm thử thật: tiến trình chrome.exe chính vẫn sống sau khi đóng
+    // cửa sổ, khóa file Cookies khiến CẢ lệnh copy thường của hệ điều hành cũng báo "resource busy",
+    // không riêng gì yt-dlp). Thông báo cũ chỉ nói "đóng hoàn toàn... kể cả tiến trình chạy nền"
+    // nhưng không nói CÁCH làm — người dùng thường không biết mở Task Manager để kết thúc tác vụ.
+    const error = new BrowserCookieLockedError('Chrome');
+    const issue = friendlyIssue(error.message);
+    const allSteps = issue.steps.join(' ');
+    expect(issue.title).toBe('Trình duyệt đang khóa dữ liệu đăng nhập');
+    expect(allSteps).toContain('Task Manager');
+    expect(allSteps).toContain('chrome.exe');
+    expect(allSteps.toLowerCase()).toContain('kết thúc tác vụ');
   });
 });

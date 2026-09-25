@@ -149,7 +149,8 @@ export class BrowserCookieLockedError extends AppError {
     super(
       'BROWSER_COOKIE_DATABASE_LOCKED',
       `${browser}${profileLabel} đang khóa cơ sở dữ liệu đăng nhập nên ứng dụng không thể đọc cookies trực tiếp. ` +
-        `Hãy đóng hoàn toàn mọi cửa sổ và tiến trình ${browser}, sau đó thử lại; hoặc dùng phương án Dán cookies / Chọn file cookies.txt.`,
+        `Hãy đóng hoàn toàn mọi cửa sổ và tiến trình ${browser} (nếu vẫn lỗi, mở Task Manager để kết thúc tác vụ ` +
+        `còn sót lại), sau đó thử lại; hoặc dùng phương án Dán cookies / Chọn file cookies.txt.`,
       false,
       { browser, profile }
     );

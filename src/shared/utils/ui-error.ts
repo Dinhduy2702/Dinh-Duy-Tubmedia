@@ -340,7 +340,9 @@ function classifyIssue(value: unknown): FriendlyIssue {
       message:
         'Ứng dụng chưa thể lấy cookies trực tiếp vì Chrome hoặc Edge vẫn đang sử dụng cơ sở dữ liệu đăng nhập.',
       steps: [
-        'Đóng hoàn toàn Chrome hoặc Edge, kể cả tiến trình chạy nền.',
+        'Đóng hoàn toàn Chrome hoặc Edge. Nếu vừa đóng cửa sổ mà vẫn gặp lỗi này, trình duyệt có ' +
+          'thể đang chạy ẩn trong nền — mở Task Manager (Ctrl+Shift+Esc), tìm mọi tiến trình ' +
+          '"chrome.exe" hoặc "msedge.exe" còn sót lại và chọn Kết thúc tác vụ.',
         'Thử lại bằng tùy chọn Trình duyệt; trên Windows có thể ưu tiên Firefox.',
         'Hoặc dùng Dán trực tiếp / Chọn tệp cookies.txt.'
       ],
