@@ -10,7 +10,7 @@ import {
   Trash2,
   X
 } from 'lucide-react';
-import type { CookieConfigurationStatus } from '@shared/types/domain';
+import type { BrowserProfileOption, CookieConfigurationStatus } from '@shared/types/domain';
 import { COOKIE_BLOCKING_CODES } from '@shared/utils/cookie-policy';
 import { useAppStore } from '../stores/app-store';
 
@@ -22,6 +22,7 @@ interface Props {
 
 type Tab = 'browser' | 'paste' | 'file';
 type BrowserName = 'chrome' | 'edge' | 'firefox';
+const MANUAL_PROFILE_OPTION = '__manual__';
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -36,6 +37,7 @@ export function CookieManagerDialog({ open, onClose, onConfigured }: Props): Rea
   const [tab, setTab] = useState<Tab>('browser');
   const [browser, setBrowser] = useState<BrowserName>('firefox');
   const [profile, setProfile] = useState('');
+  const [profiles, setProfiles] = useState<BrowserProfileOption[]>([]);
   const [text, setText] = useState('');
   const [status, setStatus] = useState<CookieConfigurationStatus | null>(null);
   const [busy, setBusy] = useState(false);
@@ -54,9 +56,33 @@ export function CookieManagerDialog({ open, onClose, onConfigured }: Props): Rea
       .catch((error: unknown) => setError(messageOf(error)));
   }, [open, setError]);
 
+  // Sự cố 2026-09-25: máy có nhiều hồ sơ Chrome thì để trống ô hồ sơ sẽ âm thầm lấy nhầm "hồ sơ dùng
+  // gần nhất trong Chrome" (yt-dlp tự chọn), không phải hồ sơ người dùng nghĩ tới. Liệt kê hồ sơ THẬT
+  // (đọc Local State) để người dùng chọn đúng theo tên tài khoản thay vì gõ tay tên thư mục kỹ thuật.
+  useEffect(() => {
+    if (!open || tab !== 'browser') return;
+    let cancelled = false;
+    void window.desktop.cookies
+      .listBrowserProfiles(browser)
+      .then((list) => {
+        if (cancelled) return;
+        setProfiles(list);
+        setProfile((current) => (current || !list.length ? current : (list[0]?.id ?? current)));
+      })
+      .catch(() => {
+        if (!cancelled) setProfiles([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, tab, browser]);
+
   if (!open) return null;
 
-  const finish = async (next: CookieConfigurationStatus): Promise<void> => {
+  const isManualProfile = profiles.length === 0 || !profiles.some((item) => item.id === profile);
+  const selectedProfileLabel = profiles.find((item) => item.id === profile)?.label ?? '';
+
+  const finish = async (next: CookieConfigurationStatus, detail?: string): Promise<void> => {
     setStatus(next);
     setSettings(await window.desktop.settings.get());
     setError(null);
@@ -68,8 +94,9 @@ export function CookieManagerDialog({ open, onClose, onConfigured }: Props): Rea
         id: `cookies-updated-${Date.now()}`,
         severity: 'success',
         title: 'Cookies đã được cập nhật',
-        message:
-          'Các video bị chặn đã tự nhận cookies mới và tiếp tục; không cần dừng danh sách hoặc bấm tải lại.',
+        message: detail
+          ? `${detail} Các video bị chặn đã tự nhận cookies mới và tiếp tục; không cần dừng danh sách hoặc bấm tải lại.`
+          : 'Các video bị chặn đã tự nhận cookies mới và tiếp tục; không cần dừng danh sách hoặc bấm tải lại.',
         sticky: false
       });
     } finally {
@@ -81,7 +108,8 @@ export function CookieManagerDialog({ open, onClose, onConfigured }: Props): Rea
     setBusy(true);
     try {
       const next = await window.desktop.cookies.useBrowser(browser, profile);
-      await finish(next);
+      const detail = selectedProfileLabel ? `Đã dùng hồ sơ/tài khoản: ${selectedProfileLabel}.` : undefined;
+      await finish(next, detail);
     } catch (error) {
       setError(messageOf(error));
     } finally {
@@ -212,6 +240,7 @@ export function CookieManagerDialog({ open, onClose, onConfigured }: Props): Rea
                 <span className="label">Trình duyệt</span>
                 <select
                   className="select"
+                  aria-label="Trình duyệt"
                   value={browser}
                   onChange={(event: ChangeEvent<HTMLSelectElement>) =>
                     setBrowser(event.target.value as BrowserName)
@@ -223,15 +252,48 @@ export function CookieManagerDialog({ open, onClose, onConfigured }: Props): Rea
                 </select>
               </label>
               <label>
-                <span className="label">Hồ sơ trình duyệt (không bắt buộc)</span>
-                <input
-                  className="input"
-                  value={profile}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => setProfile(event.target.value)}
-                  placeholder="Mặc định hoặc Hồ sơ 1"
-                />
+                <span className="label">Hồ sơ trình duyệt</span>
+                {profiles.length > 0 ? (
+                  <select
+                    className="select"
+                    aria-label="Hồ sơ trình duyệt"
+                    value={isManualProfile ? MANUAL_PROFILE_OPTION : profile}
+                    onChange={(event: ChangeEvent<HTMLSelectElement>) => {
+                      const value = event.target.value;
+                      setProfile(value === MANUAL_PROFILE_OPTION ? '' : value);
+                    }}
+                  >
+                    {profiles.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.label}
+                        {item.isLastUsed ? ' — đang dùng gần nhất trong Chrome' : ''}
+                      </option>
+                    ))}
+                    <option value={MANUAL_PROFILE_OPTION}>Khác — tự nhập tên hồ sơ</option>
+                  </select>
+                ) : (
+                  <input
+                    className="input"
+                    value={profile}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => setProfile(event.target.value)}
+                    placeholder="Mặc định hoặc Hồ sơ 1"
+                  />
+                )}
+                {isManualProfile && profiles.length > 0 && (
+                  <input
+                    className="input mt-2"
+                    value={profile}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => setProfile(event.target.value)}
+                    placeholder="Tên thư mục hồ sơ, vd Profile 1"
+                  />
+                )}
               </label>
             </div>
+            {selectedProfileLabel && (
+              <p className="mt-2 text-xs" style={{ color: 'var(--muted)' }}>
+                Sẽ lấy cookies của: <b>{selectedProfileLabel}</b>
+              </p>
+            )}
             <div className="cookie-warning mt-4">
               <ShieldAlert size={18} />
               <div>

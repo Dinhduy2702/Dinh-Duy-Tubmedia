@@ -538,3 +538,17 @@ export interface CookieConfigurationStatus {
   filePath: string;
   managed: boolean;
 }
+
+/**
+ * Một hồ sơ Chrome/Edge có thật trên máy, đọc từ `Local State` của trình duyệt — dùng để người dùng
+ * chọn ĐÚNG tài khoản thay vì gõ tay tên thư mục kỹ thuật (Sự cố 2026-09-25: máy có nhiều hồ sơ thì
+ * để trống sẽ lấy nhầm hồ sơ "dùng gần nhất trong Chrome", không phải hồ sơ người dùng nghĩ tới).
+ */
+export interface BrowserProfileOption {
+  /** Tên thư mục kỹ thuật thật, dùng làm giá trị `cookiesBrowserProfile` (vd "Profile 1"). */
+  id: string;
+  /** Tên hiển thị thân thiện, ưu tiên tên hồ sơ + email tài khoản (vd "Duy — ten@gmail.com"). */
+  label: string;
+  /** Hồ sơ Chrome đang coi là "dùng gần nhất" — gợi ý mặc định hợp lý nếu người dùng chưa từng chọn. */
+  isLastUsed: boolean;
+}

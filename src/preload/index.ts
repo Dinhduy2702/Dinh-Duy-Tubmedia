@@ -53,7 +53,8 @@ const api: DesktopApi = {
     saveText: (text) => invoke(IPC.cookies.saveText, { text }),
     useBrowser: (browser, profile = '') => invoke(IPC.cookies.useBrowser, { browser, profile }),
     useFile: (path) => invoke(IPC.cookies.useFile, { path }),
-    clear: () => invoke(IPC.cookies.clear)
+    clear: () => invoke(IPC.cookies.clear),
+    listBrowserProfiles: (browser) => invoke(IPC.cookies.listBrowserProfiles, { browser })
   },
   dialogs: {
     chooseFolder: (defaultPath) => invoke(IPC.dialogs.chooseFolder, defaultPath ? { defaultPath } : {}),

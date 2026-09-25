@@ -1,8 +1,9 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
-import type { AppSettings, CookieConfigurationStatus } from '@shared/types/domain.js';
+import type { AppSettings, BrowserProfileOption, CookieConfigurationStatus } from '@shared/types/domain.js';
 import { InvalidCookieTextError } from '@shared/errors/app-errors.js';
 import type { SettingsService } from '../settings/settings-service.js';
+import { listChromiumProfiles } from './browser-profile-directory.js';
 
 function normalizedCookieLines(text: string): string[] {
   return text
@@ -188,6 +189,16 @@ export class CookieService {
       cookiesBrowserProfile: profile.trim()
     });
     return this.status();
+  }
+
+  /**
+   * Liệt kê hồ sơ THẬT của Chrome/Edge trên máy để giao diện cho người dùng chọn đúng tài khoản, thay
+   * vì tự gõ tên thư mục kỹ thuật. Firefox không có kho hồ sơ kiểu này (khác kiến trúc) nên trả mảng
+   * rỗng — giao diện tự lùi về ô nhập tay, không phải lỗi.
+   */
+  public async listBrowserProfiles(browser: AppSettings['cookiesBrowser']): Promise<BrowserProfileOption[]> {
+    if (browser !== 'chrome' && browser !== 'edge') return [];
+    return listChromiumProfiles(browser);
   }
 
   public async clear(): Promise<CookieConfigurationStatus> {

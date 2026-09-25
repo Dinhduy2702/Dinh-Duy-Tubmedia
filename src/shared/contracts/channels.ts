@@ -43,7 +43,8 @@ export const IPC = {
     saveText: 'cookies:save-text',
     useBrowser: 'cookies:use-browser',
     useFile: 'cookies:use-file',
-    clear: 'cookies:clear'
+    clear: 'cookies:clear',
+    listBrowserProfiles: 'cookies:list-browser-profiles'
   },
   dialogs: {
     chooseFolder: 'dialogs:choose-folder',

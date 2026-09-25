@@ -264,6 +264,9 @@ export const browserCookieSchema = z.object({
   browser: z.enum(['chrome', 'edge', 'firefox']),
   profile: z.string().max(512).default('')
 });
+export const listBrowserProfilesSchema = z.object({
+  browser: z.enum(['none', 'chrome', 'edge', 'firefox'])
+});
 export const clearWorkbenchSchema = z.object({ slot: z.union([downloadLaneIdSchema, mergeLaneIdSchema]) });
 export const clearLogsSchema = z.object({ projectId: idSchema.optional() });
 

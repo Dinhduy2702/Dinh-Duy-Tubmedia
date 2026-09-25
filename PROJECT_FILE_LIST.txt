@@ -245,6 +245,7 @@ source-manifest.json
 src/main/app/app-context.ts
 src/main/backups/backup-service.ts
 src/main/clips/clip-engine.ts
+src/main/cookies/browser-profile-directory.ts
 src/main/cookies/cookie-service.ts
 src/main/database/database.ts
 src/main/database/migrations.ts
@@ -444,6 +445,7 @@ tests/unit/app-update-version.test.ts
 tests/unit/batch-error-aggregation-r18.test.ts
 tests/unit/brand-layout.test.ts
 tests/unit/brand-logo.test.ts
+tests/unit/browser-profile-directory.test.ts
 tests/unit/changelog-section.test.ts
 tests/unit/cleanup-quarantine.test.ts
 tests/unit/cleanup-scanner.test.ts

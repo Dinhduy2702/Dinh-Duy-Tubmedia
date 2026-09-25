@@ -2,6 +2,7 @@ import type {
   AppSettings,
   AppUpdateStatus,
   AttentionNotice,
+  BrowserProfileOption,
   CookieConfigurationStatus,
   DownloadLaneDraftInput,
   DownloadLaneInput,
@@ -87,6 +88,7 @@ export interface DesktopApi {
     useBrowser(browser: 'chrome' | 'edge' | 'firefox', profile?: string): Promise<CookieConfigurationStatus>;
     useFile(path: string): Promise<CookieConfigurationStatus>;
     clear(): Promise<CookieConfigurationStatus>;
+    listBrowserProfiles(browser: AppSettings['cookiesBrowser']): Promise<BrowserProfileOption[]>;
   };
   dialogs: {
     chooseFolder(

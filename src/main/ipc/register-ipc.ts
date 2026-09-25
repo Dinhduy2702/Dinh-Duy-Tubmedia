@@ -6,6 +6,7 @@ import { runWithWireErrors } from './wire-error.js';
 import {
   backupCreateSchema,
   browserCookieSchema,
+  listBrowserProfilesSchema,
   clearLogsSchema,
   clearWorkbenchSchema,
   chooseFolderSchema,
@@ -248,6 +249,9 @@ export function registerIpc(ctx: AppContext): void {
     configureCookies(() => ctx.cookies.useFile(path))
   );
   noArgs(IPC.cookies.clear, () => ctx.cookies.clear());
+  handle(IPC.cookies.listBrowserProfiles, listBrowserProfilesSchema, ({ browser }) =>
+    ctx.cookies.listBrowserProfiles(browser)
+  );
 
   handle(IPC.dialogs.chooseFolder, chooseFolderSchema, async ({ defaultPath }) => {
     const result = await dialog.showOpenDialog({

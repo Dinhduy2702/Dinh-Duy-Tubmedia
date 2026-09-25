@@ -1930,3 +1930,128 @@ test('Sửa lỗi sau phát hành 2026-09-25: phát hiện bản cập nhật hi
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
 });
+
+/**
+ * Sự cố 2026-09-25: máy có nhiều hồ sơ Chrome (đã xác nhận thật trên máy người dùng có 6 hồ sơ, mỗi hồ
+ * sơ một tài khoản Google khác nhau) thì để trống ô "Hồ sơ trình duyệt" khiến yt-dlp tự chọn hồ sơ "dùng
+ * gần nhất trong Chrome" — người dùng không kiểm soát được và không biết đang lấy cookies của ai. Bài
+ * kiểm này giả lập ĐÚNG cấu trúc Local State thật (đã đối chiếu với dữ liệu thật) qua LOCALAPPDATA riêng
+ * cho tiến trình Electron của bài kiểm — không phụ thuộc Chrome thật cài trên máy chạy CI, nhưng vẫn đi
+ * qua đúng code đọc file thật (không mock hàm main process).
+ */
+test('Sự cố 2026-09-25: chọn đúng hồ sơ Chrome thật khi lấy cookies tự động, không lấy nhầm tài khoản', async () => {
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-chrome-profiles-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+
+  const fakeLocalAppData = path.join(sandbox, 'localappdata');
+  const chromeUserData = path.join(fakeLocalAppData, 'Google', 'Chrome', 'User Data');
+  fs.mkdirSync(chromeUserData, { recursive: true });
+  fs.writeFileSync(
+    path.join(chromeUserData, 'Local State'),
+    JSON.stringify({
+      profile: {
+        last_used: 'Profile 1',
+        info_cache: {
+          Default: { name: 'Duy', gaia_name: 'Duy Đình', gaia_given_name: 'Duy', user_name: 'ca-nhan@gmail.com' },
+          'Profile 1': {
+            name: 'Media',
+            gaia_name: 'Media Tub',
+            gaia_given_name: 'Media',
+            user_name: 'tubmediatool@gmail.com'
+          },
+          'Profile 2': {
+            name: 'Capcut Pro',
+            gaia_name: 'Monkey.D Vien',
+            gaia_given_name: 'Monkey.D',
+            user_name: 'capcut@gmail.com'
+          }
+        }
+      }
+    }),
+    'utf8'
+  );
+
+  try {
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+        ),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+        LOCALAPPDATA: fakeLocalAppData,
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+
+    // Gọi thẳng kênh IPC thật (đúng đường dữ liệu main process đọc Local State thật) — xác nhận cả 3
+    // hồ sơ giả được nhận diện đúng, đúng tên hiển thị, đúng hồ sơ "dùng gần nhất".
+    interface DesktopCookiesApi {
+      cookies: {
+        listBrowserProfiles: (
+          browser: string
+        ) => Promise<Array<{ id: string; label: string; isLastUsed: boolean }>>;
+      };
+    }
+    const profiles = await shellWindow.evaluate(() =>
+      (window as unknown as { desktop: DesktopCookiesApi }).desktop.cookies.listBrowserProfiles('chrome')
+    );
+    expect(profiles, 'phải nhận diện đủ 3 hồ sơ giả lập').toHaveLength(3);
+    expect(profiles.find((item) => item.id === 'Profile 1')?.isLastUsed, 'đúng hồ sơ dùng gần nhất').toBe(
+      true
+    );
+    expect(profiles.filter((item) => item.isLastUsed)).toHaveLength(1);
+
+    // Luồng giao diện thật: Cài đặt → mục "Tải danh sách" (nơi có khối Cookies) → Quản lý cookies →
+    // tab Lấy từ trình duyệt → chọn Chrome.
+    await shellWindow.click('text=Cài đặt', { timeout: 8_000 });
+    // "Tải danh sách" cũng là tên một trang chính ở sidebar ngoài cùng — phải giới hạn đúng trong menu
+    // mục con của trang Cài đặt (.settings-nav) để không bấm nhầm điều hướng sang trang khác.
+    await shellWindow.locator('.settings-nav').getByRole('button', { name: 'Tải danh sách', exact: true }).click();
+    await shellWindow.getByRole('button', { name: 'Quản lý cookies' }).click();
+    const dialog = shellWindow.locator('[role="dialog"][aria-label="Quản lý cookies"]');
+    await expect(dialog).toBeVisible({ timeout: 5_000 });
+    await dialog.getByRole('button', { name: 'Lấy từ trình duyệt' }).click();
+    await dialog.getByLabel('Trình duyệt', { exact: true }).selectOption('chrome');
+
+    // Dropdown hồ sơ phải hiện đủ 3 hồ sơ thật + 1 lựa chọn "nhập tay", không phải ô gõ tay như trước.
+    const profileSelect = dialog.getByLabel('Hồ sơ trình duyệt');
+    await expect(profileSelect).toBeVisible({ timeout: 5_000 });
+    await expect(profileSelect.locator('option')).toHaveCount(4);
+
+    // Mặc định phải TỰ CHỌN SẴN đúng hồ sơ "dùng gần nhất" (Profile 1/Media) — hiển thị rõ ràng thay vì
+    // âm thầm để trống rồi bị yt-dlp tự chọn không ai biết.
+    await expect(dialog).toContainText('Sẽ lấy cookies của:');
+    await expect(dialog).toContainText('Media — tubmediatool@gmail.com');
+
+    // Chọn đúng hồ sơ KHÁC (Capcut Pro/Profile 2) — xác nhận chọn đúng, không lẫn giữa các hồ sơ.
+    await profileSelect.selectOption({ label: 'Capcut Pro — capcut@gmail.com' });
+    await expect(dialog).toContainText('Sẽ lấy cookies của: Capcut Pro — capcut@gmail.com');
+
+    await dialog.getByRole('button', { name: 'Dùng trình duyệt này' }).click();
+    const attention = shellWindow.locator('.attention-center');
+    await expect(attention, 'phải xác nhận rõ đã lấy cookies của đúng hồ sơ/tài khoản nào').toBeVisible({
+      timeout: 8_000
+    });
+    await expect(attention).toContainText('Đã dùng hồ sơ/tài khoản: Capcut Pro — capcut@gmail.com');
+
+    // Lưu đúng vào cấu hình thật (không chỉ hiển thị) — Profile 2 là tên thư mục kỹ thuật thật.
+    const status = await shellWindow.evaluate(() =>
+      (window as unknown as { desktop: { cookies: { status: () => Promise<{ browserProfile: string }> } } })
+        .desktop.cookies.status()
+    );
+    expect(status.browserProfile).toBe('Profile 2');
+  } finally {
+    await closeElectronApplication();
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});
