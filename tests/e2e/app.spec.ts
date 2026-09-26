@@ -594,8 +594,13 @@ test('Sửa lỗi 2026-09-23 — tải xong 1 video qua Tải nhanh không làm 
     expect(midFlightClickOk, 'phải bấm chuyển trang được NGAY TRONG LÚC đang xử lý/xác minh, không bị khóa').toBe(true);
 
     // Đúng trọng tâm Vấn đề 2: UI phải phản hồi được NGAY sau khi báo "hoàn tất", không phải chờ thêm.
+    // Dùng đúng vai trò trong đúng vùng điều hướng thay vì selector chữ mơ hồ "text=Cài đặt" (Sự cố phát
+    // hành 1.5.0, 2026-09-26) — KHÔNG đổi mốc thời gian đo lường bên dưới, chỉ sửa cách chọn phần tử.
     const afterCompleteClickStart = Date.now();
-    await shellWindow.click('text=Cài đặt', { timeout: 8_000 });
+    await shellWindow
+      .getByRole('navigation', { name: 'Điều hướng chính' })
+      .getByRole('button', { name: 'Cài đặt', exact: true })
+      .click({ timeout: 8_000 });
     const settledText = await shellWindow.evaluate(() => document.body.innerText.includes('Cài đặt'));
     expect(settledText).toBe(true);
     expect(Date.now() - afterCompleteClickStart, 'ứng dụng phải phản hồi gần như ngay sau khi hoàn tất').toBeLessThan(8_000);
@@ -1992,6 +1997,14 @@ test('Sự cố 2026-09-25: chọn đúng hồ sơ Chrome thật khi lấy cooki
     mainProcessId = electronApplication.process().pid;
     shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
     await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    // Sự cố phát hành 1.5.0 (2026-09-26): trên máy CI chậm hơn, bài này bấm điều hướng sang trang Cài
+    // đặt NGAY sau khi cửa sổ vừa mở — đúng lúc app còn đang bận tự kết nối/kiểm tra công cụ (yt-dlp/
+    // FFmpeg/ffprobe/aria2c) ở nền, tranh chấp CPU khiến việc bấm bị coi "chưa sẵn sàng tương tác" và
+    // vượt quá 8 giây (đã tái hiện cục bộ bằng CDP throttling CPU 8x: cùng thao tác luôn THÀNH CÔNG
+    // nhưng mất 5,6-7,2 giây — quá sát ngưỡng 8 giây cũ khi máy CI còn chậm/tải hơn nữa). Đợi đúng tín
+    // hiệu "công cụ sẵn sàng" thật ở Topbar trước khi điều hướng — đúng thời điểm ứng dụng đã ổn định,
+    // không phải một khoảng chờ tùy tiện.
+    await shellWindow.waitForSelector('.tool-status-button.is-ready', { timeout: 30_000 });
 
     // Gọi thẳng kênh IPC thật (đúng đường dữ liệu main process đọc Local State thật) — xác nhận cả 3
     // hồ sơ giả được nhận diện đúng, đúng tên hiển thị, đúng hồ sơ "dùng gần nhất".
@@ -2013,7 +2026,13 @@ test('Sự cố 2026-09-25: chọn đúng hồ sơ Chrome thật khi lấy cooki
 
     // Luồng giao diện thật: Cài đặt → mục "Tải danh sách" (nơi có khối Cookies) → Quản lý cookies →
     // tab Lấy từ trình duyệt → chọn Chrome.
-    await shellWindow.click('text=Cài đặt', { timeout: 8_000 });
+    // Dùng đúng vai trò (role) trong đúng vùng điều hướng (<nav aria-label="Điều hướng chính">) thay vì
+    // selector chữ mơ hồ "text=Cài đặt" — tránh khớp nhầm phần tử khác cũng chứa chữ "Cài đặt" ở nơi
+    // khác trong ứng dụng (vd nút "Cài đặt & khởi động lại" ở trang Cập nhật).
+    await shellWindow
+      .getByRole('navigation', { name: 'Điều hướng chính' })
+      .getByRole('button', { name: 'Cài đặt', exact: true })
+      .click({ timeout: 20_000 });
     // "Tải danh sách" cũng là tên một trang chính ở sidebar ngoài cùng — phải giới hạn đúng trong menu
     // mục con của trang Cài đặt (.settings-nav) để không bấm nhầm điều hướng sang trang khác.
     await shellWindow.locator('.settings-nav').getByRole('button', { name: 'Tải danh sách', exact: true }).click();
