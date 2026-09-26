@@ -4,6 +4,7 @@
 // (giữ nguyên cho code tiến trình chính không có DOM).
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -2078,6 +2079,164 @@ test('Sự cố 2026-09-25: chọn đúng hồ sơ Chrome thật khi lấy cooki
         .desktop.cookies.status()
     );
     expect(status.browserProfile).toBe('Profile 2');
+  } finally {
+    await closeElectronApplication();
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Tính năng C1 (2026-09-26) — "Gợi ý điểm cắt tự động" (khoảng lặng + đổi cảnh, KHÔNG dùng AI). Dựng một
+ * video mẫu THẬT có cấu trúc biết trước (đỏ+có tiếng 3s, xanh dương+im lặng 2s, xanh lá+có tiếng 3s —
+ * đã đối chiếu định dạng output thật của FFmpeg 8.1.2 trước khi viết regex phân tích, xem
+ * tests/unit/cut-suggestion.test.ts) rồi lái đúng luồng giao diện thật: bấm nút "Gợi ý điểm cắt tự động"
+ * → xem danh sách → bấm "Dùng đoạn này" → xác nhận 2 ô Mốc bắt đầu/kết thúc được điền đúng.
+ */
+test('C1: gợi ý điểm cắt tự động tìm đúng khoảng lặng/đổi cảnh và điền đúng vào ô mốc khi bấm "Dùng đoạn này"', async () => {
+  const toolsDirectory = resolveToolsDirectoryForTest();
+  test.skip(!toolsDirectory, 'Không tìm thấy ffmpeg/ffprobe trên máy này để chạy bài kiểm thật.');
+
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-cut-suggestion-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+  fs.mkdirSync(path.join(userDataDirectory, 'quick-download'), { recursive: true });
+
+  const sourceFile = path.join(sandbox, 'video-mau-c1.mp4');
+  const ffmpegResult = spawnSync(
+    path.join(toolsDirectory!, 'ffmpeg.exe'),
+    [
+      '-y',
+      '-f', 'lavfi', '-i', 'color=c=red:s=320x240:d=3,format=yuv420p',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3',
+      '-f', 'lavfi', '-i', 'color=c=blue:s=320x240:d=2,format=yuv420p',
+      '-f', 'lavfi', '-i', 'anullsrc=duration=2',
+      '-f', 'lavfi', '-i', 'color=c=green:s=320x240:d=3,format=yuv420p',
+      '-f', 'lavfi', '-i', 'sine=frequency=880:duration=3',
+      '-filter_complex', '[0:v][2:v][4:v]concat=n=3:v=1:a=0[v];[1:a][3:a][5:a]concat=n=3:v=0:a=1[a]',
+      '-map', '[v]', '-map', '[a]', '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', sourceFile
+    ],
+    { stdio: 'ignore', windowsHide: true, timeout: 60_000 }
+  );
+  expect(ffmpegResult.status, 'ffmpeg phải dựng được video mẫu (đỏ/xanh dương im lặng/xanh lá)').toBe(0);
+
+  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+  db.exec(
+    'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
+  );
+  db.prepare(
+    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+  ).run(
+    'app',
+    JSON.stringify({
+      theme: 'dark',
+      startWithWindows: false,
+      autoCheckAppUpdates: false,
+      autoCheckToolUpdates: false,
+      ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+      ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+    }),
+    new Date().toISOString()
+  );
+  db.close();
+
+  // Seed thẳng trạng thái Tải nhanh "vừa hoàn tất" trỏ tới video mẫu — để dùng đúng nút "Cắt đoạn này"
+  // có sẵn trên giao diện thay vì hộp thoại chọn tệp gốc hệ điều hành (Playwright không lái được).
+  fs.writeFileSync(
+    path.join(userDataDirectory, 'quick-download', 'state.json'),
+    JSON.stringify({
+      version: 1,
+      statuses: [
+        {
+          taskId: randomUUID(),
+          mode: 'full',
+          mediaMode: 'video-audio',
+          phase: 'completed',
+          progress: 100,
+          title: 'Video mẫu C1',
+          message: 'Đã tải và kiểm tra hoàn tất.',
+          speed: '',
+          eta: '',
+          downloadedBytes: 0,
+          totalBytes: 0,
+          outputPath: sourceFile,
+          outputDirectory: sandbox,
+          requestedStartSeconds: null,
+          requestedEndSeconds: null,
+          actualDurationSeconds: 8.02,
+          accurateCut: false,
+          startedAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+          error: null,
+          errorCode: null,
+          warnings: []
+        }
+      ]
+    }),
+    'utf8'
+  );
+
+  try {
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+        ),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await shellWindow.waitForSelector('.tool-status-button.is-ready', { timeout: 30_000 });
+
+    // Xác nhận trước bằng IPC thật (không qua giao diện) — cùng đường dữ liệu main process thật, khớp
+    // đúng với bài kiểm đơn vị đã xác nhận qua dữ liệu FFmpeg output thật.
+    interface DesktopCutSuggestApi {
+      localCut: {
+        suggestCutPoints: (
+          filePath: string
+        ) => Promise<Array<{ startSeconds: number; endSeconds: number; startReason: string; endReason: string }>>;
+      };
+    }
+    const directSuggestions = await shellWindow.evaluate(
+      (filePath) =>
+        (window as unknown as { desktop: DesktopCutSuggestApi }).desktop.localCut.suggestCutPoints(filePath),
+      sourceFile
+    );
+    expect(directSuggestions.length, 'phải tìm được ít nhất 1 đoạn gợi ý qua IPC thật').toBeGreaterThan(0);
+    expect(directSuggestions[0]?.startSeconds).toBeCloseTo(0, 1);
+    expect(directSuggestions[0]?.endSeconds).toBeCloseTo(3.02, 1);
+
+    // Luồng giao diện thật: Xem trước & Cắt → dùng video "vừa tải" → bấm Gợi ý điểm cắt tự động.
+    await shellWindow.click('text=Xem trước & Cắt');
+    await shellWindow.getByRole('button', { name: 'Cắt đoạn này' }).click();
+    await shellWindow.waitForSelector('text=Cắt tệp có sẵn trên máy', { timeout: 10_000 });
+
+    const suggestButton = shellWindow.getByRole('button', { name: 'Gợi ý điểm cắt tự động' });
+    await expect(suggestButton, 'phải có đúng nút gợi ý, không gọi nhầm là "AI"').toBeVisible();
+    await suggestButton.click();
+
+    const suggestionList = shellWindow.locator('.local-cut-suggestion-list li');
+    await expect(suggestionList.first(), 'phải hiện ít nhất 1 đoạn gợi ý trên giao diện thật').toBeVisible({
+      timeout: 20_000
+    });
+    const suggestionCount = await suggestionList.count();
+    expect(suggestionCount).toBeGreaterThan(0);
+    expect(suggestionCount, 'giới hạn tối đa 8 đoạn đã hỏi và được chọn').toBeLessThanOrEqual(8);
+
+    // Bấm "Dùng đoạn này" của gợi ý ĐẦU TIÊN — phải điền đúng vào 2 ô Mốc bắt đầu/kết thúc có sẵn.
+    await suggestionList.first().getByRole('button', { name: 'Dùng đoạn này' }).click();
+    const startTimeValue = await shellWindow.locator('.local-cut-field input').first().inputValue();
+    const endTimeValue = await shellWindow.locator('.local-cut-field input').nth(1).inputValue();
+    expect(startTimeValue, 'ô Mốc bắt đầu phải được điền đúng theo đoạn gợi ý đầu tiên').toBe('00:00:00');
+    expect(endTimeValue, 'ô Mốc kết thúc phải được điền đúng theo đoạn gợi ý đầu tiên').toBe('00:00:03');
   } finally {
     await closeElectronApplication();
     fs.rmSync(sandbox, { recursive: true, force: true });

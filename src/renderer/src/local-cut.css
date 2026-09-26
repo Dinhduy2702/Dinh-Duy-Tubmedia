@@ -40,6 +40,55 @@
   font-size: 0.8rem;
 }
 
+/* Tính năng C1 (2026-09-26) — "Gợi ý điểm cắt tự động" (im lặng + đổi cảnh, KHÔNG dùng AI). */
+.local-cut-suggestion-row {
+  margin-top: 0.8rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.local-cut-suggestion-row > small {
+  color: var(--muted);
+}
+
+.local-cut-suggestion-empty {
+  color: var(--muted);
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.78rem;
+}
+
+.local-cut-suggestion-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.local-cut-suggestion-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.5rem 0.7rem;
+  background: var(--panel2);
+}
+
+.local-cut-suggestion-list b {
+  font-size: 0.82rem;
+}
+
+.local-cut-suggestion-list small {
+  color: var(--muted);
+  display: block;
+  margin-top: 0.15rem;
+}
+
 .local-cut-aspect-row {
   margin-top: 0.8rem;
   display: grid;

@@ -367,3 +367,10 @@ export const localCutTaskSchema = z
     taskId: idSchema
   })
   .strict();
+// Tính năng C1 (2026-09-26): "Gợi ý điểm cắt tự động" — chỉ cần đường dẫn tệp, không có tham số ngưỡng
+// (độ nhạy CỐ ĐỊNH, không cho chỉnh — đã hỏi và được người dùng chọn).
+export const localCutSuggestRequestSchema = z
+  .object({
+    filePath: z.string().trim().min(1).max(4096)
+  })
+  .strict();

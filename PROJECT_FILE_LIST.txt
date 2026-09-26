@@ -277,6 +277,7 @@ src/main/ipc/wire-error.ts
 src/main/logging/diagnostic-exporter.ts
 src/main/logging/logger.ts
 src/main/media/aspect-ratio-filter.ts
+src/main/media/cut-suggestion.ts
 src/main/media/file-verifier.ts
 src/main/media/local-cut-command.ts
 src/main/media/local-cut-service.ts
@@ -458,6 +459,7 @@ tests/unit/cookie-normalization.test.ts
 tests/unit/cookie-policy.test.ts
 tests/unit/core-resilience-r35.test.ts
 tests/unit/csv-export.test.ts
+tests/unit/cut-suggestion.test.ts
 tests/unit/diagnostic-policy.test.ts
 tests/unit/disk-full-recovery.test.ts
 tests/unit/download-performance.test.ts

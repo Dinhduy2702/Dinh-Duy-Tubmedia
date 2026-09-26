@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Download, FileVideo, FolderOpen, ImagePlay, Info, Scissors, Square } from 'lucide-react';
+import { AlertTriangle, Download, FileVideo, FolderOpen, ImagePlay, Info, Scissors, Square, Wand2 } from 'lucide-react';
 import type { QuickDownloadStatus } from '@shared/quick-download';
 import type { MediaInfo } from '@shared/types/domain';
-import type { LocalCutAspectRatio, LocalCutStatus } from '@shared/local-cut';
+import type { CutSuggestion, LocalCutAspectRatio, LocalCutStatus } from '@shared/local-cut';
 import { parseQuickDownloadTime } from '@shared/local-cut';
 import { formatTimestamp } from '@shared/utils/timestamp';
 import { formatBitrate, formatFileSize, formatFps, formatHdr, formatVideoCodec } from '@shared/utils/media-info-format';
@@ -34,6 +34,22 @@ function directoryNameOf(path: string): string | null {
   const lastSlash = Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
   return lastSlash > 0 ? path.slice(0, lastSlash) : null;
 }
+
+// Luôn định dạng đủ 3 phần "giờ:phút:giây" — đúng khuôn của 2 ô Mốc bắt đầu/kết thúc trên trang này
+// (khác formatQuickDownloadTime dùng ở nơi khác, có thể rút gọn còn 2 phần khi dưới 1 giờ).
+function formatHms(totalSeconds: number): string {
+  const safe = Math.max(0, Math.round(totalSeconds));
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  const seconds = safe % 60;
+  return [hours, minutes, seconds].map((value) => String(value).padStart(2, '0')).join(':');
+}
+
+const CUT_SUGGESTION_REASON_LABEL: Record<CutSuggestion['startReason'], string> = {
+  edge: 'đầu/cuối video',
+  silence: 'khoảng lặng',
+  scene: 'đổi cảnh'
+};
 
 /** Bước ② Xem trước & Cắt — hành trình một video (điều hướng 3 bước, đặc tả GĐ 2a).
  * Tải nhanh (bước ①) chưa có lịch sử nhiều tệp qua IPC, nên trang này cho thấy TRUNG THỰC kết quả tải
@@ -69,6 +85,14 @@ export function StepPreviewCutPage(): React.JSX.Element {
   const [previewError, setPreviewError] = useState<string | null>(null);
   const previewInvalidationKey = `${sourceFile ?? ''}|${startTime}|${endTime}|${aspectRatio}`;
   const previewInvalidationKeyRef = useRef(previewInvalidationKey);
+
+  // Tính năng C1 (2026-09-26) — "Gợi ý điểm cắt tự động" (im lặng + đổi cảnh, KHÔNG dùng AI). Kích hoạt
+  // bằng nút bấm riêng (đã hỏi và được chọn) — không tự chạy khi vừa chọn tệp, vì phân tích cả video có
+  // thể mất vài chục giây với video dài.
+  const [suggestions, setSuggestions] = useState<CutSuggestion[]>([]);
+  const [suggestLoading, setSuggestLoading] = useState(false);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
+  const [suggestAttempted, setSuggestAttempted] = useState(false);
 
   const [status, setStatus] = useState<LocalCutStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -133,6 +157,9 @@ export function StepPreviewCutPage(): React.JSX.Element {
         setOutputDirectory((current) => current ?? directoryNameOf(selected));
         setStatus(null);
         setError(null);
+        setSuggestions([]);
+        setSuggestError(null);
+        setSuggestAttempted(false);
       }
     } catch (chooseError) {
       setError(safeUiText(chooseError, 'Không chọn được tệp.'));
@@ -145,6 +172,30 @@ export function StepPreviewCutPage(): React.JSX.Element {
     setOutputDirectory(latest.outputDirectory || null);
     setStatus(null);
     setError(null);
+    setSuggestions([]);
+    setSuggestError(null);
+    setSuggestAttempted(false);
+  }
+
+  async function suggestCutPoints(): Promise<void> {
+    if (!sourceFile) return;
+    setSuggestLoading(true);
+    setSuggestError(null);
+    try {
+      const result = await window.desktop.localCut.suggestCutPoints(sourceFile);
+      setSuggestions(result);
+      setSuggestAttempted(true);
+    } catch (suggestErrorValue) {
+      setSuggestError(safeUiText(suggestErrorValue, 'Không gợi ý được điểm cắt cho video này.'));
+      setSuggestAttempted(true);
+    } finally {
+      setSuggestLoading(false);
+    }
+  }
+
+  function applySuggestion(suggestion: CutSuggestion): void {
+    setStartTime(formatHms(suggestion.startSeconds));
+    setEndTime(formatHms(suggestion.endSeconds));
   }
 
   async function chooseOutputDirectory(): Promise<void> {
@@ -335,6 +386,60 @@ export function StepPreviewCutPage(): React.JSX.Element {
                 placeholder="00:00:10"
               />
             </label>
+          </div>
+
+          <div className="local-cut-suggestion-row">
+            <button
+              type="button"
+              className="btn btn-small"
+              disabled={running || suggestLoading}
+              onClick={() => void suggestCutPoints()}
+            >
+              {suggestLoading ? (
+                'Đang phân tích video…'
+              ) : (
+                <>
+                  <Wand2 size={14} />
+                  Gợi ý điểm cắt tự động
+                </>
+              )}
+            </button>
+            <small>Dựa vào khoảng lặng âm thanh và đổi cảnh hình ảnh — không dùng AI, chỉ là gợi ý kỹ thuật.</small>
+
+            {suggestError && (
+              <div className="quick-download-error" role="alert">
+                <AlertTriangle size={15} />
+                {suggestError}
+              </div>
+            )}
+
+            {!suggestError && suggestAttempted && suggestions.length === 0 && (
+              <div className="local-cut-suggestion-empty">
+                Không tìm thấy đoạn nào phù hợp — video có thể không có khoảng lặng/đổi cảnh rõ rệt. Hãy cắt thủ công bằng 2 ô ở trên.
+              </div>
+            )}
+
+            {suggestions.length > 0 && (
+              <ul className="local-cut-suggestion-list">
+                {suggestions.map((suggestion, index) => (
+                  <li key={`${suggestion.startSeconds}-${suggestion.endSeconds}-${index}`}>
+                    <span>
+                      <b>
+                        {formatHms(suggestion.startSeconds)} – {formatHms(suggestion.endSeconds)}
+                      </b>
+                      <small>
+                        {formatHms(suggestion.endSeconds - suggestion.startSeconds)} · bắt đầu tại{' '}
+                        {CUT_SUGGESTION_REASON_LABEL[suggestion.startReason]}, kết thúc tại{' '}
+                        {CUT_SUGGESTION_REASON_LABEL[suggestion.endReason]}
+                      </small>
+                    </span>
+                    <button type="button" className="btn btn-small" disabled={running} onClick={() => applySuggestion(suggestion)}>
+                      Dùng đoạn này
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           <div className="local-cut-aspect-row" role="radiogroup" aria-label="Preset xuất theo nền tảng">

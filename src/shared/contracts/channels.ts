@@ -129,6 +129,7 @@ export const IPC = {
   localCut: {
     chooseFile: 'local-cut:choose-file',
     previewFrame: 'local-cut:preview-frame',
+    suggestCutPoints: 'local-cut:suggest-cut-points',
     start: 'local-cut:start',
     status: 'local-cut:status',
     cancel: 'local-cut:cancel',

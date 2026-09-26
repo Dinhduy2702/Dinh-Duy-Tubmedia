@@ -140,6 +140,7 @@ const api: DesktopApi = {
   localCut: {
     chooseFile: () => invoke(IPC.localCut.chooseFile),
     previewFrame: (input) => invoke(IPC.localCut.previewFrame, input),
+    suggestCutPoints: (filePath) => invoke(IPC.localCut.suggestCutPoints, { filePath }),
     start: (input) => invoke(IPC.localCut.start, input),
     status: (taskId) => invoke(IPC.localCut.status, { taskId }),
     cancel: (taskId) => invoke(IPC.localCut.cancel, { taskId }),

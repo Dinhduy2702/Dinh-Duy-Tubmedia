@@ -45,6 +45,7 @@ import {
   previewFrameRequestSchema,
   localCutPreviewFrameRequestSchema,
   localCutRequestSchema,
+  localCutSuggestRequestSchema,
   localCutTaskSchema
 } from '@shared/schemas/ipc.js';
 import type { AppSettings } from '@shared/types/domain.js';
@@ -575,6 +576,9 @@ export function registerIpc(ctx: AppContext): void {
   });
   handle(IPC.localCut.previewFrame, localCutPreviewFrameRequestSchema, (request) =>
     localCut.previewFrame(request)
+  );
+  handle(IPC.localCut.suggestCutPoints, localCutSuggestRequestSchema, ({ filePath }) =>
+    localCut.suggestCutPoints(filePath)
   );
   handle(IPC.localCut.start, localCutRequestSchema, (request) => localCut.start(request));
   handle(IPC.localCut.status, localCutTaskSchema, ({ taskId }) => localCut.status(taskId));

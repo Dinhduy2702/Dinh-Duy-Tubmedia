@@ -97,3 +97,16 @@ export function validateLocalCutRequest(value: unknown): ValidatedLocalCutReques
 }
 
 export { formatQuickDownloadTime, parseQuickDownloadTime };
+
+// Tính năng C1 (2026-09-26) — "Gợi ý điểm cắt tự động": dựa THUẦN TÚY vào kỹ thuật (khoảng lặng âm
+// thanh + đổi cảnh hình ảnh qua FFmpeg silencedetect/scdet có sẵn), KHÔNG dùng AI/mô hình học máy nào —
+// đặt tên đúng bản chất để không gây kỳ vọng sai. 'edge' là mốc đầu/cuối chính video (luôn an toàn để
+// cắt tại đó), khác với 'silence'/'scene' là điểm phát hiện được bên trong video.
+export type CutSuggestionReason = 'silence' | 'scene' | 'edge';
+
+export interface CutSuggestion {
+  startSeconds: number;
+  endSeconds: number;
+  startReason: CutSuggestionReason;
+  endReason: CutSuggestionReason;
+}

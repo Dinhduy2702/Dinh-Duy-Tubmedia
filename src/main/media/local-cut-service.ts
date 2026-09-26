@@ -15,6 +15,7 @@ import { sanitizeProgress } from '@shared/utils/progress-policy.js';
 import {
   LOCAL_CUT_ASPECT_RATIOS,
   validateLocalCutRequest,
+  type CutSuggestion,
   type LocalCutAspectRatio,
   type LocalCutStatus,
   type ValidatedLocalCutRequest
@@ -25,6 +26,15 @@ import type { Logger } from '../logging/logger.js';
 import type { ProcessManager } from '../processes/process-manager.js';
 import type { ToolManager } from '../tools/tool-manager.js';
 import { buildLocalCutArguments, buildLocalFrameExtractArguments } from './local-cut-command.js';
+import {
+  CUT_SUGGESTION_ANALYSIS_TIMEOUT_MS,
+  buildCutSuggestions,
+  buildSceneDetectArguments,
+  buildSilenceDetectArguments,
+  parseFfmpegDurationSeconds,
+  parseSceneTimestamps,
+  parseSilenceIntervals
+} from './cut-suggestion.js';
 
 const TERMINAL_PHASES = new Set<LocalCutStatus['phase']>(['completed', 'cancelled', 'failed']);
 const ASPECT_RATIOS = new Set<LocalCutAspectRatio>(LOCAL_CUT_ASPECT_RATIOS);
@@ -91,6 +101,67 @@ export class LocalCutService {
       return { dataUrl: `data:image/jpeg;base64,${buffer.toString('base64')}` };
     } finally {
       await rm(workDirectory, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+
+  /**
+   * Tính năng C1 (2026-09-26) — "Gợi ý điểm cắt tự động". Dùng ĐÚNG ProcessManager.run() theo mẫu
+   * previewFrame() ở trên — không tạo cơ chế chạy tiến trình mới. Không qua hàng đợi/trạng thái theo dõi
+   * tiến độ vì đây là phân tích MỘT LẦN, người dùng chủ động bấm và chờ kết quả ngay (không tạm dừng/tiếp
+   * tục như tác vụ cắt thật).
+   */
+  public async suggestCutPoints(filePath: string): Promise<CutSuggestion[]> {
+    const trimmedPath = typeof filePath === 'string' ? filePath.trim() : '';
+    if (!trimmedPath) throw new Error('Đường dẫn tệp nguồn không hợp lệ.');
+    if (!existsSync(trimmedPath)) throw new Error('Không tìm thấy tệp nguồn.');
+
+    const ffmpeg = this.tools.get('ffmpeg');
+    if (!ffmpeg.available || !ffmpeg.executablePath) throw new ToolNotFoundError('ffmpeg');
+
+    try {
+      const silenceLines: string[] = [];
+      const silenceResult = await this.processes.run({
+        jobId: `cut-suggest-silence-${randomUUID()}`,
+        tool: 'ffmpeg',
+        executablePath: ffmpeg.executablePath,
+        args: buildSilenceDetectArguments(trimmedPath),
+        priority: 'below_normal',
+        timeoutMs: CUT_SUGGESTION_ANALYSIS_TIMEOUT_MS,
+        onStderrLine: (line) => silenceLines.push(line)
+      });
+      if (silenceResult.code !== 0) {
+        throw new Error('Không thể phân tích âm thanh của video để gợi ý điểm cắt.');
+      }
+      const durationSeconds = parseFfmpegDurationSeconds(silenceLines);
+      if (durationSeconds === null) {
+        throw new Error('Không đọc được thời lượng video để gợi ý điểm cắt.');
+      }
+      const silences = parseSilenceIntervals(silenceLines);
+
+      const sceneLines: string[] = [];
+      const sceneResult = await this.processes.run({
+        jobId: `cut-suggest-scene-${randomUUID()}`,
+        tool: 'ffmpeg',
+        executablePath: ffmpeg.executablePath,
+        args: buildSceneDetectArguments(trimmedPath),
+        priority: 'below_normal',
+        timeoutMs: CUT_SUGGESTION_ANALYSIS_TIMEOUT_MS,
+        onStderrLine: (line) => sceneLines.push(line)
+      });
+      if (sceneResult.code !== 0) {
+        throw new Error('Không thể phân tích hình ảnh của video để gợi ý điểm cắt.');
+      }
+      const sceneTimestamps = parseSceneTimestamps(sceneLines);
+
+      return buildCutSuggestions(durationSeconds, silences, sceneTimestamps);
+    } catch (error) {
+      this.logger.warn(
+        'local-cut',
+        'CUT_SUGGESTION_FAILED',
+        error instanceof Error ? error.message : String(error),
+        { metadata: { filePath: trimmedPath } }
+      );
+      throw error;
     }
   }
 
