@@ -1810,36 +1810,45 @@ test('A2: 3 đề xuất tinh gọn giao diện đã duyệt hoạt động đú
     );
 
     // ---- Mục 3: nút "Tiếp tục tất cả"/"Tạm dừng tất cả" ở thanh trên cùng VẪN hiện ở trang KHÁC ----
+    // Sự cố phát hành 1.5.0 (2026-09-26): thay waitForTimeout(300) cố định bằng chờ ĐÚNG điều kiện thật
+    // (expect(...).toHaveCount tự lặp lại tới khi đúng hoặc hết thời gian) — trang đích ở đây là
+    // lazy()-load, 300ms có thể không đủ trên máy CI chậm/đang bận tự kết nối công cụ ở nền (cùng nguyên
+    // nhân gốc với Sự cố 3 ở bài kiểm chọn hồ sơ Chrome).
     await shellWindow.evaluate(() =>
       document.querySelector<HTMLElement>('[data-page-id="download-workbench"]')?.click()
     );
-    await shellWindow.waitForTimeout(300);
-    expect(
-      await shellWindow.locator('.topbar-pause').count(),
+    await expect(
+      shellWindow.locator('.topbar-pause'),
       'nút Tiếp tục/Tạm dừng tất cả ở thanh trên cùng phải VẪN hiện ở trang khác Hàng đợi'
-    ).toBe(1);
+    ).toHaveCount(1, { timeout: 10_000 });
 
     // ---- Mục 3: nút đó BỊ ẨN khi đang đứng ngay ở trang Hàng đợi (chỉ còn bản riêng của trang) ----
     await shellWindow.evaluate(() => document.querySelector<HTMLElement>('[data-page-id="activity"]')?.click());
-    await shellWindow.waitForTimeout(300);
-    expect(
-      await shellWindow.locator('.topbar-pause').count(),
+    await expect(
+      shellWindow.locator('.topbar-pause'),
       'nút Tiếp tục/Tạm dừng tất cả ở thanh trên cùng phải BỊ ẨN khi đang ở đúng trang Hàng đợi'
-    ).toBe(0);
-    const activityPageHasOwnButton = await shellWindow.evaluate(() =>
-      Array.from(document.querySelectorAll('button')).some(
-        (button) => button.textContent?.includes('Tiếp tục tất cả') || button.textContent?.includes('Tạm dừng tất cả')
+    ).toHaveCount(0, { timeout: 10_000 });
+    // Bản thân trang Hàng đợi (lazy()-load) có thể chưa mount xong ngay khi thanh trên cùng đã cập nhật
+    // xong (2 việc độc lập) — chờ lặp lại (expect.poll) thay vì đọc một lần duy nhất.
+    await expect
+      .poll(
+        () =>
+          shellWindow!.evaluate(() =>
+            Array.from(document.querySelectorAll('button')).some(
+              (button) =>
+                button.textContent?.includes('Tiếp tục tất cả') || button.textContent?.includes('Tạm dừng tất cả')
+            )
+          ),
+        { timeout: 10_000, message: 'trang Hàng đợi phải vẫn còn đúng 1 nút riêng của nó' }
       )
-    );
-    expect(activityPageHasOwnButton, 'trang Hàng đợi phải vẫn còn đúng 1 nút riêng của nó').toBe(true);
+      .toBe(true);
 
     // ---- Mục 1: trang Chẩn đoán không còn thẻ "Bộ xử lý" trùng với thanh trên cùng ----
     await shellWindow.evaluate(() => document.querySelector<HTMLElement>('[data-page-id="diagnostics"]')?.click());
-    await shellWindow.waitForTimeout(300);
-    const diagnosticsSummaryCardCount = await shellWindow.evaluate(
-      () => document.querySelector('.diagnostics-summary')?.children.length ?? 0
-    );
-    expect(diagnosticsSummaryCardCount, 'trang Chẩn đoán chỉ còn đúng 3 thẻ (bỏ thẻ CPU trùng lặp)').toBe(3);
+    await expect(
+      shellWindow.locator('.diagnostics-summary > *'),
+      'trang Chẩn đoán chỉ còn đúng 3 thẻ (bỏ thẻ CPU trùng lặp)'
+    ).toHaveCount(3, { timeout: 10_000 });
     const diagnosticsSummaryText = await shellWindow.evaluate(
       () => document.querySelector('.diagnostics-summary')?.textContent ?? ''
     );
