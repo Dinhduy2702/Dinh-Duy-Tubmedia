@@ -73,7 +73,9 @@ export const IPC = {
     retry: 'queue:retry',
     retryFailed: 'queue:retry-failed',
     remove: 'queue:remove',
-    clearFinished: 'queue:clear-finished'
+    clearFinished: 'queue:clear-finished',
+    startupPrompt: 'queue:startup-prompt',
+    resumeStartupHeld: 'queue:resume-startup-held'
   },
   tools: {
     list: 'tools:list',

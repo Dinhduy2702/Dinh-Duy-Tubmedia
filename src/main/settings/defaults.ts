@@ -10,6 +10,7 @@ export const defaultAppSettings: AppSettings = {
   fontSize: 'medium',
   reduceMotion: false,
   minimizeToTray: false,
+  autoResumeInterruptedOnStartup: false,
   startWithWindows: false,
   closeBehavior: 'ask',
   defaultSourceFolder: join(base, 'Bộ nhớ nguồn'),

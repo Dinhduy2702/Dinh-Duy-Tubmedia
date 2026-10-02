@@ -48,7 +48,7 @@ import {
   localCutSuggestRequestSchema,
   localCutTaskSchema
 } from '@shared/schemas/ipc.js';
-import type { AppSettings } from '@shared/types/domain.js';
+import type { AppSettings, CookieConfigurationStatus } from '@shared/types/domain.js';
 import { InvalidInputError } from '@shared/errors/app-errors.js';
 import type { ZodType } from 'zod';
 import { exportSanitizedLogTree } from '../logging/diagnostic-exporter.js';
@@ -148,11 +148,15 @@ export function registerIpc(ctx: AppContext): void {
     });
   };
 
-  const configureCookies = async <Output>(action: () => MaybePromise<Output>): Promise<Output> => {
+  const configureCookies = async (
+    action: () => MaybePromise<CookieConfigurationStatus>
+  ): Promise<CookieConfigurationStatus> => {
     const result = await action();
-    ctx.queue.resumeCookieBlockedJobs();
+    // Chỉ chạy lại video bị chặn khi cookies vừa lưu THẬT SỰ khác lúc bị chặn; báo số đó cho giao diện để
+    // không hiện "đã tự tiếp tục" khi người dùng lưu lại đúng cookies cũ.
+    const resumedBlockedJobs = await ctx.queue.resumeCookieBlockedJobs('cookies-saved');
     await ctx.quickDownload.retryCookieBlocked();
-    return result;
+    return { ...result, resumedBlockedJobs };
   };
 
   noArgs(IPC.app.getBootstrap, () => {
@@ -335,6 +339,8 @@ export function registerIpc(ctx: AppContext): void {
   handle(IPC.queue.resume, jobIdSchema, ({ jobId }) => ctx.queue.resume(jobId));
   handle(IPC.queue.cancel, jobIdSchema, ({ jobId }) => ctx.queue.cancel(jobId));
   handle(IPC.queue.retry, jobIdSchema, ({ jobId }) => ctx.queue.retry(jobId));
+  noArgs(IPC.queue.startupPrompt, () => ctx.queue.consumeStartupPrompt());
+  noArgs(IPC.queue.resumeStartupHeld, () => ctx.queue.resumeStartupHeld());
   handle(IPC.queue.retryFailed, projectIdSchema.partial(), ({ projectId }) =>
     ctx.queue.retryFailed(projectId)
   );

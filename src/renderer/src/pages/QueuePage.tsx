@@ -18,6 +18,7 @@ import type { QuickDownloadStatus } from '@shared/quick-download';
 import { useAppStore } from '../stores/app-store';
 import { showNotice } from '../utils/notify';
 import { detailToneFor, toneTextVar } from '@shared/utils/notice-tone';
+import { displayedAttempt } from '@shared/utils/attempt-display';
 import { progressFillStyle } from '../utils/progress-style';
 import { StatusBadge } from '../components/StatusBadge';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -1159,7 +1160,7 @@ export function QueuePage({ mode }: { mode: 'downloads' | 'processing' | 'all' }
               <div>
                 <dt>Lần thử</dt>
                 <dd>
-                  {detailJob.attempts}/{detailJob.maxAttempts}
+                  {displayedAttempt(detailJob)}/{detailJob.maxAttempts}
                 </dd>
               </div>
               <div>

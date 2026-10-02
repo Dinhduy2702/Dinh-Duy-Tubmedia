@@ -128,6 +128,10 @@ export interface DesktopApi {
     cancel(jobId: string): Promise<void>;
     retry(jobId: string): Promise<void>;
     retryFailed(projectId?: string): Promise<number>;
+    /** Số tác vụ chưa xong cần hỏi "Tiếp tục / Để sau" sau khi mở app (chỉ khác 0 ở lần gọi đầu). */
+    startupPrompt(): Promise<{ count: number }>;
+    /** Chạy lại đúng các tác vụ đang chờ vì app đã đóng giữa chừng (APP_INTERRUPTED). */
+    resumeStartupHeld(): Promise<number>;
     remove(
       jobId: string,
       deleteOutput?: boolean

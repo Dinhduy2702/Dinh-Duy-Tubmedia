@@ -294,7 +294,14 @@ function initializeApplication(): void {
     .finally(() => {
       // Hàng đợi chỉ được khôi phục sau khi trạng thái công cụ đã được xác định.
       // Cổng canExecute trong QueueManager tiếp tục giữ tác vụ nếu công cụ bắt buộc vẫn thiếu.
-      current.queue.start();
+      // start() giữ mọi tác vụ dở ở trạng thái tạm dừng và chờ người dùng chọn Tiếp tục (trừ khi bật tự tiếp tục).
+      void current.queue.start().catch((error: unknown) => {
+        current.logger.error(
+          'queue',
+          'QUEUE_START_FAILED',
+          error instanceof Error ? (error.stack ?? error.message) : String(error)
+        );
+      });
     });
   // Giao diện được mở ngay với dữ liệu local. Kiểm tra/sửa công cụ vẫn chạy
   // tự động ở nền; QueueManager chỉ khởi động sau khi ba công cụ bắt buộc đã

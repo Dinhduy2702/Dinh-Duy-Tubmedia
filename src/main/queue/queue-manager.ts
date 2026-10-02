@@ -8,6 +8,12 @@ import { IPC } from '@shared/contracts/channels.js';
 import { retryDelayMs } from '@shared/utils/retry.js';
 import { hasConfiguredCookies, isCookieBlockingCode } from '@shared/utils/cookie-policy.js';
 import {
+  computeCookieFingerprint,
+  cookiesChangedSinceBlock,
+  type CookieResumeTrigger
+} from '../cookies/cookie-fingerprint.js';
+import type { CookieJarStore } from '../cookies/cookie-jar-store.js';
+import {
   independentDownloadProjectCanStart,
   mergeSourceDownloadLimit,
   queueExecutionLane
@@ -64,6 +70,20 @@ const RUNNING_STATUSES = new Set([
   'processing',
   'merging'
 ]);
+// Đợt 1 mục 2 (2026-10-02) — khởi động không tự chạy tác vụ nào.
+/** Pha "đang chạy": còn thấy lúc mở app nghĩa là app đã bị tắt ngang đúng lúc tác vụ chạy. */
+const STARTUP_CRASHED_STATUSES = new Set<string>([...RUNNING_STATUSES, 'downloaded']);
+/** Trạng thái mà bộ lập lịch sẽ tự chạy (hoặc tự chạy lại) nếu không được giữ lại lúc mở app. */
+const STARTUP_RUNNABLE_STATUSES = new Set<string>(['pending', 'retrying', 'interrupted']);
+const STARTUP_HELD_CODE = 'APP_INTERRUPTED';
+const STARTUP_HELD_MESSAGE = 'Ứng dụng bị đóng giữa chừng; tác vụ đang chờ bạn chọn Tiếp tục.';
+const MAX_STARTUP_INTERRUPTIONS = 3;
+
+function startupInterruptionsOf(job: QueueJob): number {
+  const value = job.input.startupInterruptions;
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
 const JOB_TYPE_TEXT: Record<JobType, string> = {
   analyze: 'phân tích',
   download: 'tải video',
@@ -172,6 +192,17 @@ export class QueueManager {
   private readonly repeatedFailures = new Map<string, number[]>();
   private readonly cleanupInProgress = new Set<string>();
   private readonly blockingNoticeKeys = new Set<string>();
+  private startupReadyResolve: (() => void) | null = null;
+  private readonly startupReady = new Promise<void>((resolve) => {
+    this.startupReadyResolve = resolve;
+  });
+  private startupPromptConsumed = false;
+  private cookieJar: CookieJarStore | null = null;
+
+  /** Trạng thái tệp cookies (số thế hệ lưu qua app, hash app ghi lần cuối) để biết cookies có THẬT SỰ đổi. */
+  public setCookieJar(jar: CookieJarStore): void {
+    this.cookieJar = jar;
+  }
   // TUBMEDIA DISK SPACE AUTO RECOVERY R28
   private readonly diskRecoveryChecks = new Map<string, number>();
   private readonly diskRecoveryInProgress = new Set<string>();
@@ -200,9 +231,71 @@ export class QueueManager {
   public setWindow(window: BrowserWindow): void {
     this.window = window;
   }
-  public start(): void {
-    this.repo.recoverInterrupted();
-    this.repo.resetInterrupted();
+  /**
+   * Khởi động hàng đợi khi mở app (Đợt 1 mục 2, 2026-10-02): KHÔNG tự chạy tác vụ nào.
+   * Mọi tác vụ dở (đang chạy khi app bị tắt, đang chờ, đang chờ thử lại, interrupted) và mọi tác vụ mà các
+   * bước khôi phục bên dưới vừa đưa về hàng chờ đều được giữ ở 'paused' với mã APP_INTERRUPTED; giao diện
+   * hỏi "Tiếp tục / Để sau" (consumeStartupPrompt). Chỉ khi người dùng bật autoResumeInterruptedOnStartup
+   * mới tự chạy lại như trước. Đường khởi động này cố ý KHÔNG gọi syncProjectStatus (nơi dọn thư mục tạm).
+   */
+  public async start(): Promise<void> {
+    try {
+      await this.prepareStartupQueue();
+    } catch (error) {
+      // Không để lỗi chuẩn bị làm chết cả hàng đợi: tác vụ người dùng tạo sau đó vẫn phải chạy được.
+      this.logger.error(
+        'queue',
+        'STARTUP_QUEUE_PREPARE_FAILED',
+        error instanceof Error ? (error.stack ?? error.message) : String(error)
+      );
+    } finally {
+      this.markStartupReady();
+    }
+    if (this.schedulerRunning) return;
+    this.schedulerRunning = true;
+    this.scheduleTick(0);
+  }
+
+  private async prepareStartupQueue(): Promise<void> {
+    const autoResume = this.settings.get().autoResumeInterruptedOnStartup === true;
+    // 1) Tác vụ còn ở pha "đang chạy" nghĩa là app đã bị tắt ngang (Task Manager, mất điện, treo) đúng lúc
+    //    nó chạy. Lượt thử KHÔNG bị tính (chỉ tính khi thất bại), nhưng đếm số lần gián đoạn: quá
+    //    MAX_STARTUP_INTERRUPTIONS thì giữ hẳn, kể cả khi người dùng bật tự tiếp tục — tránh một tác vụ
+    //    làm sập app rồi chạy lại vô hạn mỗi lần mở.
+    for (const job of this.repo.list()) {
+      if (!STARTUP_CRASHED_STATUSES.has(job.status)) continue;
+      const interruptions = startupInterruptionsOf(job) + 1;
+      if (interruptions > MAX_STARTUP_INTERRUPTIONS) {
+        this.repo.update(
+          job.id,
+          {
+            status: 'paused',
+            errorCode: 'INTERRUPTED_TOO_OFTEN',
+            errorMessage:
+              `Tác vụ này đã bị gián đoạn đột ngột ${interruptions} lần (ứng dụng bị tắt hoặc treo đúng lúc đang ` +
+              'xử lý nó). Tubmedia giữ tạm dừng và không tự chạy lại để tránh lặp vô hạn; hãy xem Nhật ký rồi ' +
+              'bấm Tiếp tục hoặc Thử lại nếu muốn chạy tiếp.',
+            speed: null,
+            etaSeconds: null
+          },
+          { startupInterruptions: interruptions, resumeStatus: null }
+        );
+        this.logger.warn(
+          'queue',
+          'JOB_INTERRUPTED_TOO_OFTEN',
+          `Tác vụ bị gián đoạn đột ngột ${interruptions} lần nên được giữ tạm dừng, không tự chạy lại.`,
+          { jobId: job.id, ...(job.projectId ? { projectId: job.projectId } : {}) }
+        );
+        continue;
+      }
+      this.repo.update(
+        job.id,
+        { status: 'interrupted', speed: null, etaSeconds: null },
+        { startupInterruptions: interruptions, resumeStatus: null }
+      );
+    }
+
+    // 2) Các bước khôi phục cũ (giữ nguyên) — chúng có thể đưa tác vụ về 'pending'; bước 3 giữ lại hết.
     const releasedCookieJobs = this.repo.releaseInheritedCookieBlocks();
     if (releasedCookieJobs > 0) {
       this.logger.info(
@@ -220,11 +313,103 @@ export class QueueManager {
       );
     }
     if (hasConfiguredCookies(this.settings.get())) {
-      this.resumeCookieBlockedJobs();
+      // Chỉ những video mà cookies THẬT SỰ đã đổi kể từ lúc bị chặn mới được đưa về hàng chờ (mục 3).
+      await this.resumeCookieBlockedJobs('startup');
     }
-    if (this.schedulerRunning) return;
-    this.schedulerRunning = true;
-    this.scheduleTick(0);
+
+    // 3) Giữ lại mọi tác vụ có thể tự chạy (hoặc tự chạy lại khi bật cài đặt).
+    const touchedProjects = new Set<string>();
+    let held = 0;
+    for (const job of this.repo.list()) {
+      const startupHeld = job.status === 'paused' && job.errorCode === STARTUP_HELD_CODE;
+      const diskBlocked = job.status === 'paused' && job.errorCode === 'DISK_FULL';
+      if (!STARTUP_RUNNABLE_STATUSES.has(job.status) && !startupHeld && !diskBlocked) continue;
+      if (autoResume) {
+        if (job.status === 'pending' || diskBlocked) continue;
+        this.repo.update(
+          job.id,
+          { status: 'pending', errorCode: null, errorMessage: null, speed: null, etaSeconds: null },
+          { resumeStatus: null }
+        );
+        if (job.projectId) touchedProjects.add(job.projectId);
+        continue;
+      }
+      this.repo.update(
+        job.id,
+        {
+          status: 'paused',
+          errorCode: STARTUP_HELD_CODE,
+          errorMessage: STARTUP_HELD_MESSAGE,
+          speed: null,
+          etaSeconds: null
+        },
+        { resumeStatus: null, progressStage: 'Chờ bạn chọn Tiếp tục (ứng dụng đã đóng giữa chừng)' }
+      );
+      held += 1;
+      if (job.projectId) touchedProjects.add(job.projectId);
+    }
+    // Đặt trạng thái danh sách TRỰC TIẾP — không qua syncProjectStatus (hàm đó có thể dọn thư mục tạm).
+    for (const projectId of touchedProjects) this.projects.setStatus(projectId, autoResume ? 'active' : 'paused');
+    // Giao diện đã nạp danh sách tác vụ (bootstrap) TRƯỚC bước này; phải báo ngay trạng thái đã giữ, nếu không
+    // nó tiếp tục hiện "N công việc đang chạy" theo dữ liệu cũ dù không có gì chạy.
+    if (this.window && !this.window.isDestroyed()) {
+      this.window.webContents.send(IPC.events.queueChanged, this.repo.list());
+    }
+    if (held > 0) {
+      this.logger.info(
+        'queue',
+        'STARTUP_JOBS_HELD',
+        `Có ${held} tác vụ chưa xong khi ứng dụng đóng; đang chờ người dùng chọn Tiếp tục hoặc Để sau.`,
+        { metadata: { jobs: held, projects: touchedProjects.size } }
+      );
+    }
+  }
+
+  private markStartupReady(): void {
+    this.startupReadyResolve?.();
+    this.startupReadyResolve = null;
+  }
+
+  /**
+   * Số tác vụ đang chờ quyết định "Tiếp tục / Để sau" sau khi mở app. Chỉ trả về số khác 0 ở LẦN GỌI ĐẦU
+   * TIÊN mỗi lần mở app — cửa sổ tải lại không hỏi lần nữa (tác vụ vẫn tạm dừng, Tiếp tục thủ công như thường).
+   */
+  public async consumeStartupPrompt(): Promise<{ count: number }> {
+    await this.startupReady;
+    if (this.startupPromptConsumed) return { count: 0 };
+    this.startupPromptConsumed = true;
+    const count = this.repo
+      .list()
+      .filter((job) => job.status === 'paused' && job.errorCode === STARTUP_HELD_CODE).length;
+    return { count };
+  }
+
+  /** Nút "Tiếp tục" của hộp thoại khởi động: chỉ chạy lại đúng các tác vụ APP_INTERRUPTED. */
+  public resumeStartupHeld(): number {
+    const projects = new Set<string>();
+    let resumed = 0;
+    for (const job of this.repo.list()) {
+      if (job.status !== 'paused' || job.errorCode !== STARTUP_HELD_CODE) continue;
+      const next = this.repo.update(
+        job.id,
+        { status: 'pending', errorCode: null, errorMessage: null, finishedAt: null, speed: null, etaSeconds: null },
+        { resumeStatus: null, progressStage: 'Đang tiếp tục theo lựa chọn của bạn' }
+      );
+      this.emitProgress(next);
+      resumed += 1;
+      if (job.projectId) projects.add(job.projectId);
+    }
+    for (const projectId of projects) {
+      this.clearBlockingNoticeKeys(projectId);
+      this.projects.setStatus(projectId, 'active');
+    }
+    if (resumed > 0) {
+      this.logger.info('queue', 'STARTUP_JOBS_RESUMED', `Người dùng chọn Tiếp tục ${resumed} tác vụ chưa xong.`, {
+        metadata: { jobs: resumed }
+      });
+      this.emit();
+    }
+    return resumed;
   }
   public async stop(preserveForResume = true): Promise<void> {
     this.schedulerRunning = false;
@@ -810,6 +995,7 @@ export class QueueManager {
         this.emitProgress(
           this.repo.update(job.id, {
             status: 'failed',
+            attempts: job.attempts + 1,
             errorCode: 'UNHANDLED_ERROR',
             errorMessage: message,
             finishedAt: new Date().toISOString()
@@ -1253,9 +1439,12 @@ export class QueueManager {
     this.window.webContents.send(IPC.events.attention, notice);
   }
   private async execute(job: QueueJob, profile: ResourceProfile, signal: AbortSignal): Promise<void> {
+    // Đợt 1 mục 1 (2026-10-02): attempts chỉ đếm số lượt đã THẤT BẠI (tăng ở nhánh retrying/failed bên
+    // dưới và ở handleExecutorCrash) — không tăng lúc bắt đầu. Nhờ vậy lượt chạy lại chỉ để gắn cookies,
+    // lượt bị tạm dừng do đầy ổ/quyền ghi và lượt bị app tắt ngang không ăn mất lượt thử nào.
+    // Số lượt đang chạy = attempts + 1 (dùng cho nhật ký và giao diện).
     const started = this.repo.update(job.id, {
       status: initialJobStatus(job.type),
-      attempts: job.attempts + 1,
       startedAt: new Date().toISOString(),
       errorCode: null,
       errorMessage: null
@@ -1418,13 +1607,20 @@ export class QueueManager {
           this.repeatedFailures.delete(job.projectId);
         }
         const cookieBlocking = isCookieBlockingCode(code);
+        // Ghi lại cookies lúc bị chặn: chỉ khi cookies THẬT SỰ đổi so với lúc này mới tự chạy lại (mục 3).
+        const cookieFingerprint = cookieBlocking ? await computeCookieFingerprint(this.settings.get(), this.cookieJar) : null;
+        const pausedMessage =
+          cookieFingerprint?.mode === 'browser'
+            ? `${message} Hãy đăng nhập lại tài khoản trên trình duyệt ${cookieFingerprint.browser}, rồi bấm Tiếp tục ở ` +
+              'danh sách — Tubmedia không tự chạy lại vì không biết khi nào cookies của trình duyệt được làm mới.'
+            : message;
         const paused = this.repo.update(
           job.id,
           {
             status: 'paused',
             attempts: job.attempts,
             errorCode: code,
-            errorMessage: message,
+            errorMessage: pausedMessage,
             finishedAt: null,
             speed: null,
             etaSeconds: null
@@ -1434,15 +1630,16 @@ export class QueueManager {
             cookieBlocking
               ? {
                   cookieFailureConfirmed: true,
-                  cookieRetryRequested: true
+                  cookieRetryRequested: true,
+                  cookieBlockedFingerprint: cookieFingerprint
                 }
               : {}
           )
         );
         if (!cookieBlocking) await this.pauseProjectForBlockingError(job, code, message);
         this.emitProgress(paused);
-        this.notifyBlockingError(code, message, job);
-        this.logger.warn('queue', code, message, {
+        this.notifyBlockingError(code, pausedMessage, job);
+        this.logger.warn('queue', code, pausedMessage, {
           jobId: job.id,
           ...(job.projectId ? { projectId: job.projectId } : {})
         });
@@ -1534,6 +1731,7 @@ export class QueueManager {
       if (retryable) {
         const retrying = this.repo.update(job.id, {
           status: 'retrying',
+          attempts: job.attempts + 1,
           errorCode: appError.code ?? 'RETRYABLE_ERROR',
           errorMessage: message
         });
@@ -1551,6 +1749,7 @@ export class QueueManager {
           : message;
         const failed = this.repo.update(job.id, {
           status: 'failed',
+          attempts: job.attempts + 1,
           errorCode: code,
           errorMessage: finalMessage,
           finishedAt: new Date().toISOString()
@@ -1578,6 +1777,12 @@ export class QueueManager {
           }
           this.notifyJobFailure(code, finalMessage, job);
         }
+      }
+    } finally {
+      // Lượt này kết thúc khi app vẫn sống (xong, lỗi, tạm dừng, hủy) → không phải tác vụ làm sập app:
+      // đếm lại số lần gián đoạn đột ngột liên tiếp từ 0.
+      if (startupInterruptionsOf(job) > 0 && this.repo.get(job.id)) {
+        this.repo.updateInput(job.id, { startupInterruptions: 0 });
       }
     }
   }
@@ -2143,12 +2348,23 @@ export class QueueManager {
     else this.repo.update(jobId, { status: 'cancelled', finishedAt: new Date().toISOString() });
     if (emitChange) this.emit();
   }
-  public resumeCookieBlockedJobs(): number {
+  /**
+   * Đưa video bị chặn vì cookies về hàng chờ — CHỈ những video mà cookies hiện tại thật sự khác cookies lúc
+   * bị chặn (so SHA-256 nội dung tệp; xem cookie-fingerprint.ts). Lưu lại đúng tệp cũ không tính là mới,
+   * nên không còn vòng lặp "hết hạn → tự chạy lại → hết hạn" mỗi lần mở app (Đợt 1 mục 3, 2026-10-02).
+   */
+  public async resumeCookieBlockedJobs(trigger: CookieResumeTrigger): Promise<number> {
+    const blocked = this.repo
+      .list()
+      .filter((job) => isCookieBlockingCode(job.errorCode) && ['paused', 'failed', 'interrupted'].includes(job.status));
+    if (blocked.length === 0) return 0;
+    const current = await computeCookieFingerprint(this.settings.get(), this.cookieJar);
     const resumedProjects = new Set<string>();
     let resumed = 0;
-    for (const job of this.repo.list()) {
-      if (!isCookieBlockingCode(job.errorCode)) continue;
-      if (!['paused', 'failed', 'interrupted'].includes(job.status)) continue;
+    for (const job of blocked) {
+      if (!cookiesChangedSinceBlock(job.input.cookieBlockedFingerprint, current, job.updatedAt, trigger)) continue;
+      const live = this.repo.get(job.id);
+      if (!live || !isCookieBlockingCode(live.errorCode)) continue;
       const resumedJob = this.repo.update(
         job.id,
         {
@@ -2163,7 +2379,10 @@ export class QueueManager {
           cookieFailureConfirmed: true,
           cookieRetryRequested: true,
           resumeStatus: null,
-          progressStage: 'Cookies mới đã được lưu — đang tự tiếp tục'
+          progressStage:
+            trigger === 'cookies-saved'
+              ? 'Cookies mới đã được lưu — đang tự tiếp tục'
+              : 'Cookies đã thay đổi kể từ lúc bị chặn'
         }
       );
       this.emitProgress(resumedJob);
@@ -2173,16 +2392,33 @@ export class QueueManager {
     for (const projectId of resumedProjects) {
       this.clearBlockingNoticeKeys(projectId);
       this.repeatedFailures.delete(projectId);
-      this.projects.setStatus(projectId, 'active');
+      // Lúc mở app, bước giữ tác vụ trong start() tự đặt trạng thái danh sách.
+      if (trigger === 'cookies-saved') this.projects.setStatus(projectId, 'active');
     }
     if (resumed > 0) {
+      if (trigger === 'cookies-saved') {
+        this.logger.info(
+          'cookies',
+          'COOKIE_BLOCKS_AUTO_RESUMED',
+          `Cookies mới đã được lưu; ${resumed} video bị chặn được tự động đưa lại vào hàng đợi mà không cần dừng danh sách.`,
+          { metadata: { resumedJobs: resumed, projects: resumedProjects.size } }
+        );
+      } else {
+        this.logger.info(
+          'cookies',
+          'COOKIE_BLOCKS_CHANGED_SINCE_BLOCK',
+          `Cookies đã thay đổi kể từ lúc bị chặn; ${resumed} video đủ điều kiện chạy lại.`,
+          { metadata: { eligibleJobs: resumed, projects: resumedProjects.size } }
+        );
+      }
+      this.emit();
+    } else if (trigger === 'cookies-saved') {
       this.logger.info(
         'cookies',
-        'COOKIE_BLOCKS_AUTO_RESUMED',
-        `Cookies mới đã được lưu; ${resumed} video bị chặn được tự động đưa lại vào hàng đợi mà không cần dừng danh sách.`,
-        { metadata: { resumedJobs: resumed, projects: resumedProjects.size } }
+        'COOKIE_BLOCKS_UNCHANGED',
+        `Cookies vừa lưu giống cookies lúc ${blocked.length} video bị chặn nên chưa tự chạy lại; hãy xuất cookies mới sau khi đăng nhập lại.`,
+        { metadata: { blockedJobs: blocked.length } }
       );
-      this.emit();
     }
     return resumed;
   }
@@ -2195,13 +2431,19 @@ export class QueueManager {
         `Chỉ có thể thử lại tác vụ failed/interrupted, hiện tại là ${current.status}.`
       );
     }
-    this.repo.update(jobId, {
-      status: 'pending',
-      progress: 0,
-      errorCode: null,
-      errorMessage: null,
-      finishedAt: null
-    });
+    // "Thử lại" là bắt đầu lại sạch: có lại đủ số lượt và bộ đếm gián đoạn đột ngột về 0.
+    this.repo.update(
+      jobId,
+      {
+        status: 'pending',
+        progress: 0,
+        attempts: 0,
+        errorCode: null,
+        errorMessage: null,
+        finishedAt: null
+      },
+      { startupInterruptions: 0 }
+    );
     this.emit();
   }
   public retryFailed(projectId?: string): number {

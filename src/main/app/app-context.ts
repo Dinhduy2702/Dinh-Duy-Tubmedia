@@ -34,6 +34,8 @@ import { CookieService } from '../cookies/cookie-service.js';
 import { cleanupTemporaryArtifacts } from '../files/temporary-cleanup.js';
 import { QuickDownloadService } from '../download/quick-download-service.js';
 import { PreviewFrameService } from '../download/preview-frame-service.js';
+import { logMigrationReports } from '../database/migration-report.js';
+import { CookieJarStore } from '../cookies/cookie-jar-store.js';
 
 export class AppContext {
   public readonly userData = app.getPath('userData');
@@ -48,7 +50,9 @@ export class AppContext {
   public readonly paths = new PathService();
   public readonly hardware = new HardwareService();
   public readonly settings = new SettingsService(this.settingsRepo, this.hardware, this.logger);
-  public readonly cookies = new CookieService(this.userData, this.settings);
+  /** Một kho cookies dùng chung: bản sao tạm cho yt-dlp + trạng thái "app ghi lần cuối" (Đợt 1 mục 3). */
+  public readonly cookieJar = new CookieJarStore(join(this.userData, 'security'));
+  public readonly cookies = new CookieService(this.userData, this.settings, this.cookieJar);
   public readonly projects = new ProjectService(this.projectRepo, this.paths);
   public readonly input = new InputService(this.itemRepo);
   public readonly processes = new ProcessManager(this.logger);
@@ -145,6 +149,11 @@ export class AppContext {
   });
   public constructor(prepareForAppUpdate: () => Promise<void> = () => Promise.resolve()) {
     this.tools.setRequiredRepairHandler(() => this.toolUpdates.repairRequired());
+    // Mọi nơi chạy yt-dlp có cookies đều mượn bản sao tạm từ CÙNG một kho (cookie-jar-store.ts).
+    this.downloader.setCookieJar(this.cookieJar);
+    this.quickDownload.setCookieJar(this.cookieJar);
+    this.previewFrame.setCookieJar(this.cookieJar);
+    this.queue.setCookieJar(this.cookieJar);
     this.appUpdates = new AppUpdateService(
       this.settings,
       this.queue,
@@ -156,6 +165,9 @@ export class AppContext {
   }
   public initialize(): void {
     this.settings.initialize();
+    logMigrationReports(this.database.migrationReports, this.logger);
+    // Bản sao cookies tạm còn sót khi app bị tắt ngang giữa lượt yt-dlp: xóa (chứa cookies — không để lại).
+    void this.cookieJar.cleanupStaleRuns();
     const recoveredMergeTransitions = this.queueRepo.recoverLegacyVerifiedMergeTransitionFailures();
     for (const projectId of recoveredMergeTransitions.projectIds) {
       const jobs = this.queueRepo.list(projectId);

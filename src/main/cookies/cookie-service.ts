@@ -4,6 +4,7 @@ import type { AppSettings, BrowserProfileOption, CookieConfigurationStatus } fro
 import { InvalidCookieTextError } from '@shared/errors/app-errors.js';
 import type { SettingsService } from '../settings/settings-service.js';
 import { listChromiumProfiles } from './browser-profile-directory.js';
+import type { CookieJarStore } from './cookie-jar-store.js';
 
 function normalizedCookieLines(text: string): string[] {
   return text
@@ -115,7 +116,9 @@ export class CookieService {
 
   public constructor(
     userData: string,
-    private readonly settings: SettingsService
+    private readonly settings: SettingsService,
+    /** Ghi nhận mỗi lần người dùng lưu cookies qua app (số thế hệ + hash) — xem cookie-jar-store.ts. */
+    private readonly jar?: CookieJarStore
   ) {
     this.managedPath = join(userData, 'security', 'cookies-managed.txt');
   }
@@ -158,6 +161,7 @@ export class CookieService {
     const normalized = normalizeCookieText(text);
     await mkdir(dirname(this.managedPath), { recursive: true });
     await writeFile(this.managedPath, normalized, { encoding: 'utf8', mode: 0o600 });
+    await this.jar?.recordUserSave(this.managedPath);
     this.settings.update({
       cookiesFilePath: this.managedPath,
       cookiesBrowser: 'none',
@@ -171,6 +175,7 @@ export class CookieService {
     const normalized = normalizeCookieText(text);
     await mkdir(dirname(this.managedPath), { recursive: true });
     await writeFile(this.managedPath, normalized, { encoding: 'utf8', mode: 0o600 });
+    await this.jar?.recordUserSave(this.managedPath);
     this.settings.update({
       cookiesFilePath: this.managedPath,
       cookiesBrowser: 'none',

@@ -7,6 +7,7 @@ import { Topbar } from '../layout/Topbar';
 import { AttentionCenter } from '../components/AttentionCenter';
 import { NotificationCenter } from '../components/NotificationCenter';
 import { DiagnosticDock } from '../components/DiagnosticDock';
+import { StartupResumeDialog } from '../components/StartupResumeDialog';
 import { TubmediaLogo } from '../components/TubmediaBrand';
 import { friendlyIssue, safeUiText } from '../utils/ui-error';
 
@@ -200,6 +201,7 @@ export function App(): React.JSX.Element {
       <div className="app-workspace flex min-w-0 flex-1 flex-col">
         <Topbar />
         <NotificationCenter />
+        <StartupResumeDialog />
         <div className="notice-stack">
           <AttentionCenter />
           <DiagnosticDock />

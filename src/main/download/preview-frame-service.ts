@@ -21,6 +21,7 @@ import type { Logger } from '../logging/logger.js';
 import type { ProcessManager } from '../processes/process-manager.js';
 import type { SettingsService } from '../settings/settings-service.js';
 import type { ToolManager } from '../tools/tool-manager.js';
+import type { CookieJarStore, CookieRunOutcome } from '../cookies/cookie-jar-store.js';
 import { buildFrameExtractArguments, buildPreviewFrameDownloadArguments } from './preview-frame-command.js';
 
 const YTDLP_TIMEOUT_MS = 45_000;
@@ -36,6 +37,13 @@ export interface PreviewFrameResult {
 }
 
 export class PreviewFrameService {
+  private cookieJar: CookieJarStore | null = null;
+
+  /** yt-dlp nhận bản sao tạm của tệp cookies cho mỗi lượt (xem cookie-jar-store.ts). */
+  public setCookieJar(jar: CookieJarStore): void {
+    this.cookieJar = jar;
+  }
+
   public constructor(
     private readonly processes: ProcessManager,
     private readonly tools: ToolManager,
@@ -50,12 +58,15 @@ export class PreviewFrameService {
     if (!ffmpeg.available || !ffmpeg.executablePath) throw new ToolNotFoundError('ffmpeg');
 
     const workDirectory = await mkdtemp(join(tmpdir(), 'tubmedia-preview-'));
+    // Bản sao tạm của tệp cookies cho riêng lượt này; lỗi thì KHÔNG ghi ngược (không phân loại được lỗi ở đây).
+    const cookieLease = this.cookieJar ? await this.cookieJar.lease(this.settings.get()) : null;
+    let cookieOutcome: CookieRunOutcome = 'aborted';
     try {
       const args = buildPreviewFrameDownloadArguments(
         request.url,
         request.timestampSeconds,
         { ffmpegDirectory: dirname(ffmpeg.executablePath), workDirectory },
-        this.settings.get()
+        cookieLease?.settings ?? this.settings.get()
       );
 
       const downloadResult = await this.processes.run({
@@ -67,6 +78,8 @@ export class PreviewFrameService {
         priority: 'below_normal',
         timeoutMs: YTDLP_TIMEOUT_MS
       });
+      cookieOutcome = downloadResult.code === 0 ? 'success' : 'unclassified-failure';
+      await cookieLease?.release(cookieOutcome);
       if (downloadResult.code !== 0) {
         const detail = downloadResult.stderrTail.trim().split(/\r?\n/).pop() ?? '';
         throw new Error(
@@ -104,6 +117,7 @@ export class PreviewFrameService {
       );
       throw error;
     } finally {
+      await cookieLease?.release(cookieOutcome).catch(() => undefined);
       await rm(workDirectory, { recursive: true, force: true }).catch(() => undefined);
     }
   }

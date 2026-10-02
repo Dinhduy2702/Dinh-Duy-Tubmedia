@@ -40,6 +40,7 @@ export const appSettingsSchema = z
     fontSize: z.enum(['medium', 'large', 'xlarge']),
     reduceMotion: z.boolean(),
     minimizeToTray: z.boolean(),
+    autoResumeInterruptedOnStartup: z.boolean().default(false),
     startWithWindows: z.boolean(),
     closeBehavior: z.enum(['ask', 'pause_and_exit', 'cancel_and_exit', 'tray']),
     defaultSourceFolder: pathSchema,

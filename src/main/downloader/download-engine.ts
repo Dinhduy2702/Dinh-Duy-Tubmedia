@@ -49,6 +49,7 @@ import { buildSafeYtDlpArguments } from './ytdlp-arguments.js';
 // yt-dlp khác (quick-download-command.ts, preview-frame-command.ts) — không đổi hành vi, chỉ tổ chức
 // lại code.
 import { buildCookieArguments } from './ytdlp-cookie-arguments.js';
+import { withLeasedCookieFile, type CookieJarStore, type CookieRunOutcome } from '../cookies/cookie-jar-store.js';
 import { acceptPathInside } from '../files/path-containment.js';
 
 export interface DownloadProgress {
@@ -81,6 +82,12 @@ export function isFinalDownloadForLinkTag(fileName: string, linkTag: string): bo
 
 export class DownloadEngine {
   private readonly cookieRequiredJobs = new Set<string>();
+  private cookieJar: CookieJarStore | null = null;
+
+  /** yt-dlp nhận bản sao tạm của tệp cookies cho mỗi lượt (xem cookie-jar-store.ts). */
+  public setCookieJar(jar: CookieJarStore): void {
+    this.cookieJar = jar;
+  }
 
   public constructor(
     private readonly processes: ProcessManager,
@@ -1177,19 +1184,37 @@ export class DownloadEngine {
       }
     };
 
-    const result = await this.processes.run({
-      jobId: job.id,
-      projectId: project.id,
-      tool: 'yt-dlp',
-      executablePath: ytdlp.executablePath,
-      // --ignore-config đứng đầu, URL đứng cuối sau "--": URL không bao giờ bị hiểu là tùy chọn.
-      args: buildSafeYtDlpArguments(args, source.originalUrl),
-      priority: resource.processPriority,
-      timeoutMs: 48 * 60 * 60 * 1000,
-      signal,
-      onStdoutLine: parseLine,
-      onStderrLine: parseLine
-    });
+    // yt-dlp ghi ngược tệp --cookies sau mỗi lần chạy: trao cho lượt này một BẢN SAO riêng, rồi chỉ ghi ngược
+    // vào tệp gốc khi lượt này không lỗi cookies (cookie-jar-store.ts).
+    const cookieLease =
+      attachConfiguredCookies && this.cookieJar ? await this.cookieJar.lease(appSettings) : null;
+    if (cookieLease) args.splice(0, args.length, ...withLeasedCookieFile(args, cookieLease));
+    let cookieOutcome: CookieRunOutcome = 'aborted';
+    let result: Awaited<ReturnType<ProcessManager['run']>>;
+    try {
+      result = await this.processes.run({
+        jobId: job.id,
+        projectId: project.id,
+        tool: 'yt-dlp',
+        executablePath: ytdlp.executablePath,
+        // --ignore-config đứng đầu, URL đứng cuối sau "--": URL không bao giờ bị hiểu là tùy chọn.
+        args: buildSafeYtDlpArguments(args, source.originalUrl),
+        priority: resource.processPriority,
+        timeoutMs: 48 * 60 * 60 * 1000,
+        signal,
+        onStdoutLine: parseLine,
+        onStderrLine: parseLine
+      });
+      cookieOutcome = signal.aborted
+        ? 'aborted'
+        : result.code === 0
+          ? 'success'
+          : classifyYtDlpFailure(`${result.stderrTail}\n${result.stdoutTail}`).category === 'authentication'
+            ? 'cookie-failure'
+            : 'other-failure';
+    } finally {
+      await cookieLease?.release(cookieOutcome);
+    }
     if (result.code !== 0 || !finalPath) {
       const text = `${result.stderrTail}\n${result.stdoutTail}`;
       const failure = classifyYtDlpFailure(text);

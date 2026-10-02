@@ -21,6 +21,7 @@ import type { SettingsService } from '../settings/settings-service.js';
 import type { ToolManager } from '../tools/tool-manager.js';
 import { buildQuickDownloadArguments } from './quick-download-command.js';
 import { acceptPathInside } from '../files/path-containment.js';
+import type { CookieJarStore, CookieRunOutcome } from '../cookies/cookie-jar-store.js';
 
 import { isExplicitlyRemovedYoutubeSource } from '@shared/utils/download-failure.js';
 
@@ -160,6 +161,12 @@ export class QuickDownloadService {
   private readonly statePath: string;
   private readonly tempRoot: string;
   private cookieBlockedRequest: ValidatedQuickDownloadRequest | null = null;
+  private cookieJar: CookieJarStore | null = null;
+
+  /** yt-dlp nhận bản sao tạm của tệp cookies cho mỗi lượt (xem cookie-jar-store.ts). */
+  public setCookieJar(jar: CookieJarStore): void {
+    this.cookieJar = jar;
+  }
 
   public constructor(
     private readonly processes: ProcessManager,
@@ -514,36 +521,54 @@ export class QuickDownloadService {
   private async execute(active: ActiveQuickTask, ytDlpPath: string, ffmpegPath: string): Promise<void> {
     try {
       while (true) {
-        const authentication = active.cookiesAttached ? this.cookieSettings() : undefined;
-        const args = buildQuickDownloadArguments(
-          active.request,
-          {
-            ffmpegDirectory: dirname(ffmpegPath),
-            tempDirectory: active.tempDirectory,
-            runToken: active.runToken,
-            outputToken: active.outputToken
-          },
-          authentication,
-          {
-            compactFilename: active.compactFilename,
-            forceGenericExtractor: active.genericFallbackTried,
-            filenameTemplate: this.settings?.get().quickDownloadFilenameTemplate
-          }
-        );
+        // yt-dlp ghi ngược tệp --cookies: mỗi lượt nhận một bản sao riêng (cookie-jar-store.ts).
+        const cookieLease = active.cookiesAttached && this.cookieJar
+          ? await this.cookieJar.lease(this.cookieSettings())
+          : null;
+        const authentication = active.cookiesAttached ? (cookieLease?.settings ?? this.cookieSettings()) : undefined;
+        let cookieOutcome: CookieRunOutcome = 'aborted';
+        let result: Awaited<ReturnType<ProcessManager['run']>>;
+        try {
+          const args = buildQuickDownloadArguments(
+            active.request,
+            {
+              ffmpegDirectory: dirname(ffmpegPath),
+              tempDirectory: active.tempDirectory,
+              runToken: active.runToken,
+              outputToken: active.outputToken
+            },
+            authentication,
+            {
+              compactFilename: active.compactFilename,
+              forceGenericExtractor: active.genericFallbackTried,
+              filenameTemplate: this.settings?.get().quickDownloadFilenameTemplate
+            }
+          );
 
-        active.recentLines = [];
-        const result = await this.processes.run({
-          jobId: active.status.taskId,
-          tool: 'yt-dlp',
-          executablePath: ytDlpPath,
-          args,
-          cwd: active.request.outputDirectory,
-          signal: active.controller.signal,
-          timeoutMs: 24 * 60 * 60 * 1000,
-          priority: 'below_normal',
-          onStdoutLine: (line) => this.consumeLine(active, line.trim()),
-          onStderrLine: (line) => this.consumeLine(active, line.trim())
-        });
+          active.recentLines = [];
+          result = await this.processes.run({
+            jobId: active.status.taskId,
+            tool: 'yt-dlp',
+            executablePath: ytDlpPath,
+            args,
+            cwd: active.request.outputDirectory,
+            signal: active.controller.signal,
+            timeoutMs: 24 * 60 * 60 * 1000,
+            priority: 'below_normal',
+            onStdoutLine: (line) => this.consumeLine(active, line.trim()),
+            onStderrLine: (line) => this.consumeLine(active, line.trim())
+          });
+          cookieOutcome =
+            active.controller.signal.aborted
+              ? 'aborted'
+              : result.code === 0
+                ? 'success'
+                : classifyCookieFailure(active.recentLines, active.cookiesAttached)
+                  ? 'cookie-failure'
+                  : 'other-failure';
+        } finally {
+          await cookieLease?.release(cookieOutcome);
+        }
 
         if (
           active.controller.signal.aborted ||

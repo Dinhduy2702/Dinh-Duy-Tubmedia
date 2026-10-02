@@ -181,9 +181,14 @@ export class QueueRepository {
     );
   }
   public retryFailed(projectId?: string): number {
+    // "Thử lại" là một lần bắt đầu lại sạch: tác vụ có lại đủ số lượt (attempts=0) và bộ đếm gián đoạn đột ngột
+    // cũng về 0 — nếu không, tác vụ đã thất bại 3/3 sẽ thất bại ngay ở lỗi tạm thời đầu tiên (4/3).
+    const reset =
+      "status='pending',error_code=NULL,error_message=NULL,progress=0,attempts=0," +
+      "input_json=json_remove(input_json,'$.startupInterruptions'),updated_at=?";
     const sql = projectId
-      ? "UPDATE queue_jobs SET status='pending',error_code=NULL,error_message=NULL,progress=0,updated_at=? WHERE status='failed' AND project_id=?"
-      : "UPDATE queue_jobs SET status='pending',error_code=NULL,error_message=NULL,progress=0,updated_at=? WHERE status='failed'";
+      ? `UPDATE queue_jobs SET ${reset} WHERE status='failed' AND project_id=?`
+      : `UPDATE queue_jobs SET ${reset} WHERE status='failed'`;
     return Number(
       (projectId
         ? this.db.prepare(sql).run(new Date().toISOString(), projectId)

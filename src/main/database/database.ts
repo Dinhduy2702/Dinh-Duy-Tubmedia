@@ -15,8 +15,17 @@ function errorMessage(error: unknown): string {
   }
 }
 
+export interface MigrationReport {
+  version: number;
+  name: string;
+  /** Số dòng câu lệnh cuối của migration đã thay đổi (SQLite changes()). */
+  changes: number;
+}
+
 export class AppDatabase {
   public readonly db: SqliteDatabase;
+  /** Các migration vừa chạy trong LẦN MỞ này (rỗng nếu CSDL đã ở phiên bản mới nhất). */
+  public readonly migrationReports: MigrationReport[] = [];
 
   public constructor(public readonly path: string) {
     mkdirSync(dirname(path), { recursive: true });
@@ -44,6 +53,8 @@ export class AppDatabase {
       try {
         runInTransaction(this.db, () => {
           this.db.exec(migration.up);
+          const changes = Number((this.db.prepare('SELECT changes() AS n').get() as { n: number }).n);
+          this.migrationReports.push({ version: migration.version, name: migration.name, changes });
           this.db
             .prepare(
               'INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)'

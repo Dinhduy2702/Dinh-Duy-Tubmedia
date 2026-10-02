@@ -90,13 +90,18 @@ export function CookieManagerDialog({ open, onClose, onConfigured }: Props): Rea
     try {
       await refreshJobs();
       await onConfigured?.();
+      // Chỉ nói "đã tự tiếp tục" khi tiến trình chính xác nhận có video được chạy lại vì cookies THẬT SỰ đổi.
+      const resumed = next.resumedBlockedJobs ?? 0;
+      const outcome =
+        resumed > 0
+          ? `${resumed} video bị chặn đã tự nhận cookies mới và tiếp tục; không cần dừng danh sách hoặc bấm tải lại.`
+          : 'Chưa có video bị chặn nào được chạy lại: không có video đang bị chặn, hoặc cookies vừa lưu giống hệt ' +
+            'cookies lúc bị chặn — hãy đăng nhập lại rồi xuất cookies mới.';
       setAttention({
         id: `cookies-updated-${Date.now()}`,
-        severity: 'success',
-        title: 'Cookies đã được cập nhật',
-        message: detail
-          ? `${detail} Các video bị chặn đã tự nhận cookies mới và tiếp tục; không cần dừng danh sách hoặc bấm tải lại.`
-          : 'Các video bị chặn đã tự nhận cookies mới và tiếp tục; không cần dừng danh sách hoặc bấm tải lại.',
+        severity: resumed > 0 ? 'success' : 'info',
+        title: 'Cookies đã được lưu',
+        message: detail ? `${detail} ${outcome}` : outcome,
         sticky: false
       });
     } finally {

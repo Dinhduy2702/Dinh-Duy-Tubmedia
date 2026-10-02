@@ -83,7 +83,9 @@ const api: DesktopApi = {
     retry: (jobId) => invoke(IPC.queue.retry, { jobId }),
     retryFailed: (projectId) => invoke(IPC.queue.retryFailed, projectId ? { projectId } : {}),
     remove: (jobId, deleteOutput = false) => invoke(IPC.queue.remove, { jobId, deleteOutput }),
-    clearFinished: (projectId) => invoke(IPC.queue.clearFinished, projectId ? { projectId } : {})
+    clearFinished: (projectId) => invoke(IPC.queue.clearFinished, projectId ? { projectId } : {}),
+    startupPrompt: () => invoke(IPC.queue.startupPrompt),
+    resumeStartupHeld: () => invoke(IPC.queue.resumeStartupHeld)
   },
   tools: {
     list: () => invoke(IPC.tools.list),

@@ -380,5 +380,17 @@ SET quarantine_folder = rtrim(temp_folder, '\\/') || '\\_quarantine';
     up: `
 ALTER TABLE projects ADD COLUMN aspect_ratio TEXT NOT NULL DEFAULT 'original';
 `
+  },
+  {
+    // Đợt 1 mục 1 (2026-10-02): bộ đếm lượt thử đổi sang "chỉ tính khi một lượt THẤT BẠI". Giá trị cũ của
+    // tác vụ chưa hoàn tất đã bị đếm thừa (mỗi lần bắt đầu, kể cả lượt gắn cookies/chạy lại sau khi app
+    // đóng) nên đặt lại về 0. Tác vụ đã kết thúc giữ nguyên để lịch sử đúng; Thử lại sẽ tự đặt lại.
+    // Số tác vụ được đặt lại ghi vào nhật ký qua migrationReports (ATTEMPTS_COUNTER_RESET).
+    version: 8,
+    name: 'reset_attempts_count_failures_only',
+    up: `
+UPDATE queue_jobs SET attempts = 0
+WHERE attempts <> 0 AND status NOT IN ('completed', 'skipped', 'cancelled', 'failed');
+`
   }
 ];

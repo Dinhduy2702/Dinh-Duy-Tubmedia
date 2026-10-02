@@ -257,6 +257,8 @@ export interface AppSettings {
   fontSize: AppFontSize;
   reduceMotion: boolean;
   minimizeToTray: boolean;
+  /** Mở app thì tự đưa tác vụ dở về hàng chờ (mặc định tắt: hỏi người dùng trước). */
+  autoResumeInterruptedOnStartup: boolean;
   startWithWindows: boolean;
   closeBehavior: 'ask' | 'pause_and_exit' | 'cancel_and_exit' | 'tray';
   defaultSourceFolder: string;
@@ -537,6 +539,8 @@ export interface CookieConfigurationStatus {
   browserProfile: string;
   filePath: string;
   managed: boolean;
+  /** Sau khi lưu cookies: số video bị chặn đã được chạy lại vì cookies THẬT SỰ đổi (0 nếu lưu lại cookies cũ). */
+  resumedBlockedJobs?: number;
 }
 
 /**

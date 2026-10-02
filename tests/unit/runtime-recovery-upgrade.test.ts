@@ -9,12 +9,12 @@ async function source(path: string): Promise<string> {
 describe('runtime recovery upgrade', () => {
   it('resumes cookie-blocked jobs without manual list restart', async () => {
     const queue = await source('src/main/queue/queue-manager.ts');
-    expect(queue).toMatch(/resumeCookieBlockedJobs\(\): number/);
+    expect(queue).toMatch(/resumeCookieBlockedJobs\(trigger: CookieResumeTrigger\): Promise<number>/);
     expect(queue).toMatch(/cookieRetryRequested:\s*true/);
     expect(queue).toMatch(/errorCode:\s*null/);
     expect(queue).toMatch(/this\.emitProgress\(resumedJob\)/);
     const resumeMethod =
-      queue.split('public resumeCookieBlockedJobs(): number')[1]?.split('public retry(jobId: string)')[0] ??
+      queue.split('public async resumeCookieBlockedJobs(trigger: CookieResumeTrigger): Promise<number>')[1]?.split('public retry(jobId: string)')[0] ??
       '';
     expect(resumeMethod).not.toContain('this.active.has(job.id)');
   });

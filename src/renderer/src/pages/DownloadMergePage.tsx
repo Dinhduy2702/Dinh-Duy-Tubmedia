@@ -45,6 +45,8 @@ import type {
 } from '@shared/types/domain';
 import type { LocalCutAspectRatio } from '@shared/local-cut';
 import { parseInputText } from '@shared/utils/input-parser';
+import { displayedAttempt } from '@shared/utils/attempt-display';
+import { redactSecrets } from '@shared/utils/secret-redaction';
 import { sanitizeFilename } from '@shared/utils/filename';
 import { shouldShowInlineBlockingIssue } from '@shared/utils/notification-policy';
 import { formatTimelineCopyText, formatTimestamp } from '@shared/utils/timestamp';
@@ -135,7 +137,8 @@ function mergeErrorTechnical(job: QueueJob, log: LogEntry | null): string {
         errorCode: job.errorCode ?? null,
         jobType: job.type,
         attempts: job.attempts,
-        input: job.input
+        // Che khóa nhạy cảm (cookieBlockedFingerprint, token...) trước khi người dùng sao chép thông tin hỗ trợ.
+        input: redactSecrets(job.input)
       }
     },
     null,
@@ -1780,7 +1783,7 @@ function MergeErrorDetailPanel({
         </div>
         <div>
           <span>Số lần thử</span>
-          <b>{job.attempts}/{job.maxAttempts}</b>
+          <b>{displayedAttempt(job)}/{job.maxAttempts}</b>
         </div>
         <div>
           <span>Trạng thái</span>

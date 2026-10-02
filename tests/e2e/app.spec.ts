@@ -125,6 +125,12 @@ test('opens the Download video Tubmedia desktop shell', async () => {
 
   appendRuntimeLog(`Launching Electron entry: ${mainEntry}`);
 
+  // An toàn dữ liệu (2026-10-02): trước đây bài kiểm này KHÔNG đặt TUBMEDIA_E2E_USER_DATA, nên bản dev dùng
+  // thư mục mặc định %APPDATA%\video-download-merge-studio-pro — chính là dữ liệu THẬT của người dùng (CSDL,
+  // hàng đợi, cookies). Mọi lần chạy e2e đều phải dùng thư mục tạm riêng như các bài kiểm còn lại.
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-shell-'));
+  process.once('exit', () => fs.rmSync(sandbox, { recursive: true, force: true }));
+
   electronApplication = await electron.launch({
     args: [mainEntry],
     cwd: projectRoot,
@@ -132,6 +138,7 @@ test('opens the Download video Tubmedia desktop shell', async () => {
       ...cleanEnvironment,
       NODE_ENV: 'test',
       TUBMEDIA_E2E: '1',
+      TUBMEDIA_E2E_USER_DATA: path.join(sandbox, 'userdata'),
       PLAYWRIGHT_TEST: '1',
       ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
     },
@@ -1197,6 +1204,10 @@ test('Giai đoạn 6 mục 7: mẫu đặt tên tệp Tải nhanh — lưu/đọ
  * /T /F đột ngột đúng lúc đang ở trạng thái 'merging' (KHÔNG qua app.quit()/queue.stop() — mô phỏng đúng
  * mất điện/tắt máy đột ngột, không phải đóng ứng dụng bình thường), tiến trình thứ hai mở lại trỏ ĐÚNG
  * cùng thư mục dữ liệu (cùng CSDL SQLite, cùng thư mục tạm/checkpoint) và phải tự hoàn tất đúng.
+ *
+ * Cập nhật Đợt 1 mục 2 (2026-10-02): mở lại app KHÔNG còn tự chạy tác vụ dở. QueueManager.start() giữ tác vụ
+ * ở 'paused' (APP_INTERRUPTED) và giao diện hỏi "Tiếp tục / Để sau"; bài kiểm bấm Tiếp tục rồi mới kiểm tra
+ * việc tiếp tục đúng từ checkpoint. Hành vi tự chạy cũ chỉ còn khi bật cài đặt autoResumeInterruptedOnStartup.
  */
 test('B1: ghép video tự động tiếp tục đúng sau khi app bị đóng đột ngột (kill thật giữa lúc đang ghép)', async () => {
   test.setTimeout(240_000);
@@ -1406,6 +1417,20 @@ test('B1: ghép video tự động tiếp tục đúng sau khi app bị đóng �
     const win2 = await app2.firstWindow({ timeout: 30_000 });
     shellWindow = win2;
     await win2.waitForSelector('.app-sidebar', { timeout: 30_000 });
+
+    // Đợt 1 mục 2 (2026-10-02): mở lại app KHÔNG tự chạy tác vụ dở nữa — tác vụ ghép được giữ ở 'paused'
+    // (APP_INTERRUPTED) và giao diện hỏi "Có N tác vụ chưa xong — Tiếp tục / Để sau". Bài kiểm B1 giữ
+    // nguyên mục tiêu "tiếp tục đúng từ checkpoint, không mất tiến độ", chỉ thêm bước người dùng bấm Tiếp tục.
+    const startupDialog = win2.getByRole('dialog', { name: /tác vụ chưa xong/ });
+    await startupDialog.waitFor({ timeout: 30_000 });
+    const heldBeforeResume = (
+      await win2.evaluate(() => (window as unknown as { desktop: DesktopMergeCrashApi }).desktop.queue.list())
+    ).find((job) => job.id === mergeJobId);
+    expect(
+      heldBeforeResume?.status,
+      'trước khi người dùng chọn Tiếp tục, tác vụ ghép dở phải đang tạm dừng — không được tự chạy khi mở app'
+    ).toBe('paused');
+    await startupDialog.getByRole('button', { name: 'Tiếp tục' }).click();
 
     let finalStatus = '';
     let finalOutputPath = '';

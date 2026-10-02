@@ -13,7 +13,9 @@ function extractCookieHandler(sourceText: string, name: string): string {
 describe('cookie auto-resume upgrade', () => {
   it('resumes only cookie-blocked jobs after a successful cookie update', () => {
     const queue = source('src/main/queue/queue-manager.ts');
-    expect(queue).toContain('public resumeCookieBlockedJobs(): number');
+    expect(queue).toContain('public async resumeCookieBlockedJobs(trigger: CookieResumeTrigger): Promise<number>');
+    // Đợt 1 mục 3: chỉ chạy lại khi cookies thật sự đổi so với lúc bị chặn.
+    expect(queue).toContain('cookiesChangedSinceBlock(job.input.cookieBlockedFingerprint');
     expect(queue).toContain('isCookieBlockingCode(job.errorCode)');
     expect(queue).toContain("['paused', 'failed', 'interrupted'].includes(job.status)");
     expect(queue).toContain("status: 'pending'");
@@ -22,7 +24,7 @@ describe('cookie auto-resume upgrade', () => {
 
   it('applies automatic resume to browser, pasted and file cookies', () => {
     const ipc = source('src/main/ipc/register-ipc.ts');
-    expect(ipc).toContain('ctx.queue.resumeCookieBlockedJobs()');
+    expect(ipc).toContain("ctx.queue.resumeCookieBlockedJobs('cookies-saved')");
     expect(ipc.match(/configureCookies\(\(\) => ctx\.cookies\./g)).toHaveLength(3);
   });
 
