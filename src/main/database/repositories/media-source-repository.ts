@@ -38,6 +38,14 @@ const map = (r: Row): MediaSource => ({
 });
 export class MediaSourceRepository {
   public constructor(private readonly db: SqliteDatabase) {}
+  /** Mọi tệp nguồn đã tải (để dọn tạm không bao giờ đụng tới). */
+  public listSourceFiles(): string[] {
+    return (
+      this.db
+        .prepare("SELECT source_file FROM media_sources WHERE source_file IS NOT NULL AND source_file<>''")
+        .all() as Array<{ source_file: string }>
+    ).map((row) => row.source_file);
+  }
   public get(id: string): MediaSource | null {
     const r = this.db.prepare('SELECT * FROM media_sources WHERE id=?').get(id) as Row | undefined;
     return r ? map(r) : null;

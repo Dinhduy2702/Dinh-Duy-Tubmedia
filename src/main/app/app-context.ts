@@ -32,6 +32,7 @@ import { WorkbenchService } from '../workbench/workbench-service.js';
 import { SenderValidator } from '../security/sender-validator.js';
 import { CookieService } from '../cookies/cookie-service.js';
 import { cleanupTemporaryArtifacts } from '../files/temporary-cleanup.js';
+import { buildCleanupProtection } from '../files/cleanup-protection.js';
 import { QuickDownloadService } from '../download/quick-download-service.js';
 import { PreviewFrameService } from '../download/preview-frame-service.js';
 import { logMigrationReports } from '../database/migration-report.js';
@@ -199,7 +200,13 @@ export class AppContext {
         join(project.outputFolder, '_normalized'),
         join(project.outputFolder, '_quarantine')
       ]);
-    void Promise.all(legacyFolders.map((folder) => cleanupTemporaryArtifacts(folder)))
+    const protection = buildCleanupProtection({
+      projects: this.projectRepo.list(true),
+      settings: this.settings.get(),
+      jobs: this.queueRepo.list(),
+      sourceFiles: this.sourceRepo.listSourceFiles()
+    });
+    void Promise.all(legacyFolders.map((folder) => cleanupTemporaryArtifacts(folder, [], false, protection)))
       .then((reports) => {
         const removedFiles = reports.reduce((sum, report) => sum + report.removedFiles, 0);
         const removedDirectories = reports.reduce((sum, report) => sum + report.removedDirectories, 0);

@@ -41,6 +41,7 @@ export const appSettingsSchema = z
     reduceMotion: z.boolean(),
     minimizeToTray: z.boolean(),
     autoResumeInterruptedOnStartup: z.boolean().default(false),
+    dismissedSharedTempWarnings: z.record(z.string().max(64), z.string().max(4096)).default({}),
     startWithWindows: z.boolean(),
     closeBehavior: z.enum(['ask', 'pause_and_exit', 'cancel_and_exit', 'tray']),
     defaultSourceFolder: pathSchema,

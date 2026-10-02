@@ -25,6 +25,7 @@ import { REQUIRED_TOOL_NAMES } from '../tools/tool-manager.js';
 import { sanitizeFilename } from '@shared/utils/filename.js';
 import { sizeFiles, sizePaths } from '../storage/workbench-storage.js';
 import { cleanupTemporaryArtifacts } from '../files/temporary-cleanup.js';
+import { buildCleanupProtection } from '../files/cleanup-protection.js';
 
 // A1 (2026-09-25): tăng từ 4 lên 6 lane theo yêu cầu người dùng — thêm hoàn toàn tương thích ngược,
 // không đụng tới 4 lane cũ đã có dữ liệu của người dùng (chỉ thêm phần tử mới vào cuối 2 mảng/bảng).
@@ -428,6 +429,16 @@ export class WorkbenchService {
   }
 
 
+  /** Thư mục người dùng đã chọn + tệp thành phẩm/nguồn: dọn tạm không bao giờ đụng tới (Đợt 2, 2026-10-02). */
+  private cleanupProtection(): ReturnType<typeof buildCleanupProtection> {
+    return buildCleanupProtection({
+      projects: this.projectRepo.list(true),
+      settings: this.settings.get(),
+      jobs: this.queue.list(),
+      sourceFiles: this.sources.listSourceFiles()
+    });
+  }
+
   public async removeAll(): Promise<{ projectsRemoved: number; jobsRemoved: number }> {
     // Xóa toàn bộ dự án, kể cả bản ghi cũ/ẩn/trùng mã từ các phiên bản trước.
     // Tệp video ngoài cơ sở dữ liệu luôn được giữ nguyên.
@@ -435,10 +446,11 @@ export class WorkbenchService {
     const projects = this.projectRepo.list();
 
     await this.queue.cancelAllAndWait();
+    const protection = this.cleanupProtection();
     await Promise.all(projects.flatMap((project) => [
-      cleanupTemporaryArtifacts(project.tempFolder),
-      cleanupTemporaryArtifacts(join(project.outputFolder, '_normalized')),
-      cleanupTemporaryArtifacts(join(project.outputFolder, '_quarantine'))
+      cleanupTemporaryArtifacts(project.tempFolder, [], false, protection),
+      cleanupTemporaryArtifacts(join(project.outputFolder, '_normalized'), [], false, protection),
+      cleanupTemporaryArtifacts(join(project.outputFolder, '_quarantine'), [], false, protection)
     ]));
     const projectsRemoved = this.projectRepo.removeAll();
     this.queue.clearAllHistory();
@@ -457,12 +469,14 @@ export class WorkbenchService {
     // để dữ liệu cũ không xuất hiện lại ở lần mở ứng dụng tiếp theo.
     const projects = this.projectsForSlot(slot);
     if (projects.length === 0) return this.slotState(slot);
+    // Tính danh sách bảo vệ TRƯỚC khi xóa tác vụ, để tệp thành phẩm của chính danh sách này vẫn được bảo vệ.
+    const protection = this.cleanupProtection();
     for (const project of projects) {
       await this.queue.removeProject(project.id);
       await Promise.all([
-        cleanupTemporaryArtifacts(project.tempFolder),
-        cleanupTemporaryArtifacts(join(project.outputFolder, '_normalized')),
-        cleanupTemporaryArtifacts(join(project.outputFolder, '_quarantine'))
+        cleanupTemporaryArtifacts(project.tempFolder, [], false, protection),
+        cleanupTemporaryArtifacts(join(project.outputFolder, '_normalized'), [], false, protection),
+        cleanupTemporaryArtifacts(join(project.outputFolder, '_quarantine'), [], false, protection)
       ]);
       this.logger.clearProject(project.id);
       await this.projects.remove(project.id, false);

@@ -34,6 +34,7 @@ import {
   defaultLowPercentFor
 } from './system-load-governor.js';
 import { InvalidInputError, ProcessingFailedError, type AppError } from '@shared/errors/app-errors.js';
+import { buildCleanupProtection } from '../files/cleanup-protection.js';
 import { cleanupTemporaryArtifacts } from '../files/temporary-cleanup.js';
 import { sanitizeNullableSeconds, sanitizeProgress } from '@shared/utils/progress-policy.js';
 import { initialJobStatus, resolveResumeStatus } from '@shared/utils/job-state-machine.js';
@@ -1112,10 +1113,17 @@ export class QueueManager {
       const trackedClips = items
         .map((item) => item.clipFile)
         .filter((path): path is string => typeof path === 'string' && path.length > 0);
+      // Không bao giờ đụng thư mục người dùng đã chọn hay tệp thành phẩm/nguồn (Đợt 2, 2026-10-02).
+      const protection = buildCleanupProtection({
+        projects: this.projects.list(true),
+        settings: this.settings.get(),
+        jobs: this.repo.list(),
+        sourceFiles: this.sources.listSourceFiles()
+      });
       const reports = await Promise.all([
-        cleanupTemporaryArtifacts(project.tempFolder, trackedClips, preserveTrackedClips),
-        cleanupTemporaryArtifacts(join(project.outputFolder, '_normalized')),
-        cleanupTemporaryArtifacts(join(project.outputFolder, '_quarantine'))
+        cleanupTemporaryArtifacts(project.tempFolder, trackedClips, preserveTrackedClips, protection),
+        cleanupTemporaryArtifacts(join(project.outputFolder, '_normalized'), [], false, protection),
+        cleanupTemporaryArtifacts(join(project.outputFolder, '_quarantine'), [], false, protection)
       ]);
       const report = reports.reduce(
         (total, current) => ({

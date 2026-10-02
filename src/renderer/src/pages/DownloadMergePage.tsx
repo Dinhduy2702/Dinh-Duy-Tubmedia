@@ -1487,6 +1487,7 @@ function MergeLaneCard({
           <div className="compact-config-temp">
             <FolderField
               label="Thư mục xử lý tạm"
+              warnIfSharedTemp
               disabled={locked}
               value={form.tempFolder}
               onChange={(value) => {

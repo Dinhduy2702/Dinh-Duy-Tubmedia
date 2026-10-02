@@ -1041,6 +1041,7 @@ function LaneCard({
           <div className="compact-config-temp">
             <FolderField
               label="Thư mục tạm"
+              warnIfSharedTemp
               disabled={locked}
               value={form.tempFolder}
               onChange={(value) => {

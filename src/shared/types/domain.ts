@@ -259,6 +259,8 @@ export interface AppSettings {
   minimizeToTray: boolean;
   /** Mở app thì tự đưa tác vụ dở về hàng chờ (mặc định tắt: hỏi người dùng trước). */
   autoResumeInterruptedOnStartup: boolean;
+  /** "Không nhắc lại cho danh sách này": { mã danh sách → thư mục tạm lúc tắt nhắc } (Đợt 2, 2026-10-02). */
+  dismissedSharedTempWarnings: Record<string, string>;
   startWithWindows: boolean;
   closeBehavior: 'ask' | 'pause_and_exit' | 'cancel_and_exit' | 'tray';
   defaultSourceFolder: string;

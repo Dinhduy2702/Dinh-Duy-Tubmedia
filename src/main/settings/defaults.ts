@@ -11,6 +11,7 @@ export const defaultAppSettings: AppSettings = {
   reduceMotion: false,
   minimizeToTray: false,
   autoResumeInterruptedOnStartup: false,
+  dismissedSharedTempWarnings: {},
   startWithWindows: false,
   closeBehavior: 'ask',
   defaultSourceFolder: join(base, 'Bộ nhớ nguồn'),

@@ -1,15 +1,25 @@
 import { useState, type ChangeEvent } from 'react';
 import { FolderOpen, LoaderCircle } from 'lucide-react';
 import { useAppStore } from '../stores/app-store';
+import { sharedTempFolderWarning, sharedUserFolderKind } from '@shared/utils/shared-folder-policy';
 
 interface FolderFieldProps {
   label: string;
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
+  /** Ô thư mục TẠM: cảnh báo khi người dùng chọn thư mục chung (Downloads, Desktop, gốc ổ đĩa...). */
+  warnIfSharedTemp?: boolean;
 }
 
-export function FolderField({ label, value, onChange, disabled = false }: FolderFieldProps): React.JSX.Element {
+export function FolderField({
+  label,
+  value,
+  onChange,
+  disabled = false,
+  warnIfSharedTemp = false
+}: FolderFieldProps): React.JSX.Element {
+  const sharedWarning = warnIfSharedTemp && sharedUserFolderKind(value) ? sharedTempFolderWarning(value) : null;
   const [choosing, setChoosing] = useState(false);
   const choose = async (): Promise<void> => {
     if (disabled || choosing) return;
@@ -38,5 +48,10 @@ export function FolderField({ label, value, onChange, disabled = false }: Folder
         {choosing ? 'Đang mở...' : 'Chọn'}
       </button>
     </div>
+    {sharedWarning && (
+      <span className="field-hint field-hint-warning" role="note">
+        {sharedWarning}
+      </span>
+    )}
   </label>;
 }

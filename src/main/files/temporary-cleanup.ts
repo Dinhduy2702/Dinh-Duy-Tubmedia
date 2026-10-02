@@ -1,12 +1,24 @@
-import { lstat, readdir, rm, rmdir } from 'node:fs/promises';
-import { basename, isAbsolute, parse, relative, resolve } from 'node:path';
-import { isTubmediaOwnedDirectory, TUBMEDIA_OWNERSHIP_MARKER } from './file-ownership.js';
+import { lstat, readdir, realpath, rm } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, parse, relative, resolve } from 'node:path';
+import { isTubmediaOwnedDirectory } from './file-ownership.js';
 
 export interface TemporaryCleanupReport {
   removedFiles: number;
   removedDirectories: number;
   skippedUnsafePaths: number;
 }
+
+export interface TemporaryCleanupOptions {
+  /**
+   * Thư mục người dùng đã chọn (thư mục tạm/nguồn/thành phẩm của mọi danh sách, thư mục mặc định). Không bao
+   * giờ bị xóa, cũng không xóa thư mục nào CHỨA chúng — kể cả khi tên là _yt_tmp/_normalized và có dấu sở hữu.
+   */
+  protectedFolders?: readonly string[];
+  /** Tệp thành phẩm/tệp nguồn đã biết: không bao giờ bị xóa dù được ghi nhận là tệp tạm. */
+  protectedFiles?: readonly string[];
+}
+
+const RESERVED_TEMP_DIRECTORIES = ['_normalized', '_yt_tmp'];
 
 function isSafeFolder(folder: string): boolean {
   const resolved = resolve(folder);
@@ -16,6 +28,26 @@ function isSafeFolder(folder: string): boolean {
 function isInside(folder: string, file: string): boolean {
   const child = relative(resolve(folder), resolve(file));
   return child === '' || (!child.startsWith('..') && !isAbsolute(child));
+}
+
+function samePath(left: string, right: string): boolean {
+  return resolve(left).toLowerCase() === resolve(right).toLowerCase();
+}
+
+/** Thư mục này là (hoặc chứa) một thư mục người dùng đã chọn → không được xóa. */
+function touchesProtectedFolder(directory: string, protectedFolders: readonly string[]): boolean {
+  return protectedFolders.some((folder) => Boolean(folder.trim()) && isInside(directory, folder));
+}
+
+/** Nằm trong `folder` cả theo đường dẫn chữ LẪN theo vị trí thật (không đi xuyên junction/symlink ra ngoài). */
+async function physicallyInside(folder: string, path: string): Promise<boolean> {
+  if (!isInside(folder, path)) return false;
+  try {
+    const [realFolder, realParent] = await Promise.all([realpath(folder), realpath(dirname(resolve(path)))]);
+    return isInside(realFolder, realParent);
+  } catch {
+    return false;
+  }
 }
 
 export function isTubmediaTemporaryFile(name: string): boolean {
@@ -30,14 +62,20 @@ export function isTubmediaTemporaryFile(name: string): boolean {
 }
 
 /**
- * Removes only explicitly tracked files or recursively removes a reserved
- * Tubmedia directory that contains a valid ownership marker. Arbitrary user
- * files are preserved, and broad filesystem roots are always rejected.
+ * Dọn tệp tạm của Tubmedia trong một thư mục tạm (Đợt 2, 2026-10-02 — siết lại toàn bộ):
+ * - Không bao giờ xóa thư mục rỗng hay chính thư mục tạm; không bao giờ xóa thư mục người dùng đã chọn
+ *   (protectedFolders) hoặc thư mục chứa chúng.
+ * - Chỉ xóa đệ quy thư mục dành riêng (_normalized/_yt_tmp) CÓ tệp đánh dấu sở hữu và KHÔNG phải thư mục
+ *   người dùng chọn. Nếu chính thư mục được dọn là một thư mục như vậy (ví dụ <thành phẩm>\_normalized do
+ *   app tạo) thì xóa nội dung của nó, trừ những gì được bảo vệ.
+ * - Tệp do CSDL theo dõi chỉ bị xóa khi: nằm thật trong thư mục tạm (không qua junction/symlink), là tệp
+ *   thường, mang đúng mẫu tên tệp tạm của app, và không phải tệp thành phẩm/nguồn đã biết.
  */
 export async function cleanupTemporaryArtifacts(
   tempFolder: string,
   trackedFiles: string[] = [],
-  preserveTrackedFiles = false
+  preserveTrackedFiles = false,
+  options: TemporaryCleanupOptions = {}
 ): Promise<TemporaryCleanupReport> {
   const report: TemporaryCleanupReport = {
     removedFiles: 0,
@@ -48,9 +86,31 @@ export async function cleanupTemporaryArtifacts(
     report.skippedUnsafePaths += 1;
     return report;
   }
+  const protectedFolders = options.protectedFolders ?? [];
+  const protectedFiles = options.protectedFiles ?? [];
+  const isProtectedFile = (file: string): boolean => protectedFiles.some((item) => samePath(item, file));
+
+  const removeEntry = async (path: string, isDirectory: boolean): Promise<void> => {
+    if (isDirectory ? touchesProtectedFolder(path, protectedFolders) : isProtectedFile(path)) {
+      report.skippedUnsafePaths += 1;
+      return;
+    }
+    if (!(await physicallyInside(tempFolder, path))) {
+      report.skippedUnsafePaths += 1;
+      return;
+    }
+    await rm(path, { recursive: isDirectory, force: true });
+    if (isDirectory) report.removedDirectories += 1;
+    else report.removedFiles += 1;
+  };
 
   const rootName = basename(resolve(tempFolder)).toLowerCase();
-  if (['_normalized', '_yt_tmp'].includes(rootName) && await isTubmediaOwnedDirectory(tempFolder)) {
+  const rootChosenByUser = protectedFolders.some((folder) => samePath(folder, tempFolder));
+  if (
+    RESERVED_TEMP_DIRECTORIES.includes(rootName) &&
+    !rootChosenByUser &&
+    (await isTubmediaOwnedDirectory(tempFolder))
+  ) {
     try {
       const entries = await readdir(resolve(tempFolder), { withFileTypes: true });
       for (const entry of entries) {
@@ -59,36 +119,27 @@ export async function cleanupTemporaryArtifacts(
           report.skippedUnsafePaths += 1;
           continue;
         }
-        await rm(path, { recursive: true, force: true });
-        if (entry.isDirectory()) report.removedDirectories += 1;
-        else report.removedFiles += 1;
+        if (!entry.isDirectory() && !entry.isFile()) continue;
+        await removeEntry(path, entry.isDirectory());
       }
     } catch {
       // Thư mục chưa tồn tại.
     }
   }
 
-  const preservedFiles = new Set(
-    preserveTrackedFiles
-      ? trackedFiles
-          .filter((file) => Boolean(file) && isInside(tempFolder, file))
-          .map((file) => resolve(file))
-      : []
-  );
-
+  // preserveTrackedFiles: quy trình ghép lỗi cần giữ clip để thử lại — không xóa tệp nào được theo dõi.
   for (const file of preserveTrackedFiles ? [] : new Set(trackedFiles)) {
-    if (!file || !isInside(tempFolder, file)) {
+    if (!file || !isInside(tempFolder, file) || !isTubmediaTemporaryFile(basename(file))) {
       report.skippedUnsafePaths += 1;
       continue;
     }
     try {
       const stat = await lstat(file);
-      if (!stat.isFile()) {
+      if (!stat.isFile() || stat.isSymbolicLink()) {
         report.skippedUnsafePaths += 1;
         continue;
       }
-      await rm(file, { force: true });
-      report.removedFiles += 1;
+      await removeEntry(resolve(file), false);
     } catch {
       // Tệp đã được dọn ở lần chạy trước.
     }
@@ -107,26 +158,16 @@ export async function cleanupTemporaryArtifacts(
         report.skippedUnsafePaths += 1;
         continue;
       }
-      if (entry.isDirectory()) {
-        const reservedDirectory = ['_normalized', '_yt_tmp'].includes(entry.name.toLowerCase());
-        if (reservedDirectory && await isTubmediaOwnedDirectory(path)) {
-          await rm(path, { recursive: true, force: true });
-          report.removedDirectories += 1;
-          continue;
-        }
-        await walk(path);
-      } else if (entry.isFile() && preservedFiles.has(resolve(path))) {
-        // Tệp đang được workflow sử dụng phải được giữ lại.
-      } else if (entry.isFile() && entry.name === TUBMEDIA_OWNERSHIP_MARKER) {
-        // Marker chỉ được xóa cùng cả thư mục ownership, không xóa khi walk thư mục cha.
+      if (!entry.isDirectory()) continue;
+      const reservedDirectory = RESERVED_TEMP_DIRECTORIES.includes(entry.name.toLowerCase());
+      if (reservedDirectory && (await isTubmediaOwnedDirectory(path))) {
+        await removeEntry(path, true);
+        continue;
       }
+      await walk(path);
     }
-    try {
-      await rmdir(folder);
-      report.removedDirectories += 1;
-    } catch {
-      // Thư mục còn tệp user hoặc đang được dùng nên phải giữ lại.
-    }
+    // Không rmdir thư mục rỗng: thư mục tạm có thể là thư mục chung của người dùng (Downloads...); trước đây
+    // mọi thư mục con rỗng — và cả chính thư mục gốc nếu rỗng — bị xóa dù không do Tubmedia tạo.
   };
 
   await walk(resolve(tempFolder));

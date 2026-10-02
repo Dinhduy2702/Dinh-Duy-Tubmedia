@@ -267,6 +267,7 @@ src/main/downloader/download-engine.ts
 src/main/downloader/ytdlp-arguments.ts
 src/main/downloader/ytdlp-cookie-arguments.ts
 src/main/downloader/ytdlp-progress.ts
+src/main/files/cleanup-protection.ts
 src/main/files/ensure-directory.ts
 src/main/files/file-ownership.ts
 src/main/files/non-conflicting-path.ts
@@ -336,6 +337,7 @@ src/renderer/src/components/JobProgressList.tsx
 src/renderer/src/components/NotificationCenter.tsx
 src/renderer/src/components/QuickDownloadPanel.tsx
 src/renderer/src/components/RendererErrorBoundary.tsx
+src/renderer/src/components/SharedTempFolderNotice.tsx
 src/renderer/src/components/StartupResumeDialog.tsx
 src/renderer/src/components/StatCard.tsx
 src/renderer/src/components/StatusBadge.tsx
@@ -431,6 +433,7 @@ src/shared/utils/retry.ts
 src/shared/utils/safe-json.ts
 src/shared/utils/secret-redaction.ts
 src/shared/utils/sha256-sums.ts
+src/shared/utils/shared-folder-policy.ts
 src/shared/utils/text-encoding.ts
 src/shared/utils/timestamp.ts
 src/shared/utils/ui-error.ts
@@ -451,6 +454,7 @@ tests/integration/queue-attempts.test.ts
 tests/integration/queue-load-governor.test.ts
 tests/integration/queue-retry-requeue.test.ts
 tests/integration/queue-startup-hold.test.ts
+tests/integration/queue-temp-cleanup-safety.test.ts
 tests/integration/restore-sources-policy.test.ts
 tests/integration/settings-restore-policy.test.ts
 tests/integration/settings-rollback-compat.test.ts
@@ -562,6 +566,7 @@ tests/unit/secret-redaction.test.ts
 tests/unit/settings-policy.test.ts
 tests/unit/settings-save-stale-error.test.ts
 tests/unit/sha256-sums.test.ts
+tests/unit/shared-folder-policy.test.ts
 tests/unit/smart-merge-pipeline-v120.test.ts
 tests/unit/source-completeness.test.ts
 tests/unit/startup-fast.test.ts
@@ -570,6 +575,8 @@ tests/unit/system-cleanup-navigation.test.ts
 tests/unit/system-cleanup-policy.test.ts
 tests/unit/system-load-governor.test.ts
 tests/unit/taskbar-tray-icon.test.ts
+tests/unit/temporary-cleanup-protection.test.ts
+tests/unit/temporary-cleanup-unowned.test.ts
 tests/unit/temporary-cleanup.test.ts
 tests/unit/timeline-merge-recovery-hotfix12.test.ts
 tests/unit/timeline-service-safety.test.ts
