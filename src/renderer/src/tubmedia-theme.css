@@ -881,6 +881,18 @@ html.light .tubmedia-logo-light {
   border-color: color-mix(in srgb, var(--warn) 28%, var(--border));
   color: var(--warn);
 }
+/* #4 (2026-10-05): lý do NVENC + nút "Tải driver NVIDIA" bên phải; chữ dài thì xuống dòng, nút không bị ép. */
+.gpu-encoder-issue {
+  flex-wrap: wrap;
+}
+.gpu-encoder-issue > div {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+.gpu-encoder-issue > .btn {
+  flex: 0 0 auto;
+  color: var(--text);
+}
 
 .tools-grid {
   display: grid;

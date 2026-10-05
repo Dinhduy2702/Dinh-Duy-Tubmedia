@@ -1,4 +1,5 @@
 import { app, clipboard, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
+import { NVIDIA_DRIVER_DOWNLOAD_URL } from '@shared/utils/nvenc-diagnosis.js';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { IPC } from '@shared/contracts/channels.js';
@@ -376,6 +377,8 @@ export function registerIpc(ctx: AppContext): void {
     await ctx.toolUpdates.rollback(name);
     ctx.queue.recoverToolBlocked();
   });
+  // #4 (2026-10-05): địa chỉ cố định — không nhận URL từ giao diện.
+  noArgs(IPC.tools.openNvidiaDriverPage, () => shell.openExternal(NVIDIA_DRIVER_DOWNLOAD_URL));
   noArgs(IPC.tools.openFolder, async () => {
     const folder = await ctx.tools.ensureWritableToolFolder();
     await shell.openPath(folder);

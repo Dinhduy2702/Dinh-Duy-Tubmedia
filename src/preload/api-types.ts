@@ -152,6 +152,8 @@ export interface DesktopApi {
     repairAll(): Promise<ToolStatus[]>;
     rollback(name: ToolStatus['name']): Promise<void>;
     openFolder(): Promise<string>;
+    /** #4: mở trang tải driver chính thức của NVIDIA (địa chỉ cố định ở main, giao diện không truyền URL). */
+    openNvidiaDriverPage(): Promise<void>;
   };
   media: {
     // Giai đoạn 6 mục 6 (2026-09-24) — "Xem thông tin tệp": handler đã có sẵn từ trước, chỉ gắn kiểu

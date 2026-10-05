@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { ProcessPriority } from '@shared/types/domain.js';
 import { ProcessCancelledError, ProcessSpawnError, ProcessTimeoutError } from '@shared/errors/app-errors.js';
 import type { Logger } from '../logging/logger.js';
+import { toSignedExitCode } from '@shared/utils/nvenc-diagnosis.js';
 
 export interface ProcessRunOptions {
   jobId: string;
@@ -353,7 +354,7 @@ export class ProcessManager {
       stderrTail: stderr.text(),
       durationMs: Date.now() - startedAt
     };
-    this.logger.info('process', 'PROCESS_FINISHED', `${options.tool} kết thúc với mã ${code}.`, {
+    this.logger.info('process', 'PROCESS_FINISHED', `${options.tool} kết thúc với mã ${toSignedExitCode(code)}.`, {
       jobId: options.jobId,
       ...(options.projectId ? { projectId: options.projectId } : {}),
       metadata: { durationMs: result.durationMs }

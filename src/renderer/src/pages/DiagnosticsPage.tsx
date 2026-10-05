@@ -2,6 +2,7 @@ import { Activity, CircleAlert, HardDrive, RefreshCcw, ShieldCheck, Wrench } fro
 import { useState } from 'react';
 import { useAppStore } from '../stores/app-store';
 import { friendlyIssue, safeUiText } from '../utils/ui-error';
+import { GpuEncoderIssueNotice } from '../components/GpuEncoderIssueNotice';
 
 function bytes(value: number | undefined): string {
   const safe = Math.max(0, value ?? 0);
@@ -59,6 +60,7 @@ export function DiagnosticsPage(): React.JSX.Element {
             {tool.available && tool.health !== 'broken' ? <ShieldCheck size={17} /> : <CircleAlert size={17} />}
             <div><b>{tool.name}</b><span>{tool.version ?? safeUiText(tool.error, 'Chưa xác minh')}</span></div><small>{tool.source ?? '—'}</small>
           </div>)}</div>
+          <div className="mt-3"><GpuEncoderIssueNotice/></div>
         </section>
         <section className="card p-5">
           <div className="diagnostics-section-title"><CircleAlert size={20} /><div><h2>Lỗi gần nhất</h2><p>Không hiển thị token hoặc cookies nhạy cảm.</p></div><button className="btn btn-small" onClick={() => setPage('logs')}>Mở nhật ký</button></div>

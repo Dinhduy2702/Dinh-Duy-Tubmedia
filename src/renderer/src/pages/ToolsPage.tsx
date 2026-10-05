@@ -21,6 +21,7 @@ import { useAppStore } from '../stores/app-store';
 import { createUiEventId } from '../utils/ui-id';
 import { toolSourceLabel } from '../utils/vi-labels';
 import { safeUiText } from '../utils/ui-error';
+import { GpuEncoderIssueNotice } from '../components/GpuEncoderIssueNotice';
 
 const messageOf = (error: unknown): string => safeUiText(error, 'Không thể hoàn tất thao tác với công cụ.');
 const REQUIRED = ['yt-dlp', 'ffmpeg', 'ffprobe'] as const;
@@ -165,7 +166,7 @@ export function ToolsPage(): React.JSX.Element {
     </section>
 
     {cpuReady && nvencUnavailable && <section className="encoder-status-grid">
-      <div className="encoder-status-card is-warning"><CircleAlert size={20}/><div><b>NVIDIA chưa khả dụng · CPU tự động đã thay thế</b><p>Việc tải và ghép không bị gián đoạn.</p></div></div>
+      <GpuEncoderIssueNotice/>
     </section>}
 
     <div className="tools-grid">

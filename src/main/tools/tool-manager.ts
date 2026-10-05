@@ -7,6 +7,7 @@ import type { ProcessManager } from '../processes/process-manager.js';
 import type { Logger } from '../logging/logger.js';
 import { IPC } from '@shared/contracts/channels.js';
 import { toolPathSyntaxError, type ToolPathSettingKey } from '../security/settings-policy.js';
+import { diagnoseNvencFailure, toSignedExitCode, type GpuEncoderIssue } from '@shared/utils/nvenc-diagnosis.js';
 
 export const TOOL_NAMES = ['yt-dlp', 'ffmpeg', 'ffprobe', 'ffplay', 'aria2c'] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
@@ -357,8 +358,9 @@ export class ToolManager {
             throw new Error(`Kiểm tra phiên bản thất bại (exit ${result.code}).`);
           }
           let capabilities: string[];
+          let gpuEncoderIssue: GpuEncoderIssue | null = null;
           try {
-            capabilities = await this.toolCapabilities(tool, candidate.path);
+            ({ capabilities, gpuEncoderIssue } = await this.toolCapabilities(tool, candidate.path));
           } catch (error) {
             capabilities = tool === 'ffmpeg' ? [] : verifiedCapabilities(tool);
             this.logger.warn(
@@ -376,7 +378,8 @@ export class ToolManager {
             capabilities,
             health: tool === 'ffmpeg' && !capabilities.includes('libx264') ? 'warning' : 'healthy',
             error: null,
-            lastCheckedAt: checkedAt
+            lastCheckedAt: checkedAt,
+            ...(tool === 'ffmpeg' ? { gpuEncoderIssue } : {})
           };
           break;
         } catch (error) {
@@ -403,7 +406,10 @@ export class ToolManager {
     return this.list();
   }
 
-  private async toolCapabilities(name: ToolName, path: string): Promise<string[]> {
+  private async toolCapabilities(
+    name: ToolName,
+    path: string
+  ): Promise<{ capabilities: string[]; gpuEncoderIssue: GpuEncoderIssue | null }> {
     if (name === 'ffmpeg') return this.ffmpegCapabilities(path);
     const helpArgs = name === 'aria2c' ? ['--help=#all'] : ['-h'];
     const result = await this.processes.run({
@@ -415,10 +421,12 @@ export class ToolManager {
       priority: 'below_normal'
     });
     const text = `${result.stdoutTail}\n${result.stderrTail}`;
-    return verifiedCapabilities(name, result.code === 0 ? text : '');
+    return { capabilities: verifiedCapabilities(name, result.code === 0 ? text : ''), gpuEncoderIssue: null };
   }
 
-  private async ffmpegCapabilities(path: string): Promise<string[]> {
+  private async ffmpegCapabilities(
+    path: string
+  ): Promise<{ capabilities: string[]; gpuEncoderIssue: GpuEncoderIssue | null }> {
     const [encoders, filters, muxers] = await Promise.all([
       this.processes.run({ jobId: 'health-ffmpeg-encoders', tool: 'ffmpeg', executablePath: path, args: ['-hide_banner', '-encoders'], timeoutMs: 20_000 }),
       this.processes.run({ jobId: 'health-ffmpeg-filters', tool: 'ffmpeg', executablePath: path, args: ['-hide_banner', '-filters'], timeoutMs: 20_000 }),
@@ -427,6 +435,7 @@ export class ToolManager {
     const text = `${encoders.stdoutTail}\n${encoders.stderrTail}\n${filters.stdoutTail}\n${filters.stderrTail}\n${muxers.stdoutTail}\n${muxers.stderrTail}`;
     const capabilityNames = ['libx264', 'libx265', 'h264_nvenc', 'hevc_nvenc', 'aac', 'zscale', 'tonemap', 'concat', 'mp4'];
     const capabilities = capabilityNames.filter((capability) => text.includes(capability));
+    let gpuEncoderIssue: GpuEncoderIssue | null = null;
     for (const encoder of ['h264_nvenc', 'hevc_nvenc'] as const) {
       if (!capabilities.includes(encoder)) continue;
       const test = await this.processes.run({
@@ -440,9 +449,23 @@ export class ToolManager {
       if (test.code !== 0) {
         capabilities.splice(capabilities.indexOf(encoder), 1);
         capabilities.push(`${encoder}_unavailable`);
+        // #4: giữ LÝ DO (trước đây chỉ còn cờ) và ghi Cảnh báo với mã thoát có dấu.
+        const issue = diagnoseNvencFailure(encoder, test.stderrTail, test.code);
+        gpuEncoderIssue ??= issue;
+        this.logger.warn(
+          'tools',
+          'NVENC_UNAVAILABLE',
+          `${encoder} không dùng được (mã ${toSignedExitCode(test.code)})` +
+            (issue.kind === 'driver-too-old'
+              ? `: driver NVIDIA quá cũ — cần driver ${issue.minimumDriver ?? 'mới hơn'} trở lên` +
+                (issue.requiredApi ? ` (NVENC API ${issue.foundApi ?? '?'}, cần ${issue.requiredApi})` : '')
+              : issue.detail ? `: ${issue.detail}` : '') +
+            '. Tubmedia dùng CPU thay thế.',
+          { metadata: { ...issue } }
+        );
       }
     }
     if (capabilities.includes('libx264')) capabilities.push('cpu_auto');
-    return capabilities;
+    return { capabilities, gpuEncoderIssue };
   }
 }

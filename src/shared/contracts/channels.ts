@@ -85,7 +85,8 @@ export const IPC = {
     updateAll: 'tools:update-all',
     repairAll: 'tools:repair-all',
     rollback: 'tools:rollback',
-    openFolder: 'tools:open-folder'
+    openFolder: 'tools:open-folder',
+    openNvidiaDriverPage: 'tools:open-nvidia-driver-page'
   },
   media: {
     analyze: 'media:analyze',

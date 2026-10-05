@@ -333,6 +333,7 @@ src/renderer/src/components/CookieManagerDialog.tsx
 src/renderer/src/components/DiagnosticDock.tsx
 src/renderer/src/components/ErrorBanner.tsx
 src/renderer/src/components/FolderField.tsx
+src/renderer/src/components/GpuEncoderIssueNotice.tsx
 src/renderer/src/components/InfoDisclosure.tsx
 src/renderer/src/components/JobProgressList.tsx
 src/renderer/src/components/NotificationCenter.tsx
@@ -426,6 +427,7 @@ src/shared/utils/merge-target.ts
 src/shared/utils/normalization-match.ts
 src/shared/utils/notice-tone.ts
 src/shared/utils/notification-policy.ts
+src/shared/utils/nvenc-diagnosis.ts
 src/shared/utils/progress-policy.ts
 src/shared/utils/quality-decision.ts
 src/shared/utils/queue-lane.ts
@@ -534,6 +536,7 @@ tests/unit/notice-tone.test.ts
 tests/unit/notification-center.test.ts
 tests/unit/notification-policy.test.ts
 tests/unit/notification-spam-lane-count.test.ts
+tests/unit/nvenc-diagnosis.test.ts
 tests/unit/open-path-policy.test.ts
 tests/unit/output-path-containment.test.ts
 tests/unit/preview-frame-command.test.ts
@@ -586,6 +589,7 @@ tests/unit/timestamp.test.ts
 tests/unit/tool-bootstrap-release.test.ts
 tests/unit/tool-capabilities.test.ts
 tests/unit/tool-manager-configured-path.test.ts
+tests/unit/tool-manager-nvenc-issue.test.ts
 tests/unit/tool-update-rate-limit.test.ts
 tests/unit/typography-system.test.ts
 tests/unit/ui-density.test.ts

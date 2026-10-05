@@ -95,7 +95,8 @@ const api: DesktopApi = {
     updateAll: () => invoke(IPC.tools.updateAll),
     repairAll: () => invoke(IPC.tools.repairAll),
     rollback: (name) => invoke(IPC.tools.rollback, { name }),
-    openFolder: () => invoke(IPC.tools.openFolder)
+    openFolder: () => invoke(IPC.tools.openFolder),
+    openNvidiaDriverPage: () => invoke(IPC.tools.openNvidiaDriverPage)
   },
   media: {
     analyze: (path) => invoke(IPC.media.analyze, { path }),

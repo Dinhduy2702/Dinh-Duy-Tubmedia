@@ -1,6 +1,7 @@
 // Giai đoạn 6 mục 4 (2026-09-24): preset xuất theo nền tảng ở Ghép theo Timeline dùng lại đúng khái niệm
 // tỉ lệ khung hình đã có ở "Cắt tệp có sẵn" (mục 3) — cùng 4 giá trị, cùng cơ chế nền mờ kiểu CapCut.
 import type { LocalCutAspectRatio } from '../local-cut.js';
+import type { GpuEncoderIssue } from '../utils/nvenc-diagnosis.js';
 
 export type ProjectStatus = 'draft' | 'active' | 'paused' | 'completed' | 'archived' | 'error';
 export type JobStatus =
@@ -380,6 +381,8 @@ export interface ToolStatus {
   health: 'healthy' | 'warning' | 'broken';
   error: string | null;
   lastCheckedAt: string | null;
+  /** #4 (2026-10-05): lý do NVENC không dùng được (chỉ ffmpeg); null/không có nếu NVENC dùng được hoặc không có. */
+  gpuEncoderIssue?: GpuEncoderIssue | null;
 }
 
 export interface SystemStats {
