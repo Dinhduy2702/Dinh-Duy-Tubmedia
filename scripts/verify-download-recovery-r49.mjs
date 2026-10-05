@@ -115,7 +115,9 @@ check(
 check(
   queue.includes("progressStage: 'Đang thử lại bằng cookies đã cấu hình'") &&
     queue.includes('resumeStatus: null') &&
-    queue.includes("progressStage: 'Cookies mới đã được lưu — đang tự tiếp tục'"),
+    // Đợt 1 (d2a06e3): câu này nằm trong biểu thức chọn theo nguồn kích hoạt, ngay trong khối cập nhật có
+    // resumeStatus: null của resumeCookieBlockedJobs.
+    /resumeStatus:\s*null,\s*progressStage:\s*trigger === 'cookies-saved'\s*\?\s*'Cookies mới đã được lưu — đang tự tiếp tục'/.test(queue),
   'cookie retries clear stale resumeStatus before re-entering the queue'
 );
 check(

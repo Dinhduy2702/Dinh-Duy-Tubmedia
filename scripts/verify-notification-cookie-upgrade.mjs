@@ -47,17 +47,19 @@ check(
 );
 check(
   'queue has a cookie-only automatic resume operation',
-  queue.includes('public resumeCookieBlockedJobs(): number') &&
+  // Đợt 1 (d2a06e3): hàm thành bất đồng bộ, nhận nguồn kích hoạt và chỉ chạy lại khi cookies thật sự đổi.
+  queue.includes('public async resumeCookieBlockedJobs(trigger: CookieResumeTrigger): Promise<number>') &&
     queue.includes('isCookieBlockingCode(job.errorCode)') &&
     queue.includes("['paused', 'failed', 'interrupted'].includes(job.status)") &&
     queue.includes("status: 'pending'") &&
-    queue.includes('COOKIE_BLOCKS_AUTO_RESUMED')
+    queue.includes('COOKIE_BLOCKS_AUTO_RESUMED') &&
+    queue.includes('COOKIE_BLOCKS_UNCHANGED')
 );
 check(
   'all three cookie configuration methods trigger automatic resume',
   ipc.includes('const configureCookies = async') &&
     (ipc.match(/configureCookies\(\(\) => ctx\.cookies\./g) ?? []).length === 3 &&
-    ipc.includes('ctx.queue.resumeCookieBlockedJobs()')
+    ipc.includes("await ctx.queue.resumeCookieBlockedJobs('cookies-saved')")
 );
 check(
   'cookie dialog confirms automatic continuation with a transient notice',

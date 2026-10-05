@@ -19,11 +19,13 @@ const downloadEngine = read('src/main/downloader/download-engine.ts');
 const downloadQuality = read('src/shared/utils/download-quality.ts');
 const ipc = read('src/main/ipc/register-ipc.ts');
 const cookieResumeMethod =
-  queue.split('public resumeCookieBlockedJobs(): number')[1]?.split('public retry(jobId: string)')[0] ?? '';
+  queue
+    .split('public async resumeCookieBlockedJobs(trigger: CookieResumeTrigger): Promise<number>')[1]
+    ?.split('public retry(jobId: string)')[0] ?? '';
 
 check(
   'cookie configuration triggers queue auto-resume',
-  ipc.includes('ctx.queue.resumeCookieBlockedJobs()') &&
+  ipc.includes("await ctx.queue.resumeCookieBlockedJobs('cookies-saved')") &&
     (ipc.match(/configureCookies\(\(\) => ctx\.cookies\./g) ?? []).length === 3
 );
 check(
