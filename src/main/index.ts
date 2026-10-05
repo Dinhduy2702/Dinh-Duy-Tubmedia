@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { IPC } from '@shared/contracts/channels.js';
 import type { AppUpdateStatus } from '@shared/types/domain.js';
 import { AppContext } from './app/app-context.js';
+import { decideCloseAction, decideMinimizeAction } from './app/window-close-policy.js';
 import { registerIpc } from './ipc/register-ipc.js';
 import { createMainWindow } from './windows/main-window.js';
 import { readDevelopmentEnvironment } from './runtime/development-environment.js';
@@ -81,20 +82,23 @@ async function requestClose(window: BrowserWindow): Promise<void> {
   if (!context || allowWindowClose) return;
   const settings = context.settings.get();
   const active = context.queue.activeCount() + (context.quickDownload.isActive() ? 1 : 0);
+  let action = decideCloseAction({ closeBehavior: settings.closeBehavior, activeCount: active });
 
-  if (settings.closeBehavior === 'tray' || settings.minimizeToTray) {
+  if (action === 'hide-to-tray') {
     ensureTray();
     window.hide();
     return;
   }
 
-  if (active === 0) {
+  if (action === 'quit') {
+    // Gọi thẳng app.quit(): `window-all-closed` bỏ qua việc thoát khi đã có biểu tượng khay (tạo lúc mở app
+    // nếu bật công tắc, hoặc sau lần thu nhỏ xuống khay) — chỉ đóng cửa sổ sẽ để app chạy ẩn.
+    shutdownMode = 'preserve';
     allowWindowClose = true;
-    window.close();
+    app.quit();
     return;
   }
 
-  let action = settings.closeBehavior;
   if (action === 'ask') {
     const result = await dialog.showMessageBox(window, {
       type: 'warning',
@@ -128,6 +132,13 @@ function wireWindow(window: BrowserWindow): void {
     if (allowWindowClose) return;
     event.preventDefault();
     void requestClose(window);
+  });
+  // Công tắc "Thu nhỏ xuống khay hệ thống" chỉ áp dụng cho nút thu nhỏ (—), không ảnh hưởng nút X.
+  window.on('minimize', () => {
+    if (!context) return;
+    if (decideMinimizeAction({ minimizeToTray: context.settings.get().minimizeToTray }) !== 'hide-to-tray') return;
+    ensureTray();
+    window.hide();
   });
 }
 

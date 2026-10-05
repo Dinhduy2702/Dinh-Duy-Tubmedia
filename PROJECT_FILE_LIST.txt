@@ -243,6 +243,7 @@ SECURITY.md
 SOURCE_UPDATE_OVERWRITE_VI.md
 source-manifest.json
 src/main/app/app-context.ts
+src/main/app/window-close-policy.ts
 src/main/backups/backup-service.ts
 src/main/clips/clip-engine.ts
 src/main/cookies/browser-profile-directory.ts
@@ -600,6 +601,7 @@ tests/unit/video-duration-input.test.ts
 tests/unit/video-duration-persistence.test.ts
 tests/unit/video-filter-encoding.test.ts
 tests/unit/video-link-filter.test.ts
+tests/unit/window-close-policy.test.ts
 tests/unit/windows-process-control.test.ts
 tests/unit/workbench-storage.test.ts
 tests/unit/youtube-source-removed-r36.test.ts
