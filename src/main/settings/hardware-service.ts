@@ -47,6 +47,24 @@ function asRows(value: unknown): Array<Record<string, unknown>> {
     : [];
 }
 
+/**
+ * #5 (khám phá bản cài 2026-10-05): os.cpus() trên Windows chỉ đếm MỘT nhóm bộ xử lý (processor group) —
+ * máy 2 × Xeon 18 nhân/36 luồng báo 36 thay vì 72. Cộng NumberOfLogicalProcessors/NumberOfCores của MỌI CPU
+ * mà WMI trả về; WMI lỗi thì lùi về os.cpus() như trước. Không bao giờ báo ít luồng hơn số Node đã thấy.
+ */
+export function cpuCountsFromWmi(
+  rows: Array<Record<string, unknown>>,
+  osLogicalCount: number
+): { logical: number; physical: number } {
+  const osLogical = Math.max(1, osLogicalCount);
+  const wmiLogical = rows.reduce((sum, row) => sum + Math.max(0, numberValue(row.NumberOfLogicalProcessors)), 0);
+  const wmiPhysical = rows.reduce((sum, row) => sum + Math.max(0, numberValue(row.NumberOfCores)), 0);
+  return {
+    logical: Math.max(osLogical, wmiLogical),
+    physical: wmiPhysical > 0 ? wmiPhysical : Math.max(1, Math.floor(osLogical / 2))
+  };
+}
+
 export class HardwareService {
   public quickSnapshot(): HardwareProfile {
     const cpuList = cpus();
@@ -85,16 +103,15 @@ export class HardwareService {
     const gpus = asRows(gpuData);
     const disks = asRows(diskData);
     const cpuModel = stringValue(cores[0]?.Name, cpuList[0]?.model ?? 'Bộ xử lý không xác định');
+    const cpuCounts = cpuCountsFromWmi(cores, cpuList.length);
 
     return {
       platform: quick.platform,
       release: quick.release,
       architecture: quick.architecture,
       hostname: quick.hostname,
-      physicalCpuCount:
-        cores.reduce((sum, item) => sum + numberValue(item.NumberOfCores), 0) ||
-        Math.max(1, Math.floor(cpuList.length / 2)),
-      logicalCpuCount: cpuList.length,
+      physicalCpuCount: cpuCounts.physical,
+      logicalCpuCount: cpuCounts.logical,
       cpuModel,
       totalMemoryBytes: quick.totalMemoryBytes,
       freeMemoryBytes: quick.freeMemoryBytes,
