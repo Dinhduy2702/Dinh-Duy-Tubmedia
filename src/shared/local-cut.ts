@@ -34,6 +34,8 @@ export interface LocalCutStatus {
   sourceFilePath: string;
   sourceFileName: string;
   outputPath: string | null;
+  /** Tên tệp đã có sẵn ở thư mục lưu nên phải lưu tên khác "(2)", "(3)"… — tệp cũ giữ nguyên; null nếu không trùng. */
+  outputNameConflict: string | null;
   requestedStartSeconds: number;
   requestedEndSeconds: number;
   actualDurationSeconds: number | null;

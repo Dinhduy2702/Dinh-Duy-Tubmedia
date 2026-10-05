@@ -87,7 +87,7 @@ async function createFixture(behaviour: Behaviour = {}) {
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
   const service = new LocalCutService(processes as never, tools as never, verifier as never, logger as never);
 
-  return { root, outputDirectory, sourceFile, calls, service, verifier };
+  return { root, outputDirectory, sourceFile, calls, service, verifier, logger };
 }
 
 async function waitForTerminal(service: LocalCutService, taskId: string, timeoutMs = 5000) {
@@ -328,5 +328,79 @@ describe('Giai doan 6 muc 3 (2026-09-24) - LocalCutService: doi ti le khung hinh
     const frameCall = fixture.calls.find((call) => call.tool === 'ffmpeg');
     expect(frameCall?.args).toContain('-filter_complex');
     expect(frameCall?.args?.some((arg) => arg.includes('scale=1080:1080'))).toBe(true);
+  });
+});
+
+// Khám phá bản cài 2026-10-05, vấn đề #1 (ưu tiên cao nhất): cắt lại cùng tệp với mốc làm tròn ra cùng số
+// ghi đè IM LẶNG đoạn cắt trước (`rename` thay thế tệp đích trên Windows) — đã tái hiện thật: 4,8 MB → 3,6 MB.
+// Quyết định của người dùng: không bao giờ ghi đè; tự đặt "(2)", "(3)"… và báo rõ tệp cũ được giữ nguyên.
+describe('#1 — cắt tệp có sẵn không bao giờ ghi đè tệp đã có', () => {
+  const cut = (fixture: Awaited<ReturnType<typeof createFixture>>, startTime = '10', endTime = '20') =>
+    fixture.service.start({
+      filePath: fixture.sourceFile,
+      outputDirectory: fixture.outputDirectory,
+      startTime,
+      endTime,
+      accurateCut: false
+    });
+
+  it('tên đã có → lưu thành "(2)", tệp cũ giữ nguyên nội dung, trạng thái ghi rõ tên bị trùng', async () => {
+    const fixture = await createFixture();
+    const existing = join(fixture.outputDirectory, 'nguon [10-20].mp4');
+    await writeFile(existing, 'doan-cat-cu-cua-nguoi-dung');
+
+    const finished = await waitForTerminal(fixture.service, (await cut(fixture)).taskId);
+
+    expect(finished.phase).toBe('completed');
+    expect(finished.outputPath).toBe(join(fixture.outputDirectory, 'nguon [10-20] (2).mp4'));
+    expect(await readFile(existing, 'utf8')).toBe('doan-cat-cu-cua-nguoi-dung');
+    expect(await readFile(finished.outputPath!, 'utf8')).toBe('noi-dung-da-cat');
+    expect(finished.outputNameConflict).toBe('nguon [10-20].mp4');
+    // Chi tiết đổi tên hiện ở ô kết quả (test giao diện bên dưới) và được ghi vào nhật ký.
+    expect(fixture.logger.info).toHaveBeenCalledWith(
+      'local-cut',
+      'LOCAL_CUT_RENAMED_TO_AVOID_OVERWRITE',
+      expect.stringContaining('"nguon [10-20] (2).mp4" vì "nguon [10-20].mp4" đã có trong thư mục (tệp cũ giữ nguyên)'),
+      expect.anything()
+    );
+  });
+
+  it('mốc khác nhưng làm tròn ra cùng tên (đúng ca đã tái hiện thật) cũng không ghi đè', async () => {
+    const fixture = await createFixture();
+    const first = await waitForTerminal(fixture.service, (await cut(fixture, '00:00:05', '00:00:12')).taskId);
+    await writeFile(first.outputPath!, 'lan-cat-thu-nhat');
+    const second = await waitForTerminal(fixture.service, (await cut(fixture, '00:00:05.2', '00:00:12.3')).taskId);
+
+    expect(first.outputPath).toBe(join(fixture.outputDirectory, 'nguon [5-12].mp4'));
+    expect(second.outputPath).toBe(join(fixture.outputDirectory, 'nguon [5-12] (2).mp4'));
+    expect(await readFile(first.outputPath!, 'utf8')).toBe('lan-cat-thu-nhat');
+  });
+
+  it('đã có cả tên gốc và "(2)" → dùng "(3)"', async () => {
+    const fixture = await createFixture();
+    await writeFile(join(fixture.outputDirectory, 'nguon [10-20].mp4'), 'a');
+    await writeFile(join(fixture.outputDirectory, 'nguon [10-20] (2).mp4'), 'b');
+
+    const finished = await waitForTerminal(fixture.service, (await cut(fixture)).taskId);
+
+    expect(finished.outputPath).toBe(join(fixture.outputDirectory, 'nguon [10-20] (3).mp4'));
+    expect(await readFile(join(fixture.outputDirectory, 'nguon [10-20].mp4'), 'utf8')).toBe('a');
+    expect(await readFile(join(fixture.outputDirectory, 'nguon [10-20] (2).mp4'), 'utf8')).toBe('b');
+  });
+
+  it('không trùng tên → giữ tên gốc, không báo gì thêm, không sót tệp .pending', async () => {
+    const fixture = await createFixture();
+    const finished = await waitForTerminal(fixture.service, (await cut(fixture)).taskId);
+
+    expect(finished.outputPath).toBe(join(fixture.outputDirectory, 'nguon [10-20].mp4'));
+    expect(finished.outputNameConflict).toBeNull();
+    expect(finished.message).toBe('Đã cắt và kiểm tra xong đoạn đã chọn.');
+    expect(existsSync(`${finished.outputPath!}.pending.mp4`)).toBe(false);
+  });
+
+  it('giao diện hiện thông báo khi phải đặt tên khác (test canh mã nguồn)', async () => {
+    const page = await readFile(join(process.cwd(), 'src/renderer/src/pages/StepPreviewCutPage.tsx'), 'utf8');
+    expect(page).toContain('status.outputNameConflict');
+    expect(page).toContain('tệp cũ giữ nguyên');
   });
 });

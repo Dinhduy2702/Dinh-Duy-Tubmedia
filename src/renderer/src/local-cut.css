@@ -208,6 +208,19 @@
   word-break: break-all;
 }
 
+/* #1 (2026-10-05): báo đã lưu tên khác để không ghi đè tệp cũ. */
+.local-cut-result small.local-cut-rename-note {
+  margin-top: 0.3rem;
+  color: var(--text);
+  word-break: normal;
+}
+
+.local-cut-rename-note svg {
+  display: inline;
+  vertical-align: -2px;
+  color: var(--accent);
+}
+
 /* Giai đoạn 6 mục 6 (2026-09-24) — "Xem thông tin tệp": lưới nhãn/giá trị đơn giản, giống tinh thần
  * merge-quality-detail-grid đã có, nhưng gọn hơn cho danh sách nhiều dòng thông tin kỹ thuật. */
 .local-cut-info-grid {

@@ -559,6 +559,12 @@ export function StepPreviewCutPage(): React.JSX.Element {
               <div>
                 <b>Đã cắt xong</b>
                 <small title={status.outputPath}>{status.outputPath}</small>
+                {status.outputNameConflict && (
+                  <small className="local-cut-rename-note" role="status">
+                    <Info size={13}/> Đã lưu thành “{baseNameOf(status.outputPath)}” vì “{status.outputNameConflict}” đã
+                    có trong thư mục (tệp cũ giữ nguyên).
+                  </small>
+                )}
               </div>
               <button type="button" className="btn" onClick={() => void window.desktop.localCut.revealOutput(status.taskId)}>
                 <FolderOpen size={15}/>

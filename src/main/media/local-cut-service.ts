@@ -8,7 +8,7 @@
 import { shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { constants as fsConstants, existsSync } from 'node:fs';
-import { access, mkdtemp, readFile, rename, rm, stat } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, extname, join } from 'node:path';
 import { sanitizeProgress } from '@shared/utils/progress-policy.js';
@@ -26,6 +26,7 @@ import type { Logger } from '../logging/logger.js';
 import type { ProcessManager } from '../processes/process-manager.js';
 import type { ToolManager } from '../tools/tool-manager.js';
 import { buildLocalCutArguments, buildLocalFrameExtractArguments } from './local-cut-command.js';
+import { commitFileWithoutOverwrite } from '../files/non-conflicting-path.js';
 import {
   CUT_SUGGESTION_ANALYSIS_TIMEOUT_MS,
   buildCutSuggestions,
@@ -198,7 +199,8 @@ export class LocalCutService {
       startedAt: new Date().toISOString(),
       completedAt: null,
       error: null,
-      warnings: []
+      warnings: [],
+      outputNameConflict: null
     };
     const active: ActiveLocalCut = { status, request, controller: new AbortController() };
     this.statuses.set(taskId, status);
@@ -379,13 +381,25 @@ export class LocalCutService {
       throw new Error(`Đoạn vừa cắt không đạt kiểm tra: ${checked.reasons.join('; ')}`);
     }
 
-    await rename(pendingOutput, finalOutput);
+    // #1 (khám phá bản cài 2026-10-05): KHÔNG bao giờ ghi đè tệp đã có — `rename` trên Windows thay thế
+    // tệp đích im lặng. commitFileWithoutOverwrite giữ chỗ tên bằng hard-link (nguyên tử) và tự đặt "(2)"…
+    const committedOutput = await commitFileWithoutOverwrite(pendingOutput, finalOutput);
+    const conflict = committedOutput !== finalOutput ? outputName : null;
 
     status.actualDurationSeconds = checked.duration;
-    status.outputPath = finalOutput;
+    status.outputPath = committedOutput;
+    status.outputNameConflict = conflict;
     status.phase = 'completed';
     status.progress = 100;
+    // Dòng tiến độ giữ ngắn; giao diện hiện chi tiết đổi tên ở ô kết quả từ outputNameConflict.
     status.message = 'Đã cắt và kiểm tra xong đoạn đã chọn.';
+    if (conflict) {
+      const detail = `Đã lưu thành "${basename(committedOutput)}" vì "${conflict}" đã có trong thư mục (tệp cũ giữ nguyên).`;
+      this.logger.info('local-cut', 'LOCAL_CUT_RENAMED_TO_AVOID_OVERWRITE', detail, {
+        jobId: status.taskId,
+        metadata: { existing: finalOutput, saved: committedOutput }
+      });
+    }
     status.completedAt = new Date().toISOString();
     this.publish(active);
     if (this.active === active) this.active = null;
