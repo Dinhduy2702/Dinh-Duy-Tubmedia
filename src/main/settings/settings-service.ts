@@ -257,6 +257,17 @@ export class SettingsService {
     }
   }
 
+  /**
+   * Lần ĐẦU nút "—" ẩn app xuống khay hệ thống thì nhắc rằng Tubmedia vẫn đang chạy (cửa sổ biến mất khỏi thanh tác vụ
+   * nên dễ tưởng đã đóng — người dùng duyệt 2026-10-06). Trả về true đúng một lần; ghi nhớ bền qua các lần mở app
+   * bằng dòng cài đặt riêng (không đổi schema AppSettings, quay lui 1.6.0 an toàn).
+   */
+  public consumeTrayMinimizeHint(): boolean {
+    if (this.repo.get<boolean>('tray_minimize_hint_shown', false)) return false;
+    this.repo.set('tray_minimize_hint_shown', true);
+    return true;
+  }
+
   public saveResource(profile: ResourceProfile): ResourceProfile {
     this.repo.saveResourceProfile(profile);
     return profile;

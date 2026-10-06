@@ -185,6 +185,17 @@ function wireWindow(window: BrowserWindow): void {
     if (decideMinimizeAction({ minimizeToTray: context.settings.get().minimizeToTray }) !== 'hide-to-tray') return;
     ensureTray();
     window.hide();
+    // Lần đầu: cửa sổ biến mất khỏi thanh tác vụ nên dễ tưởng app đã đóng — nhắc bằng thông báo của Windows.
+    if (context.settings.consumeTrayMinimizeHint()) {
+      tray?.displayBalloon({
+        iconType: 'info',
+        title: 'Tubmedia vẫn đang chạy',
+        content:
+          'Ứng dụng đã thu nhỏ xuống khay hệ thống (góc phải dưới, cạnh đồng hồ). Bấm biểu tượng Tubmedia để mở lại; ' +
+          'chuột phải → "Thoát an toàn" để tắt hẳn.'
+      });
+      context.logger.info('app', 'TRAY_MINIMIZE_HINT_SHOWN', 'Đã nhắc lần đầu: nút thu nhỏ ẩn ứng dụng xuống khay hệ thống.');
+    }
   });
 }
 
