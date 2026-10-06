@@ -2378,3 +2378,59 @@ test('Mục 5: nhắc khu cách ly khi mở app và trang xem khu cách ly của
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
 });
+
+/**
+ * Đợt 3 — trang Nhật ký (rà soát bản cài 1.5.0, 2026-10-02). Dựng CSDL có sẵn nhật ký CŨ (trước lần mở app này)
+ * rồi kiểm trang Nhật ký trên Electron thật.
+ * Mục 6: mở trang là phải thấy lịch sử — trước đây chỉ thấy ~100 dòng nạp lúc mở app (cần bấm "Làm mới").
+ */
+test('Đợt 3: trang Nhật ký hiện lịch sử ngay khi mở', async () => {
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-logs-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  const env = {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    ),
+    NODE_ENV: 'test',
+    TUBMEDIA_E2E: '1',
+    TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+    PLAYWRIGHT_TEST: '1',
+    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+  };
+  const launch = async (): Promise<void> => {
+    electronApplication = await electron.launch({ args: [mainEntry], cwd: projectRoot, env, timeout: 45_000 });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+  };
+
+  try {
+    await launch();
+    await closeElectronApplication();
+
+    // 300 dòng "thông tin" từ hôm qua — nhiều hơn 100 dòng ứng dụng nạp sẵn lúc mở.
+    const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+    const insertLog = db.prepare(
+      'INSERT INTO event_logs(id,timestamp,level,module,project_id,job_id,attempt_id,event_code,message,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)'
+    );
+    const yesterday = Date.now() - 24 * 60 * 60 * 1000;
+    for (let index = 0; index < 300; index += 1) {
+      insertLog.run(randomUUID(), new Date(yesterday + index * 1000).toISOString(), 'info', 'queue', null, null, null, 'E2E_OLD_INFO', `Sự kiện cũ số ${index}`, null);
+    }
+    db.close();
+
+    await launch();
+    await shellWindow!
+      .getByRole('navigation', { name: 'Điều hướng chính' })
+      .getByRole('button', { name: 'Nhật ký', exact: true })
+      .click();
+
+    // Không bấm "Làm mới": mở trang là phải thấy cả 300 sự kiện cũ.
+    await expect
+      .poll(async () => shellWindow!.locator('.logs-data-table tbody tr', { hasText: 'Sự kiện cũ số' }).count(), { timeout: 15_000 })
+      .toBe(300);
+  } finally {
+    await closeElectronApplication();
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});

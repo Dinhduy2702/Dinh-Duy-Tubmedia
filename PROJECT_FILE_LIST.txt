@@ -527,6 +527,7 @@ tests/unit/local-cut-command.test.ts
 tests/unit/local-cut-service.test.ts
 tests/unit/local-cut.test.ts
 tests/unit/logger-resilience.test.ts
+tests/unit/logs-page-dot3.test.ts
 tests/unit/media-analyzer-hdr.test.ts
 tests/unit/media-duration-sanity.test.ts
 tests/unit/media-info-format.test.ts

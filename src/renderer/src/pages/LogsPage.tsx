@@ -1,5 +1,5 @@
 import { Download, FolderOpen, RefreshCcw, Trash2 } from 'lucide-react';
-import { useMemo, useState, type ChangeEvent } from 'react';
+import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import type { LogEntry, Project } from '@shared/types/domain';
 import { StatusBadge } from '../components/StatusBadge';
 import { CompactDetail } from '../components/CompactDetail';
@@ -61,6 +61,12 @@ export function LogsPage(): React.JSX.Element {
       setLoading(false);
     }
   };
+
+  // Đợt 3 mục 6 (rà soát bản cài 1.5.0): mở trang là tải lịch sử ngay — trước đây chỉ thấy ~100 dòng nạp lúc mở
+  // app, phải bấm "Làm mới" mới thấy lịch sử. Chỉ chạy một lần khi mở trang.
+  useEffect(() => {
+    void reload();
+  }, []);
 
   const changeProject = (value: string): void => {
     setProjectId(value);
