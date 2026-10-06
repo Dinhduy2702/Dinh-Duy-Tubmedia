@@ -15,6 +15,8 @@ import type {
   ProjectCreateInput,
   ProjectItem,
   QualityProfile,
+  QuarantineDeleteOutcome,
+  QuarantineOverview,
   QueueJob,
   ResourceProfile,
   SystemStats,
@@ -186,6 +188,12 @@ export interface DesktopApi {
     openStorageSettings(): Promise<void>;
     quarantineList(): Promise<QuarantineEntry[]>;
     quarantineRestore(ids: string[]): Promise<QuarantineRestoreOutcome[]>;
+    /** Mục còn hiệu lực sẽ bị xóa vĩnh viễn trong 2 ngày tới. */
+    quarantineExpiring(): Promise<QuarantineEntry[]>;
+  };
+  quarantine: {
+    overview(): Promise<QuarantineOverview>;
+    deleteItems(ids: string[]): Promise<QuarantineDeleteOutcome[]>;
   };
   quickDownload: {
     defaults(): Promise<{ outputDirectory: string }>;

@@ -165,3 +165,155 @@ describe('copyFileVerified (dùng khi khác ổ đĩa — EXDEV)', () => {
     expect((await readFile(destination)).equals(content)).toBe(true);
   });
 });
+
+// Mục 5 ý 5 (2026-10-02): khu cách ly 14 ngày của Dọn dẹp máy — cùng ổ với tệp gốc, ghi nhật ký mỗi lần xóa
+// vĩnh viễn, và biết mục nào sắp bị xóa. "Ổ đĩa" được giả lập bằng hai thư mục trong os.tmpdir().
+describe('QuarantineStore — cùng ổ, nhật ký xóa vĩnh viễn, sắp hết hạn', () => {
+  let sandbox = '';
+  let driveC = '';
+  let driveE = '';
+  const rootOf = (path: string): string => (path.startsWith(driveE) ? driveE : driveC);
+
+  beforeEach(async () => {
+    sandbox = await mkdtemp(join(tmpdir(), 'tubmedia-quarantine-drive-'));
+    driveC = join(sandbox, 'C');
+    driveE = join(sandbox, 'E');
+    await mkdir(driveC, { recursive: true });
+    await mkdir(driveE, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(sandbox, { recursive: true, force: true });
+  });
+
+  it('tệp trên ổ khác userData: KHÔNG chép sang ổ userData, mà nằm ở <ổ>/Tubmedia/quarantine/Dọn dẹp máy', async () => {
+    const store = new QuarantineStore(join(driveC, 'userData', 'cleanup-quarantine'), QUARANTINE_RETENTION_DAYS, { rootOf });
+    const original = join(driveE, 'CapCut', 'cache.bin');
+    await mkdir(join(driveE, 'CapCut'), { recursive: true });
+    await writeFile(original, Buffer.alloc(64));
+
+    const outcome = await store.quarantineFile(original, 'capcutCache', 'run-1');
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.entry.storedPath?.startsWith(join(driveE, 'Tubmedia', 'quarantine', 'Dọn dẹp máy'))).toBe(true);
+    expect(existsSync(outcome.entry.storedPath!)).toBe(true);
+    expect(existsSync(join(driveC, 'userData', 'cleanup-quarantine', 'files', outcome.entry.id))).toBe(false);
+    expect(existsSync(join(driveE, 'Tubmedia', 'README.txt'))).toBe(true);
+
+    const [restored] = await store.restore([outcome.entry.id]);
+    expect(restored?.ok).toBe(true);
+    expect(existsSync(original)).toBe(true);
+  });
+
+  it('tệp cùng ổ với userData vẫn nằm trong userData như trước', async () => {
+    const store = new QuarantineStore(join(driveC, 'userData', 'cleanup-quarantine'), QUARANTINE_RETENTION_DAYS, { rootOf });
+    const original = join(driveC, 'Temp', 'a.tmp');
+    await mkdir(join(driveC, 'Temp'), { recursive: true });
+    await writeFile(original, Buffer.alloc(8));
+    const outcome = await store.quarantineFile(original, 'userTemp', 'run-1');
+    expect(outcome.ok && existsSync(join(driveC, 'userData', 'cleanup-quarantine', 'files', outcome.entry.id))).toBe(true);
+  });
+
+  it('mỗi lần xóa vĩnh viễn đều báo tên tệp + dung lượng để ghi nhật ký; xóa đúng nơi đang lưu', async () => {
+    const purged: Array<{ name: string; bytes: number; originalPath: string }> = [];
+    const store = new QuarantineStore(join(driveC, 'userData', 'cleanup-quarantine'), QUARANTINE_RETENTION_DAYS, {
+      rootOf,
+      onPurged: (item) => purged.push(item)
+    });
+    const original = join(driveE, 'x', 'video-cu.mp4');
+    await mkdir(join(driveE, 'x'), { recursive: true });
+    await writeFile(original, Buffer.alloc(99));
+    const outcome = await store.quarantineFile(original, 'capcutCache', 'run-1');
+    if (!outcome.ok) throw new Error('không cách ly được');
+
+    await store.purgeExpired(Date.now() + (QUARANTINE_RETENTION_DAYS + 1) * 24 * 60 * 60 * 1000);
+    expect(purged).toEqual([{ name: 'video-cu.mp4', bytes: 99, originalPath: original }]);
+    expect(existsSync(outcome.entry.storedPath!)).toBe(false);
+  });
+
+  it('tự xóa 14 ngày CHỈ đụng mục Dọn dẹp máy có trong sổ: khu cách ly của danh sách cùng ổ không bị đụng', async () => {
+    const store = new QuarantineStore(join(driveC, 'userData', 'cleanup-quarantine'), QUARANTINE_RETENTION_DAYS, { rootOf });
+    const projectBackup = join(driveE, 'Tubmedia', 'quarantine', 'Danh sách 1 (4639ff3c)', '1-abc-video-cu.mp4');
+    await mkdir(join(projectBackup, '..'), { recursive: true });
+    await writeFile(projectBackup, Buffer.alloc(10));
+    const original = join(driveE, 'x', 'cache.bin');
+    await mkdir(join(driveE, 'x'), { recursive: true });
+    await writeFile(original, Buffer.alloc(5));
+    const outcome = await store.quarantineFile(original, 'capcutCache', 'run-1');
+    if (!outcome.ok) throw new Error('không cách ly được');
+
+    await expect(store.purgeExpired(Date.now() + 365 * 24 * 60 * 60 * 1000)).resolves.toEqual({ purged: 1 });
+    expect(existsSync(outcome.entry.storedPath!)).toBe(false);
+    expect(existsSync(projectBackup)).toBe(true);
+  });
+
+  it('sổ (manifest) bị sửa trỏ vào khu cách ly của danh sách hay tệp người dùng → tự xóa từ chối, không đụng tệp', async () => {
+    const purged: string[] = [];
+    const store = new QuarantineStore(join(driveC, 'userData', 'cleanup-quarantine'), QUARANTINE_RETENTION_DAYS, {
+      rootOf,
+      onPurged: (item) => purged.push(item.name)
+    });
+    const projectBackup = join(driveE, 'Tubmedia', 'quarantine', 'Danh sách 1 (4639ff3c)', 'ban-cu.mp4');
+    const userFile = join(driveE, 'DinhDuy', 'thanh-pham.mp4');
+    for (const path of [projectBackup, userFile]) {
+      await mkdir(join(path, '..'), { recursive: true });
+      await writeFile(path, Buffer.alloc(3));
+    }
+    const expired = new Date(Date.now() - 1000).toISOString();
+    const entry = (id: string, storedPath: string): Record<string, unknown> => ({
+      id,
+      runId: 'r',
+      categoryId: 'capcutCache',
+      originalPath: join(driveE, 'x', `${id}.bin`),
+      bytes: 3,
+      quarantinedAt: expired,
+      expiresAt: expired,
+      restoredAt: null,
+      restoredPath: null,
+      purgedAt: null,
+      storedPath
+    });
+    await mkdir(join(driveC, 'userData', 'cleanup-quarantine'), { recursive: true });
+    await writeFile(
+      join(driveC, 'userData', 'cleanup-quarantine', 'manifest.json'),
+      JSON.stringify([entry('a', projectBackup), entry('b', userFile), entry('c', join(driveE, 'Tubmedia', 'quarantine', 'Dọn dẹp máy', '..', 'Danh sách 1 (4639ff3c)', 'ban-cu.mp4'))])
+    );
+
+    await store.purgeExpired();
+    expect(existsSync(projectBackup)).toBe(true);
+    expect(existsSync(userFile)).toBe(true);
+    expect(purged).toEqual([]);
+
+    const restored = await store.restore(['a', 'b']);
+    expect(restored.every((result) => !result.ok)).toBe(true);
+    expect(existsSync(projectBackup)).toBe(true);
+    expect(existsSync(userFile)).toBe(true);
+  });
+
+  it('gốc ổ khác không ghi được → tệp vẫn được cách ly (chép sang userData có đối chiếu), không báo lỗi', async () => {
+    await writeFile(join(driveE, 'Tubmedia'), 'chặn');
+    const store = new QuarantineStore(join(driveC, 'userData', 'cleanup-quarantine'), QUARANTINE_RETENTION_DAYS, { rootOf });
+    const original = join(driveE, 'y', 'cache.bin');
+    await mkdir(join(driveE, 'y'), { recursive: true });
+    await writeFile(original, Buffer.alloc(12));
+    const outcome = await store.quarantineFile(original, 'capcutCache', 'run-1');
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.entry.storedPath).toBeNull();
+    expect(existsSync(join(driveC, 'userData', 'cleanup-quarantine', 'files', outcome.entry.id))).toBe(true);
+  });
+
+  it('expiringWithin(): chỉ các mục còn hiệu lực sẽ bị xóa trong khoảng thời gian cho trước', async () => {
+    const store = new QuarantineStore(join(driveC, 'userData', 'cleanup-quarantine'), QUARANTINE_RETENTION_DAYS, { rootOf });
+    const original = join(driveC, 'Temp', 'b.tmp');
+    await mkdir(join(driveC, 'Temp'), { recursive: true });
+    await writeFile(original, Buffer.alloc(8));
+    await store.quarantineFile(original, 'userTemp', 'run-1');
+    const day = 24 * 60 * 60 * 1000;
+
+    await expect(store.expiringWithin(2 * day, Date.now())).resolves.toHaveLength(0);
+    await expect(
+      store.expiringWithin(2 * day, Date.now() + (QUARANTINE_RETENTION_DAYS - 1) * day)
+    ).resolves.toHaveLength(1);
+  });
+});

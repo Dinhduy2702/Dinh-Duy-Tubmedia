@@ -172,7 +172,7 @@ describe('download quality', () => {
     expect(engine).toContain('GOOGLE_DRIVE_NATIVE_DOWNLOAD_MODE');
     expect(engine).toContain('if (requestedFormat)');
     expect(engine).toContain("source.platform === 'google-drive'");
-    expect(engine).toContain('SOURCE_CACHE_REPLACED');
+    expect(engine).toContain('settleReplacement(');
     expect(engine).toContain('__VDMSP_FORMAT__');
     expect(engine).toContain('validateSelectedDownloadSize');
     expect(engine).toContain('DOWNLOAD_SIZE_ESTIMATE_MISMATCH');

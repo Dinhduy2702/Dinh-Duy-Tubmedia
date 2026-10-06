@@ -195,9 +195,8 @@ export class NormalizeEngine {
     if (!check.ok) {
       const quarantined = await this.quarantine.move(
         pending,
-        join(outputFolder, '_quarantine'),
         check.reasons.join('; '),
-        job.id
+        { jobId: job.id, projectId: job.projectId }
       );
       throw new ProcessingFailedError(`Tệp remux bị lỗi, đã chuyển vào khu cách ly: ${quarantined}`);
     }
@@ -475,9 +474,8 @@ export class NormalizeEngine {
       try {
         await this.quarantine.move(
           pending,
-          join(outputFolder, '_quarantine'),
           result.stderrTail || 'Normalize thất bại.',
-          job.id
+          { jobId: job.id, projectId: job.projectId }
         );
       } catch {
         // pending chưa tồn tại
@@ -496,9 +494,8 @@ export class NormalizeEngine {
     if (!check.ok) {
       const quarantined = await this.quarantine.move(
         pending,
-        join(outputFolder, '_quarantine'),
         check.reasons.join('; '),
-        job.id
+        { jobId: job.id, projectId: job.projectId }
       );
       throw new ProcessingFailedError(`Tệp chuẩn hóa bị lỗi và đã chuyển vào khu cách ly: ${quarantined}`);
     }

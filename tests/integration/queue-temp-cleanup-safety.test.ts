@@ -72,8 +72,8 @@ describe('danh sách hoàn tất/lỗi/tạm dừng: dọn tạm không đụng 
         .filter((line) => line.includes('cleanupTemporaryArtifacts(') && !line.trimStart().startsWith('import'))
         .map((line) => `${path}: ${line.trim()}`)
     );
-    // queue-manager: 3 lời gọi; workbench: 2 nút × 3; app-context: 1.
-    expect(calls.length).toBeGreaterThanOrEqual(10);
+    // queue-manager: 2 lời gọi; workbench: 2 nút × 2; app-context: 1. (Mục 5: thư mục _quarantine cũ không còn bị dọn.)
+    expect(calls.length).toBeGreaterThanOrEqual(7);
     for (const call of calls) expect(call).toContain('protection');
   });
 

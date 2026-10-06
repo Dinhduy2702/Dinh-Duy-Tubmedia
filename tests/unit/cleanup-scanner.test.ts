@@ -257,6 +257,28 @@ describe('cleanup-scanner: scanTubmediaResidue (chỉ nhận diện dữ liệu 
     expect(result.findings).toHaveLength(1);
   });
 
+  // Mục 5 (2026-10-02): tệp trong khu cách ly (<ổ>\Tubmedia\quarantine) là bản người dùng tự xử lý — Dọn
+  // dẹp máy không bao giờ coi là "rác", dù tên khớp mẫu .pending và đã quá 7 ngày.
+  it('never counts files inside a Tubmedia/quarantine folder, even under an owned temp root', async () => {
+    const tempRoot = join(sandbox, 'temp-owned');
+    const quarantined = join(tempRoot, 'Tubmedia', 'quarantine', 'Danh sách 1 (4639ff3c)');
+    await mkdir(quarantined, { recursive: true });
+    await writeFile(join(tempRoot, '.tubmedia-owned.json'), JSON.stringify({ owner: 'Tubmedia', version: 1 }));
+    await touch(join(quarantined, '1786352649948-6ff59155-Duy.pending.mp4'), 800, oldMtime);
+    await touch(join(tempRoot, 'clip-1-abc.mp4'), 500, oldMtime);
+
+    const result = await scanTubmediaResidue({
+      sourceFolders: [join(tempRoot, 'Tubmedia')],
+      tempFolders: [tempRoot],
+      trackedTempFiles: [join(quarantined, '1786352649948-6ff59155-Duy.pending.mp4')],
+      quickOutputFolders: [],
+      quickTempRoots: []
+    });
+
+    expect(result.estimatedBytes).toBe(500);
+    expect(result.findings.map((finding) => finding.path)).toEqual([join(tempRoot, 'clip-1-abc.mp4')]);
+  });
+
   it('quick-temp roots only count files under a 12-hex-char subfolder', async () => {
     const quickRoot = join(sandbox, 'quick-temp');
     await mkdir(join(quickRoot, 'abcdef123456'), { recursive: true });

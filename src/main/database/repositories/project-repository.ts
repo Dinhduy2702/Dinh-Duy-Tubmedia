@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { SqliteDatabase } from '../sqlite.js';
 import type { Project, ProjectCreateInput } from '@shared/types/domain.js';
+import { projectQuarantineFolderForFile } from '../../files/quarantine-location.js';
 
 interface ProjectRow {
   id: string; name: string; code: string | null; description: string; status: Project['status'];
@@ -13,7 +14,9 @@ interface ProjectRow {
 function map(row: ProjectRow): Project {
   return { id: row.id, name: row.name, code: row.code, description: row.description, status: row.status,
     sourceFolder: row.source_folder, tempFolder: row.temp_folder, outputFolder: row.output_folder,
-    quarantineFolder: row.quarantine_folder, finalFileName: row.final_file_name,
+    // Mục 5 (2026-10-02): khu cách ly thật nằm trên ổ của tệp (<ổ>:\Tubmedia\quarantine\<tên (mã)>); hiển thị theo ổ
+    // của thư mục nguồn. Cột quarantine_folder chỉ còn giữ giá trị cũ để bản 1.5.0 vẫn đọc được khi quay lui.
+    quarantineFolder: projectQuarantineFolderForFile(row.source_folder, { id: row.id, name: row.name }), finalFileName: row.final_file_name,
     qualityProfileId: row.quality_profile_id, resourceProfileId: row.resource_profile_id,
     exportTimelineTxt: row.export_timeline_txt === 1,
     // Giai đoạn 6 mục 4: cột mới có DEFAULT 'original' ở tầng DB nên hàng cũ luôn có giá trị hợp lệ;

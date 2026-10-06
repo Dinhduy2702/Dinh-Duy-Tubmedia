@@ -66,6 +66,8 @@ export interface DownloadResult {
   outputPath: string;
   skipped: boolean;
   resultMessage: string;
+  /** Mục 5: bản cũ vừa được bản mới thay — vẫn nằm trong khu cách ly, hàng đợi báo "Đã giữ bản cũ". */
+  keptOldVersions?: Array<{ path: string; bytes: number }>;
 }
 
 export function isFinalDownloadForMediaId(fileName: string, mediaId: string): boolean {
@@ -147,9 +149,8 @@ export class DownloadEngine {
       if (project && quarantineOnFailure) {
         const quarantined = await this.quarantine.move(
           path,
-          project.quarantineFolder,
           checked.reasons.join('; '),
-          job.id
+          { jobId: job.id, projectId: project.id }
         );
         throw new DownloadFailedError(
           `Tệp tải xong không hợp lệ và đã chuyển vào khu cách ly: ${quarantined}. ${checked.reasons.join(' ')}`
@@ -589,9 +590,8 @@ export class DownloadEngine {
         await this.quarantine
           .move(
             candidate,
-            project.quarantineFolder,
             `Tệp có sẵn theo link ${linkTag} chưa tải đủ hoặc bị hỏng: ${checked.reasons.join('; ')}`,
-            job.id
+            { jobId: job.id, projectId: project.id }
           )
           .catch(() => undefined);
       }
@@ -635,14 +635,33 @@ export class DownloadEngine {
         await this.quarantine
           .move(
             candidate,
-            project.quarantineFolder,
             `Tệp có sẵn theo ID ${mediaId} chưa tải đủ hoặc bị hỏng: ${checked.reasons.join('; ')}`,
-            job.id
+            { jobId: job.id, projectId: project.id }
           )
           .catch(() => undefined);
       }
     }
     return null;
+  }
+
+  /** Mục 5: giữ bản cũ trong khu cách ly trong lúc tải bản mới; không chuyển được thì để nguyên và ghi nhật ký. */
+  private async keepOutdatedSource(
+    path: string,
+    reason: string,
+    job: QueueJob,
+    projectId: string,
+    sourceId: string
+  ): Promise<void> {
+    await this.quarantine
+      .move(path, reason, { jobId: job.id, projectId, sourceId, kind: 'outdated-source' })
+      .catch((error: unknown) => {
+        this.logger.warn(
+          'quarantine',
+          'QUARANTINE_MOVE_FAILED',
+          `Không chuyển được bản cũ vào khu cách ly nên bản cũ vẫn ở chỗ cũ: ${error instanceof Error ? error.message : String(error)}`,
+          { jobId: job.id, projectId, metadata: { path } }
+        );
+      });
   }
 
   public async run(
@@ -666,7 +685,6 @@ export class DownloadEngine {
     const linkTag = downloadLinkTag(source.normalizedUrl || source.originalUrl);
     const appSettings = settingsForDownloadWorkflow(storedSettings, workflow);
     const downloadPolicy = downloadPolicyForWorkflow(appSettings, workflow, source.platform);
-    let outdatedSourceBackup: string | null = null;
     const verificationLevel: VerificationLevel = appSettings.downloadVerifyEntireFile
       ? 'deep'
       : appSettings.verificationLevel;
@@ -741,16 +759,15 @@ export class DownloadEngine {
         );
         const existingCheck = await this.verifier.verify(cachedPath, 'fast').catch(() => ({ ok: false }));
         if (existingCheck.ok) {
-          outdatedSourceBackup = await this.quarantine
-            .move(
-              cachedPath,
-              project.quarantineFolder,
-              workflow === 'download-merge'
-                ? 'Nguồn từ bản cũ chưa có chính sách đa nền tảng mới; giữ tạm để tải lại nguồn đầy đủ.'
-                : 'Tệp cũ không khớp chính sách chất lượng hiện tại; giữ tạm đến khi bản mới được tải và kiểm tra xong.',
-              job.id
-            )
-            .catch(() => null);
+          await this.keepOutdatedSource(
+            cachedPath,
+            workflow === 'download-merge'
+              ? 'Nguồn từ bản cũ chưa có chính sách đa nền tảng mới; giữ lại bản cũ trong khu cách ly và tải lại nguồn đầy đủ.'
+              : 'Tệp cũ không khớp chính sách chất lượng hiện tại; giữ lại bản cũ trong khu cách ly và tải bản mới.',
+            job,
+            project.id,
+            source.id
+          );
         }
         this.sources.clearFileCache(source.id);
       }
@@ -853,14 +870,13 @@ export class DownloadEngine {
             }
           }
         );
-        outdatedSourceBackup = await this.quarantine
-          .move(
-            cachedPath,
-            project.quarantineFolder,
-            `Tệp cache không còn đạt cấu hình chất lượng hiện tại: ${cachedQuality.blockingReasons.join('; ')}`,
-            job.id
-          )
-          .catch(() => null);
+        await this.keepOutdatedSource(
+          cachedPath,
+          `Tệp cache không còn đạt cấu hình chất lượng hiện tại: ${cachedQuality.blockingReasons.join('; ')}`,
+          job,
+          project.id,
+          source.id
+        );
         this.sources.clearFileCache(source.id);
         source = this.sources.get(source.id) ?? source;
       } catch (error) {
@@ -895,7 +911,7 @@ export class DownloadEngine {
           const fastCheck = await this.verifier.verify(cachedPath, 'fast');
           if (!fastCheck.ok) {
             await this.quarantine
-              .move(cachedPath, project.quarantineFolder, fastCheck.reasons.join('; '), job.id)
+              .move(cachedPath, fastCheck.reasons.join('; '), { jobId: job.id, projectId: project.id })
               .catch(() => undefined);
           }
         }
@@ -1377,9 +1393,8 @@ export class DownloadEngine {
     if (!initialCheck.ok) {
       const quarantined = await this.quarantine.move(
         finalPath,
-        project.quarantineFolder,
         initialCheck.reasons.join('; '),
-        job.id
+        { jobId: job.id, projectId: project.id }
       );
       throw new DownloadFailedError(`Tệp tải xong không hợp lệ và đã chuyển vào khu cách ly: ${quarantined}`);
     }
@@ -1414,9 +1429,8 @@ export class DownloadEngine {
     if (!selectedSize.ok) {
       const quarantined = await this.quarantine.move(
         finalPath,
-        project.quarantineFolder,
         selectedSize.message ?? 'Dung lượng tệp thực tế không hợp lệ.',
-        job.id
+        { jobId: job.id, projectId: project.id }
       );
       throw new DownloadFailedError(
         `Tệp tải về không hợp lệ và đã chuyển vào khu cách ly: ${quarantined}. ${selectedSize.message ?? ''}`
@@ -1470,9 +1484,8 @@ export class DownloadEngine {
     if (!quality.ok) {
       const quarantined = await this.quarantine.move(
         finalPath,
-        project.quarantineFolder,
         quality.blockingReasons.join('; '),
-        job.id
+        { jobId: job.id, projectId: project.id }
       );
       throw new DownloadFailedError(
         `Tệp không đạt giới hạn chất lượng và đã chuyển vào khu cách ly: ${quarantined}. ${quality.blockingReasons.join(' ')}`
@@ -1510,19 +1523,14 @@ export class DownloadEngine {
       }
     }
 
-    if (outdatedSourceBackup) {
-      await rm(outdatedSourceBackup, { force: true }).catch(() => undefined);
-      this.logger.info(
-        'download',
-        'SOURCE_CACHE_REPLACED',
-        'Tệp mới đã đạt đúng chính sách chất lượng và dung lượng; bản cũ được dọn để không chiếm thêm dung lượng.',
-        {
-          jobId: job.id,
-          projectId: project.id,
-          metadata: { removedBackup: outdatedSourceBackup, replacement: finalPath }
-        }
-      );
-    }
+    // Mục 5 (2026-10-02): bản cũ KHÔNG bị xóa nữa — được giữ trong khu cách ly cho tới khi người dùng xử lý.
+    // Tra theo CSDL nên vẫn đúng khi bản cũ được cách ly ở lượt trước (ví dụ lượt đầu lỗi cookies).
+    const keptOldVersions = await this.quarantine.settleReplacement({
+      jobId: job.id,
+      projectId: project.id,
+      sourceId: source.id,
+      replacementPath: finalPath
+    });
 
     this.cookieRequiredJobs.delete(job.id);
     this.sources.setFile(source.id, finalPath, info, 'valid', downloadPolicy);
@@ -1579,7 +1587,10 @@ export class DownloadEngine {
           ? `Đã tải nguồn tốt nhất mà ${source.platform || 'nền tảng'} cung cấp để ghép, chưa mã hóa giảm chất lượng: ${finalPath}`
           : acceptedMinimumFallback
             ? `Đã tải thành công ${info.height}p — thấp hơn mức mong muốn ${appSettings.downloadMinHeight}p nhưng là fallback được danh sách cho phép: ${finalPath}`
-            : `Đã tải và kiểm tra hoàn tất: ${finalPath}`
+            : `Đã tải và kiểm tra hoàn tất: ${finalPath}`,
+      ...(keptOldVersions.length
+        ? { keptOldVersions: keptOldVersions.map((item) => ({ path: item.quarantinePath, bytes: item.bytes })) }
+        : {})
     };
   }
 }

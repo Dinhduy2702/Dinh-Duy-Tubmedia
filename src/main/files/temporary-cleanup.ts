@@ -1,6 +1,7 @@
 import { lstat, readdir, realpath, rm } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, parse, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, parse, relative, resolve } from 'node:path';
 import { isTubmediaOwnedDirectory } from './file-ownership.js';
+import { containsQuarantineSegment } from './quarantine-location.js';
 
 export interface TemporaryCleanupReport {
   removedFiles: number;
@@ -32,6 +33,17 @@ function isInside(folder: string, file: string): boolean {
 
 function samePath(left: string, right: string): boolean {
   return resolve(left).toLowerCase() === resolve(right).toLowerCase();
+}
+
+/** Nằm trong, hoặc chứa, khu cách ly <...>\Tubmedia\quarantine → không được xóa (Mục 5, 2026-10-02). */
+async function touchesQuarantine(path: string, isDirectory: boolean): Promise<boolean> {
+  if (containsQuarantineSegment(isDirectory ? join(path, '_') : path)) return true;
+  if (!isDirectory) return false;
+  const exists = async (candidate: string): Promise<boolean> => lstat(candidate).then(() => true, () => false);
+  return (
+    (await exists(join(path, 'Tubmedia', 'quarantine'))) ||
+    (basename(path).toLowerCase() === 'tubmedia' && (await exists(join(path, 'quarantine'))))
+  );
 }
 
 /** Thư mục này là (hoặc chứa) một thư mục người dùng đã chọn → không được xóa. */
@@ -91,6 +103,11 @@ export async function cleanupTemporaryArtifacts(
   const isProtectedFile = (file: string): boolean => protectedFiles.some((item) => samePath(item, file));
 
   const removeEntry = async (path: string, isDirectory: boolean): Promise<void> => {
+    // Khu cách ly không bao giờ bị dọn tự động.
+    if (await touchesQuarantine(path, isDirectory)) {
+      report.skippedUnsafePaths += 1;
+      return;
+    }
     if (isDirectory ? touchesProtectedFolder(path, protectedFolders) : isProtectedFile(path)) {
       report.skippedUnsafePaths += 1;
       return;

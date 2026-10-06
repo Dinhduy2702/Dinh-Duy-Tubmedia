@@ -120,7 +120,12 @@ const api: DesktopApi = {
     cancel: (runId) => invoke(IPC.systemCleanup.cancel, { runId }),
     openStorageSettings: () => invoke(IPC.systemCleanup.openStorageSettings),
     quarantineList: () => invoke(IPC.systemCleanup.quarantineList),
-    quarantineRestore: (ids) => invoke(IPC.systemCleanup.quarantineRestore, { ids })
+    quarantineRestore: (ids) => invoke(IPC.systemCleanup.quarantineRestore, { ids }),
+    quarantineExpiring: () => invoke(IPC.systemCleanup.quarantineExpiring)
+  },
+  quarantine: {
+    overview: () => invoke(IPC.quarantine.overview),
+    deleteItems: (ids) => invoke(IPC.quarantine.deleteItems, { ids })
   },
   quickDownload: {
     defaults: () => invoke(IPC.quickDownload.defaults),

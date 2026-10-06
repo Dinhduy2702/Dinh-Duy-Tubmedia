@@ -9,6 +9,7 @@ import { NotificationCenter } from '../components/NotificationCenter';
 import { DiagnosticDock } from '../components/DiagnosticDock';
 import { StartupResumeDialog } from '../components/StartupResumeDialog';
 import { SharedTempFolderNotice } from '../components/SharedTempFolderNotice';
+import { StorageAttentionNotice } from '../components/StorageAttentionNotice';
 import { TubmediaLogo } from '../components/TubmediaBrand';
 import { friendlyIssue, safeUiText } from '../utils/ui-error';
 
@@ -209,6 +210,7 @@ export function App(): React.JSX.Element {
         </div>
         <main className="app-main scroll min-h-0 flex-1 overflow-auto">
           <SharedTempFolderNotice />
+          <StorageAttentionNotice />
           <Suspense fallback={<PageLoader />}>
             {page === 'editor-home' && <EditorHomePage />}
             {page === 'step-download' && <StepDownloadPage />}

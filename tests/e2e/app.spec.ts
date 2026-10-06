@@ -2267,3 +2267,114 @@ test('C1: gợi ý điểm cắt tự động tìm đúng khoảng lặng/đổi
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
 });
+
+/**
+ * Mục 5 (2026-10-02) — giao diện khu cách ly trên Electron thật, dữ liệu sandbox:
+ * - khi mở app: thư mục _quarantine cũ còn tệp → nhắc kèm "Mở thư mục" (không di chuyển, không xóa);
+ *   mục Dọn dẹp máy sắp bị xóa vĩnh viễn trong 2 ngày → nhắc kèm "Xem" (cuộn tới đúng khu);
+ * - trang Dọn dẹp máy: "Khu cách ly của danh sách" hiện tổng dung lượng, từng tệp, tên danh sách, nút xóa có chọn.
+ * Không bấm xóa thật (xóa chỉ được phép bên trong <ổ>:\Tubmedia\quarantine thật).
+ */
+test('Mục 5: nhắc khu cách ly khi mở app và trang xem khu cách ly của danh sách', async () => {
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-quarantine-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  const env = {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    ),
+    NODE_ENV: 'test',
+    TUBMEDIA_E2E: '1',
+    TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+    PLAYWRIGHT_TEST: '1',
+    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+  };
+  const launch = async (): Promise<void> => {
+    electronApplication = await electron.launch({ args: [mainEntry], cwd: projectRoot, env, timeout: 45_000 });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+  };
+
+  try {
+    // Lần mở đầu chỉ để ứng dụng tự tạo CSDL đủ bảng (kể cả quarantine_items).
+    await launch();
+    await closeElectronApplication();
+
+    const projectId = randomUUID();
+    const tempFolder = path.join(sandbox, 'Downloads');
+    const legacy = path.join(tempFolder, '_quarantine');
+    fs.mkdirSync(legacy, { recursive: true });
+    fs.writeFileSync(path.join(legacy, 'ban-cu-tu-1.5.0.mp4'), Buffer.alloc(2048));
+    const kept = path.join(sandbox, 'Tubmedia', 'quarantine', 'Danh sách e2e (abcd1234)', '1-abc-Video cũ [LINK_AAAAAAAAAAAA].mp4');
+    fs.mkdirSync(path.dirname(kept), { recursive: true });
+    fs.writeFileSync(kept, Buffer.alloc(4096));
+
+    const now = new Date().toISOString();
+    const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+    db.prepare(
+      `INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,aspect_ratio,created_at,updated_at,archived_at)
+       VALUES(?,?,NULL,'','draft',?,?,?,?,'x','q','r',0,'original',?,?,NULL)`
+    ).run(projectId, 'Danh sách e2e', path.join(sandbox, 'video'), tempFolder, path.join(sandbox, 'video'), legacy, now, now);
+    db.prepare(
+      `INSERT INTO quarantine_items(id,project_id,job_id,source_id,kind,original_path,quarantine_path,bytes,reason,created_at,replacement_path,replaced_at)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).run(
+      randomUUID(), projectId, 'job-e2e', 'src-e2e', 'outdated-source',
+      path.join(sandbox, 'video', 'Video cũ [LINK_AAAAAAAAAAAA].mp4'), kept, 4096,
+      'Tệp cũ không khớp chính sách.', now, path.join(sandbox, 'video', 'Video cũ [LINK_AAAAAAAAAAAA].mp4'), now
+    );
+    db.close();
+
+    const cleanupQuarantine = path.join(userDataDirectory, 'cleanup-quarantine');
+    fs.mkdirSync(cleanupQuarantine, { recursive: true });
+    const day = 24 * 60 * 60 * 1000;
+    fs.writeFileSync(
+      path.join(cleanupQuarantine, 'manifest.json'),
+      JSON.stringify([
+        {
+          id: randomUUID(), runId: 'run-e2e', categoryId: 'userTemp', originalPath: path.join(sandbox, 'tmp.bin'), bytes: 10,
+          quarantinedAt: new Date(Date.now() - 13 * day).toISOString(), expiresAt: new Date(Date.now() + day).toISOString(),
+          restoredAt: null, restoredPath: null, purgedAt: null
+        }
+      ])
+    );
+
+    await launch();
+    await electronApplication!.evaluate(({ shell }) => {
+      const calls: string[] = [];
+      (globalThis as unknown as { __openedPaths: string[] }).__openedPaths = calls;
+      shell.openPath = (target: string) => {
+        calls.push(target);
+        return Promise.resolve('');
+      };
+    });
+
+    const notice = shellWindow!.locator('.storage-attention-notice').first();
+    await expect(notice).toContainText('Thư mục cách ly cũ còn 1 tệp', { timeout: 15_000 });
+    await expect(notice).toContainText(legacy);
+    await expect(notice).toContainText('sẽ bị xóa vĩnh viễn trong 2 ngày tới');
+
+    await notice.getByRole('button', { name: 'Mở thư mục' }).click();
+    await expect
+      .poll(async () => electronApplication!.evaluate(() => (globalThis as unknown as { __openedPaths: string[] }).__openedPaths))
+      .toEqual([legacy]);
+    expect(fs.existsSync(path.join(legacy, 'ban-cu-tu-1.5.0.mp4')), 'thư mục cũ không bị di chuyển/xóa').toBe(true);
+
+    await notice.getByRole('button', { name: 'Xem' }).click();
+    await expect(shellWindow!.locator('#cleanup-quarantine')).toBeVisible({ timeout: 15_000 });
+    await expect(shellWindow!.locator('#cleanup-quarantine')).toContainText('còn 1 ngày để hoàn tác');
+
+    const panel = shellWindow!.locator('[data-testid="project-quarantine-panel"]');
+    await expect(panel).toContainText('Video cũ [LINK_AAAAAAAAAAAA].mp4');
+    await expect(panel).toContainText('Danh sách e2e');
+    await expect(panel).toContainText('Bản cũ — đã có bản mới thay');
+    await expect(panel).toContainText('4.0 KB');
+    await expect(panel.getByRole('button', { name: /Xóa các bản cũ đã chọn/ })).toBeDisabled();
+    await panel.locator('input[type="checkbox"]').first().check();
+    await expect(panel.getByRole('button', { name: /Xóa các bản cũ đã chọn \(1\)/ })).toBeEnabled();
+    expect(fs.existsSync(kept), 'không có gì bị xóa khi chỉ xem/chọn').toBe(true);
+  } finally {
+    await closeElectronApplication();
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});

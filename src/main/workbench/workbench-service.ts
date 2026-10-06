@@ -449,8 +449,7 @@ export class WorkbenchService {
     const protection = this.cleanupProtection();
     await Promise.all(projects.flatMap((project) => [
       cleanupTemporaryArtifacts(project.tempFolder, [], false, protection),
-      cleanupTemporaryArtifacts(join(project.outputFolder, '_normalized'), [], false, protection),
-      cleanupTemporaryArtifacts(join(project.outputFolder, '_quarantine'), [], false, protection)
+      cleanupTemporaryArtifacts(join(project.outputFolder, '_normalized'), [], false, protection)
     ]));
     const projectsRemoved = this.projectRepo.removeAll();
     this.queue.clearAllHistory();
@@ -475,8 +474,7 @@ export class WorkbenchService {
       await this.queue.removeProject(project.id);
       await Promise.all([
         cleanupTemporaryArtifacts(project.tempFolder, [], false, protection),
-        cleanupTemporaryArtifacts(join(project.outputFolder, '_normalized'), [], false, protection),
-        cleanupTemporaryArtifacts(join(project.outputFolder, '_quarantine'), [], false, protection)
+        cleanupTemporaryArtifacts(join(project.outputFolder, '_normalized'), [], false, protection)
       ]);
       this.logger.clearProject(project.id);
       await this.projects.remove(project.id, false);

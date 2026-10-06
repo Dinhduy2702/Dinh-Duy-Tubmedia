@@ -26,6 +26,7 @@ import { copyFile, lstat, readdir, readFile, rm, statfs } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { SystemCleanupCategoryId, SystemCleanupFinding } from '@shared/system-cleanup.js';
+import { containsQuarantineSegment } from '../files/quarantine-location.js';
 
 export interface CleanupEnvironmentPaths {
   tempDir: string;
@@ -459,6 +460,8 @@ export async function listResidueFiles(
     await collectFilesRecursively(safeRoot, files, options);
 
     for (const file of files) {
+      // Mục 5 (2026-10-02): tệp trong khu cách ly là bản người dùng tự xử lý — không bao giờ là "rác".
+      if (containsQuarantineSegment(file.path)) continue;
       if (spec.kind === 'quick-temp') {
         const relative = file.path.slice(safeRoot.length).replace(/^[\\/]+/, '');
         const firstSegment = relative.split(/[\\/]/)[0] ?? '';
@@ -489,6 +492,7 @@ export async function listResidueFiles(
     if (!trackedPath) continue;
 
     const resolvedFile = resolve(trackedPath);
+    if (containsQuarantineSegment(resolvedFile)) continue;
     const insideKnownTempRoot = roots.tempFolders
       .filter(Boolean)
       .some((tempRoot) => isPathInsideRoot(resolvedFile, tempRoot));

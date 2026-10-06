@@ -301,6 +301,11 @@ export const systemCleanupQuarantineRestoreSchema = z
     ids: z.array(idSchema).min(1).max(500)
   })
   .strict();
+export const quarantineDeleteSchema = z
+  .object({
+    ids: z.array(idSchema).min(1).max(5000)
+  })
+  .strict();
 
 export const videoLinkFilterRequestSchema = z
   .object({

@@ -92,3 +92,21 @@ describe('dọn tạm: tệp do CSDL theo dõi chỉ bị xóa khi chắc chắn
     expect(report.removedFiles).toBe(1);
   });
 });
+
+// Mục 5 (2026-10-02): khu cách ly của danh sách không có cơ chế tự xóa nào — kể cả khi nó lọt vào một thư mục
+// tạm "của Tubmedia" (_yt_tmp có dấu sở hữu, không do người dùng chọn) hoặc tệp bên trong bị CSDL theo dõi.
+describe('dọn tạm: không bao giờ đụng khu cách ly <...>/Tubmedia/quarantine', () => {
+  it('thư mục _yt_tmp có dấu sở hữu chứa Tubmedia/quarantine: khu cách ly vẫn còn nguyên', async () => {
+    const drive = await scratch();
+    const temp = join(drive, '_yt_tmp');
+    const quarantined = join(temp, 'Tubmedia', 'quarantine', 'Danh sách 1 (4639ff3c)');
+    await mkdir(quarantined, { recursive: true });
+    await ensureTubmediaOwnedDirectory(temp, 'download-temp');
+    const kept = join(quarantined, '1786352649948-6ff59155-clip-1-abc.mp4.pending.mp4');
+    await writeFile(kept, 'x');
+
+    await cleanupTemporaryArtifacts(temp, [kept], false, { protectedFolders: [] });
+
+    expect(existsSync(kept)).toBe(true);
+  });
+});

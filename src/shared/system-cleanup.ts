@@ -177,6 +177,11 @@ export interface QuarantineEntry {
   restoredAt: string | null;
   restoredPath: string | null;
   purgedAt: string | null;
+  /**
+   * Mục 5 ý 5 (2026-10-02): nơi đang lưu tệp khi tệp không cùng ổ với userData (<ổ>:\Tubmedia\quarantine\Dọn
+   * dẹp máy\<id>). Thiếu/null = nằm trong thư mục files của userData như trước.
+   */
+  storedPath?: string | null;
 }
 
 export interface QuarantineRestoreOutcome {

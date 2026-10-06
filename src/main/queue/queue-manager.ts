@@ -3,7 +3,7 @@ import { formatDiskShortfall } from '@shared/utils/disk-shortfall-format.js';
 import { type BrowserWindow } from 'electron';
 import { cpus, freemem, totalmem } from 'node:os';
 import { rm, stat, statfs } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { AttentionNotice, JobType, QueueJob, ResourceProfile } from '@shared/types/domain.js';
 import { IPC } from '@shared/contracts/channels.js';
 import { retryDelayMs } from '@shared/utils/retry.js';
@@ -194,6 +194,7 @@ export class QueueManager {
   private readonly repeatedFailures = new Map<string, number[]>();
   private readonly cleanupInProgress = new Set<string>();
   private readonly blockingNoticeKeys = new Set<string>();
+  private readonly keptOldVersionCounts = new Map<string, number>();
   private startupReadyResolve: (() => void) | null = null;
   private readonly startupReady = new Promise<void>((resolve) => {
     this.startupReadyResolve = resolve;
@@ -683,6 +684,29 @@ export class QueueManager {
     return false;
   }
 
+  /**
+   * Mục 5 B3 (2026-10-02): bản mới đã tải xong, bản cũ vẫn được GIỮ trong khu cách ly. Gộp theo danh sách để 45
+   * video đổi chính sách trong một lượt chỉ hiện một thông báo (số đếm tăng dần), kể cả khi bản cũ được cách
+   * ly ở lượt thử trước.
+   */
+  private notifyKeptOldVersions(job: QueueJob, kept: ReadonlyArray<{ path: string; bytes: number }>): void {
+    if (!this.window || this.window.isDestroyed()) return;
+    const scope = job.projectId ?? job.id;
+    const total = (this.keptOldVersionCounts.get(scope) ?? 0) + kept.length;
+    this.keptOldVersionCounts.set(scope, total);
+    const folder = dirname(kept[0]!.path);
+    const notice: AttentionNotice = {
+      id: `kept-old-version-${scope}`,
+      severity: 'info',
+      title: 'Đã giữ bản cũ',
+      message: `Đã tải bản mới đạt chất lượng và giữ ${total} bản cũ trong khu cách ly (${folder}). Tubmedia không tự xóa bản cũ; xem và xóa khi không cần nữa ở Dọn dẹp máy → Khu cách ly của danh sách.`,
+      code: 'SOURCE_OLD_VERSION_KEPT',
+      sticky: false,
+      ...(job.projectId ? { projectId: job.projectId } : {})
+    };
+    this.window.webContents.send(IPC.events.attention, notice);
+  }
+
   private notifyDiskSpaceRecovered(projectId: string, resumedJobs: number): void {
     if (!this.window || this.window.isDestroyed()) return;
     const notice: AttentionNotice = {
@@ -1124,8 +1148,8 @@ export class QueueManager {
       });
       const reports = await Promise.all([
         cleanupTemporaryArtifacts(project.tempFolder, trackedClips, preserveTrackedClips, protection),
-        cleanupTemporaryArtifacts(join(project.outputFolder, '_normalized'), [], false, protection),
-        cleanupTemporaryArtifacts(join(project.outputFolder, '_quarantine'), [], false, protection)
+        // Mục 5 (2026-10-02): thư mục cách ly cũ không còn bị dọn — người dùng tự xử lý.
+        cleanupTemporaryArtifacts(join(project.outputFolder, '_normalized'), [], false, protection)
       ]);
       const report = reports.reduce(
         (total, current) => ({
@@ -1145,7 +1169,7 @@ export class QueueManager {
         'TEMPORARY_ARTIFACTS_CLEANED',
         preserveTrackedClips
           ? `Đã dọn ${report.removedFiles} tệp và ${report.removedDirectories} thư mục lỗi/tạm; các đoạn cắt hợp lệ được giữ để người dùng thử lại nhanh.`
-          : `Đã tự dọn ${report.removedFiles} tệp và ${report.removedDirectories} thư mục tạm/quarantine sau khi quy trình dừng hoặc hoàn tất.`,
+          : `Đã tự dọn ${report.removedFiles} tệp và ${report.removedDirectories} thư mục tạm sau khi quy trình dừng hoặc hoàn tất.`,
         {
           projectId,
           metadata: { ...report }
@@ -1478,6 +1502,7 @@ export class QueueManager {
             this.updateDownloadProgress(job.id, progress)
           );
           completionStatus = result.skipped ? 'skipped' : 'completed';
+          if (result.keptOldVersions?.length) this.notifyKeptOldVersions(job, result.keptOldVersions);
           const source = job.sourceId ? this.sources.get(job.sourceId) : null;
           this.repo.updateInput(job.id, {
             outputPath: result.outputPath,
@@ -1893,7 +1918,6 @@ export class QueueManager {
       inputs,
       project.outputFolder,
       project.tempFolder,
-      project.quarantineFolder,
       project.finalFileName,
       quality,
       profile,

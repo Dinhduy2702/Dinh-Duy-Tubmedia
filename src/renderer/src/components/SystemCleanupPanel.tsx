@@ -4,6 +4,7 @@ import { safeUiText } from '../utils/ui-error';
 import { showNotice } from '../utils/notify';
 import { progressFillStyle } from '../utils/progress-style';
 import { ConfirmDialog } from './ConfirmDialog';
+import { CLEANUP_QUARANTINE_SECTION_ID } from './quarantine-anchors';
 import {
   QUARANTINE_RETENTION_DAYS,
   SYSTEM_CLEANUP_ADMIN_INFO_ITEMS,
@@ -657,7 +658,7 @@ export function SystemCleanupPanel(): React.JSX.Element {
       )}
 
       {quarantineEntries.length > 0 && (
-        <div className="system-cleanup-quarantine">
+        <div className="system-cleanup-quarantine" id={CLEANUP_QUARANTINE_SECTION_ID}>
           <div className="system-cleanup-group-title">
             Đã cách ly gần đây ({quarantineEntries.length} mục — tự xóa vĩnh viễn sau {QUARANTINE_RETENTION_DAYS}{' '}
             ngày nếu không hoàn tác)

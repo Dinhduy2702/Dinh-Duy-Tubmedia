@@ -110,7 +110,13 @@ export const IPC = {
     cancel: 'system-cleanup:cancel',
     openStorageSettings: 'system-cleanup:open-storage-settings',
     quarantineList: 'system-cleanup:quarantine-list',
-    quarantineRestore: 'system-cleanup:quarantine-restore'
+    quarantineRestore: 'system-cleanup:quarantine-restore',
+    quarantineExpiring: 'system-cleanup:quarantine-expiring'
+  },
+  /** Mục 5 (2026-10-02): khu cách ly của danh sách (<ổ>:\Tubmedia\quarantine). */
+  quarantine: {
+    overview: 'quarantine:overview',
+    deleteItems: 'quarantine:delete-items'
   },
   quickDownload: {
     defaults: 'quick-download:defaults',

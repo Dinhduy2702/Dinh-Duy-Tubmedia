@@ -86,12 +86,12 @@ export class ClipEngine {
     args.push('-progress', 'pipe:1', '-nostats', pending);
     const result = await this.processes.run({ jobId: job.id, projectId: job.projectId, tool: 'ffmpeg', executablePath: ffmpeg.executablePath, args, priority: resource.processPriority, signal, timeoutMs: 24 * 60 * 60 * 1000, onStdoutLine: line => { if (!line.startsWith('out_time_ms=') || !Number.isFinite(expected) || expected <= 0) return; const microseconds=Number(line.slice(12)); if (!Number.isFinite(microseconds)) return; onProgress(sanitizeProgress(microseconds / 1_000_000 / expected * 100)); } });
     if (result.code !== 0) {
-      try { await this.quarantine.move(pending, join(tempFolder, '_quarantine'), result.stderrTail || 'Tạo đoạn video thất bại.', job.id); } catch { /* pending chưa tồn tại */ }
+      try { await this.quarantine.move(pending, result.stderrTail || 'Tạo đoạn video thất bại.', { jobId: job.id, projectId: job.projectId }); } catch { /* pending chưa tồn tại */ }
       throw new ProcessingFailedError(result.stderrTail || 'Tạo đoạn video thất bại.');
     }
     const check = await this.verifier.verify(pending, 'standard', expected > 0 ? expected : undefined, { jobId: job.id, projectId: job.projectId, signal, expectedStreams: { video: true, audio: item.audioMode !== 'mute' } });
     if (!check.ok) {
-      const quarantined = await this.quarantine.move(pending, join(tempFolder, '_quarantine'), check.reasons.join('; '), job.id);
+      const quarantined = await this.quarantine.move(pending, check.reasons.join('; '), { jobId: job.id, projectId: job.projectId });
       throw new ProcessingFailedError(`Đoạn video bị lỗi và đã chuyển vào khu cách ly: ${quarantined}`);
     }
     const backup = `${final}.previous-${Date.now()}.bak`;

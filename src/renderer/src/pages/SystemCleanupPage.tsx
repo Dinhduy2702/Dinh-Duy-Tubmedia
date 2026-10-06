@@ -1,5 +1,6 @@
 import { HardDrive, ShieldCheck, Trash2 } from 'lucide-react';
 import { SystemCleanupPanel } from '../components/SystemCleanupPanel';
+import { ProjectQuarantinePanel } from '../components/ProjectQuarantinePanel';
 
 export function SystemCleanupPage(): React.JSX.Element {
   return (
@@ -28,6 +29,7 @@ export function SystemCleanupPage(): React.JSX.Element {
       </section>
 
       <SystemCleanupPanel />
+      <ProjectQuarantinePanel />
     </div>
   );
 }

@@ -40,6 +40,7 @@ import {
   systemCleanupRequestSchema,
   systemCleanupRunSchema,
   systemCleanupQuarantineRestoreSchema,
+  quarantineDeleteSchema,
   videoLinkFilterRequestSchema,
   quickDownloadRequestSchema,
   quickDownloadTaskSchema,
@@ -60,6 +61,8 @@ import { saveTextTypeFor, withRequiredExtension } from '../files/save-text-file-
 
 import { SystemCleanupService } from '../system/system-cleanup-service.js';
 import { QuarantineStore } from '../system/cleanup-quarantine.js';
+import { formatBytes } from '../media/quarantine-service.js';
+import { CLEANUP_QUARANTINE_REMIND_MS } from '@shared/utils/quarantine-policy.js';
 import { resolveCleanupEnvironmentPaths, type CleanupEnvironmentPaths } from '../system/cleanup-scanner.js';
 import { VideoLinkFilterService } from '../media/video-link-filter-service.js';
 import { LocalCutService } from '../media/local-cut-service.js';
@@ -96,7 +99,16 @@ function resolveCleanupEnvironmentOverride(): (() => CleanupEnvironmentPaths) | 
 
 export function registerIpc(ctx: AppContext): void {
   // TUBMEDIA_FEATURE_SERVICES
-  const cleanupQuarantine = new QuarantineStore(join(ctx.userData, 'cleanup-quarantine'));
+  const cleanupQuarantine = new QuarantineStore(join(ctx.userData, 'cleanup-quarantine'), undefined, {
+    // Mục 5 ý 5 (2026-10-02): mỗi lần xóa vĩnh viễn đều ghi nhật ký tên tệp + dung lượng.
+    onPurged: (item) =>
+      ctx.logger.info(
+        'cleanup-quarantine',
+        'CLEANUP_QUARANTINE_PURGED',
+        `Đã xóa vĩnh viễn ${item.name} (${formatBytes(item.bytes)}) khỏi khu cách ly của Dọn dẹp máy sau thời hạn hoàn tác.`,
+        { metadata: { name: item.name, bytes: item.bytes, originalPath: item.originalPath } }
+      )
+  });
   void cleanupQuarantine.purgeExpired().catch((error: unknown) => {
     ctx.logger.warn(
       'cleanup-quarantine',
@@ -501,6 +513,10 @@ export function registerIpc(ctx: AppContext): void {
   handle(IPC.systemCleanup.quarantineRestore, systemCleanupQuarantineRestoreSchema, ({ ids }) =>
     cleanupQuarantine.restore(ids)
   );
+  noArgs(IPC.systemCleanup.quarantineExpiring, () => cleanupQuarantine.expiringWithin(CLEANUP_QUARANTINE_REMIND_MS));
+  // Mục 5 (2026-10-02): khu cách ly của danh sách — xem toàn bộ và xóa có chọn lọc (không có tự xóa).
+  noArgs(IPC.quarantine.overview, () => ctx.quarantine.overview());
+  handle(IPC.quarantine.deleteItems, quarantineDeleteSchema, ({ ids }) => ctx.quarantine.deleteItems(ids));
 
   // TUBMEDIA_VIDEO_LINK_FILTER_HANDLERS
   noArgs(IPC.videoFilter.chooseLinksFile, async () => {

@@ -525,6 +525,58 @@ export interface WorkbenchState {
 }
 
 export type AttentionSeverity = 'info' | 'success' | 'warning' | 'error' | 'neutral';
+/** Mục 5 (2026-10-02): một tệp trong khu cách ly của danh sách (<ổ>:\Tubmedia\quarantine\<tên (mã)>). */
+export type QuarantineItemKind = 'outdated-source' | 'invalid-file';
+
+export interface QuarantineItem {
+  id: string;
+  projectId: string | null;
+  jobId: string | null;
+  sourceId: string | null;
+  kind: QuarantineItemKind;
+  originalPath: string;
+  quarantinePath: string;
+  bytes: number;
+  reason: string;
+  createdAt: string;
+  replacementPath: string | null;
+  replacedAt: string | null;
+  deletedAt: string | null;
+}
+
+export interface QuarantineOverviewItem extends QuarantineItem {
+  projectName: string | null;
+  /** false = tệp không còn trên ổ (ví dụ đã xóa bằng File Explorer). */
+  exists: boolean;
+}
+
+export interface QuarantineDriveUsage {
+  root: string;
+  quarantineBytes: number;
+  freeBytes: number | null;
+  totalBytes: number | null;
+}
+
+export interface LegacyQuarantineFolder {
+  path: string;
+  files: number;
+  bytes: number;
+}
+
+export interface QuarantineOverview {
+  items: QuarantineOverviewItem[];
+  totalBytes: number;
+  drives: QuarantineDriveUsage[];
+  warnings: string[];
+  legacyFolders: LegacyQuarantineFolder[];
+}
+
+export interface QuarantineDeleteOutcome {
+  id: string;
+  ok: boolean;
+  message?: string;
+}
+
 export interface AttentionNotice {
   id: string;
   severity: AttentionSeverity;

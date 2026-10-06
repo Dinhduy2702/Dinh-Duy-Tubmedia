@@ -7,6 +7,7 @@ import { ItemRepository } from '../database/repositories/item-repository.js';
 import { QueueRepository } from '../database/repositories/queue-repository.js';
 import { LogRepository } from '../database/repositories/log-repository.js';
 import { MediaSourceRepository } from '../database/repositories/media-source-repository.js';
+import { QuarantineRepository } from '../database/repositories/quarantine-repository.js';
 import { Logger } from '../logging/logger.js';
 import { PathService } from '../storage/path-service.js';
 import { HardwareService } from '../settings/hardware-service.js';
@@ -80,7 +81,8 @@ export class AppContext {
   // không dùng chung máy trạng thái tạm dừng/khôi phục của QuickDownloadService (không cần thiết cho
   // một tác vụ "bắn một phát rồi xong").
   public readonly previewFrame = new PreviewFrameService(this.processes, this.tools, this.settings, this.logger);
-  public readonly quarantine = new QuarantineService(this.logger);
+  public readonly quarantineRepo = new QuarantineRepository(this.database.db);
+  public readonly quarantine = new QuarantineService(this.logger, { items: this.quarantineRepo, projects: this.projectRepo });
   public readonly downloader = new DownloadEngine(
     this.processes,
     this.tools,
@@ -196,10 +198,8 @@ export class AppContext {
     this.logger.pruneFiles(logRetentionDays);
     const legacyFolders = this.projectRepo
       .list()
-      .flatMap((project) => [
-        join(project.outputFolder, '_normalized'),
-        join(project.outputFolder, '_quarantine')
-      ]);
+      // Mục 5 (2026-10-02): thư mục cách ly cũ không bị dọn nữa; nếu còn tệp thì chỉ báo (kèm "Mở thư mục").
+      .map((project) => join(project.outputFolder, '_normalized'));
     const protection = buildCleanupProtection({
       projects: this.projectRepo.list(true),
       settings: this.settings.get(),
@@ -214,7 +214,7 @@ export class AppContext {
           this.logger.info(
             'cleanup',
             'LEGACY_OUTPUT_TEMP_CLEANED',
-            `Đã tự dọn ${removedFiles} tệp và ${removedDirectories} thư mục tạm/quarantine còn sót trong thư mục thành phẩm từ phiên bản cũ.`
+            `Đã tự dọn ${removedFiles} tệp và ${removedDirectories} thư mục tạm còn sót trong thư mục thành phẩm từ phiên bản cũ.`
           );
         }
       })

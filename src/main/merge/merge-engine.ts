@@ -806,7 +806,6 @@ export class MergeEngine {
     inputs: MergeInput[],
     outputFolder: string,
     workFolder: string,
-    quarantineFolder: string,
     finalFileName: string,
     profile: QualityProfile,
     resource: ResourceProfile,
@@ -842,7 +841,6 @@ export class MergeEngine {
     emit(1, 'Khởi tạo luồng ghép thông minh');
     await ensureDirectory(outputFolder);
     await ensureDirectory(workFolder);
-    await ensureDirectory(quarantineFolder);
 
     // Thư mục cache được giữ lại giữa các lần chạy. Cache key phụ thuộc kích thước,
     // mtime và target nên nguồn thay đổi sẽ không bao giờ dùng nhầm tệp cũ.
@@ -956,9 +954,8 @@ export class MergeEngine {
           try {
             await this.quarantine.move(
               candidate.path,
-              quarantineFolder,
               'Checkpoint không đủ điều kiện tiếp tục: ' + validation.reasons.join('; '),
-              job.id
+              { jobId: job.id, projectId: job.projectId }
             );
           } catch {
             await rm(candidate.path, { force: true });
@@ -1235,9 +1232,8 @@ export class MergeEngine {
         await access(pending, constants.F_OK);
         await this.quarantine.move(
           pending,
-          quarantineFolder,
           result.stderrTail || 'Concat copy thất bại.',
-          job.id
+          { jobId: job.id, projectId: job.projectId }
         );
       } catch {
         // chưa tạo được pending
@@ -1321,7 +1317,7 @@ export class MergeEngine {
     }
     if (!check.ok) {
       const exactReason = check.reasons.join('; ') || 'Không xác định được nguyên nhân xác minh.';
-      const quarantined = await this.quarantine.move(pending, quarantineFolder, exactReason, job.id);
+      const quarantined = await this.quarantine.move(pending, exactReason, { jobId: job.id, projectId: job.projectId });
       throw new MergeFailedError(
         `Thành phẩm pending không hợp lệ: ${exactReason} Đã chuyển vào quarantine: ${quarantined}`,
         {
@@ -1541,7 +1537,7 @@ export class MergeEngine {
           '.'
         : '';
       const quarantineReason = integrity.reasons.join('; ') || userReason;
-      const quarantined = await this.quarantine.move(pending, quarantineFolder, quarantineReason, job.id);
+      const quarantined = await this.quarantine.move(pending, quarantineReason, { jobId: job.id, projectId: job.projectId });
       throw new MergeFailedError(
         'Tubmedia đã CHẶN thành phẩm vì phát hiện lỗi hình ảnh tại khoảng ' +
           mergeClock(issueTime) +
@@ -1597,9 +1593,8 @@ export class MergeEngine {
       if (audioDuration === null || audioDuration === undefined) {
         const quarantined = await this.quarantine.move(
           pending,
-          quarantineFolder,
           'Thành phẩm được yêu cầu có âm thanh nhưng không tìm thấy thời lượng audio stream.',
-          job.id
+          { jobId: job.id, projectId: job.projectId }
         );
         throw new MergeFailedError(
           'Tubmedia đã chặn thành phẩm vì luồng âm thanh bị thiếu. File lỗi đã chuyển vào khu cách ly: ' +
@@ -1611,9 +1606,8 @@ export class MergeEngine {
       if (avDrift > avTolerance) {
         const quarantined = await this.quarantine.move(
           pending,
-          quarantineFolder,
           'Lệch thời lượng audio/video ' + avDrift.toFixed(2) + 's.',
-          job.id
+          { jobId: job.id, projectId: job.projectId }
         );
         throw new MergeFailedError(
           'Tubmedia đã chặn thành phẩm vì âm thanh và hình ảnh lệch ' +
@@ -1630,9 +1624,8 @@ export class MergeEngine {
     if (!sizeValidation.ok) {
       const quarantined = await this.quarantine.move(
         pending,
-        quarantineFolder,
         sizeValidation.message ?? 'Dung lượng thành phẩm thấp bất thường.',
-        job.id
+        { jobId: job.id, projectId: job.projectId }
       );
       throw new MergeFailedError(
         `Tubmedia đã chặn thành phẩm bị nén nhỏ bất thường và chuyển vào khu cách ly: ${quarantined}. ${sizeValidation.message ?? ''}`

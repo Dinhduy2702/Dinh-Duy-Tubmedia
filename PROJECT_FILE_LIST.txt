@@ -257,6 +257,7 @@ src/main/database/repositories/item-repository.ts
 src/main/database/repositories/log-repository.ts
 src/main/database/repositories/media-source-repository.ts
 src/main/database/repositories/project-repository.ts
+src/main/database/repositories/quarantine-repository.ts
 src/main/database/repositories/queue-repository.ts
 src/main/database/repositories/settings-repository.ts
 src/main/database/sqlite.ts
@@ -271,8 +272,10 @@ src/main/downloader/ytdlp-progress.ts
 src/main/files/cleanup-protection.ts
 src/main/files/ensure-directory.ts
 src/main/files/file-ownership.ts
+src/main/files/legacy-quarantine.ts
 src/main/files/non-conflicting-path.ts
 src/main/files/path-containment.ts
+src/main/files/quarantine-location.ts
 src/main/files/save-text-file-policy.ts
 src/main/files/temporary-cleanup.ts
 src/main/index.ts
@@ -337,6 +340,8 @@ src/renderer/src/components/GpuEncoderIssueNotice.tsx
 src/renderer/src/components/InfoDisclosure.tsx
 src/renderer/src/components/JobProgressList.tsx
 src/renderer/src/components/NotificationCenter.tsx
+src/renderer/src/components/ProjectQuarantinePanel.tsx
+src/renderer/src/components/quarantine-anchors.ts
 src/renderer/src/components/QuickDownloadPanel.tsx
 src/renderer/src/components/RendererErrorBoundary.tsx
 src/renderer/src/components/SharedTempFolderNotice.tsx
@@ -344,6 +349,7 @@ src/renderer/src/components/StartupResumeDialog.tsx
 src/renderer/src/components/StatCard.tsx
 src/renderer/src/components/StatusBadge.tsx
 src/renderer/src/components/StepTabs.tsx
+src/renderer/src/components/StorageAttentionNotice.tsx
 src/renderer/src/components/SystemCleanupPanel.tsx
 src/renderer/src/components/ToolReadinessPanel.tsx
 src/renderer/src/components/TubmediaBrand.tsx
@@ -432,6 +438,7 @@ src/shared/utils/notification-policy.ts
 src/shared/utils/nvenc-diagnosis.ts
 src/shared/utils/progress-policy.ts
 src/shared/utils/quality-decision.ts
+src/shared/utils/quarantine-policy.ts
 src/shared/utils/queue-lane.ts
 src/shared/utils/resource-memory.ts
 src/shared/utils/retry.ts
@@ -455,7 +462,9 @@ tests/integration/cookie-jar-store.test.ts
 tests/integration/cookie-resume-fingerprint.test.ts
 tests/integration/database.test.ts
 tests/integration/helpers/queue-harness.ts
+tests/integration/legacy-quarantine-untouched.test.ts
 tests/integration/migration-attempts-reset.test.ts
+tests/integration/quarantine-service.test.ts
 tests/integration/queue-attempts.test.ts
 tests/integration/queue-load-governor.test.ts
 tests/integration/queue-retry-requeue.test.ts
@@ -553,6 +562,8 @@ tests/unit/process-encoding.test.ts
 tests/unit/process-error-taxonomy.test.ts
 tests/unit/progress-policy.test.ts
 tests/unit/quality.test.ts
+tests/unit/quarantine-location.test.ts
+tests/unit/quarantine-single-location-guard.test.ts
 tests/unit/queue-lane.test.ts
 tests/unit/quick-download-cookie-integration.test.ts
 tests/unit/quick-download-credit-metadata.test.ts

@@ -392,5 +392,31 @@ ALTER TABLE projects ADD COLUMN aspect_ratio TEXT NOT NULL DEFAULT 'original';
 UPDATE queue_jobs SET attempts = 0
 WHERE attempts <> 0 AND status NOT IN ('completed', 'skipped', 'cancelled', 'failed');
 `
+  },
+  {
+    // Mục 5 (2026-10-02): theo dõi mọi tệp trong khu cách ly (<ổ>:\Tubmedia\quarantine) cho tới khi người dùng
+    // tự xử lý — kể cả khi lượt tải đầu lỗi và lượt sau mới thành công. Bảng mới: bản 1.5.0 khi quay lui chỉ
+    // bỏ qua bảng này, không ảnh hưởng.
+    version: 9,
+    name: 'quarantine_items',
+    up: `
+CREATE TABLE IF NOT EXISTS quarantine_items (
+  id TEXT PRIMARY KEY,
+  project_id TEXT,
+  job_id TEXT,
+  source_id TEXT,
+  kind TEXT NOT NULL,
+  original_path TEXT NOT NULL,
+  quarantine_path TEXT NOT NULL,
+  bytes INTEGER NOT NULL DEFAULT 0,
+  reason TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  replacement_path TEXT,
+  replaced_at TEXT,
+  deleted_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_quarantine_items_active ON quarantine_items(deleted_at, created_at);
+CREATE INDEX IF NOT EXISTS idx_quarantine_items_source ON quarantine_items(source_id, job_id);
+`
   }
 ];

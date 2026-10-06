@@ -13,7 +13,7 @@
  */
 import { lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { dirname, extname, join } from 'node:path';
+import { basename, dirname, extname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
   QUARANTINE_RETENTION_DAYS,
@@ -22,6 +22,13 @@ import {
   type SystemCleanupCategoryId
 } from '@shared/system-cleanup.js';
 import { assertSafeCleanupPath, copyFileVerified } from './cleanup-scanner.js';
+import {
+  CLEANUP_QUARANTINE_FOLDER_NAME,
+  driveRootOf,
+  ensureQuarantineReadme,
+  quarantineRootForFile,
+  type RootResolver
+} from '../files/quarantine-location.js';
 
 export { QUARANTINE_RETENTION_DAYS } from '@shared/system-cleanup.js';
 export type { QuarantineEntry } from '@shared/system-cleanup.js';
@@ -34,11 +41,38 @@ function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && 'code' in error;
 }
 
+export interface QuarantineStoreOptions {
+  /** Gốc ổ đĩa của một đường dẫn — chỉ thay trong bài kiểm. */
+  rootOf?: RootResolver;
+  /** Mục 5 ý 5: gọi cho MỖI tệp bị xóa vĩnh viễn để ghi nhật ký tên + dung lượng. */
+  onPurged?: (item: { name: string; bytes: number; originalPath: string }) => void;
+}
+
 export class QuarantineStore {
+  private readonly rootOf: RootResolver;
+  private readonly onPurged: QuarantineStoreOptions['onPurged'];
+
   public constructor(
     private readonly baseDir: string,
-    private readonly retentionDays: number = QUARANTINE_RETENTION_DAYS
-  ) {}
+    private readonly retentionDays: number = QUARANTINE_RETENTION_DAYS,
+    options: QuarantineStoreOptions = {}
+  ) {
+    this.rootOf = options.rootOf ?? driveRootOf;
+    this.onPurged = options.onPurged;
+  }
+
+  /** Nơi đang lưu tệp của một mục: <ổ>\Tubmedia\quarantine\Dọn dẹp máy\<id> nếu khác ổ, ngược lại trong userData. */
+  private storedPathOf(entry: QuarantineEntry): string {
+    return entry.storedPath ?? join(this.filesDir(), entry.id);
+  }
+
+  private isOwnStoredPath(entry: QuarantineEntry): boolean {
+    const stored = resolve(this.storedPathOf(entry));
+    if (basename(stored) !== entry.id) return false;
+    const parent = dirname(stored).toLowerCase();
+    const driveDir = join(quarantineRootForFile(stored, this.rootOf), CLEANUP_QUARANTINE_FOLDER_NAME);
+    return parent === resolve(this.filesDir()).toLowerCase() || parent === resolve(driveDir).toLowerCase();
+  }
 
   private manifestPath(): string {
     return join(this.baseDir, 'manifest.json');
@@ -101,8 +135,23 @@ export class QuarantineStore {
     }
 
     const id = randomUUID();
-    await mkdir(this.filesDir(), { recursive: true });
-    const quarantinePath = join(this.filesDir(), id);
+    // Mục 5 ý 5 (2026-10-02): tệp khác ổ với userData KHÔNG bị chép sang ổ userData (thường là C:) mà ở lại
+    // đúng ổ của nó: <ổ>\Tubmedia\quarantine\Dọn dẹp máy — chỉ là đổi tên, không tốn thêm dung lượng ổ C:.
+    let sameDriveAsStore = this.rootOf(safePath).toLowerCase() === this.rootOf(this.baseDir).toLowerCase();
+    let storageDir = this.filesDir();
+    if (!sameDriveAsStore) {
+      const driveDir = join(quarantineRootForFile(safePath, this.rootOf), CLEANUP_QUARANTINE_FOLDER_NAME);
+      try {
+        await mkdir(driveDir, { recursive: true });
+        storageDir = driveDir;
+        await ensureQuarantineReadme(quarantineRootForFile(safePath, this.rootOf)).catch(() => undefined);
+      } catch {
+        // Gốc ổ không ghi được: lùi về userData như trước mục 5 (chép có đối chiếu kích thước bên dưới).
+        sameDriveAsStore = true;
+      }
+    }
+    await mkdir(storageDir, { recursive: true });
+    const quarantinePath = join(storageDir, id);
     const bytes = info.size;
 
     try {
@@ -135,7 +184,8 @@ export class QuarantineStore {
       expiresAt: new Date(now + this.retentionDays * 24 * 60 * 60 * 1000).toISOString(),
       restoredAt: null,
       restoredPath: null,
-      purgedAt: null
+      purgedAt: null,
+      storedPath: sameDriveAsStore ? null : quarantinePath
     };
 
     const entries = await this.readManifest();
@@ -162,8 +212,12 @@ export class QuarantineStore {
         results.push({ id: entry.id, ok: false, message: 'Mục này đã bị xóa vĩnh viễn (quá hạn cách ly).' });
         continue;
       }
+      if (!this.isOwnStoredPath(entry)) {
+        results.push({ id: entry.id, ok: false, message: 'Vị trí lưu của mục này không thuộc khu cách ly Dọn dẹp máy — đã chặn.' });
+        continue;
+      }
 
-      const quarantinePath = join(this.filesDir(), entry.id);
+      const quarantinePath = this.storedPathOf(entry);
       const targetPath = this.resolveNonCollidingPath(entry.originalPath);
 
       try {
@@ -214,6 +268,11 @@ export class QuarantineStore {
     return join(directory, `${baseName} (khôi phục ${randomUUID()})${extension}`);
   }
 
+  /** Mục 5 ý 5: các mục còn hiệu lực sẽ bị xóa vĩnh viễn trong khoảng `windowMs` tới (để nhắc khi mở app). */
+  public async expiringWithin(windowMs: number, now: number = Date.now()): Promise<QuarantineEntry[]> {
+    return (await this.listActive()).filter((entry) => new Date(entry.expiresAt).getTime() <= now + windowMs);
+  }
+
   /** Xóa VĨNH VIỄN các mục đã quá hạn cách ly — bước không thể hoàn tác duy nhất trong toàn bộ luồng. */
   public async purgeExpired(now: number = Date.now()): Promise<{ purged: number }> {
     const entries = await this.readManifest();
@@ -222,10 +281,14 @@ export class QuarantineStore {
     for (const entry of entries) {
       if (entry.restoredAt || entry.purgedAt) continue;
       if (new Date(entry.expiresAt).getTime() > now) continue;
+      // Mục 5: chỉ xóa đúng tệp do Dọn dẹp máy cất (userData\files\<id> hoặc <ổ>\Tubmedia\quarantine\Dọn dẹp máy\<id>).
+      // Sổ bị sửa trỏ đi nơi khác (khu cách ly của danh sách, tệp người dùng) → bỏ qua, không đánh dấu đã xóa.
+      if (!this.isOwnStoredPath(entry)) continue;
 
-      await rm(join(this.filesDir(), entry.id), { force: true });
+      await rm(this.storedPathOf(entry), { force: true });
       entry.purgedAt = new Date(now).toISOString();
       purged += 1;
+      this.onPurged?.({ name: basename(entry.originalPath), bytes: entry.bytes, originalPath: entry.originalPath });
     }
 
     if (purged > 0) {
