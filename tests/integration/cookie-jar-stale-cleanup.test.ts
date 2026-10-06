@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { CookieJarStore } from '@main/cookies/cookie-jar-store.js';
 
@@ -54,6 +55,27 @@ describe('dọn bản sao cookies sót lại: chỉ xóa đúng tệp app tạo 
     await new CookieJarStore(security).cleanupStaleRuns();
 
     expect(existsSync(victim)).toBe(true);
+  });
+
+  // Phát hiện khi phát hành 1.6.0 (2026-10-06): trên máy CI, thư mục tạm là tên ngắn 8.3 (C:\Users\RUNNER~1\…).
+  // realpath() trả tên dài nên so với đường dẫn gốc bị lệch → tưởng cookie-runs là liên kết, không dọn gì.
+  it.runIf(process.platform === 'win32')('đường dẫn dữ liệu dạng tên ngắn 8.3 (RUNNER~1) vẫn dọn đúng bản sao sót lại', async () => {
+    folder = mkdtempSync(join(tmpdir(), 'tubmedia-stale-runs-'));
+    const longParent = join(folder, 'thu-muc-du-lieu-ten-rat-dai');
+    mkdirSync(join(longParent, 'security', 'cookie-runs'), { recursive: true });
+    // windowsVerbatimArguments: nếu không, Node thoát dấu ngoặc kép thành \" và %~sI trả chuỗi rác thay vì tên ngắn.
+    const shortParent = spawnSync('cmd.exe', ['/d', '/c', `for %I in ("${longParent}") do @echo %~sI`], {
+      encoding: 'utf8',
+      windowsVerbatimArguments: true
+    }).stdout.trim();
+    expect(existsSync(shortParent), `tên ngắn phải trỏ tới thư mục thật: ${shortParent}`).toBe(true);
+    if (shortParent.toLowerCase() === longParent.toLowerCase()) return; // ổ không tạo tên 8.3 — không tái hiện được
+    const stale = join(longParent, 'security', 'cookie-runs', uuidName());
+    writeFileSync(stale, 'x');
+
+    await new CookieJarStore(join(shortParent, 'security')).cleanupStaleRuns();
+
+    expect(existsSync(stale)).toBe(false);
   });
 
   it('đường dẫn security cấu hình sai (tương đối/rỗng): không làm gì', async () => {

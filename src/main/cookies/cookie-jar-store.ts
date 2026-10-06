@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
-import { isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import type { CookieArgumentSettings } from '../downloader/ytdlp-cookie-arguments.js';
 
 /**
@@ -207,8 +207,12 @@ export class CookieJarStore {
       const runs = resolve(this.runsDirectory);
       const info = await lstat(runs).catch(() => null);
       if (!info || !info.isDirectory() || info.isSymbolicLink()) return;
+      // So với realpath của thư mục cha (không so với chuỗi gốc): đường dẫn dạng tên ngắn 8.3 (C:\Users\RUNNER~1\…)
+      // được realpath mở thành tên dài, so chuỗi gốc thì lệch và không dọn gì (phát hiện trên CI khi phát hành 1.6.0).
+      // cookie-runs là liên kết trỏ chỗ khác thì realpath của nó vẫn lệch với <cha thật>\cookie-runs → bỏ qua.
       const real = await realpath(runs).catch(() => null);
-      if (!real || real.toLowerCase() !== runs.toLowerCase()) return;
+      const realParent = await realpath(dirname(runs)).catch(() => null);
+      if (!real || !realParent || real.toLowerCase() !== join(realParent, basename(runs)).toLowerCase()) return;
       const entries = await readdir(runs, { withFileTypes: true }).catch(() => []);
       for (const entry of entries) {
         if (!entry.isFile() || !RUN_COPY_NAME.test(entry.name)) continue;
