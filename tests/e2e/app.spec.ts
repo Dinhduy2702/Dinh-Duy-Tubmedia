@@ -2569,3 +2569,53 @@ test('Cảnh báo thư mục tạm dùng chung: không có banner đầu trang, 
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
 });
+
+/**
+ * Sau phát hành 1.6.0 (2026-10-06): người dùng bấm X nhưng app không thoát hẳn, phải End Task. Chưa tái hiện được
+ * bằng thao tác thường; điểm yếu là before-quit chờ từng bước dọn dẹp không giới hạn. Ở chế độ e2e, biến
+ * TUBMEDIA_E2E_SHUTDOWN_HANG_STEP cố ý làm TREO một bước để chứng minh: app vẫn thoát hẳn trong giới hạn và
+ * logs\shutdown.log ghi rõ bước nào quá giờ.
+ */
+test('Thoát an toàn: một bước dọn dẹp bị treo vẫn thoát hẳn trong giới hạn và có nhật ký thoát', async () => {
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-shutdown-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  try {
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+        ),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+        TUBMEDIA_E2E_SHUTDOWN_HANG_STEP: 'queue',
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    const child = electronApplication.process();
+    mainProcessId = child.pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    const exited = new Promise<number>((resolveExit) => child.once('exit', () => resolveExit(Date.now())));
+
+    // Đúng đường của nút X: sự kiện 'close' của cửa sổ → requestClose (0 tác vụ → thoát).
+    const closedAt = Date.now();
+    await electronApplication.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.close()).catch(() => undefined);
+    const exitAt = await Promise.race([exited, sleep(25_000).then(() => -1)]);
+    expect(exitAt, 'app phải tự thoát hẳn dù bước "queue" bị treo').toBeGreaterThan(0);
+    expect(exitAt - closedAt, 'thoát trong giới hạn 15 giây (+ dự phòng)').toBeLessThan(18_000);
+
+    const trail = fs.readFileSync(path.join(userDataDirectory, 'logs', 'shutdown.log'), 'utf8');
+    expect(trail).toContain('BẮT ĐẦU THOÁT');
+    expect(trail).toMatch(/queue.*QUÁ GIỜ/);
+    expect(trail).toMatch(/processes.*ok/);
+    expect(trail).toContain('THOÁT XONG');
+  } finally {
+    await closeElectronApplication();
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});

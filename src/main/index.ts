@@ -10,12 +10,13 @@ import {
   Tray,
   type Event as ElectronEvent
 } from 'electron';
-import { mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { IPC } from '@shared/contracts/channels.js';
 import type { AppUpdateStatus } from '@shared/types/domain.js';
 import { AppContext } from './app/app-context.js';
 import { decideCloseAction, decideMinimizeAction } from './app/window-close-policy.js';
+import { runShutdownSequence, type ShutdownStep } from './app/shutdown-sequence.js';
 import { registerIpc } from './ipc/register-ipc.js';
 import { createMainWindow } from './windows/main-window.js';
 import { readDevelopmentEnvironment } from './runtime/development-environment.js';
@@ -32,7 +33,8 @@ let shutdownStarted = false;
 let shutdownMode: 'preserve' | 'cancel' = 'preserve';
 let allowWindowClose = false;
 
-const { e2e: isE2E, e2eUserData, fakeUpdateStatusJson } = readDevelopmentEnvironment(process.env, app.isPackaged);
+const developmentEnvironment = readDevelopmentEnvironment(process.env, app.isPackaged);
+const { e2e: isE2E, e2eUserData, fakeUpdateStatusJson, e2eShutdownHangStep } = developmentEnvironment;
 
 if (isE2E && e2eUserData) {
   app.setPath('userData', e2eUserData);
@@ -46,6 +48,50 @@ if (isE2E && e2eUserData) {
 }
 
 app.setAppUserModelId('com.tubmedia.download-video');
+
+const SHUTDOWN_TOTAL_TIMEOUT_MS = 15_000;
+/** Chốt chặn cuối, độc lập với chuỗi dọn dẹp: phòng trường hợp chính chuỗi không trả về. */
+const SHUTDOWN_WATCHDOG_MS = SHUTDOWN_TOTAL_TIMEOUT_MS + 2_000;
+
+/** Ghi đồng bộ ra logs\shutdown.log — vẫn ghi được kể cả khi bộ ghi nhật ký chính bị treo. Không bao giờ ném lỗi. */
+function createShutdownTrail(userData: string): (line: string) => void {
+  const file = join(userData, 'logs', 'shutdown.log');
+  return (line: string) => {
+    try {
+      mkdirSync(join(userData, 'logs'), { recursive: true });
+      appendFileSync(file, `${new Date().toISOString()} [pid ${process.pid}] ${line}\n`, 'utf8');
+    } catch {
+      // Không ghi được nhật ký thoát thì vẫn phải thoát.
+    }
+  };
+}
+
+/** Các bước dọn dẹp khi thoát, mỗi bước có giới hạn thời gian riêng (tổng tối đa SHUTDOWN_TOTAL_TIMEOUT_MS). */
+function buildShutdownSteps(current: AppContext, preserve: boolean): ShutdownStep[] {
+  const steps: ShutdownStep[] = [
+    { name: 'quickDownload', timeoutMs: 4_000, run: () => current.quickDownload.shutdown(preserve) },
+    // Hàng đợi chờ tác vụ đang chạy kết thúc; quá giờ thì bước "processes" ngay sau sẽ giết tiến trình con.
+    { name: 'queue', timeoutMs: 6_000, run: () => current.queue.stop(preserve) },
+    { name: 'processes', timeoutMs: 4_000, run: () => current.processes.shutdown() },
+    { name: 'logger', timeoutMs: 2_000, run: () => current.logger.flush() },
+    { name: 'database', timeoutMs: 1_000, run: () => current.database.close() },
+    {
+      name: 'powerSaveBlocker',
+      timeoutMs: 1_000,
+      run: () => {
+        if (powerSaveBlockerId !== null && powerSaveBlocker.isStarted(powerSaveBlockerId)) {
+          powerSaveBlocker.stop(powerSaveBlockerId);
+          powerSaveBlockerId = null;
+        }
+      }
+    },
+    { name: 'tray', timeoutMs: 1_000, run: () => tray?.destroy() }
+  ];
+  // Chỉ ở chế độ e2e: cố ý làm treo một bước để kiểm chứng app vẫn thoát hẳn (bài e2e "Thoát an toàn").
+  return e2eShutdownHangStep
+    ? steps.map((step) => (step.name === e2eShutdownHangStep ? { ...step, run: () => new Promise<void>(() => undefined) } : step))
+    : steps;
+}
 
 function showMainWindow(): void {
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -270,16 +316,14 @@ function initializeApplication(): void {
     if (statsTimer) clearInterval(statsTimer);
     if (updateTimer) clearInterval(updateTimer);
     if (updateInitialTimer) clearTimeout(updateInitialTimer);
-    await activeContext.quickDownload.shutdown(true);
-    await activeContext.queue.stop(true);
-    await activeContext.processes.shutdown();
-    await activeContext.logger.flush();
-    activeContext.database.close();
-    if (powerSaveBlockerId !== null && powerSaveBlocker.isStarted(powerSaveBlockerId)) {
-      powerSaveBlocker.stop(powerSaveBlockerId);
-      powerSaveBlockerId = null;
-    }
-    tray?.destroy();
+    // Cùng các bước có giới hạn thời gian như khi thoát thường: một bước treo không được chặn việc cài bản cập nhật.
+    const trail = createShutdownTrail(activeContext.userData);
+    trail('BẮT ĐẦU THOÁT để cài bản cập nhật');
+    const report = await runShutdownSequence(buildShutdownSteps(activeContext, true), {
+      totalTimeoutMs: SHUTDOWN_TOTAL_TIMEOUT_MS,
+      trail
+    });
+    trail(`THOÁT XONG (cài bản cập nhật) sau ${report.totalMs} ms`);
     tray = null;
   };
   const current = new AppContext(prepareForAppUpdate);
@@ -401,42 +445,27 @@ app.on('before-quit', (event: ElectronEvent) => {
   if (updateTimer) clearInterval(updateTimer);
   if (updateInitialTimer) clearTimeout(updateInitialTimer);
 
+  // Sau phát hành 1.6.0 (2026-10-06): bấm X mà app không thoát hẳn. Mỗi bước dọn dẹp giờ có giới hạn thời gian (bước
+  // treo thì chuyển sang bước sau — bước giết tiến trình con vẫn chạy), tổng tối đa 15 giây, và mọi diễn biến ghi
+  // đồng bộ ra logs\shutdown.log. Chốt chặn cuối: hẹn giờ độc lập buộc app.exit nếu cả chuỗi vẫn không trả về.
+  const trail = createShutdownTrail(current.userData);
+  trail(`BẮT ĐẦU THOÁT (chế độ ${shutdownMode}, ${current.queue.activeCount()} tác vụ hàng đợi đang chạy)`);
+  const watchdog = setTimeout(() => {
+    trail(`QUÁ ${SHUTDOWN_WATCHDOG_MS} ms mà chuỗi dọn dẹp chưa trả về — BUỘC THOÁT`);
+    app.exit(0);
+  }, SHUTDOWN_WATCHDOG_MS);
+
   void (async () => {
-    // Mỗi bước dọn dẹp phải độc lập: nếu một bước ném lỗi thì các bước sau vẫn chạy
-    // và app.exit(0) luôn được gọi, tránh tiến trình Tubmedia treo ngầm không thoát được.
-    const step = async (name: string, action: () => Promise<void> | void): Promise<void> => {
-      try {
-        await action();
-      } catch (error) {
-        console.error(`Shutdown step "${name}" failed:`, error instanceof Error ? error.message : error);
-      }
-    };
     try {
-      await step('quickDownload', async () => {
-        await current.quickDownload.shutdown(shutdownMode === 'preserve');
+      const report = await runShutdownSequence(buildShutdownSteps(current, shutdownMode === 'preserve'), {
+        totalTimeoutMs: SHUTDOWN_TOTAL_TIMEOUT_MS,
+        trail
       });
-      await step('queue', async () => {
-        await current.queue.stop(shutdownMode === 'preserve');
-      });
-      await step('processes', async () => {
-        await current.processes.shutdown();
-      });
-      await step('logger', async () => {
-        await current.logger.flush();
-      });
-      await step('database', () => {
-        current.database.close();
-      });
-      await step('powerSaveBlocker', () => {
-        if (powerSaveBlockerId !== null && powerSaveBlocker.isStarted(powerSaveBlockerId)) {
-          powerSaveBlocker.stop(powerSaveBlockerId);
-          powerSaveBlockerId = null;
-        }
-      });
-      await step('tray', () => {
-        tray?.destroy();
-      });
+      trail(`THOÁT XONG sau ${report.totalMs} ms${report.forced ? ' — buộc thoát vì quá giới hạn tổng' : ''}`);
+    } catch (error) {
+      trail(`LỖI ngoài dự kiến khi dọn dẹp: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
+      clearTimeout(watchdog);
       app.exit(0);
     }
   })();

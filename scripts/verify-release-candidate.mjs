@@ -145,10 +145,15 @@ check(
   has('src/main/logging/logger.ts', 'pendingWrites = new Map') &&
     has('src/main/logging/logger.ts', 'await this.fileWriteTail')
 );
+// 2026-10-06: các bước dọn dẹp khi thoát gom vào buildShutdownSteps (có giới hạn thời gian), dùng chung cho thoát
+// thường và cài bản cập nhật — vẫn phải đẩy hết nhật ký TRƯỚC khi đóng sqlite.
+const indexSource = files['src/main/index.ts'];
 check(
   'shutdown flushes buffered logs before closing sqlite',
-  has('src/main/index.ts', 'await current.logger.flush()') &&
-    has('src/main/index.ts', 'await activeContext.logger.flush()')
+  indexSource.includes("name: 'logger', timeoutMs: 2_000, run: () => current.logger.flush()") &&
+    indexSource.indexOf("name: 'logger'") < indexSource.indexOf("name: 'database'") &&
+    indexSource.includes('runShutdownSequence(buildShutdownSteps(current,') &&
+    indexSource.includes('runShutdownSequence(buildShutdownSteps(activeContext,')
 );
 check(
   'automatic update backups are bounded',

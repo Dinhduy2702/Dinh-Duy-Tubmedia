@@ -243,6 +243,7 @@ SECURITY.md
 SOURCE_UPDATE_OVERWRITE_VI.md
 source-manifest.json
 src/main/app/app-context.ts
+src/main/app/shutdown-sequence.ts
 src/main/app/window-close-policy.ts
 src/main/backups/backup-service.ts
 src/main/clips/clip-engine.ts
@@ -588,6 +589,7 @@ tests/unit/settings-policy.test.ts
 tests/unit/settings-save-stale-error.test.ts
 tests/unit/sha256-sums.test.ts
 tests/unit/shared-folder-policy.test.ts
+tests/unit/shutdown-sequence.test.ts
 tests/unit/smart-merge-pipeline-v120.test.ts
 tests/unit/source-completeness.test.ts
 tests/unit/startup-fast.test.ts

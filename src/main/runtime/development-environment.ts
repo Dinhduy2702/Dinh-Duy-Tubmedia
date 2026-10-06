@@ -8,6 +8,9 @@ export interface DevelopmentEnvironment {
    * "vừa phát hiện bản cập nhật mới" mà không cần mạng/máy chủ cập nhật thật. Chỉ dùng khi chạy từ mã
    * nguồn (isPackaged=false) và e2e=true — bản đã đóng gói bỏ qua hoàn toàn như mọi biến khác ở đây. */
   fakeUpdateStatusJson: string | undefined;
+  /** 2026-10-06: tên bước dọn dẹp khi thoát cố ý làm TREO, để bài e2e "Thoát an toàn" chứng minh app vẫn thoát hẳn.
+   * Chỉ có tác dụng khi e2e=true và chạy từ mã nguồn. */
+  e2eShutdownHangStep: string | undefined;
 }
 
 /**
@@ -20,12 +23,20 @@ export function readDevelopmentEnvironment(
   isPackaged: boolean
 ): DevelopmentEnvironment {
   if (isPackaged) {
-    return { rendererUrl: undefined, e2e: false, e2eUserData: undefined, fakeUpdateStatusJson: undefined };
+    return {
+      rendererUrl: undefined,
+      e2e: false,
+      e2eUserData: undefined,
+      fakeUpdateStatusJson: undefined,
+      e2eShutdownHangStep: undefined
+    };
   }
   return {
     rendererUrl: env.ELECTRON_RENDERER_URL || undefined,
     e2e: env.TUBMEDIA_E2E === '1',
     e2eUserData: env.TUBMEDIA_E2E_USER_DATA || undefined,
-    fakeUpdateStatusJson: env.TUBMEDIA_E2E_FAKE_UPDATE_STATUS_JSON || undefined
+    fakeUpdateStatusJson: env.TUBMEDIA_E2E_FAKE_UPDATE_STATUS_JSON || undefined,
+    e2eShutdownHangStep:
+      env.TUBMEDIA_E2E === '1' ? env.TUBMEDIA_E2E_SHUTDOWN_HANG_STEP || undefined : undefined
   };
 }
