@@ -409,6 +409,7 @@ src/shared/release-notes.ts
 src/shared/schemas/ipc.ts
 src/shared/system-cleanup.ts
 src/shared/types/domain.ts
+src/shared/utils/active-download-workers-label.ts
 src/shared/utils/attempt-display.ts
 src/shared/utils/concat-compatibility.ts
 src/shared/utils/cookie-policy.ts
@@ -463,6 +464,7 @@ tests/integration/restore-sources-policy.test.ts
 tests/integration/settings-restore-policy.test.ts
 tests/integration/settings-rollback-compat.test.ts
 tests/integration/system-cleanup-service.test.ts
+tests/unit/active-download-workers-label.test.ts
 tests/unit/app-update-version.test.ts
 tests/unit/attempt-display.test.ts
 tests/unit/batch-error-aggregation-r18.test.ts

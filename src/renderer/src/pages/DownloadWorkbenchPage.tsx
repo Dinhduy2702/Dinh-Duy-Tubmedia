@@ -34,6 +34,7 @@ import type {
 } from '@shared/types/domain';
 import { planForListCount, recommendDownloadConcurrency } from '@shared/utils/hardware-recommendation';
 import { shouldShowInlineBlockingIssue } from '@shared/utils/notification-policy';
+import { activeDownloadWorkersLabel } from '@shared/utils/active-download-workers-label';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CookieManagerDialog } from '../components/CookieManagerDialog';
 import { InfoDisclosure } from '../components/InfoDisclosure';
@@ -639,6 +640,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
           hardware={hardware}
           settings={settings}
           laneCount={laneCount}
+          laneWorkers={LANE_IDS.slice(0, laneCount).map((slot) => clampWorker(forms[slot].downloadWorkers))}
           recommendBusy={recommendBusy}
           onRecommend={applyRecommendation}
           onReferenceQuality={applyReferenceQuality}
@@ -746,6 +748,7 @@ function PreflightPanel({
   hardware,
   settings,
   laneCount,
+  laneWorkers,
   recommendBusy,
   onRecommend,
   onReferenceQuality,
@@ -754,6 +757,7 @@ function PreflightPanel({
   hardware: HardwareProfile | null;
   settings: AppSettings | null;
   laneCount: 1 | 2 | 3 | 4 | 5 | 6;
+  laneWorkers: number[];
   recommendBusy: boolean;
   onRecommend: () => Promise<void>;
   onReferenceQuality: () => Promise<void>;
@@ -769,7 +773,7 @@ function PreflightPanel({
       icon={Gauge}
       title="Thiết lập tải đang dùng"
       summary={qualityLabel(settings)}
-      status={plan ? `${plan.workersPerList}/danh sách · chạy song song độc lập` : 'Đang nhận diện máy'}
+      status={activeDownloadWorkersLabel(laneWorkers)}
       tone="info"
       actions={
         <>
