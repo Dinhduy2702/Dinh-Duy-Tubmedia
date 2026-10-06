@@ -20,16 +20,15 @@ const notificationCenter = read('src/renderer/src/components/NotificationCenter.
 const store = read('src/renderer/src/stores/app-store.ts');
 
 check(
-  'fixed diagnostic dock only keeps currently blocking job issues',
-  diagnosticPolicy.includes('isDiagnosticStillBlocking') &&
-    diagnosticPolicy.includes("'paused'") &&
-    diagnosticPolicy.includes("'interrupted'") &&
-    diagnosticPolicy.includes("'failed'") &&
+  // 2026-10-06 (phần B rà soát thông báo): một vấn đề chỉ hiện một nơi — nhật ký gắn danh sách/tác vụ đã có thông báo
+  // nổi đại diện nên khung chẩn đoán không hiện chúng nữa (trước đây giữ khi tác vụ còn bị chặn).
+  'diagnostic dock leaves job/list issues to the grouped attention notice',
+  diagnosticPolicy.includes('if (entry.jobId || entry.projectId) return false;') &&
     diagnosticDock.includes('shouldDisplayDiagnostic(entry, jobs)')
 );
 check(
   'non-blocking diagnostics expire automatically',
-  diagnosticPolicy.includes('TRANSIENT_DIAGNOSTIC_DURATION_MS = 8_000') &&
+  diagnosticPolicy.includes('TRANSIENT_DIAGNOSTIC_DURATION_MS = 12_000') &&
     diagnosticDock.includes('window.setTimeout(() => setDismissedId(diagnosticId), wait)')
 );
 check(

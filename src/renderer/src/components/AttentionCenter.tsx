@@ -26,6 +26,7 @@ export function AttentionCenter(): React.JSX.Element | null {
   const queued = useAppStore((state) => state.attentionQueue.length);
   const setError = useAppStore((state) => state.setError);
   const dismissAttention = useAppStore((state) => state.dismissAttention);
+  const dismissIssueByUser = useAppStore((state) => state.dismissIssueByUser);
   const setPage = useAppStore((state) => state.setPage);
   const [phase, setPhase] = useState<Phase>('entering');
   const [paused, setPaused] = useState(false);
@@ -64,8 +65,7 @@ export function AttentionCenter(): React.JSX.Element | null {
       code: attention?.code ?? issue?.code,
       sticky: attention?.sticky,
       steps: attention?.steps ?? issue?.steps
-    },
-    !error && attentionResolved
+    }
   );
   const sticky = display.persistent;
   const duration = updateAttention
@@ -95,6 +95,24 @@ export function AttentionCenter(): React.JSX.Element | null {
     if (!attentionResolved || !attention || phase === 'leaving') return;
     beginClose();
   }, [attention, attentionResolved, beginClose, phase]);
+
+  // Phần B rà soát thông báo (2026-10-06): CHỈ khi người dùng bấm X mới ghi nhận "đã biết" — vấn đề cùng khóa (nhóm mã
+  // lỗi + phạm vi) không bật lại (gắn danh sách: tới khi danh sách hết bị chặn; thao tác: trong phiên). Tự tắt theo
+  // giờ thì không ghi nhận gì.
+  const closeByUser = useCallback((): void => {
+    if (attention) {
+      dismissIssueByUser(attention);
+    } else if (issue) {
+      dismissIssueByUser({
+        id: 'ui-error',
+        severity: issue.tone,
+        title: issue.title,
+        message: issue.message,
+        ...(issue.code ? { code: issue.code } : {})
+      });
+    }
+    beginClose();
+  }, [attention, beginClose, dismissIssueByUser, issue]);
 
   useEffect(() => {
     clearTimers();
@@ -165,7 +183,7 @@ export function AttentionCenter(): React.JSX.Element | null {
           <div className="attention-heading">
             <span className="tone-chip">{NOTICE_TONE_LABEL[tone]}</span>
             <div className="text-sm font-black">{title}</div>
-            {sticky && <span className="attention-sticky-label">Cần xử lý</span>}
+            {(sticky || display.actionRequired) && <span className="attention-sticky-label">Cần xử lý</span>}
             {queued > 0 && <span className="attention-queue-label">+{queued}</span>}
           </div>
           <div className="mt-1 text-sm leading-5">{message}</div>
@@ -222,7 +240,7 @@ export function AttentionCenter(): React.JSX.Element | null {
             </div>
           )}
         </div>
-        <button className="attention-close" aria-label="Đóng thông báo" onClick={beginClose}>
+        <button className="attention-close" aria-label="Đóng thông báo" onClick={closeByUser}>
           <X size={18} />
         </button>
         {!sticky && <div className={`attention-life ${paused ? 'is-paused' : ''}`} aria-hidden="true" />}

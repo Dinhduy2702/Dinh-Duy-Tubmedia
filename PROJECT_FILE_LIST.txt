@@ -433,6 +433,7 @@ src/shared/utils/job-state-machine.ts
 src/shared/utils/media-info-format.ts
 src/shared/utils/merge-target.ts
 src/shared/utils/normalization-match.ts
+src/shared/utils/notice-issue.ts
 src/shared/utils/notice-tone.ts
 src/shared/utils/notification-policy.ts
 src/shared/utils/nvenc-diagnosis.ts
@@ -549,6 +550,7 @@ tests/unit/normalization-match.test.ts
 tests/unit/normalize-engine-stream-copy.test.ts
 tests/unit/notice-components.test.ts
 tests/unit/notice-display-policy.test.ts
+tests/unit/notice-issue.test.ts
 tests/unit/notice-tone.test.ts
 tests/unit/notification-center.test.ts
 tests/unit/notification-policy.test.ts

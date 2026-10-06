@@ -101,12 +101,13 @@ check(
   )
 );
 check(
-  'critical errors remain until resolved or dismissed',
-  // Quy tắc nằm ở noticeDisplayPolicy (notification-policy.ts): lỗi thật không tự tắt trừ khi nguyên nhân đã được giải quyết.
+  'notices auto-dismiss (errors ~12s) and close early once resolved',
+  // 2026-10-06 (phần B rà soát thông báo, người dùng duyệt): không còn thông báo nào đứng cố định; lỗi tự tắt ~12 giây,
+  // cảnh báo chặn việc tối thiểu 12 giây; vấn đề đã được giải quyết thì đóng sớm.
   has('src/renderer/src/components/AttentionCenter.tsx', 'noticeDisplayPolicy(') &&
-    has('src/renderer/src/components/AttentionCenter.tsx', '!error && attentionResolved') &&
     has('src/renderer/src/components/AttentionCenter.tsx', 'isAttentionNoticeResolved(attention, jobs)') &&
-    has('src/shared/utils/notification-policy.ts', 'isPersistentNoticeTone(notice.severity) && !resolved')
+    has('src/shared/utils/notification-policy.ts', 'persistent: false,') &&
+    has('src/shared/utils/notification-policy.ts', 'ERROR_NOTIFICATION_DURATION_MS = 12_000')
 );
 check(
   'notification timeout is severity-aware',

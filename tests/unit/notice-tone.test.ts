@@ -13,7 +13,7 @@ import {
   toneForErrorCode,
   toneForStatus
 } from '../../src/shared/utils/notice-tone.js';
-import { isPersistentNoticeTone, notificationDuration } from '../../src/shared/utils/notification-policy.js';
+import { noticeDisplayPolicy, notificationDuration } from '../../src/shared/utils/notification-policy.js';
 import { friendlyIssue } from '../../src/shared/utils/ui-error.js';
 
 const source = (path: string): string => readFileSync(join(process.cwd(), path), 'utf8');
@@ -94,10 +94,9 @@ describe('mức thông báo có kiểu', () => {
     expect(toneForStatus('  CANCELLED ')).toBe('neutral');
   });
 
-  it('chỉ lỗi thật mới nằm lại trên màn hình; mức khác tự tắt với thời gian riêng', () => {
-    expect(isPersistentNoticeTone('error')).toBe(true);
-    for (const tone of ['warning', 'info', 'success', 'neutral'] as const) {
-      expect(isPersistentNoticeTone(tone)).toBe(false);
+  it('không mức nào nằm lại trên màn hình (2026-10-06); mỗi mức tự tắt với thời gian riêng', () => {
+    for (const tone of NOTICE_TONES) {
+      expect(noticeDisplayPolicy({ severity: tone }).persistent, tone).toBe(false);
     }
     for (const tone of NOTICE_TONES) expect(notificationDuration(tone)).toBeGreaterThan(2_000);
     expect(notificationDuration('success')).toBeLessThan(notificationDuration('warning'));

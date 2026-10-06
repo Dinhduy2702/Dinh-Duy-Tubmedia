@@ -41,11 +41,20 @@ function supportText(error: unknown, log: LogEntry | null): string {
   }
 }
 
+/**
+ * Phần B rà soát thông báo (2026-10-06): loại lỗi (thành phần + mã sự kiện) người dùng đã bấm X tắt — không bật lại
+ * cùng loại trong phiên làm việc này. Tự tắt theo giờ thì không ghi nhận.
+ */
+const dismissedDiagnosticCodes = new Set<string>();
+const diagnosticKind = (entry: LogEntry): string => `${entry.module}:${entry.eventCode}`;
+
 export function DiagnosticDock(): React.JSX.Element | null {
   const jobs = useAppStore((state) => state.jobs);
   const logs = useAppStore((state) => state.logs);
   const setPage = useAppStore((state) => state.setPage);
-  const log = logs.find((entry) => shouldDisplayDiagnostic(entry, jobs)) ?? null;
+  const log =
+    logs.find((entry) => shouldDisplayDiagnostic(entry, jobs) && !dismissedDiagnosticCodes.has(diagnosticKind(entry))) ??
+    null;
   const blocking = Boolean(log && isDiagnosticStillBlocking(log, jobs));
   const issue = useMemo(() => friendlyIssue(log?.message ?? ''), [log]);
   // Mức lấy từ MỨC CỦA DÒNG NHẬT KÝ (error/warn/info), không đoán từ chữ: nhật ký cảnh báo không được ra đỏ.
@@ -66,6 +75,7 @@ export function DiagnosticDock(): React.JSX.Element | null {
   if (!diagnosticId || diagnosticId === dismissedId) return null;
   const technical = supportText(null, log);
   const close = (): void => {
+    if (log) dismissedDiagnosticCodes.add(diagnosticKind(log));
     setDismissedId(diagnosticId);
   };
 

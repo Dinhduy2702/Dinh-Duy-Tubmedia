@@ -19,10 +19,11 @@ describe('v1 runtime performance and lifecycle policy', () => {
     ]);
     expect(center).toContain('const attentionResolved = attention');
     expect(center).toContain('isAttentionNoticeResolved(attention, jobs)');
-    // Lỗi thật vẫn nằm lại cho tới khi được giải quyết; quy tắc nay nằm ở noticeDisplayPolicy (có test hành vi).
+    // 2026-10-06 (phần B rà soát thông báo, người dùng duyệt): không còn thông báo nào đứng cố định — lỗi tự tắt ~12s;
+    // vấn đề đã được giải quyết thì vẫn đóng sớm (isAttentionNoticeResolved). Quy tắc ở noticeDisplayPolicy (có test hành vi).
     expect(center).toContain('noticeDisplayPolicy(');
-    expect(center).toContain('!error && attentionResolved');
-    expect(policy).toContain('isPersistentNoticeTone(notice.severity) && !resolved');
+    expect(policy).toContain('persistent: false,');
+    expect(policy).toContain('ERROR_NOTIFICATION_DURATION_MS = 12_000');
     expect(center).toContain("if (!attentionResolved || !attention || phase === 'leaving') return;");
     expect(center).toContain("type Phase = 'entering' | 'visible' | 'leaving'");
     expect(policy).toContain('SUCCESS_NOTIFICATION_DURATION_MS');

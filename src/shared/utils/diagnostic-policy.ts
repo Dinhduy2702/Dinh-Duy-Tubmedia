@@ -31,7 +31,8 @@ const ACTIONABLE_WARNING_EVENT_CODES = new Set([
 
 const BLOCKING_STATUSES: ReadonlySet<QueueJob['status']> = new Set(['paused', 'interrupted', 'failed']);
 
-export const TRANSIENT_DIAGNOSTIC_DURATION_MS = 8_000;
+/** Lỗi cấp ứng dụng ở khung chẩn đoán tự tắt cùng nhịp với lỗi thường của thông báo nổi (~12 giây). */
+export const TRANSIENT_DIAGNOSTIC_DURATION_MS = 12_000;
 
 export function isActionableDiagnostic(entry: Pick<LogEntry, 'level' | 'eventCode'>): boolean {
   if (NON_ACTIONABLE_EVENT_CODES.has(entry.eventCode)) return false;
@@ -64,13 +65,15 @@ export function isDiagnosticStillBlocking(
 
 export function shouldDisplayDiagnostic(
   entry: LogEntry,
-  jobs: readonly Pick<QueueJob, 'id' | 'projectId' | 'status' | 'errorCode'>[],
+  // Giữ tham số để nơi gọi không đổi; nhật ký gắn tác vụ giờ không hiện ở khung chẩn đoán nữa nên không cần dùng.
+  _jobs: readonly Pick<QueueJob, 'id' | 'projectId' | 'status' | 'errorCode'>[],
   now = Date.now()
 ): boolean {
   if (!isActionableDiagnostic(entry)) return false;
-  if (entry.jobId || entry.projectId) {
-    return isDiagnosticStillBlocking(entry, jobs);
-  }
+  // Phần B rà soát thông báo (2026-10-06): một vấn đề chỉ hiện ở MỘT nơi. Nhật ký gắn danh sách/tác vụ đã có thông báo
+  // nổi đại diện (tiến trình chính gửi: tác vụ bị chặn, "Có N video gặp lỗi…") — trước đây khung chẩn đoán còn bật thêm
+  // MỖI dòng lỗi của từng video, người dùng phải tắt nhiều lần. Khung chỉ còn dành cho lỗi cấp ứng dụng.
+  if (entry.jobId || entry.projectId) return false;
   const timestamp = Date.parse(entry.timestamp);
   if (!Number.isFinite(timestamp)) return true;
   return now - timestamp <= TRANSIENT_DIAGNOSTIC_DURATION_MS;

@@ -2619,3 +2619,135 @@ test('Thoát an toàn: một bước dọn dẹp bị treo vẫn thoát hẳn tr
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
 });
+
+/**
+ * Phần B rà soát thông báo (người dùng duyệt 2026-10-06). Gửi thông báo/nhật ký từ tiến trình chính qua ĐÚNG kênh sự
+ * kiện app dùng thật (events:attention, events:log) rồi kiểm giao diện:
+ *  - cùng vấn đề (nhóm mã lỗi + danh sách) → THAY bằng bản mới nhất, không chồng; khác vấn đề → xếp hàng hiện đủ;
+ *  - bấm X → không hiện lại vấn đề tương tự, nhớ qua lần mở app tới khi danh sách hết bị chặn;
+ *  - mọi thông báo tự tắt (lỗi chặn việc ≥ 12 giây);
+ *  - khung chẩn đoán không lặp lại vấn đề của danh sách; lỗi cấp app đã tắt thì không bật lại cùng loại.
+ */
+test('Phần B thông báo: thay thông báo trùng, đã tắt thì không hiện lại, tự tắt, một vấn đề một nơi', async () => {
+  test.setTimeout(150_000);
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-notices-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  const env = {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    ),
+    NODE_ENV: 'test',
+    TUBMEDIA_E2E: '1',
+    TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+    PLAYWRIGHT_TEST: '1',
+    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+  };
+  const launch = async (): Promise<void> => {
+    electronApplication = await electron.launch({ args: [mainEntry], cwd: projectRoot, env, timeout: 45_000 });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await shellWindow.waitForTimeout(1500);
+  };
+  const send = async (channel: string, payload: unknown): Promise<void> => {
+    await electronApplication!.evaluate(
+      ({ BrowserWindow }, [name, data]) => BrowserWindow.getAllWindows()[0]!.webContents.send(name, data),
+      [channel, payload] as const
+    );
+  };
+  const center = (): ReturnType<Page['locator']> => shellWindow!.locator('.attention-center');
+  const projectId = randomUUID();
+  const jobId = randomUUID();
+  const diskFull = (message: string): Record<string, unknown> => ({
+    id: `disk-${randomUUID()}`, severity: 'error', title: 'Ổ đĩa không đủ dung lượng', message, code: 'DISK_FULL', projectId, sticky: true
+  });
+
+  try {
+    await launch();
+    await closeElectronApplication();
+    const now = new Date().toISOString();
+    const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+    db.prepare(
+      `INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,aspect_ratio,created_at,updated_at,archived_at)
+       VALUES(?,?,NULL,'','failed',?,?,?,?,'x','quality-source-size','resource-balanced',0,'original',?,?,NULL)`
+    ).run(projectId, 'Danh sách e2e', sandbox, sandbox, sandbox, sandbox, now, now);
+    db.prepare(
+      `INSERT INTO queue_jobs(id,project_id,type,status,priority,input_json,progress,attempts,max_attempts,error_code,error_message,created_at,updated_at)
+       VALUES(?,?,'download','failed',0,?,0,3,3,'DISK_FULL','Ổ đầy',?,?)`
+    ).run(jobId, projectId, JSON.stringify({ url: 'https://example.com/video' }), now, now);
+    db.close();
+
+    await launch();
+    await shellWindow!.mouse.move(5, 5);
+
+    // 1) Cùng vấn đề gửi 3 lần liên tiếp → chỉ MỘT thông báo, nội dung mới nhất, không có "+N".
+    for (const message of ['lần 1', 'lần 2', 'lần 3']) await send('events:attention', diskFull(message));
+    await shellWindow!.waitForTimeout(600);
+    await expect(center()).toHaveCount(1);
+    await expect(center()).toContainText('lần 3');
+    await expect(shellWindow!.locator('.attention-queue-label')).toHaveCount(0);
+
+    // 2) Vấn đề KHÁC loại → xếp hàng, không bị gộp nhầm.
+    await send('events:attention', {
+      id: `rate-${randomUUID()}`, severity: 'warning', title: 'Máy chủ video tạm từ chối', message: 'giới hạn tải', code: 'SOURCE_RATE_LIMITED', projectId
+    });
+    await expect(shellWindow!.locator('.attention-queue-label')).toHaveText('+1');
+
+    // 3) Bấm X: thông báo kế tiếp (khác loại) hiện ra đầy đủ; tắt nốt.
+    await center().locator('.attention-close').click();
+    await expect(center()).toContainText('giới hạn tải', { timeout: 5_000 });
+    await center().locator('.attention-close').click();
+    await expect(center()).toHaveCount(0, { timeout: 5_000 });
+
+    // 4) Vấn đề đã tắt xảy ra tiếp → KHÔNG hiện lại.
+    await send('events:attention', diskFull('lần 4'));
+    await shellWindow!.waitForTimeout(1200);
+    await expect(center()).toHaveCount(0);
+
+    // 5) Mở lại app, danh sách VẪN bị chặn → vẫn không hiện lại.
+    await closeElectronApplication();
+    await launch();
+    await shellWindow!.mouse.move(5, 5);
+    await send('events:attention', diskFull('lần 5'));
+    await shellWindow!.waitForTimeout(1200);
+    await expect(center()).toHaveCount(0);
+
+    // 6) Tình huống đổi khác (danh sách hết bị chặn) → lần chặn mới HIỆN lại, và tự tắt sau ≥ 12 giây.
+    await closeElectronApplication();
+    const db2 = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+    db2.prepare("UPDATE queue_jobs SET status='completed', error_code=NULL, error_message=NULL WHERE id=?").run(jobId);
+    db2.close();
+    await launch(); // mở app lúc danh sách đã hết bị chặn → bỏ ghi nhớ "đã tắt"
+    await closeElectronApplication();
+    // Lần bị chặn MỚI (thông báo ổ đầy thật chỉ đến khi danh sách đang bị chặn; nếu không, thông báo tự đóng sớm vì
+    // vấn đề đã được giải quyết — cơ chế cũ vẫn giữ).
+    const db3 = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+    db3.prepare("UPDATE queue_jobs SET status='failed', error_code='DISK_FULL', error_message='Ổ đầy lần mới' WHERE id=?").run(jobId);
+    db3.close();
+    await launch();
+    await shellWindow!.mouse.move(5, 5);
+    await send('events:attention', diskFull('lần 6'));
+    await expect(center()).toContainText('lần 6', { timeout: 5_000 });
+    const shownAt = Date.now();
+    await expect(center()).toHaveCount(0, { timeout: 16_000 });
+    expect(Date.now() - shownAt, 'lỗi chặn việc hiện tối thiểu ~12 giây').toBeGreaterThan(10_500);
+
+    // 7) Khung chẩn đoán: nhật ký gắn danh sách không lặp lại ở đây; lỗi cấp app hiện, tắt rồi không bật lại cùng loại.
+    const log = (over: Record<string, unknown>): Record<string, unknown> => ({
+      id: randomUUID(), timestamp: new Date().toISOString(), level: 'error', module: 'download', eventCode: 'JOB_FAILED', message: 'Video lỗi', ...over
+    });
+    await send('events:log', log({ projectId, jobId }));
+    await shellWindow!.waitForTimeout(1500);
+    await expect(shellWindow!.locator('.diagnostic-dock')).toHaveCount(0);
+    await send('events:log', log({ module: 'tools', eventCode: 'TOOL_HEALTH_CHECK_FAILED', message: 'Công cụ lỗi lần 1' }));
+    await expect(shellWindow!.locator('.diagnostic-dock')).toBeVisible({ timeout: 5_000 });
+    await shellWindow!.locator('.diagnostic-dock').getByRole('button', { name: 'Đóng thông báo này' }).click();
+    await expect(shellWindow!.locator('.diagnostic-dock')).toHaveCount(0);
+    await send('events:log', log({ module: 'tools', eventCode: 'TOOL_HEALTH_CHECK_FAILED', message: 'Công cụ lỗi lần 2' }));
+    await shellWindow!.waitForTimeout(1500);
+    await expect(shellWindow!.locator('.diagnostic-dock')).toHaveCount(0);
+  } finally {
+    await closeElectronApplication();
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});

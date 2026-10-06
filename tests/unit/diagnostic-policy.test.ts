@@ -37,7 +37,9 @@ describe('diagnostic policy', () => {
     expect(isActionableDiagnostic({ level: 'error', eventCode: 'MERGE_FAILED' })).toBe(true);
     expect(isActionableDiagnostic({ level: 'warn', eventCode: 'DISK_FULL' })).toBe(true);
   });
-  it('keeps a cookie diagnostic only while its job is still blocked', () => {
+  // 2026-10-06 (phần B rà soát thông báo, người dùng duyệt): một vấn đề chỉ hiện MỘT nơi — tác vụ bị chặn đã có thông báo
+  // nổi đại diện (gộp theo danh sách), nên khung chẩn đoán không hiện nhật ký gắn tác vụ nữa, kể cả khi còn bị chặn.
+  it('never surfaces a job-scoped diagnostic (the grouped attention notice represents it)', () => {
     expect(
       shouldDisplayDiagnostic(
         cookieLog,
@@ -51,7 +53,7 @@ describe('diagnostic policy', () => {
         ],
         Date.parse(cookieLog.timestamp) + 30_000
       )
-    ).toBe(true);
+    ).toBe(false);
     expect(
       shouldDisplayDiagnostic(
         cookieLog,

@@ -2,6 +2,13 @@ import { create } from 'zustand';
 import { friendlyIssue, safeUiText } from '../utils/ui-error';
 import { isJobNoticeStillBlocking, shouldRouteIssueToAttention } from '@shared/utils/notification-policy';
 import { isNoticeTone } from '@shared/utils/notice-tone';
+import {
+  isIssueDismissed,
+  mergeNoticeIntoQueue,
+  pruneDismissedIssues,
+  recordIssueDismissal,
+  type DismissedIssue
+} from '@shared/utils/notice-issue';
 import type {
   AppSettings,
   AppUpdateStatus,
@@ -62,6 +69,8 @@ interface State {
   error: unknown;
   attention: AttentionNotice | null;
   attentionQueue: AttentionNotice[];
+  /** Vấn đề người dùng đã bấm X tắt (phần B rà soát thông báo, 2026-10-06) — không hiện lại vấn đề cùng khóa. */
+  dismissedIssues: DismissedIssue[];
   notifications: NotificationRecord[];
   notificationCenterOpen: boolean;
   updateStatus: AppUpdateStatus | null;
@@ -81,6 +90,8 @@ interface State {
   setError(error: unknown): void;
   setAttention(attention: AttentionNotice | null): void;
   dismissAttention(id?: string): void;
+  /** Người dùng bấm X: ghi nhận đã tắt vấn đề này rồi đóng. Tự tắt theo giờ thì KHÔNG gọi hàm này. */
+  dismissIssueByUser(notice: AttentionNotice): void;
   dismissAttentionByCodes(codes: readonly string[], projectId?: string | null): void;
   openNotificationCenter(): void;
   closeNotificationCenter(): void;
@@ -371,6 +382,35 @@ function mergeLogs(current: LogEntry[], entries: LogEntry[]): LogEntry[] {
 
 const initialNotifications = loadNotificationHistory();
 
+/**
+ * Chỉ lưu bền các vấn đề gắn danh sách (persistent) — nhớ qua các lần mở app tới khi danh sách hết bị chặn.
+ * Thông báo thao tác chỉ im trong phiên nên không ghi xuống bộ nhớ trình duyệt.
+ */
+const DISMISSED_ISSUES_STORAGE_KEY = 'tubmedia.dismissed-issues.v1';
+
+function loadDismissedIssues(): DismissedIssue[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(DISMISSED_ISSUES_STORAGE_KEY) ?? '[]') as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (item): item is DismissedIssue =>
+        Boolean(item) && typeof (item as DismissedIssue).key === 'string' && (item as DismissedIssue).persistent === true
+    );
+  } catch {
+    return [];
+  }
+}
+
+function persistDismissedIssues(list: readonly DismissedIssue[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(DISMISSED_ISSUES_STORAGE_KEY, JSON.stringify(list.filter((item) => item.persistent)));
+  } catch {
+    // Ghi nhớ "đã tắt" là tiện ích phụ; lỗi bộ nhớ trình duyệt không được chặn ứng dụng.
+  }
+}
+
 export const useAppStore = create<State>((set, get) => ({
   ready: false,
   loading: false,
@@ -391,6 +431,7 @@ export const useAppStore = create<State>((set, get) => ({
   error: null,
   attention: null,
   attentionQueue: [],
+  dismissedIssues: loadDismissedIssues(),
   notifications: initialNotifications,
   notificationCenterOpen: false,
   updateStatus: null,
@@ -497,13 +538,12 @@ export const useAppStore = create<State>((set, get) => ({
         Date.now(),
         outputPathFromUnknown(error) ?? undefined
       );
+      // Phần B rà soát thông báo (2026-10-06): vấn đề người dùng đã bấm X thì không bật lại — vẫn ghi vào chuông.
+      if (isIssueDismissed(state.dismissedIssues, notice)) return { error: null, notifications };
       if (shouldRouteIssueToAttention(issue.tone)) {
-        if (!state.attention) return { error: null, attention: notice, notifications };
-        return {
-          error: null,
-          notifications,
-          attentionQueue: [...state.attentionQueue.filter((item) => item.id !== notice.id), notice].slice(-5)
-        };
+        // Cùng vấn đề (khóa = nhóm mã lỗi + phạm vi) thì THAY bản đang hiện/đang chờ thay vì chồng thêm.
+        const merged = mergeNoticeIntoQueue(state.attention, state.attentionQueue, notice);
+        return { error: null, notifications, attention: merged.current, attentionQueue: merged.queue };
       }
       return { error, notifications };
     }),
@@ -515,15 +555,15 @@ export const useAppStore = create<State>((set, get) => ({
       }
       const cleanAttention = cleanNotice(attention);
       const notifications = addNotification(state.notifications, cleanAttention);
-      if (state.attention?.id === cleanAttention.id) {
-        return { attention: cleanAttention, notifications };
-      }
-      if (!state.attention) return { attention: cleanAttention, notifications };
-      const queue = [
-        ...state.attentionQueue.filter((item) => item.id !== cleanAttention.id),
-        cleanAttention
-      ].slice(-5);
-      return { attentionQueue: queue, notifications };
+      if (isIssueDismissed(state.dismissedIssues, cleanAttention)) return { notifications };
+      const merged = mergeNoticeIntoQueue(state.attention, state.attentionQueue, cleanAttention);
+      return { attention: merged.current, attentionQueue: merged.queue, notifications };
+    }),
+  dismissIssueByUser: (notice) =>
+    set((state) => {
+      const dismissedIssues = recordIssueDismissal(state.dismissedIssues, notice, new Date());
+      persistDismissedIssues(dismissedIssues);
+      return { dismissedIssues };
     }),
   dismissAttention: (id) =>
     set((state) => {
@@ -591,3 +631,13 @@ export const useAppStore = create<State>((set, get) => ({
   clearProjectLogs: (projectId) =>
     set((state) => ({ logs: state.logs.filter((entry) => entry.projectId !== projectId) }))
 }));
+
+// "Tới khi tình huống đổi khác": mỗi khi danh sách tác vụ đổi (sau khi đã nạp xong lúc mở app), bỏ ghi nhớ "đã tắt" của
+// danh sách đã HẾT bị chặn — lần bị chặn sau là tình huống mới nên thông báo hiện lại.
+useAppStore.subscribe((state, previous) => {
+  if (!state.ready || state.jobs === previous.jobs || state.dismissedIssues.length === 0) return;
+  const pruned = pruneDismissedIssues(state.dismissedIssues, state.jobs);
+  if (pruned.length === state.dismissedIssues.length) return;
+  persistDismissedIssues(pruned);
+  useAppStore.setState({ dismissedIssues: pruned });
+});

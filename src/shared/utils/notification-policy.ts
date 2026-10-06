@@ -4,28 +4,23 @@ import type { UiTone } from './ui-error.js';
 
 /**
  * Thông báo thường cần đủ lâu để đọc nhưng không được chiếm giao diện quá lâu.
- * Chỉ lỗi vẫn đang chặn tác vụ mới được giữ cố định.
+ * Phần B rà soát thông báo (người dùng duyệt 2026-10-06): MỌI thông báo nổi đều tự tắt — lỗi thường sau ~12 giây,
+ * cảnh báo chặn việc tối thiểu 12 giây. Nội dung vẫn còn ở Trung tâm thông báo và thẻ chặn trong từng danh sách.
  */
 export const TRANSIENT_NOTIFICATION_DURATION_MS = 4_800;
 export const SUCCESS_NOTIFICATION_DURATION_MS = 3_600;
 export const WARNING_NOTIFICATION_DURATION_MS = 6_500;
+export const ERROR_NOTIFICATION_DURATION_MS = 12_000;
 
 export function notificationDuration(severity: AttentionNotice['severity']): number {
   if (severity === 'success') return SUCCESS_NOTIFICATION_DURATION_MS;
-  if (severity === 'warning' || severity === 'error') return WARNING_NOTIFICATION_DURATION_MS;
+  if (severity === 'error') return ERROR_NOTIFICATION_DURATION_MS;
+  if (severity === 'warning') return WARNING_NOTIFICATION_DURATION_MS;
   return TRANSIENT_NOTIFICATION_DURATION_MS;
 }
 
 export function shouldRouteIssueToAttention(tone: UiTone): boolean {
   return tone !== 'error';
-}
-
-/**
- * Chỉ LỖI THẬT mới nằm lại trên màn hình cho tới khi người dùng đóng. Mọi mức khác (cảnh báo,
- * thông tin, thành công, trung tính) tự tắt sau vài giây; nội dung vẫn còn trong Trung tâm thông báo.
- */
-export function isPersistentNoticeTone(tone: AttentionNotice['severity']): boolean {
-  return tone === 'error';
 }
 
 /** Phần của một thông báo mà quy tắc hiển thị cần biết (cho phép thiếu trường tùy chọn). */
@@ -75,15 +70,16 @@ export interface NoticeDisplayPolicy {
 
 /**
  * Quy tắc hiển thị DUY NHẤT cho thông báo nổi:
- *  - lỗi thật: không tự tắt (đóng được), trừ khi nguyên nhân đã được giải quyết;
+ *  - lỗi (kể cả lỗi đang chặn việc như ổ đầy): tự tắt sau ~12 giây (2026-10-06 — trước đây đứng tới khi đóng);
  *  - cảnh báo cần hành động: tối thiểu 12 giây;
  *  - cảnh báo chỉ để biết, thông tin, thành công, trung tính: thời gian ngắn theo mức.
  * Mọi thông báo đều còn ở Trung tâm thông báo dưới dạng mục CHƯA ĐỌC, kể cả khi thông báo nổi đã tắt.
  */
-export function noticeDisplayPolicy(notice: NoticeDisplayInput, resolved = false): NoticeDisplayPolicy {
+export function noticeDisplayPolicy(notice: NoticeDisplayInput): NoticeDisplayPolicy {
   const actionRequired = isActionRequiredWarning(notice);
   return {
-    persistent: isPersistentNoticeTone(notice.severity) && !resolved,
+    // 2026-10-06: không còn mức nào nằm lại cố định — kể cả lỗi (trước đây lỗi thật đứng tới khi đóng).
+    persistent: false,
     durationMs: actionRequired
       ? Math.max(ACTION_REQUIRED_WARNING_MIN_DURATION_MS, WARNING_NOTIFICATION_DURATION_MS)
       : notificationDuration(notice.severity),

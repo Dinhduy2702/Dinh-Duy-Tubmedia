@@ -60,7 +60,9 @@ describe('DISK_FULL là LỖI ở mọi tầng và không tự tắt', () => {
     expect(block).not.toContain("'warning'");
   });
 
-  it('thông báo DISK_FULL không tự tắt dù không có cờ sticky', () => {
+  // 2026-10-06 (phần B rà soát thông báo, người dùng duyệt): không còn thông báo nào đứng cố định; ổ đầy vẫn là cảnh báo
+  // chặn việc nên hiện tối thiểu 12 giây (thẻ chặn trong danh sách vẫn hiện cố định tại chỗ).
+  it('thông báo DISK_FULL tự tắt nhưng hiện tối thiểu 12 giây', () => {
     const notice: AttentionNotice = {
       id: 'x',
       severity: toneForErrorCode('DISK_FULL'),
@@ -68,8 +70,9 @@ describe('DISK_FULL là LỖI ở mọi tầng và không tự tắt', () => {
       message: 'm',
       code: 'DISK_FULL'
     };
-    expect(noticeDisplayPolicy(notice).persistent).toBe(true);
-    expect(noticeDisplayPolicy({ ...notice, sticky: true }).persistent).toBe(true);
+    expect(noticeDisplayPolicy(notice).persistent).toBe(false);
+    expect(noticeDisplayPolicy({ ...notice, sticky: true }).persistent).toBe(false);
+    expect(noticeDisplayPolicy({ ...notice, sticky: true }).durationMs).toBeGreaterThanOrEqual(12_000);
   });
 
   it('bảng kiểm kê ghi DISK_FULL là Lỗi và không nơi nào ghi là cảnh báo', () => {
@@ -84,10 +87,10 @@ describe('DISK_FULL là LỖI ở mọi tầng và không tự tắt', () => {
 });
 
 describe('quy tắc hiển thị thông báo nổi', () => {
-  it('lỗi thật không tự tắt, kể cả khi không có cờ sticky; chỉ đóng khi nguyên nhân đã được giải quyết', () => {
-    expect(noticeDisplayPolicy({ severity: 'error' }).persistent).toBe(true);
-    expect(noticeDisplayPolicy({ severity: 'error', sticky: false }).persistent).toBe(true);
-    expect(noticeDisplayPolicy({ severity: 'error', sticky: true }, true).persistent).toBe(false);
+  it('lỗi cũng tự tắt (~12 giây), kể cả khi có cờ sticky — 2026-10-06, người dùng duyệt', () => {
+    expect(noticeDisplayPolicy({ severity: 'error' }).persistent).toBe(false);
+    expect(noticeDisplayPolicy({ severity: 'error', sticky: true }).persistent).toBe(false);
+    expect(noticeDisplayPolicy({ severity: 'error' }).durationMs).toBe(12_000);
   });
 
   it('mọi mức khác không nằm lại, dù có cờ sticky', () => {
