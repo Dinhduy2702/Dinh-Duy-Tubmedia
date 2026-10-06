@@ -206,10 +206,12 @@ body{
 @media(max-width:1100px){.queue-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.workflow-tab{min-width:160px}.queue-data-table{min-width:1040px}}
 @media(max-width:760px){.workflow-tabs{margin-left:-.2rem;margin-right:-.2rem}.workflow-tab{min-width:145px;max-width:210px;padding:.6rem .7rem}.queue-detail-grid{grid-template-columns:1fr}.queue-detail-wide{grid-column:auto}.page-heading{align-items:flex-start}.page-action-toolbar{overflow-x:auto;flex-wrap:nowrap}.page-action-group{flex:0 0 auto}}
 
-/* Đợt 2 (2026-10-02): nhắc danh sách dùng thư mục chung làm thư mục tạm (banner đầu vùng nội dung). */
-.shared-temp-folder-notice{background:var(--tone-warning-bg);border:1px solid var(--tone-warning-border);border-left-width:4px;color:var(--tone-warning-text);border-radius:12px;padding:.85rem 1rem;margin:12px 16px 0}
-.shared-temp-folder-notice p{margin-top:.25rem}
-.field-hint-warning{display:block;margin-top:.35rem;font-size:.8rem;color:var(--warn)}
+/* Sau phát hành 1.6.0 (2026-10-06): cảnh báo thư mục tạm dùng chung chỉ còn nhãn ⚠ nhỏ cùng hàng với tên ô — không thêm chiều cao để hàng cấu hình (lưới căn đáy) không lệch. Câu đầy đủ: title khi rê chuột, ô chú thích khi focus bằng bàn phím. */
+.folder-field-label{display:flex;align-items:center;gap:.35rem;min-width:0}
+.shared-folder-chip{position:relative;display:inline-flex;align-items:center;justify-content:center;flex:none;width:1rem;height:1rem;border-radius:999px;color:var(--tone-warning-icon);cursor:help}
+.shared-folder-chip:focus-visible{outline:2px solid var(--tone-warning-border);outline-offset:1px}
+.shared-folder-tip{display:none;position:absolute;z-index:40;top:calc(100% + 6px);left:0;width:min(320px,70vw);padding:.5rem .6rem;border:1px solid var(--tone-warning-border);border-radius:9px;background:var(--tone-warning-bg);color:var(--tone-warning-text);font-size:.72rem;font-weight:600;line-height:1.45;text-transform:none;letter-spacing:normal;white-space:normal;box-shadow:var(--shadow)}
+.shared-folder-chip:hover .shared-folder-tip,.shared-folder-chip:focus-visible .shared-folder-tip{display:block}
 .storage-attention-notice{background:var(--tone-bg);border:1px solid var(--tone-border);border-left-width:4px;color:var(--tone-text);border-radius:12px;padding:.85rem 1rem;margin:12px 16px 0}
 .storage-attention-notice svg{color:var(--tone-icon);flex:none}
 .system-cleanup-panel .storage-attention-notice{margin:.5rem 0 0}

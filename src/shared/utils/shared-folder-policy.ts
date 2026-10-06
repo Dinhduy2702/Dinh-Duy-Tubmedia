@@ -49,7 +49,12 @@ export function sharedUserFolderLabel(kind: SharedUserFolderKind): string {
   return KIND_LABEL[kind];
 }
 
-/** Lời cảnh báo ngắn dưới ô chọn thư mục tạm. */
+/**
+ * Câu giải thích đầy đủ cho nhãn ⚠ "Thư mục chung" cạnh tên ô thư mục tạm (hiện khi rê chuột/focus).
+ * Sau phát hành 1.6.0 người dùng báo banner lớn đầu trang + dòng chữ dài dưới ô làm lệch bố cục → phương án A đã
+ * duyệt (2026-10-06): bỏ banner, chỉ giữ nhãn nhỏ này. Dữ liệu "Không nhắc lại" đã lưu (dismissedSharedTempWarnings)
+ * vẫn giữ nguyên trong cài đặt để quay lui an toàn, chỉ không còn dùng.
+ */
 export function sharedTempFolderWarning(path: string): string | null {
   const kind = sharedUserFolderKind(path);
   if (!kind) return null;
@@ -57,33 +62,4 @@ export function sharedTempFolderWarning(path: string): string | null {
     `Đây là ${sharedUserFolderLabel(kind)} — thư mục dùng chung với tệp của bạn. Nên chọn một thư mục riêng ` +
     'cho Tubmedia (ví dụ một thư mục con mới) để tệp tạm không lẫn với tệp cá nhân.'
   );
-}
-
-export interface SharedTempFolderNoticeItem {
-  id: string;
-  name: string;
-  tempFolder: string;
-}
-
-/**
- * Thông báo khi mở app: các danh sách đang dùng thư mục chung làm thư mục tạm. Không tự đổi gì.
- * `dismissed`: { mã danh sách → thư mục tạm lúc người dùng chọn "Không nhắc lại" }. Chỉ còn hiệu lực khi danh
- * sách vẫn dùng ĐÚNG thư mục đó; đổi sang thư mục chung khác thì nhắc lại.
- */
-export function buildSharedTempFolderNotice(
-  projects: ReadonlyArray<SharedTempFolderNoticeItem>,
-  dismissed: Readonly<Record<string, string>> = {}
-): { title: string; message: string; items: SharedTempFolderNoticeItem[] } | null {
-  const items = projects
-    .filter((project) => sharedUserFolderKind(project.tempFolder) !== null)
-    .filter((project) => dismissed[project.id] !== project.tempFolder)
-    .map(({ id, name, tempFolder }) => ({ id, name, tempFolder }));
-  if (items.length === 0) return null;
-  return {
-    title: `${items.length} danh sách đang dùng thư mục chung làm thư mục tạm`,
-    message:
-      'Tubmedia chỉ dọn thư mục do chính nó tạo nên tệp của bạn an toàn, nhưng nên đổi sang một thư mục riêng ' +
-      'khi danh sách đã xong. Tubmedia không tự di chuyển hay đổi gì.',
-    items
-  };
 }

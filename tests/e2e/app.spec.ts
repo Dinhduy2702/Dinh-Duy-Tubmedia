@@ -2434,3 +2434,138 @@ test('Đợt 3: trang Nhật ký hiện lịch sử ngay khi mở', async () => 
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
 });
+
+/**
+ * Người dùng báo sau phát hành 1.6.0 (2026-10-06, kèm ảnh thật): (1) banner lớn "N danh sách đang dùng thư mục chung
+ * làm thư mục tạm" ở đầu MỌI trang; (2) dòng cảnh báo dài dưới ô "Thư mục tạm" làm lệch cả hàng cấu hình (lưới căn
+ * đáy — đo thật: ô tạm top 757, ô bên cạnh 794/854 trong CÙNG một hàng). Phương án A đã duyệt: bỏ banner, thay dòng
+ * chữ bằng nhãn ⚠ nhỏ cùng hàng với tên ô, câu đầy đủ hiện khi rê chuột/focus (title + aria-label).
+ * Đường dẫn "Downloads" là GIẢ (C:\Users\TubmediaE2E\Downloads) — không đụng thư mục thật nào.
+ */
+test('Cảnh báo thư mục tạm dùng chung: không có banner đầu trang, ô cùng hàng thẳng nhau, nhãn ⚠ có giải thích', async () => {
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-shared-temp-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  const fakeDownloads = 'C:\\Users\\TubmediaE2E\\Downloads';
+  const env = {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    ),
+    NODE_ENV: 'test',
+    TUBMEDIA_E2E: '1',
+    TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+    PLAYWRIGHT_TEST: '1',
+    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+  };
+  const launch = async (): Promise<void> => {
+    electronApplication = await electron.launch({ args: [mainEntry], cwd: projectRoot, env, timeout: 45_000 });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+  };
+  const goTo = async (label: string): Promise<void> => {
+    await shellWindow!.getByRole('navigation', { name: 'Điều hướng chính' }).getByRole('button', { name: label, exact: true }).click();
+  };
+  // Số tọa độ top khác nhau của các ô nhập trong lưới cấu hình phải đúng bằng số hàng của lưới.
+  const rowAlignment = async (): Promise<{ rows: number; tops: number[] }> =>
+    shellWindow!.evaluate(() => {
+      const grid = document.querySelector('.compact-config-grid');
+      if (!grid) return { rows: -1, tops: [] };
+      const rows = getComputedStyle(grid).gridTemplateRows.split(' ').filter(Boolean).length;
+      const tops = Array.from(grid.querySelectorAll('input, select'))
+        .map((element) => Math.round(element.getBoundingClientRect().top))
+        .sort((a, b) => a - b);
+      // Gom các ô lệch nhau ≤ 2px thành một hàng: ô chọn cao 35px, ô nhập 34px nên vốn lệch 1px (có từ trước, mắt
+      // không thấy). Lỗi cần bắt lệch hàng chục px (757/794/854).
+      const groups = tops.filter((top, index) => index === 0 || top - tops[index - 1]! > 2);
+      return { rows, tops: groups };
+    });
+  // Icon ⚠ nhỏ cạnh tên ô; câu đầy đủ KHÔNG hiện cứng — chỉ hiện khi rê chuột vào icon.
+  const expectSharedChip = async (scope: string): Promise<void> => {
+    const chip = shellWindow!.locator(`${scope} .shared-folder-chip`).first();
+    await expect(chip).toBeVisible();
+    await expect(chip).toHaveAttribute('aria-label', /Tải xuống \(Downloads\).*thư mục riêng/);
+    const tip = chip.locator('.shared-folder-tip');
+    await shellWindow!.mouse.move(0, 0);
+    await expect(tip, 'câu giải thích không để cứng trên giao diện').toBeHidden();
+    await chip.hover();
+    await expect(tip, 'rê chuột vào ⚠ thì hiện đủ câu giải thích').toBeVisible();
+    await expect(tip).toContainText('Tải xuống (Downloads)');
+    await expect(tip).toContainText('Nên chọn một thư mục riêng cho Tubmedia');
+    await expect(tip).toContainText('tệp tạm không lẫn với tệp cá nhân');
+    await shellWindow!.mouse.move(0, 0);
+    await expect(tip).toBeHidden();
+    expect(await shellWindow!.locator(`${scope} .field-hint-warning`).count(), 'không còn dòng chữ dài dưới ô').toBe(0);
+  };
+
+  try {
+    await launch();
+    await closeElectronApplication();
+    const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+    const now = new Date().toISOString();
+    const insertProject = db.prepare(
+      `INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,aspect_ratio,created_at,updated_at,archived_at)
+       VALUES(?,?,?,'','draft',?,?,?,?,'x','quality-source-size','resource-balanced',0,'original',?,?,NULL)`
+    );
+    const laneIds: string[] = [];
+    for (const lane of [1, 2, 3]) {
+      const output = path.join(sandbox, `video-${lane}`);
+      const id = randomUUID();
+      laneIds.push(id);
+      insertProject.run(id, `Danh sách tải ${lane}`, `__WORKBENCH_DOWNLOAD_${lane}__`, output, fakeDownloads, output, path.join(sandbox, 'q'), now, now);
+    }
+    // "Không nhắc lại" đã lưu từ 1.6.0 cho Danh sách tải 2 (đúng thư mục này) — vẫn phải được tôn trọng.
+    db.prepare(
+      'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+    ).run('app_extra', JSON.stringify({ autoResumeInterruptedOnStartup: false, dismissedSharedTempWarnings: { [laneIds[1]!]: fakeDownloads } }), now);
+    db.close();
+
+    await launch();
+    // Đợi danh sách đã nạp xong (thấy tên danh sách đã dựng) rồi mới kiểm banner — kiểm quá sớm thì banner chưa kịp
+    // hiện và bài kiểm xanh nhầm (đã gặp khi viết bài này).
+    await goTo('Tải danh sách');
+    await expect(shellWindow!.locator('.workflow-tab', { hasText: 'Danh sách tải 1' })).toBeVisible({ timeout: 15_000 });
+    await shellWindow!.waitForTimeout(1000);
+    expect(await shellWindow!.locator('.shared-temp-folder-notice').count(), 'không còn banner lớn đầu trang').toBe(0);
+
+    for (const [page, scope, label] of [
+      ['Tải danh sách', '.compact-config-temp', 'Thư mục tạm'],
+      ['Ghép theo Timeline', '.compact-config-temp', 'Thư mục xử lý tạm']
+    ] as const) {
+      await goTo(page);
+      const tempInput = shellWindow!.locator(`${scope} input`).first();
+      await expect(tempInput).toBeVisible({ timeout: 15_000 });
+      if ((await tempInput.inputValue()) !== fakeDownloads) await tempInput.fill(fakeDownloads);
+      await expect(shellWindow!.locator(`${scope}`).first()).toContainText(label);
+      await expectSharedChip(scope);
+      for (const width of [1400, 1600]) {
+        await shellWindow!.setViewportSize({ width, height: 900 });
+        await shellWindow!.waitForTimeout(400);
+        const { rows, tops } = await rowAlignment();
+        expect(tops.length, `${page} ${width}px: ${rows} hàng nhưng ô nhập nằm ở ${tops.join('/')}`).toBe(rows);
+      }
+      if (page === 'Tải danh sách') {
+        // Danh sách tải 2 đã "Không nhắc lại" cho đúng thư mục này: không hiện ⚠; vẫn dùng bình thường (ô không bị khóa).
+        await shellWindow!.locator('.workflow-tab', { hasText: 'Danh sách tải 2' }).click();
+        const laneTwoTemp = shellWindow!.locator(`${scope} input`).first();
+        await expect(laneTwoTemp).toHaveValue(fakeDownloads, { timeout: 10_000 });
+        await expect(laneTwoTemp).toBeEnabled();
+        expect(await shellWindow!.locator(`${scope} .shared-folder-chip`).count(), 'danh sách đã chọn "Không nhắc lại"').toBe(0);
+        await shellWindow!.locator('.workflow-tab', { hasText: 'Danh sách tải 1' }).click();
+      }
+    }
+
+    await goTo('Cài đặt');
+    await shellWindow!.getByRole('button', { name: 'Lưu trữ', exact: true }).click();
+    const settingsTemp = shellWindow!.locator('label', { hasText: 'Thư mục tạm mặc định' }).first();
+    await settingsTemp.locator('input').fill(fakeDownloads);
+    await expect(settingsTemp.locator('.shared-folder-chip')).toBeVisible();
+    await expect(settingsTemp.locator('.shared-folder-chip')).toHaveAttribute('aria-label', /Tải xuống \(Downloads\)/);
+    await settingsTemp.locator('.shared-folder-chip').hover();
+    await expect(settingsTemp.locator('.shared-folder-tip')).toBeVisible();
+    expect(await settingsTemp.locator('.field-hint-warning').count()).toBe(0);
+    expect(fs.existsSync('C:\\Users\\TubmediaE2E'), 'không tạo thư mục thật nào ở đường dẫn giả').toBe(false);
+  } finally {
+    await closeElectronApplication();
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});

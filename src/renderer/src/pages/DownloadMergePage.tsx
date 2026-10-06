@@ -1237,6 +1237,7 @@ function MergeLaneCard({
   onNotice: (title: string, message: string, severity?: 'info' | 'success' | 'warning') => void;
   setError: (error: string | null) => void;
 }): React.JSX.Element {
+  const dismissedSharedTemp = useAppStore((state) => state.settings?.dismissedSharedTempWarnings);
   const [showLogs, setShowLogs] = useState(false);
   const [persistedLogs, setPersistedLogs] = useState<LogEntry[]>([]);
   const [storage, setStorage] = useState<WorkbenchStorageSummary | null>(null);
@@ -1488,6 +1489,9 @@ function MergeLaneCard({
             <FolderField
               label="Thư mục xử lý tạm"
               warnIfSharedTemp
+              {...(projectId && dismissedSharedTemp?.[projectId] !== undefined
+                ? { sharedTempDismissedFolder: dismissedSharedTemp[projectId] }
+                : {})}
               disabled={locked}
               value={form.tempFolder}
               onChange={(value) => {

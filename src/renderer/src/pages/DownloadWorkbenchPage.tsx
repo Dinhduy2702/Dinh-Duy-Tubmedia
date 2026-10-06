@@ -1050,6 +1050,9 @@ function LaneCard({
             <FolderField
               label="Thư mục tạm"
               warnIfSharedTemp
+              {...(projectId && settings?.dismissedSharedTempWarnings?.[projectId] !== undefined
+                ? { sharedTempDismissedFolder: settings.dismissedSharedTempWarnings[projectId] }
+                : {})}
               disabled={locked}
               value={form.tempFolder}
               onChange={(value) => {

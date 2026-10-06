@@ -344,7 +344,6 @@ src/renderer/src/components/ProjectQuarantinePanel.tsx
 src/renderer/src/components/quarantine-anchors.ts
 src/renderer/src/components/QuickDownloadPanel.tsx
 src/renderer/src/components/RendererErrorBoundary.tsx
-src/renderer/src/components/SharedTempFolderNotice.tsx
 src/renderer/src/components/StartupResumeDialog.tsx
 src/renderer/src/components/StatCard.tsx
 src/renderer/src/components/StatusBadge.tsx

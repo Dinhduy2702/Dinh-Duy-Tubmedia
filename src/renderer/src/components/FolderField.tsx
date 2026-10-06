@@ -1,5 +1,5 @@
 import { useState, type ChangeEvent } from 'react';
-import { FolderOpen, LoaderCircle } from 'lucide-react';
+import { AlertTriangle, FolderOpen, LoaderCircle } from 'lucide-react';
 import { useAppStore } from '../stores/app-store';
 import { sharedTempFolderWarning, sharedUserFolderKind } from '@shared/utils/shared-folder-policy';
 
@@ -8,8 +8,13 @@ interface FolderFieldProps {
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
-  /** Ô thư mục TẠM: cảnh báo khi người dùng chọn thư mục chung (Downloads, Desktop, gốc ổ đĩa...). */
+  /** Ô thư mục TẠM: gợi ý nhẹ khi người dùng chọn thư mục chung (Downloads, Desktop, gốc ổ đĩa...). */
   warnIfSharedTemp?: boolean;
+  /**
+   * Thư mục tạm mà người dùng đã chọn "Không nhắc lại" cho danh sách này (cài đặt dismissedSharedTempWarnings).
+   * Chỉ còn hiệu lực khi ô vẫn là ĐÚNG thư mục đó — đổi sang thư mục chung khác thì gợi ý lại.
+   */
+  sharedTempDismissedFolder?: string;
 }
 
 export function FolderField({
@@ -17,9 +22,12 @@ export function FolderField({
   value,
   onChange,
   disabled = false,
-  warnIfSharedTemp = false
+  warnIfSharedTemp = false,
+  sharedTempDismissedFolder
 }: FolderFieldProps): React.JSX.Element {
-  const sharedWarning = warnIfSharedTemp && sharedUserFolderKind(value) ? sharedTempFolderWarning(value) : null;
+  const dismissed = sharedTempDismissedFolder !== undefined && sharedTempDismissedFolder === value;
+  const sharedWarning =
+    warnIfSharedTemp && !dismissed && sharedUserFolderKind(value) ? sharedTempFolderWarning(value) : null;
   const [choosing, setChoosing] = useState(false);
   const choose = async (): Promise<void> => {
     if (disabled || choosing) return;
@@ -35,7 +43,18 @@ export function FolderField({
   };
 
   return <label>
-    <span className="label">{label}</span>
+    <span className="label folder-field-label">
+      {label}
+      {/* Sau phát hành 1.6.0 (2026-10-06): chỉ một icon ⚠ nhỏ CÙNG HÀNG với tên ô — không thêm chiều cao nên các ô
+          trong hàng cấu hình (lưới căn đáy) vẫn thẳng nhau; dòng chữ dài dưới ô trước đây làm lệch cả hàng. Câu đầy
+          đủ chỉ hiện khi rê chuột/focus. Chỉ là gợi ý: giữ thư mục chung vẫn dùng bình thường, không chặn gì. */}
+      {sharedWarning && (
+        <span className="shared-folder-chip" role="img" tabIndex={0} aria-label={sharedWarning}>
+          <AlertTriangle size={12} aria-hidden="true" />
+          <span className="shared-folder-tip" aria-hidden="true">{sharedWarning}</span>
+        </span>
+      )}
+    </span>
     <div className="flex gap-2">
       <input
         className="input"
@@ -48,10 +67,5 @@ export function FolderField({
         {choosing ? 'Đang mở...' : 'Chọn'}
       </button>
     </div>
-    {sharedWarning && (
-      <span className="field-hint field-hint-warning" role="note">
-        {sharedWarning}
-      </span>
-    )}
   </label>;
 }

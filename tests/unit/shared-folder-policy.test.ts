@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { buildSharedTempFolderNotice, sharedUserFolderKind } from '@shared/utils/shared-folder-policy.js';
+import { sharedTempFolderWarning, sharedUserFolderKind } from '@shared/utils/shared-folder-policy.js';
 
 describe('nhận diện thư mục chung không nên dùng làm thư mục tạm', () => {
   it.each([
@@ -33,55 +33,39 @@ describe('nhận diện thư mục chung không nên dùng làm thư mục tạm
   });
 });
 
-describe('thông báo khi mở app: danh sách dùng thư mục chung làm thư mục tạm', () => {
-  it('liệt kê đúng các danh sách, nói rõ KHÔNG tự di chuyển dữ liệu', () => {
-    const notice = buildSharedTempFolderNotice([
-      { id: 'p1', name: 'Danh sách tải 1', tempFolder: 'C:\\Users\\Hi\\Downloads' },
-      { id: 'p2', name: 'Danh sách tải 2', tempFolder: 'C:\\Users\\Hi\\Downloads' },
-      { id: 'p3', name: 'Duy_29_09_2026', tempFolder: 'E:\\_yt_tmp' }
-    ]);
-    expect(notice).not.toBeNull();
-    expect(notice!.items.map((item) => item.name)).toEqual(['Danh sách tải 1', 'Danh sách tải 2']);
-    expect(notice!.message).toMatch(/không tự di chuyển/i);
+// Sau phát hành 1.6.0 (2026-10-06) người dùng báo banner lớn đầu trang + dòng chữ dài dưới ô làm lệch bố cục.
+// Phương án A đã duyệt: bỏ banner, chỉ giữ nhãn ⚠ nhỏ cạnh tên ô; dữ liệu "Không nhắc lại" đã lưu vẫn giữ nguyên.
+describe('cảnh báo thư mục tạm dùng chung chỉ còn nhãn ⚠ nhỏ (phương án A)', () => {
+  it('câu giải thích nêu đúng loại thư mục và khuyên dùng thư mục riêng', () => {
+    expect(sharedTempFolderWarning('C:\\Users\\Hi\\Downloads')).toMatch(/Tải xuống \(Downloads\).*thư mục riêng/);
+    expect(sharedTempFolderWarning('E:\\_yt_tmp')).toBeNull();
   });
 
-  it('không có danh sách nào dùng thư mục chung: không thông báo', () => {
-    expect(buildSharedTempFolderNotice([{ id: 'a', name: 'A', tempFolder: 'E:\\_yt_tmp' }])).toBeNull();
+  it('khung ứng dụng KHÔNG còn banner lớn đầu trang', () => {
+    expect(readFileSync('src/renderer/src/app/App.tsx', 'utf8')).not.toContain('SharedTempFolderNotice');
   });
 
-  it('"Không nhắc lại cho danh sách này": bỏ đúng danh sách đó, các danh sách khác vẫn được nhắc', () => {
-    const notice = buildSharedTempFolderNotice(
-      [
-        { id: 'p1', name: 'Danh sách tải 1', tempFolder: 'C:\\Users\\Hi\\Downloads' },
-        { id: 'p2', name: 'Danh sách tải 2', tempFolder: 'C:\\Users\\Hi\\Downloads' }
-      ],
-      { p1: 'C:\\Users\\Hi\\Downloads' }
-    );
-    expect(notice!.items.map((item) => item.id)).toEqual(['p2']);
-    expect(
-      buildSharedTempFolderNotice([{ id: 'p1', name: 'A', tempFolder: 'C:\\Users\\Hi\\Downloads' }], {
-        p1: 'C:\\Users\\Hi\\Downloads'
-      })
-    ).toBeNull();
+  it('icon ⚠ cùng hàng với tên ô, câu đầy đủ chỉ trong ô chú thích khi rê chuột/focus + aria-label, không còn dòng chữ dưới ô', () => {
+    const field = readFileSync('src/renderer/src/components/FolderField.tsx', 'utf8');
+    expect(field).toContain('className="shared-folder-chip"');
+    expect(field).toContain('aria-label={sharedWarning}');
+    expect(field).toContain('className="shared-folder-tip"');
+    expect(field).not.toContain('field-hint-warning');
+    const css = readFileSync('src/renderer/src/styles.css', 'utf8');
+    expect(css).toContain('.shared-folder-tip{display:none;');
+    expect(css).toContain('.shared-folder-chip:hover .shared-folder-tip,.shared-folder-chip:focus-visible .shared-folder-tip{display:block}');
   });
 
-  it('đã tắt nhắc nhưng sau đó đổi sang một thư mục chung KHÁC: nhắc lại', () => {
-    const notice = buildSharedTempFolderNotice([{ id: 'p1', name: 'A', tempFolder: 'C:\\Users\\Hi\\Desktop' }], {
-      p1: 'C:\\Users\\Hi\\Downloads'
-    });
-    expect(notice!.items.map((item) => item.id)).toEqual(['p1']);
-  });
-});
-
-describe('lựa chọn "Không nhắc lại" được lưu bền theo từng danh sách', () => {
-  it('thông báo có nút cho từng danh sách và lưu vào cài đặt dismissedSharedTempWarnings', () => {
-    const text = readFileSync('src/renderer/src/components/SharedTempFolderNotice.tsx', 'utf8');
-    expect(text).toContain('Không nhắc lại cho danh sách này');
-    expect(text).toContain('dismissedSharedTempWarnings');
-    expect(text).toContain('settings.update(');
+  it.each([
+    ['src/renderer/src/pages/DownloadWorkbenchPage.tsx', 'label="Thư mục tạm"'],
+    ['src/renderer/src/pages/DownloadMergePage.tsx', 'label="Thư mục xử lý tạm"']
+  ])('%s: "Không nhắc lại" đã lưu vẫn áp dụng cho ô thư mục tạm của danh sách', (path, label) => {
+    const text = readFileSync(path, 'utf8');
+    const at = text.indexOf(label);
+    expect(text.slice(at, at + 400)).toContain('sharedTempDismissedFolder');
   });
 
-  it('được lưu ở dòng cài đặt riêng (không làm hỏng việc quay lui về 1.5.0)', () => {
+  it('dữ liệu "Không nhắc lại" đã lưu vẫn giữ ở dòng cài đặt riêng (quay lui 1.6.0 an toàn)', () => {
     expect(readFileSync('src/main/database/repositories/settings-repository.ts', 'utf8')).toContain(
       "'dismissedSharedTempWarnings'"
     );
@@ -104,9 +88,5 @@ describe('cảnh báo được gắn vào đúng chỗ', () => {
     const at = text.indexOf(label);
     expect(at).toBeGreaterThan(-1);
     expect(text.slice(Math.max(0, at - 300), at + 400)).toContain('warnIfSharedTemp');
-  });
-
-  it('khung ứng dụng hiện thông báo lúc mở app', () => {
-    expect(source('src/renderer/src/app/App.tsx')).toContain('<SharedTempFolderNotice />');
   });
 });
