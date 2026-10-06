@@ -1,3 +1,27 @@
+# Tubmedia 1.6.0
+
+- Mới: Gợi ý điểm cắt tự động ở trang "Xem trước & Cắt" — bấm một nút, ứng dụng tìm các khoảng lặng và chỗ chuyển cảnh trong video rồi đưa ra tối đa 8 đoạn nên cắt; bấm "Dùng đoạn này" để điền sẵn mốc bắt đầu/kết thúc.
+- Mở ứng dụng không còn tự chạy lại các tác vụ đang dở: ứng dụng hỏi "Có N tác vụ chưa xong — Tiếp tục / Để sau". Muốn tự tiếp tục như trước, bật "Tự tiếp tục tác vụ dở khi mở app" trong Cài đặt.
+- Sửa bộ đếm "Lần thử" hiện sai kiểu "4/3": giờ chỉ đếm những lần thất bại thật; bấm "Thử lại" thì tác vụ được tính lại từ đầu.
+- Sửa lỗi cookies cứ báo "hết hạn" rồi tự chạy lại rồi lại hết hạn: tệp cookies của bạn không còn bị nhiều lượt tải ghi đè lẫn nhau.
+- Dọn thư mục tạm an toàn tuyệt đối: ứng dụng không bao giờ xóa thư mục hay tệp của bạn (kể cả Downloads hoặc thư mục bạn tự tạo), chỉ xóa đúng tệp tạm do chính ứng dụng tạo ra. Nếu một danh sách đang dùng thư mục chung như Downloads/Desktop làm thư mục tạm, ứng dụng sẽ nhắc (có nút "Không nhắc lại cho danh sách này").
+- Khu cách ly mới, gom về một chỗ trên từng ổ đĩa: Tubmedia\quarantine (ví dụ E:\Tubmedia\quarantine), chia theo tên danh sách, có tệp README.txt giải thích.
+  - Khi tải bản mới thay cho video đã có, bản cũ được GIỮ LẠI trong khu cách ly thay vì bị xóa, và ứng dụng báo "Đã giữ bản cũ". Ứng dụng không bao giờ tự xóa các bản này.
+  - Xem và xóa có chọn lọc tại Dọn dẹp máy → "Khu cách ly của danh sách": tổng dung lượng, từng tệp, ngày, nút "Xóa các bản cũ đã chọn".
+  - Cảnh báo khi khu cách ly vượt 20 GB hoặc ổ đĩa còn dưới 10% dung lượng trống.
+  - Thư mục "_quarantine" kiểu cũ được để nguyên, không di chuyển, không xóa; nếu còn tệp, ứng dụng nhắc kèm nút "Mở thư mục".
+  - Khu cách ly 14 ngày của Dọn dẹp máy: tệp nằm cùng ổ với tệp gốc (không chép sang ổ C:), nhắc trước 2 ngày khi sắp tới hạn xóa, và mỗi lần xóa vĩnh viễn đều ghi lại tên tệp và dung lượng vào Nhật ký.
+- Cắt tệp có sẵn không bao giờ ghi đè đoạn đã cắt trước đó: nếu trùng tên, tệp mới tự lưu thành "(2)", "(3)"… và ứng dụng báo rõ tệp cũ được giữ nguyên.
+- Cắt tệp có sẵn: chọn mốc kết thúc vượt quá độ dài video giờ được báo ngay bằng lời dễ hiểu (ví dụ "Mốc kết thúc 01:00 vượt quá thời lượng của tệp (00:20)") thay vì chạy rồi mới báo lỗi kỹ thuật; tên tệp giữ đúng mốc đã chọn, ví dụ "[5.5-9.25]" thay vì làm tròn thành "[6-9]".
+- Nút X đóng cửa sổ giờ luôn làm theo lựa chọn "Khi đóng ứng dụng" trong Cài đặt (trước đây công tắc khay hệ thống lấn át, khiến ứng dụng chạy ẩn dù đã chọn "Luôn hỏi"). Công tắc khay hệ thống giờ chỉ áp dụng cho nút thu nhỏ (—).
+- Nói rõ vì sao không dùng được mã hóa bằng card NVIDIA (ví dụ driver quá cũ, cần bản bao nhiêu) ở trang Công cụ và Chẩn đoán, kèm nút "Tải driver NVIDIA".
+- Nhận đúng số luồng xử lý trên máy có 2 CPU (ví dụ 72 thay vì 36).
+- Không còn sinh nhiều hồ sơ trùng tên "Tự động theo máy": áp dụng đề xuất lại chỉ cập nhật một hồ sơ duy nhất. Các hồ sơ trùng cũ được đổi tên kèm ngày lưu, ví dụ "Tự động theo máy (cũ, 03/10/2026 14:32)", và xếp theo thời gian; không hồ sơ nào bị xóa.
+- Nhãn "Thiết lập tải đang dùng" ở Tải danh sách hiện đúng số video tải cùng lúc thật của các danh sách, không còn hiện nhầm con số đề xuất.
+- Thông báo thiếu dung lượng không còn hiện hai con số giống nhau khó hiểu (kiểu "còn 20.0 GB, thấp hơn mức an toàn 20.0 GB").
+- Thông báo lỗi trong Trung tâm thông báo nêu rõ tên danh sách (ví dụ: Có 1 video gặp lỗi trong "Danh sách tải 2") thay vì "danh sách này"; thông báo bắt đầu/tạm dừng/tiếp tục/hủy cũng dùng đúng tên danh sách của bạn.
+- Các nút trên thẻ công cụ (Mở thư mục, Kiểm tra lại, Khôi phục, Mới nhất) hiện đủ chữ, không còn bị cắt "Mở th…", và có chú thích khi rê chuột.
+
 # Tubmedia 1.5.0
 
 - Chọn đúng hồ sơ Chrome/Edge khi lấy cookies tự động: liệt kê thật các hồ sơ có trên máy theo tên tài khoản (không còn phải tự gõ tên thư mục kỹ thuật như "Profile 1"), hiển thị rõ đang dùng hồ sơ/tài khoản nào cả trước lẫn sau khi lấy — tránh lấy nhầm cookies của tài khoản không mong muốn khi máy có nhiều hồ sơ Chrome.
