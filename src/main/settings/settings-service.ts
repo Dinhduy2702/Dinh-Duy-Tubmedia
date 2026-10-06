@@ -3,7 +3,7 @@ import type { AppSettings, HardwareProfile, QualityProfile, ResourceProfile } fr
 import { InvalidInputError } from '@shared/errors/app-errors.js';
 import type { SettingsRepository } from '../database/repositories/settings-repository.js';
 import { builtInQualityProfiles, builtInResourceProfiles, defaultAppSettings } from './defaults.js';
-import type { HardwareService } from './hardware-service.js';
+import { AUTO_RESOURCE_PROFILE_NAME, type HardwareService } from './hardware-service.js';
 import type { Logger } from '../logging/logger.js';
 import { assertGuardedSettingsChange, sanitizeGuardedSettings } from '../security/settings-policy.js';
 
@@ -58,6 +58,7 @@ export class SettingsService {
     for (const profile of builtInQualityProfiles) {
       this.repo.saveQualityProfile(profile);
     }
+    this.renameOldAutoResourceProfiles();
     if (!this.repo.get<unknown>('initialized', null)) {
       this.repo.saveAppSettings(defaultAppSettings);
       this.repo.set('initialized', true);
@@ -237,6 +238,23 @@ export class SettingsService {
       resources: this.repo.listResourceProfiles(),
       qualities: this.repo.listQualityProfiles()
     };
+  }
+
+  /**
+   * Hồ sơ đề xuất tự động lưu trước khi dùng mã cố định (`resource-auto-<thời điểm>`) cùng mang tên
+   * "Tự động theo máy". Đổi tên kèm ngày lưu cho phân biệt được; không xóa, không đổi mã, vì dự án cũ có
+   * thể đang trỏ tới (khám phá bản cài #6). Chạy mỗi lần mở app: bản cũ hơn quay lui vẫn có thể sinh thêm.
+   */
+  private renameOldAutoResourceProfiles(): void {
+    for (const profile of this.repo.listResourceProfiles()) {
+      const match = /^resource-auto-(\d+)$/.exec(profile.id);
+      if (!match || profile.name !== AUTO_RESOURCE_PROFILE_NAME) continue;
+      const savedAt = new Date(Number(match[1]));
+      if (Number.isNaN(savedAt.getTime())) continue;
+      const pad = (value: number): string => String(value).padStart(2, '0');
+      const label = `${pad(savedAt.getDate())}/${pad(savedAt.getMonth() + 1)}/${savedAt.getFullYear()} ${pad(savedAt.getHours())}:${pad(savedAt.getMinutes())}`;
+      this.repo.saveResourceProfile({ ...profile, name: `${AUTO_RESOURCE_PROFILE_NAME} (cũ, ${label})` });
+    }
   }
 
   public saveResource(profile: ResourceProfile): ResourceProfile {

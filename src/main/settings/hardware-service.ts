@@ -65,6 +65,13 @@ export function cpuCountsFromWmi(
   };
 }
 
+/**
+ * Mã cố định cho hồ sơ đề xuất tự động: áp dụng lại chỉ ghi đè đúng một hồ sơ. Trước đây mỗi lần áp dụng
+ * lưu thêm `resource-auto-<thời điểm>` cùng tên, dồn thành nhiều hồ sơ trùng tên (khám phá bản cài #6).
+ */
+export const AUTO_RESOURCE_PROFILE_ID = 'resource-auto';
+export const AUTO_RESOURCE_PROFILE_NAME = 'Tự động theo máy';
+
 export class HardwareService {
   public quickSnapshot(): HardwareProfile {
     const cpuList = cpus();
@@ -149,8 +156,8 @@ export class HardwareService {
     const normalizeWorkers = low ? 1 : workstation ? 3 : logical >= 16 && ramGb >= 24 ? 2 : 1;
 
     return {
-      id: `resource-auto-${Date.now()}`,
-      name: 'Tự động theo máy',
+      id: AUTO_RESOURCE_PROFILE_ID,
+      name: AUTO_RESOURCE_PROFILE_NAME,
       description: `${concurrency.summary} Phát hiện ${logical} logical processors, ${Math.round(totalRamGb)} GB RAM (còn trống ${Math.round(ramGb)} GB lúc quét)${hasNvidiaGpu ? ' và GPU NVIDIA' : ''}. Chỉ dùng GPU khi FFmpeg kiểm tra encoder thành công; nếu lỗi sẽ tự quay về CPU.`,
       downloadWorkers: concurrency.recommendedPerListWorkers,
       analyzeWorkers: low ? 1 : 2,

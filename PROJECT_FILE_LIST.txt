@@ -447,6 +447,7 @@ src/shared/utils/youtube-url-validation.ts
 src/shared/video-link-filter.ts
 TEST_RESULTS.md
 tests/e2e/app.spec.ts
+tests/integration/auto-resource-profile-duplicates.test.ts
 tests/integration/cookie-jar-stale-cleanup.test.ts
 tests/integration/cookie-jar-store.test.ts
 tests/integration/cookie-resume-fingerprint.test.ts
