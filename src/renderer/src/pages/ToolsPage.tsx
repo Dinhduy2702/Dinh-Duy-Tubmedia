@@ -198,13 +198,13 @@ export function ToolsPage(): React.JSX.Element {
 
           <footer className="tool-card-actions">
             <div className="tool-action-group tool-action-group-secondary">
-              <button className="tool-action-button" onClick={() => void openFolder()} disabled={busy !== null}><span><FolderOpen size={16}/></span><b>Mở thư mục</b></button>
-              <button className="tool-action-button" onClick={() => void checkAgain()} disabled={busy !== null}><span><RefreshCcw size={16}/></span><b>Kiểm tra lại</b></button>
+              <button className="tool-action-button" title="Mở thư mục công cụ" onClick={() => void openFolder()} disabled={busy !== null}><span><FolderOpen size={16}/></span><b>Mở thư mục</b></button>
+              <button className="tool-action-button" title="Kiểm tra lại công cụ" onClick={() => void checkAgain()} disabled={busy !== null}><span><RefreshCcw size={16}/></span><b>Kiểm tra lại</b></button>
             </div>
             <div className="tool-action-divider"/>
             <div className="tool-action-group tool-action-group-maintenance">
-              <button className="tool-action-button tool-action-restore" onClick={() => void restorePrevious(tool.name)} disabled={busy !== null}><RotateCcw size={16}/><b>Khôi phục</b><small>Bản trước</small></button>
-              {updateInfo?.available ? <button className="tool-action-button tool-action-update" onClick={() => void updateOne(tool.name)} disabled={busy !== null}><UploadCloud size={16}/><b>Cập nhật</b><small>{updateInfo.latestVersion}</small></button> : <div className="tool-action-button tool-action-current" aria-label="Công cụ đang ở bản mới nhất"><CheckCircle2 size={16}/><b>Mới nhất</b><small>{tool.version ?? 'Đã xác minh'}</small></div>}
+              <button className="tool-action-button tool-action-restore" title="Khôi phục bản trước" onClick={() => void restorePrevious(tool.name)} disabled={busy !== null}><RotateCcw size={16}/><b>Khôi phục</b><small>Bản trước</small></button>
+              {updateInfo?.available ? <button className="tool-action-button tool-action-update" title={`Cập nhật lên ${updateInfo.latestVersion}`} onClick={() => void updateOne(tool.name)} disabled={busy !== null}><UploadCloud size={16}/><b>Cập nhật</b><small>{updateInfo.latestVersion}</small></button> : <div className="tool-action-button tool-action-current" title={`Đang ở bản mới nhất · ${tool.version ?? 'Đã xác minh'}`} aria-label="Công cụ đang ở bản mới nhất"><CheckCircle2 size={16}/><b>Mới nhất</b><small>{tool.version ?? 'Đã xác minh'}</small></div>}
             </div>
           </footer>
         </article>;

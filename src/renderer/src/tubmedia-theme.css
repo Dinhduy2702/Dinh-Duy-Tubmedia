@@ -2422,6 +2422,13 @@ body {
   padding-top: 0.7rem;
   border-top: 1px solid var(--border);
 }
+/* #11 (khám phá bản cài 2026-10-05): mỗi nhóm nút một hàng — 4 nút chung một hàng chỉ còn ~80px nên chữ bị cắt
+   ("Mở th…", "Kiểm t…"). Bộ chọn phải mạnh hơn `.tool-card>footer{display:flex}` trong styles.css, nếu không
+   footer vẫn là flex và grid-template-columns không có tác dụng (đã đo thật trên bản dev). */
+.tool-card > footer.tool-card-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+}
 .tool-action-group {
   display: grid;
   gap: 0.45rem;

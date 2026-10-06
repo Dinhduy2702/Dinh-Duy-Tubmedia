@@ -1,4 +1,5 @@
 import { malformedYouTubeVideoUrlMessage } from '@shared/utils/youtube-url-validation.js';
+import { formatDiskShortfall } from '@shared/utils/disk-shortfall-format.js';
 import { type BrowserWindow } from 'electron';
 import { cpus, freemem, totalmem } from 'node:os';
 import { rm, stat, statfs } from 'node:fs/promises';
@@ -649,9 +650,10 @@ export class QueueManager {
 
         if (freeBytes >= requiredBytes) continue;
 
+        const shown = formatDiskShortfall(freeBytes, requiredBytes);
         const message =
-          `Ổ đĩa chứa ${folder} chỉ còn ${this.formatDiskBytes(freeBytes)}, thấp hơn mức an toàn ` +
-          `${this.formatDiskBytes(requiredBytes)}. Tubmedia đã tạm dừng ngay tác vụ đang chạy để tránh đầy ổ; ` +
+          `Ổ đĩa chứa ${folder} chỉ còn ${shown.free}, thấp hơn mức an toàn ` +
+          `${shown.required}. Tubmedia đã tạm dừng ngay tác vụ đang chạy để tránh đầy ổ; ` +
           'hãy dọn dung lượng rồi nhấn Tiếp tục.';
         this.repo.update(
           current.id,

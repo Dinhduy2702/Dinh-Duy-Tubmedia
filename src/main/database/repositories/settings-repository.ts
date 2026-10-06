@@ -7,6 +7,20 @@ import type { AppSettings, QualityProfile, ResourceProfile } from '@shared/types
 const EXTRA_SETTINGS_ROW = 'app_extra';
 const EXTRA_SETTING_KEYS = ['autoResumeInterruptedOnStartup', 'dismissedSharedTempWarnings'] as const satisfies ReadonlyArray<keyof AppSettings>;
 
+/**
+ * Hồ sơ tự động cũ `resource-auto-<thời điểm>` tên dạng "(cũ, dd/mm/yyyy …)" — xếp theo chữ thì 14/09 đứng sau
+ * 04/10. Giữ nguyên vị trí của nhóm, chỉ xếp lại các hồ sơ đó theo thời điểm trong mã, cũ trước mới sau (#6).
+ */
+function sortOldAutoProfilesByTime(profiles: ResourceProfile[]): ResourceProfile[] {
+  const savedAt = (profile: ResourceProfile): number | null => {
+    const match = /^resource-auto-(\d+)$/.exec(profile.id);
+    return match ? Number(match[1]) : null;
+  };
+  const oldAuto = profiles.filter((profile) => savedAt(profile) !== null).sort((a, b) => savedAt(a)! - savedAt(b)!);
+  let next = 0;
+  return profiles.map((profile) => (savedAt(profile) === null ? profile : oldAuto[next++]!));
+}
+
 export class SettingsRepository {
   public constructor(private readonly db: SqliteDatabase) {}
   public get<T>(key: string, fallback: T): T {
@@ -37,9 +51,10 @@ export class SettingsRepository {
     }
   }
   public listResourceProfiles(): ResourceProfile[] {
-    return (this.db.prepare('SELECT profile_json FROM resource_profiles ORDER BY built_in DESC,name').all() as Array<{ profile_json: string }>)
+    const profiles = (this.db.prepare('SELECT profile_json FROM resource_profiles ORDER BY built_in DESC,name').all() as Array<{ profile_json: string }>)
       .map((row) => parseJsonOr<ResourceProfile | null>(row.profile_json, null))
       .filter((profile): profile is ResourceProfile => profile !== null);
+    return sortOldAutoProfilesByTime(profiles);
   }
   public saveResourceProfile(profile: ResourceProfile): void {
     this.db.prepare(`INSERT INTO resource_profiles(id,name,description,profile_json,built_in,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,profile_json=excluded.profile_json,built_in=excluded.built_in,updated_at=excluded.updated_at`).run(profile.id, profile.name, profile.description, JSON.stringify(profile), profile.builtIn ? 1 : 0, new Date().toISOString());

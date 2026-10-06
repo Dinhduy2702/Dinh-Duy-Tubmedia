@@ -136,7 +136,10 @@ export function useDesktopEvents(): void {
           store.dismissAttentionByCodes(['DISK_FULL'], notice.projectId);
         }
         /* TUBMEDIA_R18_R10_CENTRAL_ATTENTION_AGGREGATION */
-        const aggregatedNotice = coalesceBatchJobFailureAttention(notice);
+        const projectName = notice.projectId
+          ? store.projects.find((project) => project.id === notice.projectId)?.name
+          : undefined;
+        const aggregatedNotice = coalesceBatchJobFailureAttention(notice, projectName);
         if (aggregatedNotice) {
           store.setAttention(aggregatedNotice);
         }

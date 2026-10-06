@@ -109,3 +109,23 @@ describe('#6 — hồ sơ "Tự động theo máy" không bị nhân bản', () 
     expect(byId.get(renamedByUser.id)?.name).toBe('Máy chính — tải đêm');
   });
 });
+
+// Người dùng duyệt #6 (2026-10-06) và ghi nhận: tên dạng dd/mm/yyyy xếp theo chữ nên bản 14/09 đứng sau 04/10.
+describe('#6 bổ sung — hồ sơ tự động cũ xếp theo thời gian', () => {
+  it('các bản "Tự động theo máy (cũ, …)" xếp từ cũ đến mới, hồ sơ khác giữ thứ tự cũ', () => {
+    const repo = openRepo();
+    const stamps = [new Date(2026, 9, 3, 14, 32), new Date(2026, 8, 14, 8, 5), new Date(2026, 9, 4, 21, 0)].map((d) => d.getTime());
+    for (const ts of stamps) repo.saveResourceProfile(oldAutoProfile(ts));
+    repo.saveResourceProfile(new HardwareService().recommend(fakeHardware()));
+    new SettingsService(repo, new HardwareService()).initialize();
+
+    const names = repo.listResourceProfiles().map((profile) => profile.name);
+    const old = names.filter((name) => name.startsWith('Tự động theo máy (cũ'));
+    expect(old).toEqual([
+      'Tự động theo máy (cũ, 14/09/2026 08:05)',
+      'Tự động theo máy (cũ, 03/10/2026 14:32)',
+      'Tự động theo máy (cũ, 04/10/2026 21:00)'
+    ]);
+    expect(names.indexOf('Tự động theo máy')).toBeGreaterThanOrEqual(0);
+  });
+});

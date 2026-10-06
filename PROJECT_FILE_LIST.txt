@@ -415,6 +415,7 @@ src/shared/utils/concat-compatibility.ts
 src/shared/utils/cookie-policy.ts
 src/shared/utils/csv.ts
 src/shared/utils/diagnostic-policy.ts
+src/shared/utils/disk-shortfall-format.ts
 src/shared/utils/download-failure.ts
 src/shared/utils/download-quality.ts
 src/shared/utils/encoder-selection.ts
@@ -487,6 +488,7 @@ tests/unit/csv-export.test.ts
 tests/unit/cut-suggestion.test.ts
 tests/unit/diagnostic-policy.test.ts
 tests/unit/disk-full-recovery.test.ts
+tests/unit/disk-shortfall-format.test.ts
 tests/unit/download-performance.test.ts
 tests/unit/download-quality.test.ts
 tests/unit/download-recovery-policy.test.ts
@@ -590,6 +592,7 @@ tests/unit/timeline-merge-recovery-hotfix12.test.ts
 tests/unit/timeline-service-safety.test.ts
 tests/unit/timeline.test.ts
 tests/unit/timestamp.test.ts
+tests/unit/tool-action-buttons-labels.test.ts
 tests/unit/tool-bootstrap-release.test.ts
 tests/unit/tool-capabilities.test.ts
 tests/unit/tool-manager-configured-path.test.ts

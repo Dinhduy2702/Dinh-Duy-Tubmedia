@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
   coalesceBatchJobFailureAttention,
   resetBatchErrorNotificationAggregatorForTests
@@ -97,5 +98,41 @@ describe('R18 R10 central batch attention aggregation', () => {
     };
 
     expect(coalesceBatchJobFailureAttention(notice)?.id).toBe('batch-job-failures:p1');
+  });
+});
+
+// Khám phá bản cài 1.5.0 (2026-10-05) #10: Trung tâm thông báo ghi "Có 1 video gặp lỗi trong danh sách này" —
+// thông báo nằm chung một chỗ với mọi danh sách nên "danh sách này" không cho biết là danh sách nào.
+describe('#10 — thông báo gom lỗi nêu đúng tên danh sách', () => {
+  beforeEach(() => {
+    resetBatchErrorNotificationAggregatorForTests();
+  });
+
+  it('có tên danh sách → nêu tên trong tiêu đề', () => {
+    const first = coalesceBatchJobFailureAttention(failure('project-2', 'job-1'), 'Danh sách tải 2');
+    expect(first?.title).toBe('Có 1 video gặp lỗi trong "Danh sách tải 2"');
+    const second = coalesceBatchJobFailureAttention(failure('project-2', 'job-2'), 'Danh sách tải 2');
+    expect(second?.title).toBe('Có 2 video gặp lỗi trong "Danh sách tải 2"');
+  });
+
+  it('cảnh báo phục hồi cũng nêu tên', () => {
+    const notice = coalesceBatchJobFailureAttention({ ...failure('project-3', 'job-9', 'SOURCE_TEMPORARY'), severity: 'warning' }, 'Kênh A');
+    expect(notice?.title).toBe('Có 1 video trong "Kênh A" chưa tải được sau khi tự thử lại');
+  });
+
+  it('không có tên → không còn câu "danh sách này"', () => {
+    const notice = coalesceBatchJobFailureAttention(failure('project-4', 'job-1'));
+    expect(notice?.title).toBe('Có 1 video gặp lỗi trong một danh sách tải');
+  });
+
+  it('nơi nhận sự kiện tra tên danh sách theo projectId rồi truyền vào', () => {
+    const source = readFileSync('src/renderer/src/hooks/use-desktop-events.ts', 'utf8');
+    expect(source).toMatch(/coalesceBatchJobFailureAttention\(\s*notice,\s*\w+/);
+  });
+
+  it('thông báo bắt đầu / tạm dừng / tiếp tục / hủy ở trang Tải danh sách dùng tên thật, không dùng số ô', () => {
+    const source = readFileSync('src/renderer/src/pages/DownloadWorkbenchPage.tsx', 'utf8');
+    expect(source).not.toContain('`Danh sách ${laneNumber(slot)} đã bắt đầu`');
+    expect(source).not.toContain('`Danh sách ${laneNumber(slot)} ${label}`');
   });
 });

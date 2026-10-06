@@ -112,3 +112,31 @@ export interface CutSuggestion {
   startReason: CutSuggestionReason;
   endReason: CutSuggestionReason;
 }
+
+/** Mốc cuối được phép vượt thời lượng đo được một chút: ffprobe và ô nhập giờ có thể lệch vài phần trăm giây. */
+const DURATION_TOLERANCE_SECONDS = 0.1;
+
+/**
+ * Lý do đoạn đã chọn nằm ngoài tệp, hoặc null nếu hợp lệ / không đo được thời lượng. Trước đây không kiểm tra
+ * nên ffmpeg vẫn chạy rồi mới báo lỗi kỹ thuật "Thời lượng lệch 40.00s…" (khám phá bản cài #9).
+ */
+export function describeCutRangeBeyondDuration(
+  startSeconds: number,
+  endSeconds: number,
+  sourceDurationSeconds: number | null
+): string | null {
+  if (sourceDurationSeconds === null || !Number.isFinite(sourceDurationSeconds) || sourceDurationSeconds <= 0) return null;
+  const duration = formatQuickDownloadTime(sourceDurationSeconds);
+  if (startSeconds >= sourceDurationSeconds) {
+    return `Mốc bắt đầu ${formatQuickDownloadTime(startSeconds)} nằm ngoài thời lượng của tệp (${duration}).`;
+  }
+  if (endSeconds > sourceDurationSeconds + DURATION_TOLERANCE_SECONDS) {
+    return `Mốc kết thúc ${formatQuickDownloadTime(endSeconds)} vượt quá thời lượng của tệp (${duration}). Hãy chọn mốc kết thúc không quá ${duration}.`;
+  }
+  return null;
+}
+
+/** Mốc trong tên tệp giữ phần thập phân (tối đa 2 chữ số): 5,5→9,25 thành "5.5-9.25" thay vì "6-9" (#9). */
+export function formatCutSecondsForFileName(seconds: number): string {
+  return String(Number(seconds.toFixed(2)));
+}

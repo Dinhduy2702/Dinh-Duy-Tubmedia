@@ -246,6 +246,10 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
       .catch((error: unknown) => setError(messageOf(error)));
   }, [setError]);
 
+  // #10 (khám phá bản cài 2026-10-05): thông báo gọi đúng tên danh sách người dùng thấy ("Danh sách tải 2" hoặc
+  // tên đã đổi), không phải số ô "Danh sách 2".
+  const laneTitle = (slot: DownloadLaneId): string => forms[slot].name.trim() || `Danh sách ${laneNumber(slot)}`;
+
   const notify = (
     title: string,
     message: string,
@@ -333,7 +337,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
       setStates((current) => ({ ...current, [slot]: next }));
       await Promise.all([refreshJobs(), refreshProjects()]);
       notify(
-        `Danh sách ${laneNumber(slot)} đã bắt đầu`,
+        `${laneTitle(slot)} đã bắt đầu`,
         `${profile.downloadWorkers} video tối đa trong danh sách này; danh sách bắt đầu độc lập và chạy song song, không phải chờ danh sách khác.`
       );
     } catch (error) {
@@ -351,10 +355,10 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
       await refreshJobs();
       const label = action === 'pause' ? 'đã tạm dừng' : action === 'resume' ? 'đã tiếp tục' : 'đã hủy';
       notify(
-        `Danh sách ${laneNumber(slot)} ${label}`,
+        `${laneTitle(slot)} ${label}`,
         action === 'pause'
           ? 'Các tiến trình của danh sách khác không bị ảnh hưởng.'
-          : `Thao tác chỉ áp dụng cho danh sách ${laneNumber(slot)}.`,
+          : `Thao tác chỉ áp dụng cho ${laneTitle(slot)}.`,
         action === 'resume' ? 'success' : 'neutral'
       );
     } catch (error) {

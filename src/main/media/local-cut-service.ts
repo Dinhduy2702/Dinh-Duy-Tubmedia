@@ -14,6 +14,8 @@ import { basename, extname, join } from 'node:path';
 import { sanitizeProgress } from '@shared/utils/progress-policy.js';
 import {
   LOCAL_CUT_ASPECT_RATIOS,
+  describeCutRangeBeyondDuration,
+  formatCutSecondsForFileName,
   validateLocalCutRequest,
   type CutSuggestion,
   type LocalCutAspectRatio,
@@ -56,7 +58,9 @@ export class LocalCutService {
     private readonly processes: ProcessManager,
     private readonly tools: ToolManager,
     private readonly verifier: FileVerifier,
-    private readonly logger: Logger
+    private readonly logger: Logger,
+    /** Đo thời lượng tệp nguồn (giây) để chặn mốc vượt thời lượng trước khi chạy ffmpeg (#9); null = không đo được. */
+    private readonly probeSourceDuration?: (filePath: string) => Promise<number | null>
   ) {}
 
   public isActive(): boolean {
@@ -268,6 +272,14 @@ export class LocalCutService {
       throw new Error('Tubmedia không có quyền ghi vào thư mục đã chọn.');
     });
 
+    // #9 (khám phá bản cài 2026-10-05): chặn mốc nằm ngoài tệp TRƯỚC khi chạy ffmpeg, báo bằng lời dễ hiểu.
+    // Không đo được thời lượng thì giữ hành vi cũ — bước kiểm tra sau khi cắt vẫn bắt lỗi.
+    const sourceDuration = this.probeSourceDuration
+      ? await this.probeSourceDuration(request.filePath).catch(() => null)
+      : null;
+    const rangeIssue = describeCutRangeBeyondDuration(request.startSeconds, request.endSeconds, sourceDuration);
+    if (rangeIssue) throw new Error(rangeIssue);
+
     // Đổi tỉ lệ khung hình LUÔN bắt buộc mã hóa lại (bộ lọc nền mờ là bộ lọc pixel, không thể đi cùng
     // -c copy) — accurateCut không còn ý nghĩa khi aspectRatio khác 'original', xem local-cut-command.ts.
     const isReencode = request.accurateCut || request.aspectRatio !== 'original';
@@ -285,7 +297,7 @@ export class LocalCutService {
     const baseName = basename(request.filePath, extname(request.filePath));
     const aspectTag =
       request.aspectRatio === 'original' ? '' : ` [${request.aspectRatio.replace(':', 'x')}]`;
-    const outputName = `${baseName} [${Math.round(request.startSeconds)}-${Math.round(request.endSeconds)}]${aspectTag}${extension}`;
+    const outputName = `${baseName} [${formatCutSecondsForFileName(request.startSeconds)}-${formatCutSecondsForFileName(request.endSeconds)}]${aspectTag}${extension}`;
     const finalOutput = join(request.outputDirectory, outputName);
     const pendingOutput = `${finalOutput}.pending${extension}`;
 

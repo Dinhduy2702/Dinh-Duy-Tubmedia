@@ -30,6 +30,8 @@ interface Behaviour {
   verifyReasons?: string[];
   neverResolveFfmpeg?: boolean;
   neverResolveVerify?: boolean;
+  /** Thời lượng tệp nguồn trả về từ bước đo trước khi cắt (#9); undefined = không truyền hàm đo. */
+  sourceDurationSeconds?: number | null;
 }
 
 async function createFixture(behaviour: Behaviour = {}) {
@@ -85,7 +87,9 @@ async function createFixture(behaviour: Behaviour = {}) {
     })
   };
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-  const service = new LocalCutService(processes as never, tools as never, verifier as never, logger as never);
+  const probeSourceDuration =
+    behaviour.sourceDurationSeconds === undefined ? undefined : vi.fn(() => Promise.resolve(behaviour.sourceDurationSeconds ?? null));
+  const service = new LocalCutService(processes as never, tools as never, verifier as never, logger as never, probeSourceDuration);
 
   return { root, outputDirectory, sourceFile, calls, service, verifier, logger };
 }
@@ -365,11 +369,13 @@ describe('#1 — cắt tệp có sẵn không bao giờ ghi đè tệp đã có'
     );
   });
 
-  it('mốc khác nhưng làm tròn ra cùng tên (đúng ca đã tái hiện thật) cũng không ghi đè', async () => {
+  // Ca tái hiện thật của #1 dùng 5→12 và 5,2→12,3 (cùng ra "[5-12]" vì Math.round). Từ #9 tên giữ phần
+  // thập phân nên hai mốc đó không còn trùng tên; trùng tên giờ chỉ xảy ra khi cắt lại đúng cùng mốc.
+  it('cắt lại đúng cùng mốc (ra cùng tên) cũng không ghi đè', async () => {
     const fixture = await createFixture();
     const first = await waitForTerminal(fixture.service, (await cut(fixture, '00:00:05', '00:00:12')).taskId);
     await writeFile(first.outputPath!, 'lan-cat-thu-nhat');
-    const second = await waitForTerminal(fixture.service, (await cut(fixture, '00:00:05.2', '00:00:12.3')).taskId);
+    const second = await waitForTerminal(fixture.service, (await cut(fixture, '00:00:05', '00:00:12')).taskId);
 
     expect(first.outputPath).toBe(join(fixture.outputDirectory, 'nguon [5-12].mp4'));
     expect(second.outputPath).toBe(join(fixture.outputDirectory, 'nguon [5-12] (2).mp4'));
@@ -402,5 +408,59 @@ describe('#1 — cắt tệp có sẵn không bao giờ ghi đè tệp đã có'
     const page = await readFile(join(process.cwd(), 'src/renderer/src/pages/StepPreviewCutPage.tsx'), 'utf8');
     expect(page).toContain('status.outputNameConflict');
     expect(page).toContain('tệp cũ giữ nguyên');
+  });
+});
+
+// Khám phá bản cài 2026-10-05 #9: mốc cuối vượt thời lượng tệp không bị chặn — ffmpeg vẫn chạy rồi mới báo lỗi
+// kỹ thuật "Thời lượng lệch 40.00s…"; tên tệp `[6-9]` cho đoạn 5,5→9,25 (Math.round).
+describe('#9 — chặn mốc vượt thời lượng trước khi cắt, tên tệp đúng mốc đã chọn', () => {
+  const cut = (fixture: Awaited<ReturnType<typeof createFixture>>, startTime: string, endTime: string) =>
+    fixture.service.start({
+      filePath: fixture.sourceFile,
+      outputDirectory: fixture.outputDirectory,
+      startTime,
+      endTime,
+      accurateCut: false
+    });
+
+  it('mốc kết thúc vượt thời lượng → báo rõ bằng lời, KHÔNG gọi ffmpeg, không tạo tệp', async () => {
+    const fixture = await createFixture({ sourceDurationSeconds: 20 });
+    const finished = await waitForTerminal(fixture.service, (await cut(fixture, '00:00:05', '00:01:00')).taskId);
+
+    expect(finished.phase).toBe('failed');
+    expect(finished.error).toBe(
+      'Mốc kết thúc 01:00 vượt quá thời lượng của tệp (00:20). Hãy chọn mốc kết thúc không quá 00:20.'
+    );
+    expect(fixture.calls.filter((call) => call.tool === 'ffmpeg')).toHaveLength(0);
+    expect(existsSync(join(fixture.outputDirectory, 'nguon [5-60].mp4'))).toBe(false);
+  });
+
+  it('mốc bắt đầu nằm ngoài thời lượng → báo rõ, không gọi ffmpeg', async () => {
+    const fixture = await createFixture({ sourceDurationSeconds: 20 });
+    const finished = await waitForTerminal(fixture.service, (await cut(fixture, '00:00:25', '00:00:30')).taskId);
+
+    expect(finished.phase).toBe('failed');
+    expect(finished.error).toBe('Mốc bắt đầu 00:25 nằm ngoài thời lượng của tệp (00:20).');
+    expect(fixture.calls.filter((call) => call.tool === 'ffmpeg')).toHaveLength(0);
+  });
+
+  it('mốc cuối đúng bằng thời lượng (hoặc lệch dưới 0,1 giây do làm tròn) vẫn cắt bình thường', async () => {
+    const fixture = await createFixture({ sourceDurationSeconds: 19.96 });
+    const finished = await waitForTerminal(fixture.service, (await cut(fixture, '00:00:10', '00:00:20')).taskId);
+    expect(finished.phase).toBe('completed');
+  });
+
+  it('không đo được thời lượng → giữ hành vi cũ (không chặn nhầm)', async () => {
+    const fixture = await createFixture({ sourceDurationSeconds: null });
+    const finished = await waitForTerminal(fixture.service, (await cut(fixture, '00:00:10', '00:00:20')).taskId);
+    expect(finished.phase).toBe('completed');
+  });
+
+  it('tên tệp giữ đúng phần thập phân của mốc: 5,5→9,25 thành "[5.5-9.25]", mốc tròn vẫn "[10-20]"', async () => {
+    const fixture = await createFixture({ sourceDurationSeconds: 30 });
+    const decimal = await waitForTerminal(fixture.service, (await cut(fixture, '00:00:05.5', '00:00:09.25')).taskId);
+    expect(decimal.outputPath).toBe(join(fixture.outputDirectory, 'nguon [5.5-9.25].mp4'));
+    const whole = await waitForTerminal(fixture.service, (await cut(fixture, '10', '20')).taskId);
+    expect(whole.outputPath).toBe(join(fixture.outputDirectory, 'nguon [10-20].mp4'));
   });
 });

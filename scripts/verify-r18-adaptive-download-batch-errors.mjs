@@ -78,7 +78,8 @@ check(
 
 check(
   desktopEvents.includes('TUBMEDIA_R18_R10_CENTRAL_ATTENTION_AGGREGATION') &&
-    desktopEvents.includes('coalesceBatchJobFailureAttention(notice)') &&
+    // #10 (2026-10-06): lời gọi truyền thêm tên danh sách — coalesceBatchJobFailureAttention(notice, projectName).
+    desktopEvents.includes('coalesceBatchJobFailureAttention(notice, projectName)') &&
     desktopEvents.includes('store.setAttention(aggregatedNotice)'),
   'batch aggregation is installed at the single desktop onAttention gateway'
 );

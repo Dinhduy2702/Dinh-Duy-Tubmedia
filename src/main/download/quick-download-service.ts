@@ -1,4 +1,5 @@
 import { malformedYouTubeVideoUrlMessage } from '@shared/utils/youtube-url-validation.js';
+import { formatDiskShortfall } from '@shared/utils/disk-shortfall-format.js';
 import { app, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { access, mkdir, readFile, readdir, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
@@ -834,9 +835,10 @@ export class QuickDownloadService {
       .then(async (disk) => {
         active.diskCheckWarningLogged = false;
         if (disk.ready || this.activeTask !== active || TERMINAL_PHASES.has(active.status.phase)) return;
+        const shown = formatDiskShortfall(disk.freeBytes, disk.requiredBytes);
         const message =
-          `Ổ đĩa chứa ${disk.folder} chỉ còn ${this.formatDiskBytes(disk.freeBytes)}, thấp hơn mức an toàn ` +
-          `${this.formatDiskBytes(disk.requiredBytes)}. Tải nhanh đã tạm dừng để tránh đầy ổ; ` +
+          `Ổ đĩa chứa ${disk.folder} chỉ còn ${shown.free}, thấp hơn mức an toàn ` +
+          `${shown.required}. Tải nhanh đã tạm dừng để tránh đầy ổ; ` +
           'hãy dọn dung lượng rồi nhấn Tiếp tục.';
         const pausedProcesses = await this.processes.pauseByJob(active.status.taskId).catch(() => 0);
         if (pausedProcesses === 0) {

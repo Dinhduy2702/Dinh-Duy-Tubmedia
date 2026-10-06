@@ -77,8 +77,11 @@ export function resetBatchErrorNotificationAggregatorForTests(): void {
  * - null for a duplicate failure from the same job.
  *
  * Queue state, diagnostics and per-job logs are never modified here.
+ *
+ * projectName: tên danh sách để nêu trong tiêu đề. Thông báo nằm ở Trung tâm thông báo chung cho mọi danh sách
+ * nên "danh sách này" không cho biết là danh sách nào (khám phá bản cài #10).
  */
-export function coalesceBatchJobFailureAttention<T extends BatchAttentionNotice>(notice: T): T | null {
+export function coalesceBatchJobFailureAttention<T extends BatchAttentionNotice>(notice: T, projectName?: string): T | null {
   if (!isBatchableFinalJobFailure(notice)) {
     return notice;
   }
@@ -108,17 +111,15 @@ export function coalesceBatchJobFailureAttention<T extends BatchAttentionNotice>
 
   const count = bucket.jobIds.size;
   const recoverableWarning = notice.severity === 'warning';
+  const name = projectName?.trim();
+  const where = name ? `"${name}"` : 'một danh sách tải';
 
   return {
     ...notice,
     id: `batch-job-failures:${projectId}`,
     title: recoverableWarning
-      ? count === 1
-        ? 'Có 1 video chưa tải được sau khi tự thử lại'
-        : `Có ${count} video chưa tải được sau khi tự thử lại`
-      : count === 1
-        ? 'Có 1 video gặp lỗi trong danh sách này'
-        : `Có ${count} video gặp lỗi trong danh sách này`,
+      ? `Có ${count} video${name ? ` trong ${where}` : ''} chưa tải được sau khi tự thử lại`
+      : `Có ${count} video gặp lỗi trong ${where}`,
     message: recoverableWarning
       ? 'Tubmedia đã gom các cảnh báo phục hồi vào một thông báo. Tệp .part vẫn được giữ để thử lại đúng video khi nguồn ổn định.'
       : 'Các lỗi được gom vào một thông báo. Mở Nhật ký riêng của danh sách để xem chi tiết từng video.',

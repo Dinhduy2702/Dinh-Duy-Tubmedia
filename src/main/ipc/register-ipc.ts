@@ -129,7 +129,13 @@ export function registerIpc(ctx: AppContext): void {
     cleanupQuarantine
   );
   const videoLinkFilter = new VideoLinkFilterService(ctx.tools, ctx.logger);
-  const localCut = new LocalCutService(ctx.processes, ctx.tools, ctx.verifier, ctx.logger);
+  const localCut = new LocalCutService(
+    ctx.processes,
+    ctx.tools,
+    ctx.verifier,
+    ctx.logger,
+    async (filePath) => (await ctx.analyzer.analyze(filePath, 'local-cut-duration')).duration
+  );
 
   const handle = <Input, Output>(
     channel: string,
