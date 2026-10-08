@@ -280,8 +280,9 @@ export class ToolManager {
     // The user's portable folder: <project>\tool\yt-dlp.exe, ffmpeg.exe, ffprobe.exe, ffplay.exe...
     candidates.push({ path: join(this.appPath, 'tool', executable), source: 'local' });
     candidates.push({ path: join(this.appPath, 'tools', executable), source: 'local' });
-    candidates.push({ path: join(process.cwd(), 'tool', executable), source: 'local' });
-    candidates.push({ path: join(process.cwd(), 'tools', executable), source: 'local' });
+    // Đợt 4 mục 15 (rà soát bản cài 1.5.0): KHÔNG tìm trong <thư mục đang đứng khi mở app>\tool. Thư mục đó do cách mở app
+    // quyết định (lối tắt, dòng lệnh, mở từ thư mục tải về…), trước đây lại được ưu tiên hơn cả công cụ đi kèm bộ cài — ai
+    // đặt được ffmpeg.exe/yt-dlp.exe vào đó là app chạy tệp đó. Bản chạy từ mã nguồn đã có thư mục tool của chính app ở trên.
 
     // Portable builds are often placed beside the Electron executable instead
     // of inside app.asar. Check both direct and nested tool folders.

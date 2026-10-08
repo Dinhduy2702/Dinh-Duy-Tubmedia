@@ -621,6 +621,7 @@ tests/unit/tool-action-buttons-labels.test.ts
 tests/unit/tool-bootstrap-release.test.ts
 tests/unit/tool-capabilities.test.ts
 tests/unit/tool-manager-configured-path.test.ts
+tests/unit/tool-manager-cwd.test.ts
 tests/unit/tool-manager-nvenc-issue.test.ts
 tests/unit/tool-update-rate-limit.test.ts
 tests/unit/typography-system.test.ts

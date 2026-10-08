@@ -3315,3 +3315,73 @@ test('Khám phá #12: Nhật ký riêng của danh sách đọc lịch sử ngay
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
 });
+
+/**
+ * Đợt 4 mục 15 (rà soát bản cài 1.5.0): app tìm công cụ trong <thư mục đang đứng khi mở app>\tool trước cả công cụ của
+ * ứng dụng — ai đặt được ffmpeg.exe/yt-dlp.exe vào thư mục đó là app chạy tệp đó. Tái hiện thật: mở app với thư mục đang
+ * đứng là một thư mục lạ có tool\ffmpeg.exe (bản ffmpeg thật, liên kết cứng) → app không được dùng tệp đó.
+ */
+test('Đợt 4 mục 15: không chạy công cụ đặt sẵn trong thư mục đang đứng khi mở app', async () => {
+  test.setTimeout(150_000);
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-cwd-tool-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  const strangeCwd = path.join(sandbox, 'thu-muc-la');
+  const env = {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    ),
+    NODE_ENV: 'test',
+    TUBMEDIA_E2E: '1',
+    TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+    PLAYWRIGHT_TEST: '1',
+    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+  };
+  type ToolRow = { name: string; available: boolean; executablePath: string | null };
+  const ffmpegPath = async (): Promise<string | null> => {
+    let found: string | null = null;
+    await expect
+      .poll(
+        async () => {
+          const tools = await shellWindow!.evaluate(
+            () => (window as unknown as { desktop: { tools: { list: () => Promise<ToolRow[]> } } }).desktop.tools.list()
+          );
+          const ffmpeg = tools.find((tool) => tool.name === 'ffmpeg');
+          found = ffmpeg?.available ? ffmpeg.executablePath : null;
+          return found;
+        },
+        { timeout: 60_000 }
+      )
+      .not.toBeNull();
+    return found;
+  };
+  const launch = async (cwd: string): Promise<void> => {
+    electronApplication = await electron.launch({ args: [mainEntry], cwd, env, timeout: 45_000 });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+  };
+
+  try {
+    // 1) Mở bình thường để biết ffmpeg thật app đang dùng.
+    await launch(projectRoot);
+    const realFfmpeg = await ffmpegPath();
+    await closeElectronApplication();
+    expect(realFfmpeg).toBeTruthy();
+
+    // 2) Đặt một ffmpeg.exe chạy được vào <thư mục lạ>\tool rồi mở app với thư mục đang đứng là thư mục lạ.
+    const planted = path.join(strangeCwd, 'tool', path.basename(realFfmpeg!));
+    fs.mkdirSync(path.dirname(planted), { recursive: true });
+    try {
+      fs.linkSync(realFfmpeg!, planted);
+    } catch {
+      fs.copyFileSync(realFfmpeg!, planted);
+    }
+    await launch(strangeCwd);
+    const usedFfmpeg = await ffmpegPath();
+    expect(path.resolve(usedFfmpeg!).toLowerCase(), 'không dùng ffmpeg trong thư mục đang đứng').not.toBe(path.resolve(planted).toLowerCase());
+    expect(path.resolve(usedFfmpeg!).toLowerCase().startsWith(path.resolve(strangeCwd).toLowerCase())).toBe(false);
+  } finally {
+    await closeElectronApplication();
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});
