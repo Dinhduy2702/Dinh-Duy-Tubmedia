@@ -62,6 +62,7 @@ import { StatusBadge } from '../components/StatusBadge';
 import { CompactLogRow } from '../components/CompactLogRow';
 import { EmptyState } from '../components/ui/EmptyState';
 import { useAppStore } from '../stores/app-store';
+import { useLaneLogs } from '../hooks/use-lane-logs';
 import { showNotice } from '../utils/notify';
 import { createUiEventId } from '../utils/ui-id';
 import { loadWorkbenchPath, saveWorkbenchPath } from '../utils/workbench-path-memory';
@@ -730,6 +731,8 @@ export function DownloadMergePage(): React.JSX.Element {
   const [applyTemp, setApplyTemp] = useState<{ slot: MergeLaneId; folder: string } | null>(null);
   // Đợt 3 mục 9: xóa nhật ký hỏi xác nhận trước (trước đây bấm là xóa ngay).
   const [clearLogsTarget, setClearLogsTarget] = useState<{ slot: MergeLaneId; projectId?: string } | null>(null);
+  // Khám phá #12: tăng sau khi xóa nhật ký một quy trình → khung "Nhật ký riêng" của nó đọc lại từ CSDL.
+  const [logsVersion, setLogsVersion] = useState<Partial<Record<MergeLaneId, number>>>({});
   const [applyTempAsDefault, setApplyTempAsDefault] = useState(false);
   const [activeLane, setActiveLane] = useState<MergeLaneId>('merge-1');
   const initializedRef = useRef(false);
@@ -957,6 +960,7 @@ export function DownloadMergePage(): React.JSX.Element {
       const next = await window.desktop.workbench.clearLogs(slot);
       setStates((current) => ({ ...current, [slot]: next }));
       if (projectId) clearProjectLogs(projectId);
+      setLogsVersion((current) => ({ ...current, [slot]: (current[slot] ?? 0) + 1 }));
       notify(
         `Đã xóa nhật ký quy trình ghép ${mergeNumber(slot)}`,
         'Nhật ký của các quy trình ghép và danh sách tải khác vẫn nguyên vẹn.',
@@ -1197,6 +1201,7 @@ export function DownloadMergePage(): React.JSX.Element {
                 resources={resources}
                 jobs={projectId ? jobs.filter((job) => job.projectId === projectId) : []}
                 liveLogs={projectId ? logs.filter((entry) => entry.projectId === projectId) : []}
+                logsVersion={logsVersion[slot] ?? 0}
                 {...(projectId ? { projectId } : {})}
                 busy={busy === slot}
                 onStart={() => start(slot)}
@@ -1279,6 +1284,7 @@ function MergeLaneCard({
   resources,
   jobs,
   liveLogs,
+  logsVersion,
   projectId,
   busy,
   onStart,
@@ -1299,6 +1305,7 @@ function MergeLaneCard({
   resources: ResourceProfile[];
   jobs: QueueJob[];
   liveLogs: LogEntry[];
+  logsVersion: number;
   projectId?: string;
   busy: boolean;
   onStart: () => Promise<void>;
@@ -1314,7 +1321,7 @@ function MergeLaneCard({
 }): React.JSX.Element {
   const dismissedSharedTemp = useAppStore((state) => state.settings?.dismissedSharedTempWarnings);
   const [showLogs, setShowLogs] = useState(false);
-  const [persistedLogs, setPersistedLogs] = useState<LogEntry[]>([]);
+  const combinedLogs = useLaneLogs(projectId, liveLogs, logsVersion, setError);
   const [storage, setStorage] = useState<WorkbenchStorageSummary | null>(null);
   const state = workflowState(jobs);
   const number = mergeNumber(slot);
@@ -1341,14 +1348,6 @@ function MergeLaneCard({
         : completed > 0
           ? `${completed} tác vụ đã hoàn tất`
           : 'Chưa có tác vụ';
-
-  useEffect(() => {
-    if (!projectId || (!showLogs && failed.length === 0)) return;
-    void window.desktop.logs
-      .list({ projectId, limit: 500 })
-      .then(setPersistedLogs)
-      .catch((error: unknown) => setError(messageOf(error)));
-  }, [failed.length, projectId, setError, showLogs]);
 
   useEffect(() => {
     if (!projectId) {
@@ -1400,13 +1399,6 @@ function MergeLaneCard({
     };
   }, [hasActiveJobs, projectId, setError, slot]);
 
-  const combinedLogs = useMemo(() => {
-    const byId = new Map<string, LogEntry>();
-    for (const entry of [...liveLogs, ...persistedLogs]) {
-      if (!byId.has(entry.id)) byId.set(entry.id, entry);
-    }
-    return [...byId.values()].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-  }, [liveLogs, persistedLogs]);
   const latestFailedJob =
     [...failed].sort((a, b) => (b.finishedAt ?? b.updatedAt).localeCompare(a.finishedAt ?? a.updatedAt))[0] ??
     null;

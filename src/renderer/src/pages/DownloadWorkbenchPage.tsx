@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import {
   AlertTriangle,
   ChevronDown,
@@ -44,6 +44,7 @@ import { FolderField } from '../components/FolderField';
 import { StatusBadge } from '../components/StatusBadge';
 import { CompactLogRow } from '../components/CompactLogRow';
 import { useAppStore } from '../stores/app-store';
+import { useLaneLogs } from '../hooks/use-lane-logs';
 import { showNotice } from '../utils/notify';
 import { createUiEventId } from '../utils/ui-id';
 import { loadWorkbenchPath, saveWorkbenchPath } from '../utils/workbench-path-memory';
@@ -204,6 +205,8 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
   const [applyTemp, setApplyTemp] = useState<{ slot: DownloadLaneId; folder: string } | null>(null);
   // Đợt 3 mục 9: xóa nhật ký hỏi xác nhận trước (trước đây bấm là xóa ngay).
   const [clearLogsTarget, setClearLogsTarget] = useState<{ slot: DownloadLaneId; projectId?: string } | null>(null);
+  // Khám phá #12: tăng sau khi xóa nhật ký một danh sách → khung "Nhật ký riêng" của nó đọc lại từ CSDL.
+  const [logsVersion, setLogsVersion] = useState<Partial<Record<DownloadLaneId, number>>>({});
   const [applyTempAsDefault, setApplyTempAsDefault] = useState(false);
   const [activeLane, setActiveLane] = useState<DownloadLaneId>('download-1');
   const initializedRef = useRef(false);
@@ -432,6 +435,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
       const next = await window.desktop.workbench.clearLogs(slot);
       setStates((current) => ({ ...current, [slot]: next }));
       if (projectId) clearProjectLogs(projectId);
+      setLogsVersion((current) => ({ ...current, [slot]: (current[slot] ?? 0) + 1 }));
       notify(
         `Đã dọn nhật ký danh sách ${laneNumber(slot)}`,
         'Nhật ký của các danh sách khác được giữ nguyên.',
@@ -736,6 +740,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
                 settings={settings}
                 jobs={projectId ? jobs.filter((job) => job.projectId === projectId) : []}
                 logs={projectId ? logs.filter((entry) => entry.projectId === projectId) : []}
+                logsVersion={logsVersion[slot] ?? 0}
                 {...(projectId ? { projectId } : {})}
                 busy={busy === slot}
                 onStart={() => start(slot)}
@@ -931,6 +936,7 @@ function LaneCard({
   settings,
   jobs,
   logs,
+  logsVersion,
   projectId,
   busy,
   onStart,
@@ -951,6 +957,7 @@ function LaneCard({
   settings: AppSettings | null;
   jobs: QueueJob[];
   logs: LogEntry[];
+  logsVersion: number;
   projectId?: string;
   busy: boolean;
   onStart: () => Promise<void>;
@@ -965,7 +972,7 @@ function LaneCard({
   setError: (error: string | null) => void;
 }): React.JSX.Element {
   const [showLogs, setShowLogs] = useState(false);
-  const [persisted, setPersisted] = useState<LogEntry[]>([]);
+  const combinedLogs = useLaneLogs(projectId, logs, logsVersion, setError);
   const state = workflowState(jobs);
   const number = laneNumber(slot);
   const completed = jobs.filter((job) => ['completed', 'skipped'].includes(job.status)).length;
@@ -985,22 +992,6 @@ function LaneCard({
         : completed > 0
           ? `${completed} video mới đã hoàn tất`
           : 'Chưa có tác vụ';
-
-  useEffect(() => {
-    if (!projectId || !showLogs) return;
-    void window.desktop.logs
-      .list({ projectId, limit: 500 })
-      .then(setPersisted)
-      .catch((error: unknown) => setError(messageOf(error)));
-  }, [projectId, setError, showLogs]);
-
-  const combinedLogs = useMemo(() => {
-    const byId = new Map<string, LogEntry>();
-    for (const entry of [...logs, ...persisted]) {
-      if (!byId.has(entry.id)) byId.set(entry.id, entry);
-    }
-    return [...byId.values()].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-  }, [logs, persisted]);
 
   const paste = async (): Promise<void> => {
     try {

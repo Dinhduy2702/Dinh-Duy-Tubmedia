@@ -366,6 +366,7 @@ src/renderer/src/env.d.ts
 src/renderer/src/features/projects/CreateProjectDialog.tsx
 src/renderer/src/features/projects/ImportLinksDialog.tsx
 src/renderer/src/hooks/use-desktop-events.ts
+src/renderer/src/hooks/use-lane-logs.ts
 src/renderer/src/layout/Sidebar.tsx
 src/renderer/src/layout/Topbar.tsx
 src/renderer/src/local-cut.css
@@ -530,6 +531,7 @@ tests/unit/installer-upgrade.test.ts
 tests/unit/ipc-wire-error.test.ts
 tests/unit/job-resume-race.test.ts
 tests/unit/job-state-machine.test.ts
+tests/unit/lane-logs.test.ts
 tests/unit/light-mode-token-consistency.test.ts
 tests/unit/local-cut-command.test.ts
 tests/unit/local-cut-service.test.ts

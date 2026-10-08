@@ -3228,3 +3228,90 @@ test('Đợt 3 mục 9: xóa nhật ký hỏi xác nhận — trang Nhật ký, 
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
 });
+
+/**
+ * Khám phá #12 (bản cài 1.5.0, 2026-10-05) — mục cuối Đợt 3: khung "Nhật ký riêng" của danh sách chỉ đọc CSDL khi MỞ khung,
+ * nên số "N sự kiện" trên đầu khung lúc đóng chỉ đếm dòng tình cờ có trong bộ nhớ chung (100 dòng mới nhất của cả app lúc
+ * mở + dòng mới phát sinh); và sau khi xóa nhật ký, dòng đã đọc vẫn nằm trong khung. Cả Tải danh sách lẫn Ghép theo Timeline.
+ */
+test('Khám phá #12: Nhật ký riêng của danh sách đọc lịch sử ngay, đếm đúng, xóa xong không còn dòng cũ', async () => {
+  test.setTimeout(150_000);
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-lane-logs-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  const env = {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    ),
+    NODE_ENV: 'test',
+    TUBMEDIA_E2E: '1',
+    TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+    PLAYWRIGHT_TEST: '1',
+    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+  };
+  const launch = async (): Promise<void> => {
+    electronApplication = await electron.launch({ args: [mainEntry], cwd: projectRoot, env, timeout: 45_000 });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await shellWindow.setViewportSize({ width: 1400, height: 900 });
+  };
+  const goTo = async (label: string): Promise<void> => {
+    await shellWindow!.getByRole('navigation', { name: 'Điều hướng chính' }).getByRole('button', { name: label, exact: true }).click();
+    await shellWindow!.waitForTimeout(800);
+  };
+
+  try {
+    await launch();
+    await closeElectronApplication();
+    const old = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const now = new Date().toISOString();
+    const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+    const insertProject = db.prepare(
+      `INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,aspect_ratio,created_at,updated_at,archived_at)
+       VALUES(?,?,?,'','draft',?,?,?,?,'x','quality-source-size','resource-balanced',0,'original',?,?,NULL)`
+    );
+    const downloadId = randomUUID();
+    const mergeId = randomUUID();
+    insertProject.run(downloadId, 'Danh sách tải 1', '__WORKBENCH_DOWNLOAD_1__', path.join(sandbox, 'v1'), path.join(sandbox, 't1'), path.join(sandbox, 'v1'), path.join(sandbox, 'q'), now, now);
+    insertProject.run(mergeId, 'Quy trình ghép 1', '__WORKBENCH_MERGE_1__', path.join(sandbox, 'g1'), path.join(sandbox, 'tg1'), path.join(sandbox, 'g1'), path.join(sandbox, 'q'), now, now);
+    const insertLog = db.prepare(
+      'INSERT INTO event_logs(id,timestamp,level,module,project_id,job_id,attempt_id,event_code,message,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)'
+    );
+    db.exec('BEGIN');
+    // Lịch sử CŨ của từng danh sách (hôm qua) + 300 dòng chung MỚI hơn → không lọt vào 100 dòng nạp sẵn lúc mở app.
+    for (let index = 0; index < 7; index += 1) {
+      const at = new Date(old.getTime() + index * 1000).toISOString();
+      insertLog.run(randomUUID(), at, 'info', 'download', downloadId, null, null, 'E2E', `Lịch sử tải ${index}`, null);
+      insertLog.run(randomUUID(), at, 'info', 'merge', mergeId, null, null, 'E2E', `Lịch sử ghép ${index}`, null);
+    }
+    for (let index = 0; index < 300; index += 1) {
+      insertLog.run(randomUUID(), new Date(Date.now() - 60_000 + index).toISOString(), 'debug', 'queue', null, null, null, 'E2E_NOISE', `chung ${index}`, null);
+    }
+    db.exec('COMMIT');
+    db.close();
+    await launch();
+
+    for (const [page, toggleName, rowText] of [
+      ['Tải danh sách', /Nhật ký riêng/, 'Lịch sử tải'],
+      ['Ghép theo Timeline', /Nhật ký riêng của quy trình/, 'Lịch sử ghép']
+    ] as const) {
+      await goTo(page);
+      const toggle = shellWindow!.locator('.lane-log-toggle').filter({ hasText: toggleName }).first();
+      // Khung còn ĐÓNG: số sự kiện đã đúng.
+      await expect(toggle, `${page}: đếm đúng khi khung đóng`).toContainText('7 sự kiện', { timeout: 10_000 });
+      await toggle.click();
+      await expect(shellWindow!.locator('.lane-log-body').first().getByText(rowText)).toHaveCount(7, { timeout: 10_000 });
+
+      // Xóa nhật ký (hộp xác nhận của mục 9) → khung không còn dòng cũ.
+      await shellWindow!.getByRole('button', { name: 'Xóa nhật ký' }).first().click();
+      await shellWindow!.getByRole('dialog').getByRole('button', { name: 'Xóa nhật ký' }).click();
+      await expect(shellWindow!.locator('.lane-log-body').first().getByText(rowText), `${page}: xóa xong không còn dòng cũ`).toHaveCount(0, {
+        timeout: 10_000
+      });
+      await expect(toggle).not.toContainText('7 sự kiện');
+    }
+  } finally {
+    await closeElectronApplication();
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});
