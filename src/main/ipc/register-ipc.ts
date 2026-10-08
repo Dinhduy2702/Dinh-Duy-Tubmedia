@@ -420,7 +420,8 @@ export function registerIpc(ctx: AppContext): void {
       ...(query.projectId !== undefined ? { projectId: query.projectId } : {}),
       ...(query.jobId !== undefined ? { jobId: query.jobId } : {}),
       ...(query.level !== undefined ? { level: query.level } : {}),
-      ...(query.module !== undefined ? { module: query.module } : {})
+      ...(query.module !== undefined ? { module: query.module } : {}),
+      ...(query.modules !== undefined ? { modules: query.modules } : {})
     })
   );
   noArgs(IPC.logs.openFolder, () => shell.openPath(join(ctx.userData, 'logs')));

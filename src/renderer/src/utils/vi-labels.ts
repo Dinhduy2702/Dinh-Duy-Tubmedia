@@ -100,3 +100,17 @@ const MODULE_LABELS: Record<string, string> = {
 export function moduleLabel(module: string): string {
   return MODULE_LABELS[module.toLowerCase()] ?? module;
 }
+
+/**
+ * Đợt 3 mục 7: ô "Thành phần" ở trang Nhật ký gợi ý gõ tiếng Việt ("tải xuống", "hàng đợi") nhưng CSDL lưu mã nội bộ
+ * ("download", "queue"). Trả về mọi mã có mã hoặc tên tiếng Việt chứa chữ đã gõ (không phân biệt hoa thường); không khớp mã
+ * nào thì dùng chính chữ đã gõ làm mã.
+ */
+export function modulesMatching(text: string): string[] {
+  const needle = text.trim().toLowerCase();
+  if (!needle) return [];
+  const matches = Object.entries(MODULE_LABELS)
+    .filter(([key, label]) => key.includes(needle) || label.toLowerCase().includes(needle))
+    .map(([key]) => key);
+  return matches.length > 0 ? matches : [needle];
+}

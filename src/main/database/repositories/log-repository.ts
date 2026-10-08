@@ -53,6 +53,8 @@ export class LogRepository {
     jobId?: string;
     level?: string;
     module?: string;
+    /** Đợt 3 mục 7: lọc theo nhiều thành phần ở CSDL (một tên tiếng Việt có thể ứng với nhiều mã nội bộ). */
+    modules?: readonly string[];
     limit: number;
   }): LogEntry[] {
     const where: string[] = [];
@@ -72,6 +74,10 @@ export class LogRepository {
     if (query.module) {
       where.push('module=?');
       args.push(query.module);
+    }
+    if (query.modules && query.modules.length > 0) {
+      where.push(`module IN (${query.modules.map(() => '?').join(',')})`);
+      args.push(...query.modules);
     }
     args.push(query.limit);
 

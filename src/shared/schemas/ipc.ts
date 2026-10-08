@@ -181,6 +181,7 @@ export const logQuerySchema = z.object({
   jobId: idSchema.optional(),
   level: z.enum(['debug', 'info', 'warn', 'error']).optional(),
   module: z.string().max(100).optional(),
+  modules: z.array(z.string().max(100)).max(50).optional(),
   limit: z.number().int().min(1).max(5000).default(500)
 });
 export const showPathSchema = z.object({ path: pathSchema });

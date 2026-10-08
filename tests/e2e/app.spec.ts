@@ -2992,3 +2992,71 @@ test('Phần C: áp dụng thư mục tạm cho tất cả danh sách — xác n
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
 });
+
+/**
+ * Đợt 3 mục 7 (rà soát bản cài 1.5.0): lọc mức "Lỗi" sót phần lớn lỗi — trang chỉ tải 2000 dòng MỚI NHẤT rồi lọc trên giao
+ * diện, nên khi nhật ký gỡ lỗi dồn nhiều (máy thật: 51.604 dòng debug), lỗi cũ hơn bị đẩy ra ngoài (lọc ra 71/172 lỗi).
+ * Dựng 150 lỗi cũ + 2500 dòng gỡ lỗi mới hơn; chọn mức "Lỗi" phải thấy đủ 150. Kèm: ô "Thành phần" lọc được bằng tên tiếng
+ * Việt như gợi ý trong ô.
+ */
+test('Đợt 3 mục 7: lọc nhật ký theo mức ở CSDL — đủ lỗi cũ dù có hàng nghìn dòng gỡ lỗi mới hơn', async () => {
+  test.setTimeout(120_000);
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-log-level-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  const env = {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    ),
+    NODE_ENV: 'test',
+    TUBMEDIA_E2E: '1',
+    TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+    PLAYWRIGHT_TEST: '1',
+    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+  };
+  const launch = async (): Promise<void> => {
+    electronApplication = await electron.launch({ args: [mainEntry], cwd: projectRoot, env, timeout: 45_000 });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+  };
+
+  try {
+    await launch();
+    await closeElectronApplication();
+    const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+    const insertLog = db.prepare(
+      'INSERT INTO event_logs(id,timestamp,level,module,project_id,job_id,attempt_id,event_code,message,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)'
+    );
+    const base = Date.now() - 2 * 24 * 60 * 60 * 1000;
+    db.exec('BEGIN');
+    for (let index = 0; index < 150; index += 1) {
+      insertLog.run(randomUUID(), new Date(base + index * 1000).toISOString(), 'error', 'download', null, null, null, 'E2E_OLD_ERROR', `Lỗi cũ số ${index}`, null);
+    }
+    for (let index = 0; index < 2500; index += 1) {
+      insertLog.run(randomUUID(), new Date(base + 3_600_000 + index * 1000).toISOString(), 'debug', 'queue', null, null, null, 'E2E_DEBUG', `Gỡ lỗi số ${index}`, null);
+    }
+    db.exec('COMMIT');
+    db.close();
+
+    await launch();
+    await shellWindow!
+      .getByRole('navigation', { name: 'Điều hướng chính' })
+      .getByRole('button', { name: 'Nhật ký', exact: true })
+      .click();
+    await shellWindow!.locator('label', { hasText: 'Mức' }).locator('select').selectOption('error');
+    await expect
+      .poll(async () => shellWindow!.locator('.logs-data-table tbody tr', { hasText: 'Lỗi cũ số' }).count(), { timeout: 15_000 })
+      .toBe(150);
+
+    // Ô "Thành phần" lọc được bằng tên tiếng Việt như gợi ý trong ô (trước đây chỉ khớp mã nội bộ "download").
+    await shellWindow!.locator('label', { hasText: 'Mức' }).locator('select').selectOption('all');
+    await shellWindow!.locator('label', { hasText: 'Thành phần' }).locator('input').fill('tải xuống');
+    await expect
+      .poll(async () => shellWindow!.locator('.logs-data-table tbody tr', { hasText: 'Lỗi cũ số' }).count(), { timeout: 15_000 })
+      .toBe(150);
+    expect(await shellWindow!.locator('.logs-data-table tbody tr', { hasText: 'Gỡ lỗi số' }).count()).toBe(0);
+  } finally {
+    await closeElectronApplication();
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});

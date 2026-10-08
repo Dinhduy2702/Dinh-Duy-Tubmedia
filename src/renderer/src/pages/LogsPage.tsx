@@ -1,12 +1,12 @@
 import { Download, FolderOpen, RefreshCcw, Trash2 } from 'lucide-react';
-import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import type { LogEntry, Project } from '@shared/types/domain';
 import { StatusBadge } from '../components/StatusBadge';
 import { CompactDetail } from '../components/CompactDetail';
 import { InfoHint } from '../components/InfoHint';
 import { useAppStore } from '../stores/app-store';
 import { createUiEventId } from '../utils/ui-id';
-import { moduleLabel } from '../utils/vi-labels';
+import { moduleLabel, modulesMatching } from '../utils/vi-labels';
 
 function shouldDiscloseMessage(message: string): boolean {
   return message.length > 72 || /[\\/].{32,}/.test(message);
@@ -42,22 +42,28 @@ export function LogsPage(): React.JSX.Element {
     .filter((entry, index, entries) => entries.findIndex((candidate) => candidate.id === entry.id) === index)
     .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 
+  const moduleKeys = modulesMatching(module);
   const filtered = effectiveLogs.filter(
     (entry) =>
       (projectId === 'all' || entry.projectId === projectId) &&
       (level === 'all' || entry.level === level) &&
-      (!module || entry.module.toLowerCase().includes(module.toLowerCase()))
+      (!module || moduleKeys.includes(entry.module.toLowerCase()))
   );
 
-  const reload = async (nextProjectId = projectId): Promise<void> => {
+  // Đợt 3 mục 7 (rà soát bản cài 1.5.0): lọc mức/thành phần chạy ở CSDL — trước đây chỉ tải 2000 dòng MỚI NHẤT rồi lọc trên
+  // giao diện, nên khi nhật ký gỡ lỗi dồn nhiều thì lỗi cũ hơn bị đẩy ra ngoài (máy thật: lọc "Lỗi" ra 71/172).
+  const reload = async (nextProjectId = projectId, nextLevel = level, nextModule = module): Promise<void> => {
     setLoading(true);
     try {
+      const nextModules = modulesMatching(nextModule);
       const nextLogs = await window.desktop.logs.list({
         ...(nextProjectId !== 'all' ? { projectId: nextProjectId } : {}),
+        ...(nextLevel !== 'all' ? { level: nextLevel as LogEntry['level'] } : {}),
+        ...(nextModules.length > 0 ? { modules: nextModules } : {}),
         limit: 2000
       });
       setLogs(nextLogs);
-      if (nextProjectId === 'all') useAppStore.setState({ logs: nextLogs });
+      if (nextProjectId === 'all' && nextLevel === 'all' && nextModules.length === 0) useAppStore.setState({ logs: nextLogs });
     } finally {
       setLoading(false);
     }
@@ -73,6 +79,22 @@ export function LogsPage(): React.JSX.Element {
     setProjectId(value);
     void reload(value);
   };
+
+  const changeLevel = (value: string): void => {
+    setLevel(value);
+    void reload(projectId, value);
+  };
+
+  // Gõ ô "Thành phần": đợi người dùng ngừng gõ một chút rồi mới hỏi CSDL.
+  const firstModuleRun = useRef(true);
+  useEffect(() => {
+    if (firstModuleRun.current) {
+      firstModuleRun.current = false;
+      return;
+    }
+    const timer = window.setTimeout(() => void reload(projectId, level, module), 300);
+    return () => window.clearTimeout(timer);
+  }, [module]);
 
   const clearSelected = async (): Promise<void> => {
     setLoading(true);
@@ -154,7 +176,7 @@ export function LogsPage(): React.JSX.Element {
           <select
             className="select"
             value={level}
-            onChange={(event: ChangeEvent<HTMLSelectElement>) => setLevel(event.target.value)}
+            onChange={(event: ChangeEvent<HTMLSelectElement>) => changeLevel(event.target.value)}
           >
             <option value="all">Tất cả mức</option>
             <option value="debug">Gỡ lỗi</option>

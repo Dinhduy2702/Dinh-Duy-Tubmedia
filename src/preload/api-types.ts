@@ -170,6 +170,7 @@ export interface DesktopApi {
       jobId?: string;
       level?: LogEntry['level'];
       module?: string;
+      modules?: string[];
       limit?: number;
     }): Promise<LogEntry[]>;
     exportDiagnostics(): Promise<string | null>;

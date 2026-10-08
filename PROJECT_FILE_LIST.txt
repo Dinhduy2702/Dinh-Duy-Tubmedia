@@ -466,6 +466,7 @@ tests/integration/cookie-resume-fingerprint.test.ts
 tests/integration/database.test.ts
 tests/integration/helpers/queue-harness.ts
 tests/integration/legacy-quarantine-untouched.test.ts
+tests/integration/log-repository-filter.test.ts
 tests/integration/migration-attempts-reset.test.ts
 tests/integration/quarantine-service.test.ts
 tests/integration/queue-attempts.test.ts
