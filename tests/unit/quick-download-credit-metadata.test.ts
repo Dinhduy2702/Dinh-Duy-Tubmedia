@@ -108,7 +108,12 @@ async function run(
 }
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  // Dịch vụ Tải nhanh còn ghi tệp trạng thái NGẦM ngay sau khi báo "completed" — trên máy chậm (CI phát hành 1.6.1, run
+  // 37744052498) việc xóa thư mục tạm có lúc chạy đua với lần ghi đó và Windows báo ENOTEMPTY. Thử lại vài lần (rm của Node
+  // tự thử lại khi gặp ENOTEMPTY/EBUSY/EPERM) thay vì đánh rớt cả bài kiểm vì phần dọn dẹp.
+  await Promise.all(
+    roots.splice(0).map((root) => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }))
+  );
 });
 
 describe('Sửa lỗi (2026-09-23) — Vấn đề 2: ghi credit KHÔNG được chặn "hoàn tất" (app đơ)', () => {
