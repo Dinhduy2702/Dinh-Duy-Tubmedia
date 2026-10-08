@@ -188,7 +188,7 @@ function emptyMerge(
   const number = mergeNumber(slot);
   const finalFileName = `Thanh_pham_${number}`;
   const rememberedSource = loadWorkbenchPath('merge-source');
-  const rememberedTemp = loadWorkbenchPath('merge-temp');
+  const rememberedTemp = loadWorkbenchPath('merge-temp-default') ?? loadWorkbenchPath('merge-temp');
   const rememberedOutput = loadWorkbenchPath('merge-output');
   return {
     name: finalFileName,
@@ -805,28 +805,21 @@ export function DownloadMergePage(): React.JSX.Element {
         applyTemp.folder
       )
     : null;
-  const confirmApplyTemp = async (): Promise<void> => {
+  const confirmApplyTemp = (): void => {
     if (!applyTemp || !applyTempPlan) return;
     const { folder } = applyTemp;
     for (const change of applyTempPlan.changes) {
       updateForm(change.slot as MergeLaneId, (current) => ({ ...current, tempFolder: folder }));
     }
-    saveWorkbenchPath('merge-temp', folder);
-    try {
-      if (applyTempAsDefault) {
-        const next = await window.desktop.settings.update({ defaultTempFolder: folder });
-        useAppStore.setState({ settings: next });
-      }
-      notify(
-        'Đã áp dụng thư mục xử lý tạm',
-        `Đã đổi ${applyTempPlan.changes.length} quy trình${applyTempPlan.skipped.length ? `, bỏ qua ${applyTempPlan.skipped.length} quy trình đang chạy` : ''}${applyTempAsDefault ? '; đặt làm mặc định cho danh sách mới' : ''}.`
-      );
-    } catch (error) {
-      setError(messageOf(error));
-    } finally {
-      setApplyTemp(null);
-      setApplyTempAsDefault(false);
-    }
+    // Người dùng chọn (2026-10-08): mặc định RIÊNG của trang này — không đụng "Thư mục tạm mặc định" chung trong Cài đặt
+    // (tránh tác dụng phụ sang trang kia).
+    if (applyTempAsDefault) saveWorkbenchPath('merge-temp-default', folder);
+    notify(
+      'Đã áp dụng thư mục xử lý tạm',
+      `Đã đổi ${applyTempPlan.changes.length} quy trình${applyTempPlan.skipped.length ? `, bỏ qua ${applyTempPlan.skipped.length} quy trình đang chạy` : ''}${applyTempAsDefault ? '; đặt làm mặc định cho quy trình mới của trang này' : ''}.`
+    );
+    setApplyTemp(null);
+    setApplyTempAsDefault(false);
   };
   const updateForm = (slot: MergeLaneId, updater: (current: MergeForm) => MergeForm): void => {
     deletedSlotsRef.current.delete(slot);
@@ -998,7 +991,8 @@ export function DownloadMergePage(): React.JSX.Element {
         const source = forms[activeLane] ?? forms[MERGE_IDS[Math.max(0, laneCount - 1)]!];
         const target = MERGE_IDS[laneCount]!;
         const rememberedSource = loadWorkbenchPath('merge-source') ?? source.sourceFolder;
-        const rememberedTemp = loadWorkbenchPath('merge-temp') ?? source.tempFolder;
+        const rememberedTemp =
+          loadWorkbenchPath('merge-temp-default') ?? loadWorkbenchPath('merge-temp') ?? source.tempFolder;
         const rememberedOutput = loadWorkbenchPath('merge-output') ?? source.outputFolder;
         setForms((current) => ({
           ...current,
@@ -1232,9 +1226,9 @@ export function DownloadMergePage(): React.JSX.Element {
             : 'Không có quy trình nào khác cần đổi.'
         }
         details={applyTempPlan?.details ?? []}
-        option={{ label: 'Đặt làm mặc định cho danh sách mới', checked: applyTempAsDefault, onChange: setApplyTempAsDefault }}
+        option={{ label: 'Đặt làm mặc định cho danh sách mới của trang này', checked: applyTempAsDefault, onChange: setApplyTempAsDefault }}
         confirmLabel="Áp dụng"
-        onConfirm={() => void confirmApplyTemp()}
+        onConfirm={confirmApplyTemp}
         onCancel={() => {
           setApplyTemp(null);
           setApplyTempAsDefault(false);

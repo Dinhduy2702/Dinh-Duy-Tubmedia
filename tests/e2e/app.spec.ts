@@ -2942,6 +2942,13 @@ test('Phần C: áp dụng thư mục tạm cho tất cả danh sách — xác n
     await tab('Danh sách tải 3').click();
     const laneThreeTemp = await shellWindow!.locator('.compact-config-temp input').first().inputValue();
 
+    const readDefaultTemp = async (): Promise<string> =>
+      shellWindow!.evaluate(async () => {
+        const desktop = (window as unknown as { desktop: { settings: { get: () => Promise<{ defaultTempFolder: string }> } } }).desktop;
+        return (await desktop.settings.get()).defaultTempFolder;
+      });
+    const settingsDefaultBefore = await readDefaultTemp();
+
     await tab('Danh sách tải 1').click();
     await shellWindow!.locator('.compact-config-temp input').first().fill(sharedTemp);
     // Ô thư mục lưu video KHÔNG có nút áp dụng cho tất cả; ô thư mục tạm có.
@@ -2961,16 +2968,25 @@ test('Phần C: áp dụng thư mục tạm cho tất cả danh sách — xác n
     await expect(shellWindow!.locator('.compact-config-output input').first()).toHaveValue(laneTwoOutput);
     await tab('Danh sách tải 3').click();
     await expect(shellWindow!.locator('.compact-config-temp input').first()).toHaveValue(laneThreeTemp);
-    const defaultTemp = await shellWindow!.evaluate(async () => {
-      const desktop = (window as unknown as { desktop: { settings: { get: () => Promise<{ defaultTempFolder: string }> } } }).desktop;
-      return (await desktop.settings.get()).defaultTempFolder;
-    });
-    expect(defaultTemp, 'đã đặt làm mặc định cho danh sách mới').toBe(sharedTemp);
+    // Người dùng chọn (2026-10-08): mặc định RIÊNG từng trang — "Thư mục tạm mặc định" chung trong Cài đặt KHÔNG đổi.
+    expect(await readDefaultTemp(), 'không đụng cài đặt chung').toBe(settingsDefaultBefore);
+    // Sửa riêng danh sách 1 sang thư mục khác (thư mục "dùng gần nhất" đổi theo) — danh sách MỚI vẫn nhận đúng mặc định đã đặt.
+    await tab('Danh sách tải 1').click();
+    await shellWindow!.locator('.compact-config-temp input').first().fill(path.join(sandbox, 'tam-rieng'));
+    await shellWindow!.getByRole('button', { name: /Thêm danh sách/ }).click();
+    await expect(tab('Danh sách tải 4')).toBeVisible({ timeout: 10_000 });
+    await tab('Danh sách tải 4').click();
+    await expect(shellWindow!.locator('.compact-config-temp input').first()).toHaveValue(sharedTemp);
 
-    // Phạm vi theo từng trang: quy trình ghép ĐÃ CÓ không bị đụng.
+    // Phạm vi theo từng trang: quy trình ghép ĐÃ CÓ không bị đụng, quy trình MỚI không nhận mặc định của Tải danh sách.
     await goTo('Ghép theo Timeline');
     await expect(shellWindow!.locator('.compact-config-temp input').first()).toHaveValue(mergeTempBefore);
     expect(mergeTempBefore).not.toBe(sharedTemp);
+    await shellWindow!.getByRole('button', { name: /Thêm quy trình/ }).click();
+    await shellWindow!.waitForTimeout(800);
+    const mergeTemps = await shellWindow!.locator('.workflow-tab').count();
+    await shellWindow!.locator('.workflow-tab').nth(mergeTemps - 1).click();
+    await expect(shellWindow!.locator('.compact-config-temp input').first()).not.toHaveValue(sharedTemp);
   } finally {
     await closeElectronApplication();
     fs.rmSync(sandbox, { recursive: true, force: true });

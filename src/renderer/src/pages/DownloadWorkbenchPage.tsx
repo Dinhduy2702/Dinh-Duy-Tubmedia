@@ -122,7 +122,7 @@ function emptyLane(
 ): LaneForm {
   const number = laneNumber(slot);
   const rememberedOutput = loadWorkbenchPath('download-output');
-  const rememberedTemp = loadWorkbenchPath('download-temp');
+  const rememberedTemp = loadWorkbenchPath('download-temp-default') ?? loadWorkbenchPath('download-temp');
   return {
     name: `Danh sách tải ${number}`,
     linksText: '',
@@ -271,28 +271,21 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
         applyTemp.folder
       )
     : null;
-  const confirmApplyTemp = async (): Promise<void> => {
+  const confirmApplyTemp = (): void => {
     if (!applyTemp || !applyTempPlan) return;
     const { folder } = applyTemp;
     for (const change of applyTempPlan.changes) {
       updateForm(change.slot as DownloadLaneId, (current) => ({ ...current, tempFolder: folder }));
     }
-    saveWorkbenchPath('download-temp', folder);
-    try {
-      if (applyTempAsDefault) {
-        const next = await window.desktop.settings.update({ defaultTempFolder: folder });
-        useAppStore.setState({ settings: next });
-      }
-      notify(
-        'Đã áp dụng thư mục tạm',
-        `Đã đổi ${applyTempPlan.changes.length} danh sách${applyTempPlan.skipped.length ? `, bỏ qua ${applyTempPlan.skipped.length} danh sách đang chạy` : ''}${applyTempAsDefault ? '; đặt làm mặc định cho danh sách mới' : ''}.`
-      );
-    } catch (error) {
-      setError(messageOf(error));
-    } finally {
-      setApplyTemp(null);
-      setApplyTempAsDefault(false);
-    }
+    // Người dùng chọn (2026-10-08): mặc định RIÊNG của trang này — không đụng "Thư mục tạm mặc định" chung trong Cài đặt
+    // (tránh tác dụng phụ sang trang kia).
+    if (applyTempAsDefault) saveWorkbenchPath('download-temp-default', folder);
+    notify(
+      'Đã áp dụng thư mục tạm',
+      `Đã đổi ${applyTempPlan.changes.length} danh sách${applyTempPlan.skipped.length ? `, bỏ qua ${applyTempPlan.skipped.length} danh sách đang chạy` : ''}${applyTempAsDefault ? '; đặt làm mặc định cho danh sách mới của trang này' : ''}.`
+    );
+    setApplyTemp(null);
+    setApplyTempAsDefault(false);
   };
 
   const notify = (
@@ -526,7 +519,8 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
         const source = forms[activeLane] ?? forms[LANE_IDS[Math.max(0, laneCount - 1)]!];
         const target = LANE_IDS[laneCount]!;
         const rememberedOutput = loadWorkbenchPath('download-output') ?? source.outputFolder;
-        const rememberedTemp = loadWorkbenchPath('download-temp') ?? source.tempFolder;
+        const rememberedTemp =
+          loadWorkbenchPath('download-temp-default') ?? loadWorkbenchPath('download-temp') ?? source.tempFolder;
         setForms((current) => ({
           ...current,
           [target]: {
@@ -782,9 +776,9 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
             : 'Không có danh sách nào khác cần đổi.'
         }
         details={applyTempPlan?.details ?? []}
-        option={{ label: 'Đặt làm mặc định cho danh sách mới', checked: applyTempAsDefault, onChange: setApplyTempAsDefault }}
+        option={{ label: 'Đặt làm mặc định cho danh sách mới của trang này', checked: applyTempAsDefault, onChange: setApplyTempAsDefault }}
         confirmLabel="Áp dụng"
-        onConfirm={() => void confirmApplyTemp()}
+        onConfirm={confirmApplyTemp}
         onCancel={() => {
           setApplyTemp(null);
           setApplyTempAsDefault(false);

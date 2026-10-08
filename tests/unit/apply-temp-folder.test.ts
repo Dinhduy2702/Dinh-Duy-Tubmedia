@@ -66,4 +66,24 @@ describe('nối vào giao diện', () => {
       expect(read(path)).toContain('Đặt làm mặc định cho danh sách mới');
     }
   });
+
+  // Người dùng chọn (2026-10-08): mặc định RIÊNG từng trang — không đụng "Thư mục tạm mặc định" chung trong Cài đặt, tránh
+  // tác dụng phụ sang trang kia.
+  it.each([
+    ['src/renderer/src/pages/DownloadWorkbenchPage.tsx', 'download-temp-default'],
+    ['src/renderer/src/pages/DownloadMergePage.tsx', 'merge-temp-default']
+  ])('%s: ô mặc định chỉ ghi mặc định của CHÍNH trang, không đổi Cài đặt chung; danh sách mới đọc mặc định đó trước', (path, key) => {
+    const page = read(path);
+    const confirm = page.slice(page.indexOf('const confirmApplyTemp'), page.indexOf('const confirmApplyTemp') + 1500);
+    expect(confirm).toContain(`saveWorkbenchPath('${key}', folder)`);
+    expect(confirm).not.toContain('defaultTempFolder');
+    expect(confirm).not.toContain('settings.update(');
+    expect(page.match(new RegExp(`loadWorkbenchPath\\('${key}'\\)`, 'g'))?.length ?? 0).toBeGreaterThanOrEqual(2);
+  });
+
+  it('khóa nhớ mặc định riêng từng trang có trong kiểu WorkbenchPathKey', () => {
+    const memory = read('src/renderer/src/utils/workbench-path-memory.ts');
+    expect(memory).toContain("'download-temp-default'");
+    expect(memory).toContain("'merge-temp-default'");
+  });
 });
