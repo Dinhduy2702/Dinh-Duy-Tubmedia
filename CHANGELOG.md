@@ -1,3 +1,31 @@
+# Tubmedia 1.6.1
+
+- Thoát ứng dụng không bao giờ bị treo nữa: bấm X (hoặc "Thoát an toàn" ở khay hệ thống) thì ứng dụng tắt hẳn trong tối đa khoảng 15 giây, kể cả khi một bước dọn dẹp bị kẹt — không còn phải vào Task Manager để tắt. Mỗi lần thoát được ghi lại trong tệp logs\shutdown.log để dễ kiểm tra nếu có sự cố.
+- Lần đầu bấm nút thu nhỏ (—) khi đã bật "ẩn xuống khay hệ thống", Windows hiện lời nhắc "Tubmedia vẫn đang chạy" kèm cách mở lại và cách tắt hẳn, để bạn không tưởng ứng dụng đã đóng. Lời nhắc chỉ hiện một lần.
+- Thông báo không còn dồn dập:
+  - Cùng một vấn đề (ví dụ cookies hết hạn, ổ đĩa đầy) chỉ hiện một thông báo, thông báo mới thay cho thông báo cũ thay vì xếp chồng nhiều cái giống nhau.
+  - Đã bấm X tắt một vấn đề thì ứng dụng không bật lại vấn đề đó nữa (cho tới khi vấn đề được giải quyết rồi xảy ra lần mới). Thông báo vẫn được lưu trong chuông.
+  - Mọi thông báo tự ẩn sau vài giây, không còn thông báo đứng cố định che giao diện.
+  - Lỗi của từng video trong danh sách được gộp vào một thông báo "Có N video gặp lỗi…", không hiện thêm ở góc chẩn đoán.
+  - Lỗi cũ không còn bật lại khi mở ứng dụng hoặc khi xem lại Nhật ký — chỉ sự kiện mới phát sinh mới hiện thông báo.
+- Giao diện gọn hơn:
+  - Các đoạn chữ giải thích dài được thay bằng biểu tượng ⓘ nhỏ — rê chuột (hoặc dùng phím Tab) để đọc đầy đủ.
+  - Cảnh báo "thư mục tạm dùng chung" (Downloads, Desktop…) không còn là khung lớn ở đầu mọi trang: chỉ còn biểu tượng ⚠ nhỏ cạnh tên ô Thư mục tạm, rê chuột để xem giải thích. Các ô cấu hình không còn bị lệch hàng.
+  - Lời nhắc về khu cách ly lúc mở ứng dụng được chuyển vào chuông thông báo.
+  - Trang Tổng quan ghi đúng "tối đa 6 danh sách".
+- Mới: nút "Áp dụng thư mục tạm cho tất cả danh sách" ngay cạnh nút Chọn của ô Thư mục tạm (Tải danh sách) và Thư mục xử lý tạm (Ghép theo Timeline).
+  - Trước khi đổi, ứng dụng liệt kê từng danh sách sẽ đổi từ thư mục nào sang thư mục nào để bạn xác nhận.
+  - Danh sách đang chạy hoặc tạm dừng được bỏ qua, không bị đổi giữa chừng. Thư mục lưu video và thư mục thành phẩm không bị đụng tới.
+  - Chỉ áp dụng trong trang đang thao tác: đổi ở Tải danh sách không ảnh hưởng Ghép theo Timeline và ngược lại.
+  - Có ô "Đặt làm mặc định cho danh sách mới của trang này" — danh sách mới tạo sau đó dùng luôn thư mục này.
+- Nhật ký:
+  - Trang Nhật ký hiện lịch sử ngay khi mở, không cần bấm "Làm mới".
+  - Lọc theo mức (ví dụ chỉ "Lỗi") giờ tìm trong toàn bộ nhật ký, không còn sót lỗi cũ khi có nhiều dòng khác.
+  - Ô "Thành phần" lọc được bằng tên tiếng Việt như gợi ý trong ô (ví dụ gõ "tải xuống", "hàng đợi").
+  - Xóa nhật ký giờ luôn hỏi xác nhận trước (ở trang Nhật ký và ở nút xóa nhật ký của từng danh sách tải/quy trình ghép), nêu rõ phạm vi sẽ xóa và không thể hoàn tác.
+  - Khung "Nhật ký riêng" của từng danh sách đếm đúng số sự kiện ngay cả khi chưa mở, hiện đủ lịch sử, và không còn hiện dòng cũ sau khi đã xóa.
+- An toàn: ứng dụng chỉ dùng các công cụ tải/xử lý video (yt-dlp, aria2c, FFmpeg) đi kèm bộ cài, bản cập nhật công cụ của chính ứng dụng hoặc đường dẫn bạn tự chọn trong Cài đặt — không bao giờ chạy một tệp công cụ lạ chỉ vì tệp đó nằm trong thư mục mà ứng dụng được mở từ đó.
+
 # Tubmedia 1.6.0
 
 - Mới: Gợi ý điểm cắt tự động ở trang "Xem trước & Cắt" — bấm một nút, ứng dụng tìm các khoảng lặng và chỗ chuyển cảnh trong video rồi đưa ra tối đa 8 đoạn nên cắt; bấm "Dùng đoạn này" để điền sẵn mốc bắt đầu/kết thúc.
