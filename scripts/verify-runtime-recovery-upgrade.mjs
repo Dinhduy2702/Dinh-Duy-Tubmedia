@@ -49,7 +49,9 @@ check(
 );
 check(
   'diagnostic dock only remains while a job is really blocked',
-  diagnosticDock.includes('shouldDisplayDiagnostic(entry, jobs)') &&
+  // Đợt 3 mục 8 (2026-10-08): khung chọn qua pickLiveDiagnostic (chỉ sự kiện trực tiếp), vẫn áp shouldDisplayDiagnostic.
+  diagnosticDock.includes('pickLiveDiagnostic(logs, liveLogIds, jobs, dismissedDiagnosticCodes)') &&
+    diagnosticPolicy.includes('shouldDisplayDiagnostic(entry, jobs, now)') &&
     diagnosticPolicy.includes('isDiagnosticStillBlocking') &&
     diagnosticPolicy.includes('COOKIE_BLOCKS_AUTO_RESUMED') &&
     diagnosticPolicy.includes('DOWNLOAD_SIZE_ESTIMATE_MISMATCH')
