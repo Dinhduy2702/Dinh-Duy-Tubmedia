@@ -4,6 +4,7 @@ import { safeUiText } from '../utils/ui-error';
 import { showNotice } from '../utils/notify';
 import { progressFillStyle } from '../utils/progress-style';
 import { ConfirmDialog } from './ConfirmDialog';
+import { InfoHint } from './InfoHint';
 import { CLEANUP_QUARANTINE_SECTION_ID } from './quarantine-anchors';
 import {
   QUARANTINE_RETENTION_DAYS,
@@ -362,9 +363,10 @@ export function SystemCleanupPanel(): React.JSX.Element {
           <span className="system-cleanup-eyebrow">DỌN FILE RÁC CÓ KIỂM SOÁT</span>
           <h2>Quét dung lượng, xem độ an toàn rồi mới xóa</h2>
           <p>
-            Tubmedia phân loại từng vùng dữ liệu, ước tính dung lượng và khóa nút xóa cho đến khi hoàn
-            tất một lần quét đúng với lựa chọn hiện tại. Xóa thật đi qua khu cách ly riêng — có thể hoàn
-            tác trong {QUARANTINE_RETENTION_DAYS} ngày trước khi bị dọn vĩnh viễn.
+            Quét trước, xóa qua khu cách ly — hoàn tác được trong {QUARANTINE_RETENTION_DAYS} ngày.
+            <InfoHint
+              text={`Tubmedia phân loại từng vùng dữ liệu, ước tính dung lượng và khóa nút xóa cho đến khi hoàn tất một lần quét đúng với lựa chọn hiện tại. Xóa thật đi qua khu cách ly riêng — có thể hoàn tác trong ${QUARANTINE_RETENTION_DAYS} ngày trước khi bị dọn vĩnh viễn.`}
+            />
           </p>
         </div>
 
@@ -423,9 +425,8 @@ export function SystemCleanupPanel(): React.JSX.Element {
       </div>
 
       <div className="system-cleanup-warning">
-        Không quét Desktop, Documents, Downloads, Pictures, Videos, Zalo Received Files, thư mục gốc
-        CapCut/Zalo, dữ liệu dự án Tubmedia hay bất kỳ thư mục hệ thống nào. Hãy đóng Chrome, Edge, CapCut
-        và Zalo để dọn được nhiều hơn.
+        Không quét thư mục cá nhân, dữ liệu dự án hay thư mục hệ thống.
+        <InfoHint text="Không quét Desktop, Documents, Downloads, Pictures, Videos, Zalo Received Files, thư mục gốc CapCut/Zalo, dữ liệu dự án Tubmedia hay bất kỳ thư mục hệ thống nào. Hãy đóng Chrome, Edge, CapCut và Zalo để dọn được nhiều hơn." />
       </div>
 
       <div className="system-cleanup-group">
@@ -472,8 +473,8 @@ export function SystemCleanupPanel(): React.JSX.Element {
       <div className="system-cleanup-admin-info">
         <div className="system-cleanup-group-title">Cần quyền quản trị — Tubmedia không tự chạy</div>
         <p>
-          Các mục dưới đây thuộc khu vực hệ thống dùng chung cho mọi tài khoản trên máy. Tubmedia không
-          còn tự yêu cầu quyền quản trị để xóa nữa — hãy dùng công cụ Dọn dẹp ổ đĩa của chính Windows.
+          Dùng công cụ Dọn dẹp ổ đĩa của Windows cho các mục này.
+          <InfoHint text="Các mục dưới đây thuộc khu vực hệ thống dùng chung cho mọi tài khoản trên máy. Tubmedia không còn tự yêu cầu quyền quản trị để xóa nữa — hãy dùng công cụ Dọn dẹp ổ đĩa của chính Windows." />
         </p>
 
         <ul className="system-cleanup-admin-list">

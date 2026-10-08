@@ -22,6 +22,7 @@ import { NOTICE_TONE_LABEL } from '@shared/utils/notice-tone';
 import { ToneIcon } from './ui/ToneIcon';
 import { useShallow } from 'zustand/react/shallow';
 import { useAppStore, type NotificationRecord, type PageId } from '../stores/app-store';
+import { CLEANUP_QUARANTINE_SECTION_ID, PROJECT_QUARANTINE_SECTION_ID } from './quarantine-anchors';
 
 const FILTERS = [
   { id: 'all', label: 'Tất cả' },
@@ -92,6 +93,10 @@ function targetFor(notification: NotificationRecord): { page: PageId; label: str
   const code = notification.code?.toUpperCase() ?? '';
   const id = notification.id.toLowerCase();
   const title = notification.title.toLowerCase();
+  // Lời nhắc khu cách ly lúc mở app (phần A, 2026-10-06 — trước đây là banner đầu trang).
+  if (code.startsWith('QUARANTINE_') || code.startsWith('CLEANUP_QUARANTINE_')) {
+    return { page: 'cleanup', label: 'Xem khu cách ly' };
+  }
   if (code.startsWith('APP_UPDATE_') || id.startsWith('app-update-')) {
     return { page: 'updates', label: 'Mở cập nhật' };
   }
@@ -197,6 +202,15 @@ export function NotificationCenter(): React.JSX.Element | null {
     markNotificationRead(notification.id);
     setPage(page);
     closeNotificationCenter();
+    const code = notification.code?.toUpperCase() ?? '';
+    const section = code.startsWith('CLEANUP_QUARANTINE_')
+      ? CLEANUP_QUARANTINE_SECTION_ID
+      : code.startsWith('QUARANTINE_')
+        ? PROJECT_QUARANTINE_SECTION_ID
+        : null;
+    if (section) {
+      window.setTimeout(() => document.getElementById(section)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
+    }
   };
 
   const openOutput = async (notification: NotificationRecord): Promise<void> => {

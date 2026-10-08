@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import type { LogEntry, Project } from '@shared/types/domain';
 import { StatusBadge } from '../components/StatusBadge';
 import { CompactDetail } from '../components/CompactDetail';
+import { InfoHint } from '../components/InfoHint';
 import { useAppStore } from '../stores/app-store';
 import { createUiEventId } from '../utils/ui-id';
 import { moduleLabel } from '../utils/vi-labels';
@@ -99,8 +100,8 @@ export function LogsPage(): React.JSX.Element {
         <div>
           <h1 className="text-2xl font-black">Nhật ký vận hành</h1>
           <p className="mt-1 text-sm" style={{ color: 'var(--muted)' }}>
-            Mỗi danh sách có bộ lọc và tệp nhật ký riêng. Màn hình này không trộn nhật ký khi bạn chọn một
-            danh sách cụ thể.
+            Mỗi danh sách có bộ lọc và tệp nhật ký riêng.
+            <InfoHint text="Mỗi danh sách có bộ lọc và tệp nhật ký riêng. Màn hình này không trộn nhật ký khi bạn chọn một danh sách cụ thể." />
           </p>
         </div>
       </div>
@@ -177,9 +178,8 @@ export function LogsPage(): React.JSX.Element {
         className="mt-3 rounded-xl border px-3 py-2 text-xs"
         style={{ borderColor: 'var(--border)', background: 'var(--panel2)', color: 'var(--muted)' }}
       >
-        Đang hiển thị <b style={{ color: 'var(--text)' }}>{filtered.length}</b> sự kiện. Tệp nhật ký theo danh
-        sách nằm trong thư mục <code>logs\projects</code>; cookies, mã truy cập và thông tin xác thực được che
-        trước khi ghi.
+        Đang hiển thị <b style={{ color: 'var(--text)' }}>{filtered.length}</b> sự kiện.
+        <InfoHint text={'Tệp nhật ký theo danh sách nằm trong thư mục logs\\projects; cookies, mã truy cập và thông tin xác thực được che trước khi ghi.'} />
       </div>
 
       <div className="card logs-table scroll mt-4 max-h-[calc(100vh-270px)] overflow-auto">

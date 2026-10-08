@@ -2,6 +2,7 @@ import { CircleAlert, ExternalLink } from 'lucide-react';
 import { useState } from 'react';
 import { describeGpuEncoderIssue, nvidiaDriverVersionFromWindows } from '@shared/utils/nvenc-diagnosis';
 import { safeUiText } from '../utils/ui-error';
+import { InfoHint } from './InfoHint';
 import { useAppStore } from '../stores/app-store';
 
 /**
@@ -41,7 +42,11 @@ export function GpuEncoderIssueNotice(): React.JSX.Element | null {
       <CircleAlert size={20}/>
       <div>
         <b>{text.title}</b>
-        <p>{text.message}</p>
+        {/* Phần A (2026-10-06): câu giải thích dài vào ⓘ; dòng hiển thị chỉ nói điều cần biết ngay. */}
+        <p>
+          Tubmedia đang dùng CPU thay thế (chậm hơn, chất lượng như nhau).
+          <InfoHint text={text.message} />
+        </p>
         {error && <p role="alert">{error}</p>}
       </div>
       {text.canUpdateDriver && (

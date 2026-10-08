@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { APP_VERSION_LABEL } from '@shared/constants/app';
 import { WorkflowCard } from '../components/WorkflowCard';
+import { InfoHint } from '../components/InfoHint';
 import { useAppStore } from '../stores/app-store';
 
 const ACTIVE = new Set([
@@ -56,8 +57,8 @@ export function EditorHomePage(): React.JSX.Element {
           <span className="editor-kicker">TUBMEDIA EDITOR STUDIO · {APP_VERSION_LABEL}</span>
           <h1>Tải, kiểm tra và chuẩn bị video trong một quy trình rõ ràng</h1>
           <p>
-            Bắt đầu từ một video, nhiều liên kết hoặc một quy trình tải–ghép. Hàng đợi, công cụ,
-            lịch sử và chẩn đoán đều dùng dữ liệu thật của ứng dụng.
+            Bắt đầu từ một video, nhiều liên kết hoặc một quy trình tải–ghép.
+            <InfoHint text="Hàng đợi, công cụ, lịch sử và chẩn đoán đều dùng dữ liệu thật của ứng dụng." />
           </p>
           <div className="editor-hero-actions">
             <button className="btn btn-primary" onClick={() => setPage('download-workbench')}>
@@ -94,7 +95,7 @@ export function EditorHomePage(): React.JSX.Element {
           icon={ListVideo}
           eyebrow="NGUỒN VIDEO"
           title="Tải xuống"
-          description="Tải nhanh một video hoặc quản lý tối đa bốn danh sách độc lập với kiểm tra công cụ tự động."
+          description="Tải nhanh một video hoặc quản lý tối đa 6 danh sách độc lập với kiểm tra công cụ tự động."
           meta="URL · TXT/CSV · kéo thả"
           actionLabel="Mở tải xuống"
           tone="primary"

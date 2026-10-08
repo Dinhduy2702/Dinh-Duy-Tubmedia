@@ -54,6 +54,7 @@ import { shouldAnimateJobProgress } from '@shared/utils/progress-policy';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CookieManagerDialog } from '../components/CookieManagerDialog';
 import { InfoDisclosure } from '../components/InfoDisclosure';
+import { InfoHint } from '../components/InfoHint';
 import { ToolReadinessPanel } from '../components/ToolReadinessPanel';
 import { FolderField } from '../components/FolderField';
 import { StatusBadge } from '../components/StatusBadge';
@@ -1562,15 +1563,15 @@ function MergeLaneCard({
             </select>
             {form.aspectRatio !== 'original' && (
               <small className="merge-aspect-ratio-note">
-                Nền mờ phóng to từ chính video, video gốc giữ nguyên tỉ lệ ở giữa (kiểu CapCut) — chạy thêm một
-                bước xử lý sau khi ghép xong nên mất thêm thời gian.
+                Nền mờ kiểu CapCut, mất thêm thời gian xử lý.
+                <InfoHint text="Nền mờ phóng to từ chính video, video gốc giữ nguyên tỉ lệ ở giữa (kiểu CapCut) — chạy thêm một bước xử lý sau khi ghép xong nên mất thêm thời gian." />
               </small>
             )}
           </label>
         </div>
         <label className={`merge-timeline-only-option ${form.timelineOnly ? 'is-active' : ''}`}>
           <input type="checkbox" checked={form.timelineOnly} disabled={locked} onChange={(event: ChangeEvent<HTMLInputElement>) => { saveTimelineOnlyMode(slot, event.target.checked); update((current) => ({ ...current, timelineOnly: event.target.checked })); }}/>
-          <span><b>Chỉ tạo timeline (không ghép video)</b><small><em>Không tạo MP4.</em> Tubmedia tải khi cần hoặc dùng lại video sẵn có, kiểm tra giải mã từng tệp từ đầu đến cuối, rồi tính mốc chính xác. Bạn tự chọn nơi lưu khi bấm Xuất TXT.</small></span>
+          <span><b>Chỉ tạo timeline (không ghép video)</b><small><em>Không tạo MP4.</em><InfoHint text="Tubmedia tải khi cần hoặc dùng lại video sẵn có, kiểm tra giải mã từng tệp từ đầu đến cuối, rồi tính mốc chính xác. Bạn tự chọn nơi lưu khi bấm Xuất TXT." /></small></span>
         </label>
         <InfoDisclosure
           className="merge-quality-disclosure"

@@ -92,6 +92,11 @@ interface State {
   dismissAttention(id?: string): void;
   /** Người dùng bấm X: ghi nhận đã tắt vấn đề này rồi đóng. Tự tắt theo giờ thì KHÔNG gọi hàm này. */
   dismissIssueByUser(notice: AttentionNotice): void;
+  /**
+   * Chỉ ghi vào chuông thông báo (không bật thông báo nổi) — dùng cho lời nhắc lúc mở app như khu cách ly. Cùng id và
+   * cùng nội dung thì giữ nguyên (không đánh dấu chưa đọc lại mỗi lần mở app).
+   */
+  addBellNotification(notice: AttentionNotice, outputPath?: string): void;
   dismissAttentionByCodes(codes: readonly string[], projectId?: string | null): void;
   openNotificationCenter(): void;
   closeNotificationCenter(): void;
@@ -558,6 +563,12 @@ export const useAppStore = create<State>((set, get) => ({
       if (isIssueDismissed(state.dismissedIssues, cleanAttention)) return { notifications };
       const merged = mergeNoticeIntoQueue(state.attention, state.attentionQueue, cleanAttention);
       return { attention: merged.current, attentionQueue: merged.queue, notifications };
+    }),
+  addBellNotification: (notice, outputPath) =>
+    set((state) => {
+      const existing = state.notifications.find((item) => item.id === notice.id);
+      if (existing && existing.message === notice.message && existing.title === notice.title) return {};
+      return { notifications: addNotification(state.notifications, notice, Date.now(), outputPath) };
     }),
   dismissIssueByUser: (notice) =>
     set((state) => {

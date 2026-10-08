@@ -2349,18 +2349,23 @@ test('Mục 5: nhắc khu cách ly khi mở app và trang xem khu cách ly của
       };
     });
 
-    const notice = shellWindow!.locator('.storage-attention-notice').first();
-    await expect(notice).toContainText('Thư mục cách ly cũ còn 1 tệp', { timeout: 15_000 });
-    await expect(notice).toContainText(legacy);
-    await expect(notice).toContainText('sẽ bị xóa vĩnh viễn trong 2 ngày tới');
+    // Phần A rà soát giao diện (2026-10-06): lời nhắc khu cách ly lúc mở app nằm trong CHUÔNG thông báo, không còn banner.
+    await shellWindow!.waitForTimeout(1500);
+    expect(await shellWindow!.locator('.storage-attention-notice').count(), 'không còn banner đầu trang').toBe(0);
+    await shellWindow!.locator('#notification-center-trigger').click();
+    const legacyItem = shellWindow!.locator('.notification-item', { hasText: 'Thư mục cách ly cũ còn 1 tệp' });
+    await expect(legacyItem).toBeVisible({ timeout: 15_000 });
+    await expect(legacyItem).toContainText(legacy);
+    const expiringItem = shellWindow!.locator('.notification-item', { hasText: 'sắp bị xóa vĩnh viễn' });
+    await expect(expiringItem).toContainText('trong 2 ngày tới');
 
-    await notice.getByRole('button', { name: 'Mở thư mục' }).click();
+    await legacyItem.getByRole('button', { name: 'Mở thư mục' }).click();
     await expect
       .poll(async () => electronApplication!.evaluate(() => (globalThis as unknown as { __openedPaths: string[] }).__openedPaths))
       .toEqual([legacy]);
     expect(fs.existsSync(path.join(legacy, 'ban-cu-tu-1.5.0.mp4')), 'thư mục cũ không bị di chuyển/xóa').toBe(true);
 
-    await notice.getByRole('button', { name: 'Xem' }).click();
+    await expiringItem.getByRole('button', { name: 'Xem khu cách ly' }).click();
     await expect(shellWindow!.locator('#cleanup-quarantine')).toBeVisible({ timeout: 15_000 });
     await expect(shellWindow!.locator('#cleanup-quarantine')).toContainText('còn 1 ngày để hoàn tác');
 
@@ -2746,6 +2751,114 @@ test('Phần B thông báo: thay thông báo trùng, đã tắt thì không hi�
     await send('events:log', log({ module: 'tools', eventCode: 'TOOL_HEALTH_CHECK_FAILED', message: 'Công cụ lỗi lần 2' }));
     await shellWindow!.waitForTimeout(1500);
     await expect(shellWindow!.locator('.diagnostic-dock')).toHaveCount(0);
+  } finally {
+    await closeElectronApplication();
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Phần A rà soát giao diện (người dùng duyệt 2026-10-06): không còn đoạn chữ dài đứng cố định trên giao diện — giải
+ * thích dài nằm trong icon ⓘ (hiện đủ khi rê chuột/focus), phụ đề trang rút gọn một dòng. Bài này đi qua MỌI trang và
+ * mọi mục Cài đặt, tìm phần tử ĐANG HIỂN THỊ có đoạn chữ riêng dài > 110 ký tự (bỏ qua hộp thoại, ô chú thích ⓘ, thông
+ * báo nổi, ô nhập). Banner khu cách ly lúc mở app chuyển vào chuông thông báo; trang Tổng quan ghi đúng 6 danh sách.
+ */
+test('Phần A giao diện: không còn chữ dài cố định, ⓘ hiện đủ khi rê chuột, banner khu cách ly vào chuông', async () => {
+  test.setTimeout(150_000);
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-long-text-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  const env = {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    ),
+    NODE_ENV: 'test',
+    TUBMEDIA_E2E: '1',
+    TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+    PLAYWRIGHT_TEST: '1',
+    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+  };
+  const launch = async (): Promise<void> => {
+    electronApplication = await electron.launch({ args: [mainEntry], cwd: projectRoot, env, timeout: 45_000 });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await shellWindow.setViewportSize({ width: 1400, height: 900 });
+  };
+  const longVisibleTexts = async (): Promise<string[]> =>
+    shellWindow!.evaluate(() => {
+      const skip = '[role="dialog"], .info-hint-tip, .shared-folder-tip, .attention-center, .diagnostic-dock, input, textarea, select, pre, code, .logs-data-table, #notification-center-panel, .info-disclosure:not(.is-open) .info-disclosure-collapse, details:not([open]) > :not(summary)';
+      const found: string[] = [];
+      for (const element of Array.from(document.querySelectorAll('main *, .app-main *'))) {
+        if (element.closest(skip)) continue;
+        const style = getComputedStyle(element);
+        if (style.display === 'none' || style.visibility === 'hidden') continue;
+        const rect = element.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) continue;
+        const own = Array.from(element.childNodes)
+          .filter((node) => node.nodeType === Node.TEXT_NODE)
+          .map((node) => node.textContent ?? '')
+          .join('')
+          .replace(/\s+/g, ' ')
+          .trim();
+        // Bỏ qua dữ liệu dạng đường dẫn (ví dụ đường dẫn công cụ) — không phải chữ giải thích.
+        if (own.length > 110 && !/^[A-Za-z]:[\\/]/.test(own)) found.push(own.slice(0, 90));
+      }
+      return [...new Set(found)];
+    });
+  const goTo = async (label: string): Promise<void> => {
+    await shellWindow!.getByRole('navigation', { name: 'Điều hướng chính' }).getByRole('button', { name: label, exact: true }).click();
+    await shellWindow!.waitForTimeout(700);
+  };
+
+  try {
+    // Dựng thư mục _quarantine cũ còn tệp để kiểm banner khu cách ly đã chuyển vào chuông.
+    await launch();
+    await closeElectronApplication();
+    const legacy = path.join(sandbox, 'Downloads', '_quarantine');
+    fs.mkdirSync(legacy, { recursive: true });
+    fs.writeFileSync(path.join(legacy, 'ban-cu.mp4'), Buffer.alloc(2048));
+    const now = new Date().toISOString();
+    const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+    db.prepare(
+      `INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,aspect_ratio,created_at,updated_at,archived_at)
+       VALUES(?,?,NULL,'','draft',?,?,?,?,'x','q','r',0,'original',?,?,NULL)`
+    ).run(randomUUID(), 'Danh sách e2e', sandbox, path.join(sandbox, 'Downloads'), sandbox, legacy, now, now);
+    db.close();
+
+    await launch();
+    await shellWindow!.waitForTimeout(2000);
+    expect(await shellWindow!.locator('.storage-attention-notice').count(), 'không còn banner khu cách ly đầu trang').toBe(0);
+    await shellWindow!.locator('#notification-center-trigger').click();
+    const bell = shellWindow!.locator('#notification-center-panel');
+    await expect(bell).toContainText('Thư mục cách ly cũ còn 1 tệp', { timeout: 10_000 });
+    await expect(bell.getByRole('button', { name: 'Mở thư mục' }).first()).toBeVisible();
+    await shellWindow!.keyboard.press('Escape');
+
+    const offenders: string[] = [];
+    await shellWindow!.getByRole('button', { name: 'Mở Tổng quan Editor' }).click();
+    await shellWindow!.waitForTimeout(700);
+    await expect(shellWindow!.locator('main, .app-main').first()).not.toContainText('tối đa bốn danh sách');
+    offenders.push(...(await longVisibleTexts()).map((text) => `Tổng quan: ${text}`));
+    for (const page of ['Tải danh sách', 'Ghép theo Timeline', 'Hàng đợi', 'Lịch sử', 'Tải 1 video', 'Xem trước & Cắt', 'Ghép & Xuất', 'Lọc video theo link', 'Dọn dẹp máy', 'Cập nhật', 'Công cụ', 'Chẩn đoán', 'Nhật ký', 'Giới thiệu']) {
+      await goTo(page);
+      offenders.push(...(await longVisibleTexts()).map((text) => `${page}: ${text}`));
+    }
+    await goTo('Cài đặt');
+    for (const section of ['Chung', 'Hiệu năng', 'Tải danh sách', 'Tải & Ghép', 'Lưu trữ', 'Kiểm tra', 'Cập nhật']) {
+      await shellWindow!.locator('main, .app-main').first().getByRole('button', { name: section, exact: true }).first().click();
+      await shellWindow!.waitForTimeout(400);
+      offenders.push(...(await longVisibleTexts()).map((text) => `Cài đặt/${section}: ${text}`));
+    }
+    expect(offenders, `Chữ dài cố định còn sót:\n${offenders.join('\n')}`).toEqual([]);
+
+    // ⓘ: câu đầy đủ chỉ hiện khi rê chuột.
+    const hint = shellWindow!.locator('.info-hint').first();
+    await expect(hint).toBeVisible();
+    await shellWindow!.mouse.move(2, 2);
+    await expect(hint.locator('.info-hint-tip')).toBeHidden();
+    await hint.hover();
+    await expect(hint.locator('.info-hint-tip')).toBeVisible();
+    expect((await hint.getAttribute('aria-label'))?.length ?? 0).toBeGreaterThan(20);
   } finally {
     await closeElectronApplication();
     fs.rmSync(sandbox, { recursive: true, force: true });

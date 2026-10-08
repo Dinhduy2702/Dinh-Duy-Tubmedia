@@ -17,6 +17,7 @@ import type {
   QuickDownloadStatus
 } from '@shared/quick-download';
 import { CookieManagerDialog } from './CookieManagerDialog';
+import { InfoHint } from './InfoHint';
 import { UnifiedDownloadProgress } from './UnifiedDownloadProgress';
 import { Card } from './ui/Card';
 import { InfoDisclosure } from './InfoDisclosure';
@@ -492,7 +493,10 @@ export function QuickDownloadPanel(): ReactElement {
                   >
                     {previewLoading ? 'Đang lấy khung hình…' : 'Xem khung hình'}
                   </button>
-                  <small>Tải một đoạn rất ngắn thật (không âm thanh) quanh mỗi mốc để lấy khung hình — không lưu lại trên máy.</small>
+                  <small>
+                    Lấy khung hình quanh mỗi mốc.
+                    <InfoHint text="Tải một đoạn rất ngắn thật (không âm thanh) quanh mỗi mốc để lấy khung hình — không lưu lại trên máy." />
+                  </small>
                 </div>
                 {previewError && (
                   <div className="quick-download-error" role="alert">
@@ -537,8 +541,8 @@ export function QuickDownloadPanel(): ReactElement {
               <span>
                 <b>Ghi credit vào tệp</b>
                 <small>
-                  Ghi nguồn gốc (kênh, URL, ngày tải, đoạn đã cắt nếu có) vào metadata ẩn của tệp để tra
-                  lại sau này — không chèn chữ lên hình, không làm chậm tốc độ tải.
+                  Ghi nguồn gốc vào metadata ẩn của tệp.
+                  <InfoHint text="Ghi nguồn gốc (kênh, URL, ngày tải, đoạn đã cắt nếu có) vào metadata ẩn của tệp để tra lại sau này — không chèn chữ lên hình, không làm chậm tốc độ tải." />
                 </small>
               </span>
             </label>
@@ -802,11 +806,16 @@ export function QuickDownloadPanel(): ReactElement {
         ) : null}
 
         <div className="quick-download-note">
-          {useTimeline
-            ? 'Timeline đang bật: Tubmedia chỉ tải đoạn đã chọn. Cắt nhanh có thể lệch nhẹ quanh keyframe; bật Cắt chính xác khi cần mốc sát hơn.'
-            : mediaMode === 'audio-only'
-              ? 'Timeline đang tắt: Tubmedia tải toàn bộ tệp âm thanh. Tên file vẫn có ID nguồn và mã tác vụ để tránh ghi đè.'
-              : 'Timeline đang tắt: Tubmedia tải toàn bộ video. File luôn có Video ID và mã tác vụ để không bỏ qua nhầm video trùng tên.'}
+          {useTimeline ? 'Timeline đang bật: chỉ tải đoạn đã chọn.' : mediaMode === 'audio-only' ? 'Timeline đang tắt: tải toàn bộ tệp âm thanh.' : 'Timeline đang tắt: tải toàn bộ video.'}
+          <InfoHint
+            text={
+              useTimeline
+                ? 'Timeline đang bật: Tubmedia chỉ tải đoạn đã chọn. Cắt nhanh có thể lệch nhẹ quanh keyframe; bật Cắt chính xác khi cần mốc sát hơn.'
+                : mediaMode === 'audio-only'
+                  ? 'Timeline đang tắt: Tubmedia tải toàn bộ tệp âm thanh. Tên file vẫn có ID nguồn và mã tác vụ để tránh ghi đè.'
+                  : 'Timeline đang tắt: Tubmedia tải toàn bộ video. File luôn có Video ID và mã tác vụ để không bỏ qua nhầm video trùng tên.'
+            }
+          />
         </div>
       </div>
       <CookieManagerDialog

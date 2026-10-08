@@ -13,6 +13,7 @@ import {
 import type { BrowserProfileOption, CookieConfigurationStatus } from '@shared/types/domain';
 import { COOKIE_BLOCKING_CODES } from '@shared/utils/cookie-policy';
 import { useAppStore } from '../stores/app-store';
+import { InfoHint } from './InfoHint';
 
 interface Props {
   open: boolean;
@@ -183,8 +184,8 @@ export function CookieManagerDialog({ open, onClose, onConfigured }: Props): Rea
               Cookies và đăng nhập
             </div>
             <p className="mt-1 text-sm" style={{ color: 'var(--muted)' }}>
-              Chọn đúng một trong ba cách. Cookies chỉ được truyền cho yt-dlp ở bộ phận tải nền và luôn bị che
-              khỏi nhật ký.
+              Chọn đúng một trong ba cách.
+              <InfoHint text="Cookies chỉ được truyền cho yt-dlp ở bộ phận tải nền và luôn bị che khỏi nhật ký." />
             </p>
           </div>
           <button className="btn btn-ghost p-2" disabled={busy} onClick={onClose}>
@@ -323,8 +324,8 @@ export function CookieManagerDialog({ open, onClose, onConfigured }: Props): Rea
         {tab === 'paste' && (
           <div className="cookie-panel">
             <p className="mb-3 text-sm" style={{ color: 'var(--muted)' }}>
-              Có thể dán Netscape cookies.txt, JSON xuất từ trình duyệt hoặc chuỗi Cookie dạng name=value;
-              name2=value2. Ứng dụng tự chuyển đổi và không hiển thị lại nội dung.
+              Dán cookies.txt, JSON hoặc chuỗi Cookie.
+              <InfoHint text="Có thể dán Netscape cookies.txt, JSON xuất từ trình duyệt hoặc chuỗi Cookie dạng name=value; name2=value2. Ứng dụng tự chuyển đổi và không hiển thị lại nội dung." />
             </p>
             <textarea
               className="textarea cookie-textarea font-mono text-xs"
@@ -348,8 +349,8 @@ export function CookieManagerDialog({ open, onClose, onConfigured }: Props): Rea
         {tab === 'file' && (
           <div className="cookie-panel">
             <p className="text-sm leading-6" style={{ color: 'var(--muted)' }}>
-              Chọn tệp cookies.txt dạng Netscape hoặc tệp JSON đã xuất từ trình duyệt. Ứng dụng kiểm tra và
-              chuyển đổi an toàn trước khi sử dụng.
+              Chọn tệp cookies.txt (Netscape) hoặc JSON.
+              <InfoHint text="Chọn tệp cookies.txt dạng Netscape hoặc tệp JSON đã xuất từ trình duyệt. Ứng dụng kiểm tra và chuyển đổi an toàn trước khi sử dụng." />
             </p>
             <button className="btn btn-primary mt-4" disabled={busy} onClick={() => void chooseFile()}>
               {busy ? <LoaderCircle className="animate-spin" size={17} /> : <FileText size={17} />}Chọn tệp

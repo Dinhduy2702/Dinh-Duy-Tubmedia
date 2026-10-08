@@ -20,6 +20,7 @@ import { planForListCount, recommendDownloadConcurrency } from '@shared/utils/ha
 import { CookieManagerDialog } from '../components/CookieManagerDialog';
 import { FolderField } from '../components/FolderField';
 import { InfoDisclosure } from '../components/InfoDisclosure';
+import { InfoHint } from '../components/InfoHint';
 import { useAppStore } from '../stores/app-store';
 import { createPersistentUiId, createUiEventId } from '../utils/ui-id';
 
@@ -300,15 +301,15 @@ function DownloadSettings({ settings, patch, setError }: { settings: AppSettings
     <h3 className="mb-3 font-black">Chất lượng đầu ra của Tải danh sách</h3>
     <div className="download-preset-grid">
       <div className={`download-source-preset ${reference1080Active ? 'is-active' : ''}`}>
-        <ShieldCheck size={19}/><div><b>Đa nền tảng 720p–1080p · KHUYÊN DÙNG</b><span>H.264 + MP4, fallback thông minh, aria2c 16 kết nối, 2 fragment và tối đa 2 video tải đồng thời; đầu ra giống workflow tham chiếu, dễ phát và dễ dựng.</span></div>
+        <ShieldCheck size={19}/><div><b>Đa nền tảng 720p–1080p · KHUYÊN DÙNG</b><span>H.264 + MP4, dễ phát và dễ dựng.<InfoHint text="H.264 + MP4, fallback thông minh, aria2c 16 kết nối, 2 fragment và tối đa 2 video tải đồng thời; đầu ra giống workflow tham chiếu, dễ phát và dễ dựng."/></span></div>
         <button className="btn" type="button" disabled={reference1080Active} onClick={useReference1080}>{reference1080Active ? 'Đang dùng' : 'Áp dụng'}</button>
       </div>
       <div className={`download-source-preset ${highestSourceActive ? 'is-active' : ''}`}>
-        <HardDrive size={19}/><div><b>Nguồn cao nhất</b><span>Không giới hạn độ phân giải, FPS hay codec; mạnh nhất khi cần giữ 2K/4K, HDR và bitrate tối đa nền tảng cung cấp.</span></div>
+        <HardDrive size={19}/><div><b>Nguồn cao nhất</b><span>Giữ 2K/4K, HDR và bitrate tối đa.<InfoHint text="Không giới hạn độ phân giải, FPS hay codec; mạnh nhất khi cần giữ 2K/4K, HDR và bitrate tối đa nền tảng cung cấp."/></span></div>
         <button className="btn" type="button" disabled={highestSourceActive} onClick={useHighestSource}>{highestSourceActive ? 'Đang dùng' : 'Áp dụng'}</button>
       </div>
       <div className={`download-source-preset ${light720Active ? 'is-active' : ''}`}>
-        <Gauge size={19}/><div><b>720p nhẹ và nhanh</b><span>H.264 MP4 tối đa 720p/30 FPS; mạnh nhất khi cần tiết kiệm dung lượng, tải nhanh và xem trên máy cấu hình thấp.</span></div>
+        <Gauge size={19}/><div><b>720p nhẹ và nhanh</b><span>Tối đa 720p/30 FPS, tiết kiệm dung lượng.<InfoHint text="H.264 MP4 tối đa 720p/30 FPS; mạnh nhất khi cần tiết kiệm dung lượng, tải nhanh và xem trên máy cấu hình thấp."/></span></div>
         <button className="btn" type="button" disabled={light720Active} onClick={useLight720}>{light720Active ? 'Đang dùng' : 'Áp dụng'}</button>
       </div>
     </div>
@@ -316,7 +317,7 @@ function DownloadSettings({ settings, patch, setError }: { settings: AppSettings
     {capCutMode
       ? <div className="my-4 rounded-xl border p-4 text-sm leading-6" style={{ borderColor: 'var(--good)', background: 'color-mix(in srgb,var(--good) 7%,var(--panel2))' }}>
         <b style={{ color: 'var(--good)' }}>Dựng trực tiếp trong CapCut, không tạo và không cần Proxy</b>
-        <p className="mt-1" style={{ color: 'var(--muted)' }}>Ứng dụng bắt buộc nguồn tối thiểu 1080p, giữ tối đa 60 FPS và xuất MP4 H.264 8-bit yuv420p, SDR BT.709, AAC 48 kHz. HDR/PQ/HLG/BT.2020, 10-bit, VP9, AV1 hoặc HEVC chỉ được chuyển đổi sau khi bạn chủ động chọn chế độ này.</p>
+        <p className="mt-1" style={{ color: 'var(--muted)' }}>Nguồn tối thiểu 1080p, xuất MP4 H.264 SDR dựng thẳng trong CapCut.<InfoHint text="Ứng dụng bắt buộc nguồn tối thiểu 1080p, giữ tối đa 60 FPS và xuất MP4 H.264 8-bit yuv420p, SDR BT.709, AAC 48 kHz. HDR/PQ/HLG/BT.2020, 10-bit, VP9, AV1 hoặc HEVC chỉ được chuyển đổi sau khi bạn chủ động chọn chế độ này."/></p>
       </div>
       : <>
         <div className="mt-4"/>
@@ -340,7 +341,7 @@ function DownloadSettings({ settings, patch, setError }: { settings: AppSettings
       <Toggle label="Kiểm tra toàn bộ video sau tải bằng FFmpeg (Chuyên sâu)" checked={settings.downloadVerifyEntireFile} onChange={(value) => patch('downloadVerifyEntireFile', value)}/>
     </Grid>
     {!capCutMode && (qualityInvalid || fpsInvalid || videoBitrateInvalid || audioInvalid) && <div className="mt-3 rounded-xl border p-3 text-sm" style={{ borderColor: 'var(--bad)', color: 'var(--bad)' }}>Giới hạn không hợp lệ: giá trị tối thiểu không được lớn hơn giá trị tối đa, trừ khi tối đa bằng 0.</div>}
-    <p className="mt-3 text-xs leading-5" style={{ color: 'var(--muted)' }}>Kiểm tra toàn bộ chuyên sâu giải mã toàn bộ tệp để phát hiện lỗi ở đầu, giữa hoặc cuối video. Tính năng này chính xác hơn nhưng dùng thêm Bộ xử lý trung tâm và tốc độ đọc ổ đĩa; ứng dụng sẽ đề xuất giảm luồng tải khi bật.</p>
+    <p className="mt-3 text-xs leading-5" style={{ color: 'var(--muted)' }}>Kiểm tra chuyên sâu chính xác hơn nhưng dùng thêm CPU và ổ đĩa.<InfoHint text="Kiểm tra toàn bộ chuyên sâu giải mã toàn bộ tệp để phát hiện lỗi ở đầu, giữa hoặc cuối video. Tính năng này chính xác hơn nhưng dùng thêm Bộ xử lý trung tâm và tốc độ đọc ổ đĩa; ứng dụng sẽ đề xuất giảm luồng tải khi bật."/></p>
 
     <h3 className="mb-3 mt-7 font-black">Cookies và đăng nhập</h3>
     <InfoDisclosure
@@ -381,7 +382,8 @@ function DownloadSettings({ settings, patch, setError }: { settings: AppSettings
       <Text label="Mẫu đặt tên tệp" value={settings.quickDownloadFilenameTemplate} onChange={(value) => patch('quickDownloadFilenameTemplate', value)} placeholder="{title} [{id}]"/>
     </Grid>
     <p className="settings-detail-copy">
-      Token dùng được: <code>{'{title}'}</code> tên video, <code>{'{channel}'}</code> kênh/tác giả, <code>{'{date}'}</code> ngày tải (hôm nay), <code>{'{id}'}</code> mã video trên nền tảng. Chỉ áp dụng cho Tải nhanh. Nếu tên theo mẫu quá dài hoặc không hợp lệ với Windows, ứng dụng tự động thử lại bằng tên rút gọn an toàn.
+      Token: <code>{'{title}'}</code> <code>{'{channel}'}</code> <code>{'{date}'}</code> <code>{'{id}'}</code>
+      <InfoHint text="{title} tên video, {channel} kênh/tác giả, {date} ngày tải (hôm nay), {id} mã video trên nền tảng. Chỉ áp dụng cho Tải nhanh. Nếu tên theo mẫu quá dài hoặc không hợp lệ với Windows, ứng dụng tự động thử lại bằng tên rút gọn an toàn."/>
     </p>
   </Block>;
 }
@@ -422,7 +424,9 @@ function ProcessingSettings({ settings, patch, qualities, setError }: { settings
       summary="H.264 dùng libx264 · HEVC dùng libx265"
       status={cpuReady ? 'SẴN SÀNG' : 'CẦN KIỂM TRA'}
       tone={cpuReady ? (nvencUnavailable ? 'warning' : 'good') : 'warning'}
-      autoOpen={!cpuReady || nvencUnavailable}
+      // Phần A (2026-10-06): NVENC không dùng được không chặn việc (CPU tự thay thế) — trạng thái đã ghi ở thanh tiêu
+      // đề, không tự mở khung để tránh chữ dài đứng cố định. Chỉ tự mở khi CPU cũng chưa sẵn sàng.
+      autoOpen={!cpuReady}
     >
       <p className="settings-detail-copy">NVENC chỉ chạy khi user ép chọn và kiểm tra thực tế thành công. {nvencUnavailable ? 'NVIDIA hiện không tương thích; tác vụ tự chuyển sang bộ xử lý trung tâm và không bị dừng.' : nvencReady ? 'NVENC đã vượt qua kiểm tra, nhưng CPU tự động vẫn là mặc định an toàn.' : 'Ứng dụng tiếp tục dùng CPU để ưu tiên tính ổn định.'}</p>
     </InfoDisclosure>
@@ -436,10 +440,10 @@ function ProcessingSettings({ settings, patch, qualities, setError }: { settings
 function Storage({ settings, patch }: { settings: AppSettings; patch: Patch }): React.JSX.Element {
   return <Block title="Thư mục và bộ nhớ đệm" icon={HardDrive}><div className="space-y-4"><FolderField label="Thư mục nguồn mặc định" value={settings.defaultSourceFolder} onChange={(value) => patch('defaultSourceFolder', value)}/><FolderField label="Thư mục tạm mặc định" warnIfSharedTemp value={settings.defaultTempFolder} onChange={(value) => patch('defaultTempFolder', value)}/><FolderField label="Thư mục đầu ra mặc định" value={settings.defaultOutputFolder} onChange={(value) => patch('defaultOutputFolder', value)}/><Grid><Select label="Chính sách lưu nguồn" value={settings.sourceCachePolicy} onChange={(value) => patch('sourceCachePolicy', value as AppSettings['sourceCachePolicy'])} options={[['forever','Giữ vĩnh viễn'],['days','Giữ theo số ngày'],['project_complete','Xóa khi hoàn tất'],['manual','Chỉ xóa thủ công']]}/><NumberField label="Số ngày giữ bộ nhớ đệm" value={settings.sourceCacheDays} min={1} max={3650} onChange={(value) => patch('sourceCacheDays', value)}/></Grid></div></Block>;
 }
-function Verification({ settings, patch }: { settings: AppSettings; patch: Patch }): React.JSX.Element { return <Block title="Kiểm tra tệp và nhật ký" icon={ShieldCheck}><Grid><Select label="Mức kiểm tra mặc định" value={settings.verificationLevel} onChange={(value) => patch('verificationLevel', value as AppSettings['verificationLevel'])} options={[['fast','Nhanh'],['standard','Tiêu chuẩn'],['deep','Chuyên sâu']]}/><NumberField label="Giữ nhật ký (ngày)" value={settings.logRetentionDays} min={1} max={3650} onChange={(value) => patch('logRetentionDays', value)}/><NumberField label="Làm mới giao diện (mili giây)" value={settings.progressRefreshMs} min={100} max={5000} onChange={(value) => patch('progressRefreshMs', value)}/></Grid><p className="mt-4 text-xs" style={{ color: 'var(--muted)' }}>Tệp lỗi chỉ nằm tạm trong khu cách ly để bảo vệ thành phẩm; Tubmedia tự dọn sau khi hoàn tất, hủy hoặc xóa quy trình. Kiểm tra chuyên sâu giải mã toàn bộ tệp.</p></Block>; }
-function UpdateSettings({ settings, patch }: { settings: AppSettings; patch: Patch }): React.JSX.Element { return <Block title="Cập nhật công cụ và ứng dụng" icon={Wrench}><p className="mb-4 text-xs leading-5" style={{ color: 'var(--muted)' }}>Bản cài đặt phát hành sẽ tự đọc máy chủ cập nhật đã đóng gói. Trường URL bên dưới chỉ dùng khi cần đổi sang máy chủ HTTPS riêng mà không build lại ứng dụng.</p><Grid><Text label="Địa chỉ danh sách cập nhật công cụ (cũ, không bắt buộc)" value={settings.toolManifestUrl} onChange={(value) => patch('toolManifestUrl', value)}/><Text label="Máy chủ cập nhật ứng dụng tùy chọn (HTTPS)" value={settings.appFeedUrl} onChange={(value) => patch('appFeedUrl', value)}/><Select label="Kênh cập nhật công cụ" value={settings.toolUpdateChannel} onChange={(value) => patch('toolUpdateChannel', value as AppSettings['toolUpdateChannel'])} options={[['stable','Ổn định'],['beta','Thử nghiệm']]}/><Select label="Kênh cập nhật ứng dụng" value={settings.appUpdateChannel} onChange={(value) => patch('appUpdateChannel', value as AppSettings['appUpdateChannel'])} options={[['stable','Ổn định'],['beta','Thử nghiệm']]}/><Toggle label="Tự kiểm tra cập nhật công cụ" checked={settings.autoCheckToolUpdates} onChange={(value) => patch('autoCheckToolUpdates', value)}/><Toggle label="Tự kiểm tra cập nhật ứng dụng khi khởi động và mỗi 6 giờ" checked={settings.autoCheckAppUpdates} onChange={(value) => patch('autoCheckAppUpdates', value)}/></Grid><p className="mt-4 text-xs leading-5" style={{ color: 'var(--muted)' }}>Khuyến nghị: để trống URL tùy chọn và build bản phát hành bằng <b>npm.cmd run release:windows</b>. Khi đó latest.yml/beta.yml và blockmap được tạo đồng bộ với installer.</p></Block>; }
+function Verification({ settings, patch }: { settings: AppSettings; patch: Patch }): React.JSX.Element { return <Block title="Kiểm tra tệp và nhật ký" icon={ShieldCheck} info="Tệp lỗi được giữ trong khu cách ly để bảo vệ thành phẩm; Tubmedia không tự xóa khu cách ly — xem và xóa ở Dọn dẹp máy. Kiểm tra chuyên sâu giải mã toàn bộ tệp."><Grid><Select label="Mức kiểm tra mặc định" value={settings.verificationLevel} onChange={(value) => patch('verificationLevel', value as AppSettings['verificationLevel'])} options={[['fast','Nhanh'],['standard','Tiêu chuẩn'],['deep','Chuyên sâu']]}/><NumberField label="Giữ nhật ký (ngày)" value={settings.logRetentionDays} min={1} max={3650} onChange={(value) => patch('logRetentionDays', value)}/><NumberField label="Làm mới giao diện (mili giây)" value={settings.progressRefreshMs} min={100} max={5000} onChange={(value) => patch('progressRefreshMs', value)}/></Grid></Block>; }
+function UpdateSettings({ settings, patch }: { settings: AppSettings; patch: Patch }): React.JSX.Element { return <Block title="Cập nhật công cụ và ứng dụng" icon={Wrench} info="Bản cài đặt phát hành sẽ tự đọc máy chủ cập nhật đã đóng gói. Trường URL bên dưới chỉ dùng khi cần đổi sang máy chủ HTTPS riêng mà không build lại ứng dụng. Khuyến nghị: để trống URL tùy chọn và build bản phát hành bằng npm.cmd run release:windows — khi đó latest.yml/beta.yml và blockmap được tạo đồng bộ với installer."><Grid><Text label="Địa chỉ danh sách cập nhật công cụ (cũ, không bắt buộc)" value={settings.toolManifestUrl} onChange={(value) => patch('toolManifestUrl', value)}/><Text label="Máy chủ cập nhật ứng dụng tùy chọn (HTTPS)" value={settings.appFeedUrl} onChange={(value) => patch('appFeedUrl', value)}/><Select label="Kênh cập nhật công cụ" value={settings.toolUpdateChannel} onChange={(value) => patch('toolUpdateChannel', value as AppSettings['toolUpdateChannel'])} options={[['stable','Ổn định'],['beta','Thử nghiệm']]}/><Select label="Kênh cập nhật ứng dụng" value={settings.appUpdateChannel} onChange={(value) => patch('appUpdateChannel', value as AppSettings['appUpdateChannel'])} options={[['stable','Ổn định'],['beta','Thử nghiệm']]}/><Toggle label="Tự kiểm tra cập nhật công cụ" checked={settings.autoCheckToolUpdates} onChange={(value) => patch('autoCheckToolUpdates', value)}/><Toggle label="Tự kiểm tra cập nhật ứng dụng khi khởi động và mỗi 6 giờ" checked={settings.autoCheckAppUpdates} onChange={(value) => patch('autoCheckAppUpdates', value)}/></Grid></Block>; }
 
-function Block({ title, icon: Icon, children }: { title: string; icon: LucideIcon; children: ReactNode }): React.JSX.Element { return <div><h2 className="mb-5 flex items-center gap-2 text-lg font-black"><Icon size={20} style={{ color: 'var(--accent)' }}/>{title}</h2>{children}</div>; }
+function Block({ title, icon: Icon, info, children }: { title: string; icon: LucideIcon; info?: string; children: ReactNode }): React.JSX.Element { return <div><h2 className="mb-5 flex items-center gap-2 text-lg font-black"><Icon size={20} style={{ color: 'var(--accent)' }}/>{title}{info && <InfoHint text={info}/>}</h2>{children}</div>; }
 function Grid({ children }: { children: ReactNode }): React.JSX.Element { return <div className="grid gap-4 lg:grid-cols-2">{children}</div>; }
 function Text({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string }): React.JSX.Element { return <label><span className="label">{label}</span><input className="input" value={value} placeholder={placeholder} onChange={(event: ChangeEvent<HTMLInputElement>) => onChange(event.target.value)}/></label>; }
 function NumberField({ label, value, onChange, min, max }: { label: string; value: number; onChange: (value: number) => void; min: number; max: number }): React.JSX.Element { return <label><span className="label">{label}</span><input className="input" type="number" min={min} max={max} value={value} onChange={(event: ChangeEvent<HTMLInputElement>) => onChange(Number(event.target.value))}/></label>; }

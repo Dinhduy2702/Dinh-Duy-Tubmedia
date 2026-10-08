@@ -13,6 +13,7 @@ import type { AppUpdateReleaseInfo, AppUpdateStatus } from '@shared/types/domain
 import { useAppStore } from '../stores/app-store';
 import type { NoticeTone } from '@shared/utils/notice-tone';
 import { Notice } from '../components/ui/Notice';
+import { InfoHint } from '../components/InfoHint';
 import { ToneIcon } from '../components/ui/ToneIcon';
 import { compareAppVersions } from '../../../shared/app-version';
 import { formatReleaseNotesForDisplay } from '../../../shared/release-notes';
@@ -160,8 +161,8 @@ export function UpdatesPage(): React.JSX.Element {
         <div>
           <h1 className="text-2xl font-black">Trung tâm cập nhật</h1>
           <p className="mt-1 text-sm" style={{ color: 'var(--muted)' }}>
-            Tubmedia tự đồng bộ phiên bản mới trong nền. Trang này chỉ hiển thị thông tin và hành động khi có
-            bản cập nhật thực sự.
+            Tubmedia tự đồng bộ phiên bản mới trong nền.
+            <InfoHint text="Tubmedia tự đồng bộ phiên bản mới trong nền. Trang này chỉ hiển thị thông tin và hành động khi có bản cập nhật thực sự." />
           </p>
         </div>
 

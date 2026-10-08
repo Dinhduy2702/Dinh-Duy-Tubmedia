@@ -36,7 +36,7 @@ export const SYSTEM_CLEANUP_CATEGORIES = [
     id: 'crashReports',
     label: 'Báo cáo lỗi của bạn (CrashDumps)',
     description:
-      'Chỉ dọn CrashDumps trong hồ sơ người dùng hiện tại; không đụng báo cáo lỗi hệ thống dùng chung (cần quyền quản trị, xem mục Windows Temp/Update bên dưới).',
+      'Chỉ dọn CrashDumps trong hồ sơ của bạn; báo cáo lỗi hệ thống dùng chung cần quyền quản trị (xem bên dưới).',
     defaultSelected: false
   },
   {

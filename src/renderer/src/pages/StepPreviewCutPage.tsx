@@ -9,6 +9,7 @@ import { formatBitrate, formatFileSize, formatFps, formatHdr, formatVideoCodec }
 import { StepTabs } from '../components/StepTabs';
 import { Card } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
+import { InfoHint } from '../components/InfoHint';
 import { safeUiText } from '../utils/ui-error';
 import { useAppStore } from '../stores/app-store';
 
@@ -350,7 +351,12 @@ export function StepPreviewCutPage(): React.JSX.Element {
         <EmptyState
           icon={FileVideo}
           title="Chưa chọn video nào"
-          description="Chọn một tệp video có sẵn trên máy để cắt một đoạn — không cần tải qua Tubmedia. Muốn cắt/chuẩn hóa nhiều tệp cùng lúc thì dùng Ghép theo Timeline."
+          description={
+            <>
+              Chọn một tệp video có sẵn trên máy để cắt một đoạn.
+              <InfoHint text="Không cần tải qua Tubmedia. Muốn cắt/chuẩn hóa nhiều tệp cùng lúc thì dùng Ghép theo Timeline." />
+            </>
+          }
           action={<button type="button" className="btn btn-primary" onClick={() => void chooseFile()}>Chọn tệp video</button>}
         />
       ) : (
@@ -461,7 +467,8 @@ export function StepPreviewCutPage(): React.JSX.Element {
             </div>
             {aspectRatio !== 'original' && (
               <small className="local-cut-aspect-note">
-                Nền mờ phóng to từ chính video, video gốc giữ nguyên tỉ lệ ở giữa (kiểu CapCut) — không cắt mất khung hình, không viền đen.
+                Nền mờ kiểu CapCut, không viền đen.
+                <InfoHint text="Nền mờ phóng to từ chính video, video gốc giữ nguyên tỉ lệ ở giữa (kiểu CapCut) — không cắt mất khung hình, không viền đen." />
               </small>
             )}
           </div>

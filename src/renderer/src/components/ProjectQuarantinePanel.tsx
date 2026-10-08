@@ -3,6 +3,7 @@ import { AlertTriangle, FolderOpen, RefreshCw, Trash2 } from 'lucide-react';
 import type { QuarantineOverview, QuarantineOverviewItem } from '@shared/types/domain';
 import { QUARANTINE_WARN_BYTES } from '@shared/utils/quarantine-policy';
 import { ConfirmDialog } from './ConfirmDialog';
+import { InfoHint } from './InfoHint';
 import { safeUiText } from '../utils/ui-error';
 import { PROJECT_QUARANTINE_SECTION_ID } from './quarantine-anchors';
 
@@ -88,8 +89,10 @@ export function ProjectQuarantinePanel(): React.JSX.Element {
           <span className="system-cleanup-eyebrow">KHU CÁCH LY CỦA DANH SÁCH</span>
           <h2>Bản cũ và tệp lỗi đang được giữ</h2>
           <p>
-            Nằm trên cùng ổ với tệp gốc, tại &lt;ổ&gt;:\Tubmedia\quarantine\&lt;tên danh sách (mã)&gt;. Tubmedia không bao giờ
-            tự xóa ở đây; chỉ cảnh báo khi tổng dung lượng vượt {formatBytes(QUARANTINE_WARN_BYTES)} hoặc ổ còn dưới 10% trống.
+            Tubmedia không bao giờ tự xóa ở đây.
+            <InfoHint
+              text={`Nằm trên cùng ổ với tệp gốc, tại <ổ>:\\Tubmedia\\quarantine\\<tên danh sách (mã)>. Tubmedia không bao giờ tự xóa ở đây; chỉ cảnh báo khi tổng dung lượng vượt ${formatBytes(QUARANTINE_WARN_BYTES)} hoặc ổ còn dưới 10% trống.`}
+            />
           </p>
         </div>
         <button type="button" className="system-cleanup-button secondary" disabled={busy} onClick={() => void load()}>

@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { APP_NAME, APP_VERSION_LABEL } from '@shared/constants/app';
 import { DeveloperSignature, TubmediaLogo, TubmediaMark } from '../components/TubmediaBrand';
+import { InfoHint } from '../components/InfoHint';
 
 /**
  * Trang Giới thiệu (người dùng cuối). Mục "Bộ nhận diện" (logo, mã màu, cách dùng đúng/sai) đã bỏ khỏi
@@ -27,7 +28,7 @@ export function AboutPage(): React.JSX.Element {
       <div className="about-hero-copy">
         <span className="eyebrow">QUY TRÌNH SÁNG TẠO TUBMEDIA</span>
         <h1>{APP_NAME}</h1>
-        <p>Tải nhiều danh sách, kiểm tra toàn vẹn, chuẩn hóa có chọn lọc và ghép video chất lượng cao trong một ứng dụng Windows duy nhất.</p>
+        <p>Tải, kiểm tra và ghép video chất lượng cao trong một ứng dụng.<InfoHint text="Tải nhiều danh sách, kiểm tra toàn vẹn, chuẩn hóa có chọn lọc và ghép video chất lượng cao trong một ứng dụng Windows duy nhất." /></p>
         <div className="about-badges">
           <span><BadgeCheck size={15}/>{APP_VERSION_LABEL}</span>
           <span><ShieldCheck size={15}/>Hoạt động cục bộ trên máy tính</span>
@@ -48,17 +49,17 @@ export function AboutPage(): React.JSX.Element {
       <Feature icon={Film} title="Tải và ghép nhiều quy trình" text="Tối đa 6 quy trình riêng, hỗ trợ chất lượng từ nhẹ đến cao nhất theo nguồn và chỉ mã hóa lại khi cần."/>
       <Feature icon={Cpu} title="Tối ưu theo phần cứng" text="Đọc bộ xử lý, bộ nhớ, bộ xử lý đồ họa và ổ đĩa để đề xuất số luồng tải, số luồng FFmpeg và mức tải phù hợp."/>
       <Feature icon={Database} title="Lưu trạng thái an toàn" text="SQLite lưu hàng đợi, tiến trình, lịch sử và hỗ trợ phục hồi khi ứng dụng bị đóng giữa chừng."/>
-      <Feature icon={Code2} title="Ứng dụng máy tính thực thụ" text="Giao diện React giao tiếp với phần xử lý Electron qua cầu nối an toàn; bản phát hành không phụ thuộc máy chủ web."/>
+      <Feature icon={Code2} title="Ứng dụng máy tính thực thụ" text="Không phụ thuộc máy chủ web." detail="Giao diện React giao tiếp với phần xử lý Electron qua cầu nối an toàn; bản phát hành không phụ thuộc máy chủ web."/>
       <Feature icon={ShieldCheck} title="Kiểm tra và cách ly tệp lỗi" text="ffprobe và FFmpeg xác minh tệp tải về; tệp lỗi được đưa vào khu cách ly thay vì báo hoàn tất sai."/>
     </div>
 
     <section className="responsibility-card">
       <div><ShieldCheck size={21}/></div>
-      <div><h3>Sử dụng có trách nhiệm</h3><p>Chỉ tải và xử lý nội dung bạn sở hữu hoặc có quyền sử dụng. Nội dung cookies không được ghi vào nhật ký hay gói chẩn đoán; ứng dụng chỉ lưu trạng thái đã cấu hình.</p></div>
+      <div><h3>Sử dụng có trách nhiệm</h3><p>Chỉ tải và xử lý nội dung bạn sở hữu hoặc có quyền sử dụng.<InfoHint text="Nội dung cookies không được ghi vào nhật ký hay gói chẩn đoán; ứng dụng chỉ lưu trạng thái đã cấu hình." /></p></div>
     </section>
   </div>;
 }
 
-function Feature({ icon: Icon, title, text }: { icon: typeof Workflow; title: string; text: string }): React.JSX.Element {
-  return <article className="about-feature-card"><div><Icon size={22}/></div><h3>{title}</h3><p>{text}</p></article>;
+function Feature({ icon: Icon, title, text, detail }: { icon: typeof Workflow; title: string; text: string; detail?: string }): React.JSX.Element {
+  return <article className="about-feature-card"><div><Icon size={22}/></div><h3>{title}</h3><p>{text}{detail && <InfoHint text={detail}/>}</p></article>;
 }
