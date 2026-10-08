@@ -52,7 +52,7 @@ export function useDesktopEvents(): void {
     const flushLogs = (): void => {
       logTimer = null;
       if (pendingLogs.length === 0) return;
-      useAppStore.getState().pushLogs(pendingLogs.splice(0));
+      useAppStore.getState().receiveLiveLogs(pendingLogs.splice(0));
     };
     const scheduleLogs = (): void => {
       if (logTimer !== null) return;

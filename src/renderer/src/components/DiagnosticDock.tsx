@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { LogEntry } from '@shared/types/domain';
 import {
   isDiagnosticStillBlocking,
-  shouldDisplayDiagnostic,
+  pickLiveDiagnostic,
   TRANSIENT_DIAGNOSTIC_DURATION_MS
 } from '@shared/utils/diagnostic-policy';
 import { useAppStore } from '../stores/app-store';
@@ -51,10 +51,10 @@ const diagnosticKind = (entry: LogEntry): string => `${entry.module}:${entry.eve
 export function DiagnosticDock(): React.JSX.Element | null {
   const jobs = useAppStore((state) => state.jobs);
   const logs = useAppStore((state) => state.logs);
+  const liveLogIds = useAppStore((state) => state.liveLogIds);
   const setPage = useAppStore((state) => state.setPage);
-  const log =
-    logs.find((entry) => shouldDisplayDiagnostic(entry, jobs) && !dismissedDiagnosticCodes.has(diagnosticKind(entry))) ??
-    null;
+  // Đợt 3 mục 8: chỉ sự kiện mới phát sinh trong phiên — lỗi cũ nạp từ lịch sử không bật lại khung này.
+  const log = pickLiveDiagnostic(logs, liveLogIds, jobs, dismissedDiagnosticCodes);
   const blocking = Boolean(log && isDiagnosticStillBlocking(log, jobs));
   const issue = useMemo(() => friendlyIssue(log?.message ?? ''), [log]);
   // Mức lấy từ MỨC CỦA DÒNG NHẬT KÝ (error/warn/info), không đoán từ chữ: nhật ký cảnh báo không được ra đỏ.

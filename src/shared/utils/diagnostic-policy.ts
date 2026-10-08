@@ -63,6 +63,28 @@ export function isDiagnosticStillBlocking(
   });
 }
 
+/**
+ * Đợt 3 mục 8 (rà soát bản cài 1.5.0): khung chẩn đoán chỉ hiện sự kiện MỚI PHÁT SINH trong phiên — dòng có mã trong
+ * `liveIds` (đến qua sự kiện trực tiếp từ tiến trình chính). Dòng nạp từ lịch sử (mở app, trang Nhật ký, trang Chẩn đoán)
+ * không bao giờ bật khung, dù giờ ghi còn mới (mở lại app ngay sau lỗi). Loại đã bấm X tắt cũng không hiện lại.
+ */
+export function pickLiveDiagnostic(
+  logs: readonly LogEntry[],
+  liveIds: ReadonlySet<string>,
+  jobs: readonly Pick<QueueJob, 'id' | 'projectId' | 'status' | 'errorCode'>[],
+  dismissedKinds: ReadonlySet<string>,
+  now = Date.now()
+): LogEntry | null {
+  return (
+    logs.find(
+      (entry) =>
+        liveIds.has(entry.id) &&
+        shouldDisplayDiagnostic(entry, jobs, now) &&
+        !dismissedKinds.has(`${entry.module}:${entry.eventCode}`)
+    ) ?? null
+  );
+}
+
 export function shouldDisplayDiagnostic(
   entry: LogEntry,
   // Giữ tham số để nơi gọi không đổi; nhật ký gắn tác vụ giờ không hiện ở khung chẩn đoán nữa nên không cần dùng.

@@ -3060,3 +3060,67 @@ test('Đợt 3 mục 7: lọc nhật ký theo mức ở CSDL — đủ lỗi cũ
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
 });
+
+/**
+ * Đợt 3 mục 8 (rà soát bản cài 1.5.0): "toast chỉ hiện cho sự kiện mới phát sinh, không hiện lại lỗi cũ khi tải lịch sử".
+ * Mô phỏng mở lại app ngay sau một lỗi cấp ứng dụng của phiên trước (dòng lỗi còn "mới" theo giờ): lúc mở app và khi mở
+ * trang Nhật ký, lịch sử được nạp — khung chẩn đoán không được bật lại lỗi cũ đó.
+ */
+test('Đợt 3 mục 8: lỗi cũ nạp từ lịch sử không bật lại thông báo chẩn đoán', async () => {
+  test.setTimeout(120_000);
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-old-toast-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  const env = {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    ),
+    NODE_ENV: 'test',
+    TUBMEDIA_E2E: '1',
+    TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+    PLAYWRIGHT_TEST: '1',
+    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+  };
+  const launch = async (): Promise<void> => {
+    electronApplication = await electron.launch({ args: [mainEntry], cwd: projectRoot, env, timeout: 45_000 });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+  };
+
+  try {
+    await launch();
+    await closeElectronApplication();
+    const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+    // Giờ ghi lùi về sau vài giây: suốt lúc mở app dòng lỗi vẫn "dưới 12 giây" — đúng trường hợp quy tắc theo giờ bỏ lọt.
+    db.prepare(
+      'INSERT INTO event_logs(id,timestamp,level,module,project_id,job_id,attempt_id,event_code,message,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)'
+    ).run(randomUUID(), new Date(Date.now() + 6_000).toISOString(), 'error', 'app', null, null, null, 'E2E_OLD_APP_ERROR', 'Lỗi cũ của phiên trước', null);
+    db.close();
+
+    await launch();
+    await shellWindow!.waitForTimeout(2_500);
+    expect(await shellWindow!.locator('.diagnostic-dock').count(), 'mở app: không bật lại lỗi cũ').toBe(0);
+
+    await shellWindow!
+      .getByRole('navigation', { name: 'Điều hướng chính' })
+      .getByRole('button', { name: 'Nhật ký', exact: true })
+      .click();
+    await expect(shellWindow!.locator('.logs-data-table tbody tr', { hasText: 'Lỗi cũ của phiên trước' })).toHaveCount(1, {
+      timeout: 15_000
+    });
+    await shellWindow!.waitForTimeout(1_000);
+    expect(await shellWindow!.locator('.diagnostic-dock').count(), 'tải lịch sử: không bật lại lỗi cũ').toBe(0);
+
+    // Sự kiện MỚI phát sinh vẫn hiện và đóng được.
+    await electronApplication!.evaluate(
+      ({ BrowserWindow }, data) => BrowserWindow.getAllWindows()[0]!.webContents.send('events:log', data),
+      { id: randomUUID(), timestamp: new Date().toISOString(), level: 'error', module: 'tools', eventCode: 'TOOL_HEALTH_CHECK_FAILED', message: 'Công cụ lỗi mới' }
+    );
+    await expect(shellWindow!.locator('.diagnostic-dock')).toBeVisible({ timeout: 5_000 });
+    await shellWindow!.locator('.diagnostic-dock').getByRole('button', { name: 'Đóng thông báo này' }).click();
+    await expect(shellWindow!.locator('.diagnostic-dock')).toHaveCount(0);
+  } finally {
+    await closeElectronApplication();
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});

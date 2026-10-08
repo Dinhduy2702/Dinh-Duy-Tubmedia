@@ -65,6 +65,8 @@ interface State {
   hardware: HardwareProfile | null;
   stats: SystemStats | null;
   logs: LogEntry[];
+  /** Đợt 3 mục 8: mã các dòng nhật ký đến TRỰC TIẾP trong phiên (không phải nạp từ lịch sử) — chỉ chúng được bật khung chẩn đoán. */
+  liveLogIds: ReadonlySet<string>;
   selectedProjectId: string | null;
   error: unknown;
   attention: AttentionNotice | null;
@@ -83,6 +85,8 @@ interface State {
   setSettings(settings: AppSettings): void;
   pushLog(entry: LogEntry): void;
   pushLogs(entries: LogEntry[]): void;
+  /** Nhận dòng nhật ký trực tiếp từ tiến trình chính (sự kiện mới phát sinh) — gộp vào kho và đánh dấu là trực tiếp. */
+  receiveLiveLogs(entries: LogEntry[]): void;
   updateJob(job: QueueJob): void;
   updateJobs(jobs: QueueJob[]): void;
   replaceJobs(jobs: QueueJob[]): void;
@@ -432,6 +436,7 @@ export const useAppStore = create<State>((set, get) => ({
   hardware: null,
   stats: null,
   logs: [],
+  liveLogIds: new Set<string>(),
   selectedProjectId: null,
   error: null,
   attention: null,
@@ -489,6 +494,14 @@ export const useAppStore = create<State>((set, get) => ({
   setSettings: (settings) => set({ settings }),
   pushLog: (entry) => set((state) => ({ logs: mergeLogs(state.logs, [entry]) })),
   pushLogs: (entries) => set((state) => ({ logs: mergeLogs(state.logs, entries) })),
+  receiveLiveLogs: (entries) =>
+    set((state) => {
+      const liveLogIds = new Set(state.liveLogIds);
+      for (const entry of entries) liveLogIds.add(entry.id);
+      // Giữ gọn: chỉ cần nhớ các dòng gần đây (khung chỉ xét dòng dưới 12 giây).
+      const recent = liveLogIds.size > 2000 ? new Set([...liveLogIds].slice(-1000)) : liveLogIds;
+      return { logs: mergeLogs(state.logs, entries), liveLogIds: recent };
+    }),
   updateJob: (job) =>
     set((state) => {
       const jobs = mergeJobUpdates(state.jobs, [job]);

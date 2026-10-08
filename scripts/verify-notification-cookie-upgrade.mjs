@@ -24,7 +24,9 @@ check(
   // nổi đại diện nên khung chẩn đoán không hiện chúng nữa (trước đây giữ khi tác vụ còn bị chặn).
   'diagnostic dock leaves job/list issues to the grouped attention notice',
   diagnosticPolicy.includes('if (entry.jobId || entry.projectId) return false;') &&
-    diagnosticDock.includes('shouldDisplayDiagnostic(entry, jobs)')
+    // Đợt 3 mục 8 (2026-10-08): khung chọn qua pickLiveDiagnostic (chỉ sự kiện trực tiếp), vẫn áp shouldDisplayDiagnostic.
+    diagnosticPolicy.includes('shouldDisplayDiagnostic(entry, jobs, now)') &&
+    diagnosticDock.includes('pickLiveDiagnostic(logs, liveLogIds, jobs, dismissedDiagnosticCodes)')
 );
 check(
   'non-blocking diagnostics expire automatically',

@@ -501,6 +501,7 @@ tests/unit/cookie-policy.test.ts
 tests/unit/core-resilience-r35.test.ts
 tests/unit/csv-export.test.ts
 tests/unit/cut-suggestion.test.ts
+tests/unit/diagnostic-live-only.test.ts
 tests/unit/diagnostic-policy.test.ts
 tests/unit/disk-full-recovery.test.ts
 tests/unit/disk-shortfall-format.test.ts
