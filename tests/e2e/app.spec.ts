@@ -3124,3 +3124,107 @@ test('Đợt 3 mục 8: lỗi cũ nạp từ lịch sử không bật lại thô
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
 });
+
+/**
+ * Đợt 3 mục 9 (rà soát bản cài 1.5.0): xóa nhật ký phải hỏi xác nhận trong giao diện — trước đây bấm là xóa ngay, không hoàn
+ * tác được. Cả 3 nơi: trang Nhật ký, icon "Xóa nhật ký" của danh sách tải, của quy trình ghép. Bấm "Quay lại" → còn nguyên.
+ */
+test('Đợt 3 mục 9: xóa nhật ký hỏi xác nhận — trang Nhật ký, danh sách tải, quy trình ghép', async () => {
+  test.setTimeout(150_000);
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-clear-logs-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  const env = {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    ),
+    NODE_ENV: 'test',
+    TUBMEDIA_E2E: '1',
+    TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+    PLAYWRIGHT_TEST: '1',
+    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+  };
+  const launch = async (): Promise<void> => {
+    electronApplication = await electron.launch({ args: [mainEntry], cwd: projectRoot, env, timeout: 45_000 });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await shellWindow.setViewportSize({ width: 1400, height: 900 });
+  };
+  const goTo = async (label: string): Promise<void> => {
+    await shellWindow!.getByRole('navigation', { name: 'Điều hướng chính' }).getByRole('button', { name: label, exact: true }).click();
+    await shellWindow!.waitForTimeout(800);
+  };
+  // Đếm các dòng ĐÃ GHI SẴN (mã E2E) — sau khi xóa, ứng dụng tự ghi một dòng "đã dọn sạch" (PROJECT_LOGS_CLEARED), không tính.
+  const countLogs = async (projectId?: string): Promise<number> =>
+    shellWindow!.evaluate(async (id) => {
+      const desktop = (window as unknown as { desktop: { logs: { list: (query: Record<string, unknown>) => Promise<Array<{ eventCode: string }>> } } }).desktop;
+      return (await desktop.logs.list({ ...(id ? { projectId: id } : {}), limit: 5000 })).filter((entry) => entry.eventCode === 'E2E').length;
+    }, projectId);
+
+  try {
+    await launch();
+    await closeElectronApplication();
+    const now = new Date().toISOString();
+    const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+    const insertProject = db.prepare(
+      `INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,aspect_ratio,created_at,updated_at,archived_at)
+       VALUES(?,?,?,'','draft',?,?,?,?,'x','quality-source-size','resource-balanced',0,'original',?,?,NULL)`
+    );
+    const downloadId = randomUUID();
+    const mergeId = randomUUID();
+    insertProject.run(downloadId, 'Danh sách tải 1', '__WORKBENCH_DOWNLOAD_1__', path.join(sandbox, 'v1'), path.join(sandbox, 't1'), path.join(sandbox, 'v1'), path.join(sandbox, 'q'), now, now);
+    insertProject.run(mergeId, 'Quy trình ghép 1', '__WORKBENCH_MERGE_1__', path.join(sandbox, 'g1'), path.join(sandbox, 'tg1'), path.join(sandbox, 'g1'), path.join(sandbox, 'q'), now, now);
+    const insertLog = db.prepare(
+      'INSERT INTO event_logs(id,timestamp,level,module,project_id,job_id,attempt_id,event_code,message,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)'
+    );
+    for (let index = 0; index < 5; index += 1) {
+      insertLog.run(randomUUID(), now, 'info', 'download', downloadId, null, null, 'E2E', `tải ${index}`, null);
+      insertLog.run(randomUUID(), now, 'info', 'merge', mergeId, null, null, 'E2E', `ghép ${index}`, null);
+      insertLog.run(randomUUID(), now, 'info', 'app', null, null, null, 'E2E', `chung ${index}`, null);
+    }
+    db.close();
+    await launch();
+
+    // 1) Danh sách tải: hỏi; Quay lại → còn; Xóa → hết.
+    await goTo('Tải danh sách');
+    await shellWindow!.getByRole('button', { name: 'Xóa nhật ký' }).first().click();
+    const laneDialog = shellWindow!.getByRole('dialog', { name: /Xóa nhật ký danh sách tải 1\?/ });
+    await expect(laneDialog).toBeVisible({ timeout: 5_000 });
+    await laneDialog.getByRole('button', { name: 'Quay lại' }).click();
+    await expect(laneDialog).toBeHidden();
+    expect(await countLogs(downloadId), 'Quay lại: nhật ký danh sách tải còn nguyên').toBe(5);
+    await shellWindow!.getByRole('button', { name: 'Xóa nhật ký' }).first().click();
+    await laneDialog.getByRole('button', { name: 'Xóa nhật ký' }).click();
+    await expect.poll(async () => countLogs(downloadId), { timeout: 10_000 }).toBe(0);
+    expect(await countLogs(mergeId), 'không đụng quy trình ghép').toBe(5);
+
+    // 2) Quy trình ghép.
+    await goTo('Ghép theo Timeline');
+    await shellWindow!.getByRole('button', { name: 'Xóa nhật ký' }).first().click();
+    const mergeDialog = shellWindow!.getByRole('dialog', { name: /Xóa nhật ký quy trình ghép 1\?/ });
+    await expect(mergeDialog).toBeVisible({ timeout: 5_000 });
+    await mergeDialog.getByRole('button', { name: 'Quay lại' }).click();
+    expect(await countLogs(mergeId), 'Quay lại: nhật ký quy trình ghép còn nguyên').toBe(5);
+    await shellWindow!.getByRole('button', { name: 'Xóa nhật ký' }).first().click();
+    await mergeDialog.getByRole('button', { name: 'Xóa nhật ký' }).click();
+    await expect.poll(async () => countLogs(mergeId), { timeout: 10_000 }).toBe(0);
+
+    // 3) Trang Nhật ký: xóa toàn bộ.
+    await goTo('Nhật ký');
+    const before = await countLogs();
+    expect(before, 'còn 5 dòng chung').toBe(5);
+    await shellWindow!.getByRole('button', { name: 'Xóa toàn bộ nhật ký' }).click();
+    const allDialog = shellWindow!.getByRole('dialog', { name: /Xóa toàn bộ nhật ký\?/ });
+    await expect(allDialog).toBeVisible({ timeout: 5_000 });
+    await expect(allDialog).toContainText('không thể hoàn tác');
+    await allDialog.getByRole('button', { name: 'Quay lại' }).click();
+    expect(await countLogs(), 'Quay lại: nhật ký còn nguyên').toBe(5);
+    await shellWindow!.getByRole('button', { name: 'Xóa toàn bộ nhật ký' }).click();
+    await allDialog.getByRole('button', { name: 'Xóa nhật ký' }).click();
+    await expect(allDialog).toBeHidden();
+    await expect.poll(async () => countLogs(), { timeout: 10_000 }).toBe(0);
+  } finally {
+    await closeElectronApplication();
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});

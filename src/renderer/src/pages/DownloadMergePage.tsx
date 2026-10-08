@@ -728,6 +728,8 @@ export function DownloadMergePage(): React.JSX.Element {
   const [deleteTarget, setDeleteTarget] = useState<MergeLaneId | null>(null);
   // Phần C (2026-10-06): áp dụng thư mục xử lý tạm cho tất cả quy trình của TRANG NÀY (không đụng Tải danh sách).
   const [applyTemp, setApplyTemp] = useState<{ slot: MergeLaneId; folder: string } | null>(null);
+  // Đợt 3 mục 9: xóa nhật ký hỏi xác nhận trước (trước đây bấm là xóa ngay).
+  const [clearLogsTarget, setClearLogsTarget] = useState<{ slot: MergeLaneId; projectId?: string } | null>(null);
   const [applyTempAsDefault, setApplyTempAsDefault] = useState(false);
   const [activeLane, setActiveLane] = useState<MergeLaneId>('merge-1');
   const initializedRef = useRef(false);
@@ -1201,7 +1203,7 @@ export function DownloadMergePage(): React.JSX.Element {
                 onControl={(action) => control(slot, action)}
                 onRetry={() => retryFailed(slot, projectId)}
                 onClearProgress={() => clearProgress(slot)}
-                onClearLogs={() => clearLogs(slot, projectId)}
+                onClearLogs={() => setClearLogsTarget({ slot, ...(projectId ? { projectId } : {}) })}
                 onDelete={() => setDeleteTarget(slot)}
                 onApplyTempToAll={() => setApplyTemp({ slot, folder: forms[slot].tempFolder.trim() })}
                 onCookies={() => openCookies(slot)}
@@ -1232,6 +1234,20 @@ export function DownloadMergePage(): React.JSX.Element {
         onCancel={() => {
           setApplyTemp(null);
           setApplyTempAsDefault(false);
+        }}
+      />
+      <ConfirmDialog
+        open={clearLogsTarget !== null}
+        title={clearLogsTarget ? `Xóa nhật ký quy trình ghép ${mergeNumber(clearLogsTarget.slot)}?` : 'Xóa nhật ký?'}
+        message="Nhật ký của quy trình ghép này sẽ bị xóa khỏi ứng dụng."
+        details={['Nhật ký của các quy trình ghép khác và của danh sách tải được giữ nguyên.', 'Video và tệp trên ổ đĩa không bị ảnh hưởng.', 'Thao tác này không thể hoàn tác.']}
+        confirmLabel="Xóa nhật ký"
+        danger
+        busy={clearLogsTarget !== null && busy === clearLogsTarget.slot}
+        onCancel={() => setClearLogsTarget(null)}
+        onConfirm={() => {
+          if (!clearLogsTarget) return;
+          void clearLogs(clearLogsTarget.slot, clearLogsTarget.projectId).finally(() => setClearLogsTarget(null));
         }}
       />
       <ConfirmDialog
@@ -1289,7 +1305,7 @@ function MergeLaneCard({
   onControl: (action: 'pause' | 'resume' | 'cancel') => Promise<void>;
   onRetry: () => Promise<void>;
   onClearProgress: () => Promise<void>;
-  onClearLogs: () => Promise<void>;
+  onClearLogs: () => void;
   onDelete: () => void;
   onApplyTempToAll: () => void;
   onCookies: () => void;
@@ -1777,7 +1793,7 @@ function MergeLaneCard({
             title="Xóa nhật ký"
             aria-label="Xóa nhật ký"
             disabled={busy || !projectId}
-            onClick={() => void onClearLogs()}
+            onClick={onClearLogs}
           >
             <FileText size={16} />
           </button>

@@ -5,6 +5,7 @@ import { StatusBadge } from '../components/StatusBadge';
 import { CompactDetail } from '../components/CompactDetail';
 import { InfoHint } from '../components/InfoHint';
 import { useAppStore } from '../stores/app-store';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { createUiEventId } from '../utils/ui-id';
 import { moduleLabel, modulesMatching } from '../utils/vi-labels';
 
@@ -30,6 +31,8 @@ export function LogsPage(): React.JSX.Element {
   const [level, setLevel] = useState('all');
   const [module, setModule] = useState('');
   const [loading, setLoading] = useState(false);
+  // Đợt 3 mục 9: xóa nhật ký hỏi xác nhận trước (trước đây bấm là xóa ngay).
+  const [confirmClear, setConfirmClear] = useState(false);
   const setAttention = useAppStore((state) => state.setAttention);
   const clearProjectLogs = useAppStore((state) => state.clearProjectLogs);
 
@@ -37,6 +40,9 @@ export function LogsPage(): React.JSX.Element {
     () => [...projects].sort((a, b) => projectLabel(a).localeCompare(projectLabel(b), 'vi')),
     [projects]
   );
+
+  const selectedProject = projects.find((project) => project.id === projectId);
+  const selectedProjectName = selectedProject ? projectLabel(selectedProject) : projectId;
 
   const effectiveLogs = [...storeLogs, ...logs]
     .filter((entry, index, entries) => entries.findIndex((candidate) => candidate.id === entry.id) === index)
@@ -147,7 +153,7 @@ export function LogsPage(): React.JSX.Element {
           <button
             className="btn btn-danger"
             disabled={loading || effectiveLogs.length === 0}
-            onClick={() => void clearSelected()}
+            onClick={() => setConfirmClear(true)}
           >
             <Trash2 size={17} />
             {projectId === 'all' ? 'Xóa toàn bộ nhật ký' : 'Xóa nhật ký đang chọn'}
@@ -287,6 +293,21 @@ export function LogsPage(): React.JSX.Element {
           </tbody>
         </table>
       </div>
+      <ConfirmDialog
+        open={confirmClear}
+        title={projectId === 'all' ? 'Xóa toàn bộ nhật ký?' : 'Xóa nhật ký của khu vực đang chọn?'}
+        message={
+          projectId === 'all'
+            ? 'Toàn bộ nhật ký của mọi danh sách và quy trình sẽ bị xóa khỏi ứng dụng.'
+            : `Nhật ký của "${selectedProjectName}" sẽ bị xóa khỏi ứng dụng. Nhật ký của khu vực khác được giữ nguyên.`
+        }
+        details={['Video và tệp trên ổ đĩa không bị ảnh hưởng.', 'Thao tác này không thể hoàn tác.']}
+        confirmLabel="Xóa nhật ký"
+        danger
+        busy={loading}
+        onCancel={() => setConfirmClear(false)}
+        onConfirm={() => void clearSelected().finally(() => setConfirmClear(false))}
+      />
     </div>
   );
 }

@@ -202,6 +202,8 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
   const [deleteTarget, setDeleteTarget] = useState<DownloadLaneId | null>(null);
   // Phần C (2026-10-06): áp dụng thư mục tạm của một danh sách cho tất cả danh sách của TRANG NÀY (có hỏi xác nhận).
   const [applyTemp, setApplyTemp] = useState<{ slot: DownloadLaneId; folder: string } | null>(null);
+  // Đợt 3 mục 9: xóa nhật ký hỏi xác nhận trước (trước đây bấm là xóa ngay).
+  const [clearLogsTarget, setClearLogsTarget] = useState<{ slot: DownloadLaneId; projectId?: string } | null>(null);
   const [applyTempAsDefault, setApplyTempAsDefault] = useState(false);
   const [activeLane, setActiveLane] = useState<DownloadLaneId>('download-1');
   const initializedRef = useRef(false);
@@ -740,7 +742,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
                 onControl={(action) => control(slot, action)}
                 onRetry={() => retryFailed(slot, projectId)}
                 onClearProgress={() => clearProgress(slot)}
-                onClearLogs={() => clearLogs(slot, projectId)}
+                onClearLogs={() => setClearLogsTarget({ slot, ...(projectId ? { projectId } : {}) })}
                 onDelete={() => setDeleteTarget(slot)}
                 onApplyTempToAll={() => setApplyTemp({ slot, folder: forms[slot].tempFolder.trim() })}
                 onCookies={() => openCookies(slot)}
@@ -782,6 +784,20 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
         onCancel={() => {
           setApplyTemp(null);
           setApplyTempAsDefault(false);
+        }}
+      />
+      <ConfirmDialog
+        open={clearLogsTarget !== null}
+        title={clearLogsTarget ? `Xóa nhật ký danh sách tải ${laneNumber(clearLogsTarget.slot)}?` : 'Xóa nhật ký?'}
+        message="Nhật ký của danh sách tải này sẽ bị xóa khỏi ứng dụng."
+        details={['Nhật ký của các danh sách khác và của quy trình ghép được giữ nguyên.', 'Video và tệp trên ổ đĩa không bị ảnh hưởng.', 'Thao tác này không thể hoàn tác.']}
+        confirmLabel="Xóa nhật ký"
+        danger
+        busy={clearLogsTarget !== null && busy === clearLogsTarget.slot}
+        onCancel={() => setClearLogsTarget(null)}
+        onConfirm={() => {
+          if (!clearLogsTarget) return;
+          void clearLogs(clearLogsTarget.slot, clearLogsTarget.projectId).finally(() => setClearLogsTarget(null));
         }}
       />
       <ConfirmDialog
@@ -941,7 +957,7 @@ function LaneCard({
   onControl: (action: 'pause' | 'resume' | 'cancel') => Promise<void>;
   onRetry: () => Promise<void>;
   onClearProgress: () => Promise<void>;
-  onClearLogs: () => Promise<void>;
+  onClearLogs: () => void;
   onDelete: () => void;
   onApplyTempToAll: () => void;
   onCookies: () => void;
@@ -1238,7 +1254,7 @@ function LaneCard({
             title="Xóa nhật ký"
             aria-label="Xóa nhật ký"
             disabled={busy || !projectId}
-            onClick={() => void onClearLogs()}
+            onClick={onClearLogs}
           >
             <FileText size={16} />
           </button>
