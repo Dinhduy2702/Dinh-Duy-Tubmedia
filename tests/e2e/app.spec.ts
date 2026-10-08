@@ -2864,3 +2864,115 @@ test('Phần A giao diện: không còn chữ dài cố định, ⓘ hiện đ�
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
 });
+
+/**
+ * Phần C rà soát giao diện (người dùng duyệt 2026-10-06): nút "Áp dụng thư mục tạm cho tất cả danh sách" — CHỈ ô thư mục
+ * tạm, phạm vi theo từng trang, hộp xác nhận liệt kê từng danh sách, bỏ qua danh sách đang chạy/tạm dừng, có ô "Đặt làm
+ * mặc định cho danh sách mới". Đường dẫn đều nằm trong thư mục tạm của bài kiểm (không đụng thư mục thật).
+ */
+test('Phần C: áp dụng thư mục tạm cho tất cả danh sách — xác nhận, bỏ qua danh sách đang chạy, không đụng trang khác', async () => {
+  test.setTimeout(120_000);
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-apply-temp-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  const env = {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    ),
+    NODE_ENV: 'test',
+    TUBMEDIA_E2E: '1',
+    TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+    PLAYWRIGHT_TEST: '1',
+    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+  };
+  const launch = async (): Promise<void> => {
+    electronApplication = await electron.launch({ args: [mainEntry], cwd: projectRoot, env, timeout: 45_000 });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await shellWindow.setViewportSize({ width: 1400, height: 900 });
+  };
+  const goTo = async (label: string): Promise<void> => {
+    await shellWindow!.getByRole('navigation', { name: 'Điều hướng chính' }).getByRole('button', { name: label, exact: true }).click();
+    await shellWindow!.waitForTimeout(800);
+  };
+  const tab = (name: string): ReturnType<Page['locator']> => shellWindow!.locator('.workflow-tab', { hasText: name });
+  const sharedTemp = path.join(sandbox, 'tam-chung');
+
+  try {
+    await launch();
+    await closeElectronApplication();
+    const now = new Date().toISOString();
+    const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+    const insertProject = db.prepare(
+      `INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,aspect_ratio,created_at,updated_at,archived_at)
+       VALUES(?,?,?,'','draft',?,?,?,?,'x','quality-source-size','resource-balanced',0,'original',?,?,NULL)`
+    );
+    const ids: string[] = [];
+    for (const lane of [1, 2, 3]) {
+      const id = randomUUID();
+      ids.push(id);
+      const output = path.join(sandbox, `video-${lane}`);
+      insertProject.run(id, `Danh sách tải ${lane}`, `__WORKBENCH_DOWNLOAD_${lane}__`, output, path.join(sandbox, `tam-${lane}`), output, path.join(sandbox, 'q'), now, now);
+    }
+    // Một quy trình ghép ĐÃ CÓ (đã lưu) — phải giữ nguyên thư mục xử lý tạm (phạm vi theo từng trang).
+    const mergeOutput = path.join(sandbox, 'ghep-1');
+    insertProject.run(randomUUID(), 'Quy trình ghép e2e', '__WORKBENCH_MERGE_1__', mergeOutput, path.join(sandbox, 'tam-ghep-1'), mergeOutput, path.join(sandbox, 'q'), now, now);
+    // Danh sách 3 đang tạm dừng → ô thư mục bị khóa → phải được bỏ qua.
+    db.prepare(
+      `INSERT INTO queue_jobs(id,project_id,type,status,priority,input_json,progress,attempts,max_attempts,error_code,error_message,created_at,updated_at)
+       VALUES(?,?,'download','paused',0,?,0,0,3,NULL,NULL,?,?)`
+    ).run(randomUUID(), ids[2]!, JSON.stringify({ url: 'https://example.com/video' }), now, now);
+    const appRow = db.prepare("SELECT value_json FROM app_settings WHERE key='app'").get() as { value_json: string };
+    db.prepare("UPDATE app_settings SET value_json=? WHERE key='app'").run(JSON.stringify({ ...JSON.parse(appRow.value_json), downloadLaneCount: 3 }));
+    db.close();
+
+    await launch();
+    // Hộp "Có N tác vụ chưa xong" (Đợt 1) có thể hiện vì danh sách 3 đang tạm dừng — chọn Để sau.
+    const later = shellWindow!.getByRole('button', { name: 'Để sau' });
+    if (await later.isVisible({ timeout: 3_000 }).catch(() => false)) await later.click();
+
+    await goTo('Ghép theo Timeline');
+    const mergeTempBefore = await shellWindow!.locator('.compact-config-temp input').first().inputValue();
+    expect(mergeTempBefore, 'quy trình ghép đã lưu nạp đúng thư mục tạm của nó').toBe(path.join(sandbox, 'tam-ghep-1'));
+
+    await goTo('Tải danh sách');
+    await expect(tab('Danh sách tải 3')).toBeVisible({ timeout: 15_000 });
+    await tab('Danh sách tải 2').click();
+    const laneTwoOutput = await shellWindow!.locator('.compact-config-output input').first().inputValue();
+    await tab('Danh sách tải 3').click();
+    const laneThreeTemp = await shellWindow!.locator('.compact-config-temp input').first().inputValue();
+
+    await tab('Danh sách tải 1').click();
+    await shellWindow!.locator('.compact-config-temp input').first().fill(sharedTemp);
+    // Ô thư mục lưu video KHÔNG có nút áp dụng cho tất cả; ô thư mục tạm có.
+    expect(await shellWindow!.locator('.compact-config-output .folder-apply-all').count()).toBe(0);
+    await shellWindow!.locator('.compact-config-temp .folder-apply-all').first().click();
+
+    const dialog = shellWindow!.getByRole('dialog', { name: 'Áp dụng thư mục tạm cho tất cả danh sách?' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText(`Danh sách tải 2: ${path.join(sandbox, 'tam-2')} → ${sharedTemp}`);
+    await expect(dialog).toContainText('Danh sách tải 3: bỏ qua — đang chạy hoặc tạm dừng');
+    await dialog.getByRole('checkbox', { name: 'Đặt làm mặc định cho danh sách mới' }).check();
+    await dialog.getByRole('button', { name: 'Áp dụng' }).click();
+    await expect(dialog).toBeHidden();
+
+    await tab('Danh sách tải 2').click();
+    await expect(shellWindow!.locator('.compact-config-temp input').first()).toHaveValue(sharedTemp);
+    await expect(shellWindow!.locator('.compact-config-output input').first()).toHaveValue(laneTwoOutput);
+    await tab('Danh sách tải 3').click();
+    await expect(shellWindow!.locator('.compact-config-temp input').first()).toHaveValue(laneThreeTemp);
+    const defaultTemp = await shellWindow!.evaluate(async () => {
+      const desktop = (window as unknown as { desktop: { settings: { get: () => Promise<{ defaultTempFolder: string }> } } }).desktop;
+      return (await desktop.settings.get()).defaultTempFolder;
+    });
+    expect(defaultTemp, 'đã đặt làm mặc định cho danh sách mới').toBe(sharedTemp);
+
+    // Phạm vi theo từng trang: quy trình ghép ĐÃ CÓ không bị đụng.
+    await goTo('Ghép theo Timeline');
+    await expect(shellWindow!.locator('.compact-config-temp input').first()).toHaveValue(mergeTempBefore);
+    expect(mergeTempBefore).not.toBe(sharedTemp);
+  } finally {
+    await closeElectronApplication();
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});

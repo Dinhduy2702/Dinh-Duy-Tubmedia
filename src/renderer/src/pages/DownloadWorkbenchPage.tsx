@@ -35,6 +35,7 @@ import type {
 import { planForListCount, recommendDownloadConcurrency } from '@shared/utils/hardware-recommendation';
 import { shouldShowInlineBlockingIssue } from '@shared/utils/notification-policy';
 import { activeDownloadWorkersLabel } from '@shared/utils/active-download-workers-label';
+import { planApplyTempFolderToAll } from '@shared/utils/apply-temp-folder';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CookieManagerDialog } from '../components/CookieManagerDialog';
 import { InfoDisclosure } from '../components/InfoDisclosure';
@@ -199,6 +200,9 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
   const [cookieOpen, setCookieOpen] = useState(false);
   const [cookieTarget, setCookieTarget] = useState<DownloadLaneId | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DownloadLaneId | null>(null);
+  // Phần C (2026-10-06): áp dụng thư mục tạm của một danh sách cho tất cả danh sách của TRANG NÀY (có hỏi xác nhận).
+  const [applyTemp, setApplyTemp] = useState<{ slot: DownloadLaneId; folder: string } | null>(null);
+  const [applyTempAsDefault, setApplyTempAsDefault] = useState(false);
   const [activeLane, setActiveLane] = useState<DownloadLaneId>('download-1');
   const initializedRef = useRef(false);
   const dirtySlotsRef = useRef<Set<DownloadLaneId>>(new Set());
@@ -249,6 +253,47 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
   // #10 (khám phá bản cài 2026-10-05): thông báo gọi đúng tên danh sách người dùng thấy ("Danh sách tải 2" hoặc
   // tên đã đổi), không phải số ô "Danh sách 2".
   const laneTitle = (slot: DownloadLaneId): string => forms[slot].name.trim() || `Danh sách ${laneNumber(slot)}`;
+
+  const laneLocked = (slot: DownloadLaneId): boolean => {
+    const projectId = states[slot]?.project?.id;
+    const state = workflowState(projectId ? jobs.filter((job) => job.projectId === projectId) : []);
+    return state === 'running' || state === 'paused' || busy === slot;
+  };
+  const applyTempPlan = applyTemp
+    ? planApplyTempFolderToAll(
+        LANE_IDS.slice(0, laneCount).map((slot) => ({
+          slot,
+          name: laneTitle(slot),
+          tempFolder: forms[slot].tempFolder,
+          locked: laneLocked(slot)
+        })),
+        applyTemp.slot,
+        applyTemp.folder
+      )
+    : null;
+  const confirmApplyTemp = async (): Promise<void> => {
+    if (!applyTemp || !applyTempPlan) return;
+    const { folder } = applyTemp;
+    for (const change of applyTempPlan.changes) {
+      updateForm(change.slot as DownloadLaneId, (current) => ({ ...current, tempFolder: folder }));
+    }
+    saveWorkbenchPath('download-temp', folder);
+    try {
+      if (applyTempAsDefault) {
+        const next = await window.desktop.settings.update({ defaultTempFolder: folder });
+        useAppStore.setState({ settings: next });
+      }
+      notify(
+        'Đã áp dụng thư mục tạm',
+        `Đã đổi ${applyTempPlan.changes.length} danh sách${applyTempPlan.skipped.length ? `, bỏ qua ${applyTempPlan.skipped.length} danh sách đang chạy` : ''}${applyTempAsDefault ? '; đặt làm mặc định cho danh sách mới' : ''}.`
+      );
+    } catch (error) {
+      setError(messageOf(error));
+    } finally {
+      setApplyTemp(null);
+      setApplyTempAsDefault(false);
+    }
+  };
 
   const notify = (
     title: string,
@@ -703,6 +748,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
                 onClearProgress={() => clearProgress(slot)}
                 onClearLogs={() => clearLogs(slot, projectId)}
                 onDelete={() => setDeleteTarget(slot)}
+                onApplyTempToAll={() => setApplyTemp({ slot, folder: forms[slot].tempFolder.trim() })}
                 onCookies={() => openCookies(slot)}
                 onNotice={notify}
                 setError={setError}
@@ -726,6 +772,23 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
         open={cookieOpen}
         onClose={() => setCookieOpen(false)}
         onConfigured={resumeAfterCookie}
+      />
+      <ConfirmDialog
+        open={applyTempPlan !== null}
+        title="Áp dụng thư mục tạm cho tất cả danh sách?"
+        message={
+          applyTempPlan && applyTempPlan.changes.length > 0
+            ? `Đổi thư mục tạm của ${applyTempPlan.changes.length} danh sách sang ${applyTemp?.folder ?? ''}. Thư mục lưu video không đổi.`
+            : 'Không có danh sách nào khác cần đổi.'
+        }
+        details={applyTempPlan?.details ?? []}
+        option={{ label: 'Đặt làm mặc định cho danh sách mới', checked: applyTempAsDefault, onChange: setApplyTempAsDefault }}
+        confirmLabel="Áp dụng"
+        onConfirm={() => void confirmApplyTemp()}
+        onCancel={() => {
+          setApplyTemp(null);
+          setApplyTempAsDefault(false);
+        }}
       />
       <ConfirmDialog
         open={deleteTarget !== null}
@@ -866,6 +929,7 @@ function LaneCard({
   onClearProgress,
   onClearLogs,
   onDelete,
+  onApplyTempToAll,
   onCookies,
   onNotice,
   setError
@@ -885,6 +949,7 @@ function LaneCard({
   onClearProgress: () => Promise<void>;
   onClearLogs: () => Promise<void>;
   onDelete: () => void;
+  onApplyTempToAll: () => void;
   onCookies: () => void;
   onNotice: (title: string, message: string, severity?: 'info' | 'success' | 'warning') => void;
   setError: (error: string | null) => void;
@@ -1050,6 +1115,7 @@ function LaneCard({
             <FolderField
               label="Thư mục tạm"
               warnIfSharedTemp
+              onApplyToAll={onApplyTempToAll}
               {...(projectId && settings?.dismissedSharedTempWarnings?.[projectId] !== undefined
                 ? { sharedTempDismissedFolder: settings.dismissedSharedTempWarnings[projectId] }
                 : {})}

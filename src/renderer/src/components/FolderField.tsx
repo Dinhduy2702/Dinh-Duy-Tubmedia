@@ -1,5 +1,5 @@
 import { useState, type ChangeEvent } from 'react';
-import { AlertTriangle, FolderOpen, LoaderCircle } from 'lucide-react';
+import { AlertTriangle, CopyCheck, FolderOpen, LoaderCircle } from 'lucide-react';
 import { useAppStore } from '../stores/app-store';
 import { sharedTempFolderWarning, sharedUserFolderKind } from '@shared/utils/shared-folder-policy';
 
@@ -15,6 +15,11 @@ interface FolderFieldProps {
    * Chỉ còn hiệu lực khi ô vẫn là ĐÚNG thư mục đó — đổi sang thư mục chung khác thì gợi ý lại.
    */
   sharedTempDismissedFolder?: string;
+  /**
+   * Phần C (2026-10-06): CHỈ ô thư mục TẠM — nút nhỏ cùng hàng nút Chọn để áp dụng thư mục này cho tất cả danh sách của
+   * trang (trang tự mở hộp xác nhận). Không truyền thì không có nút.
+   */
+  onApplyToAll?: () => void;
 }
 
 export function FolderField({
@@ -23,7 +28,8 @@ export function FolderField({
   onChange,
   disabled = false,
   warnIfSharedTemp = false,
-  sharedTempDismissedFolder
+  sharedTempDismissedFolder,
+  onApplyToAll
 }: FolderFieldProps): React.JSX.Element {
   const dismissed = sharedTempDismissedFolder !== undefined && sharedTempDismissedFolder === value;
   const sharedWarning =
@@ -66,6 +72,18 @@ export function FolderField({
         {choosing ? <LoaderCircle className="animate-spin" size={17}/> : <FolderOpen size={17}/>}
         {choosing ? 'Đang mở...' : 'Chọn'}
       </button>
+      {onApplyToAll && (
+        <button
+          type="button"
+          className="btn folder-apply-all"
+          title="Áp dụng thư mục tạm này cho tất cả danh sách"
+          aria-label="Áp dụng thư mục tạm này cho tất cả danh sách"
+          disabled={disabled || choosing || !value.trim()}
+          onClick={onApplyToAll}
+        >
+          <CopyCheck size={17} />
+        </button>
+      )}
     </div>
   </label>;
 }

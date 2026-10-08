@@ -48,6 +48,7 @@ import { parseInputText } from '@shared/utils/input-parser';
 import { displayedAttempt } from '@shared/utils/attempt-display';
 import { redactSecrets } from '@shared/utils/secret-redaction';
 import { sanitizeFilename } from '@shared/utils/filename';
+import { planApplyTempFolderToAll } from '@shared/utils/apply-temp-folder';
 import { shouldShowInlineBlockingIssue } from '@shared/utils/notification-policy';
 import { formatTimelineCopyText, formatTimestamp } from '@shared/utils/timestamp';
 import { shouldAnimateJobProgress } from '@shared/utils/progress-policy';
@@ -725,6 +726,9 @@ export function DownloadMergePage(): React.JSX.Element {
   const [cookieOpen, setCookieOpen] = useState(false);
   const [cookieTarget, setCookieTarget] = useState<MergeLaneId | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<MergeLaneId | null>(null);
+  // Phần C (2026-10-06): áp dụng thư mục xử lý tạm cho tất cả quy trình của TRANG NÀY (không đụng Tải danh sách).
+  const [applyTemp, setApplyTemp] = useState<{ slot: MergeLaneId; folder: string } | null>(null);
+  const [applyTempAsDefault, setApplyTempAsDefault] = useState(false);
   const [activeLane, setActiveLane] = useState<MergeLaneId>('merge-1');
   const initializedRef = useRef(false);
   const dirtySlotsRef = useRef<Set<MergeLaneId>>(new Set());
@@ -783,6 +787,46 @@ export function DownloadMergePage(): React.JSX.Element {
     severity: 'info' | 'success' | 'warning' | 'neutral' = 'success'
   ): void => {
     setAttention({ id: createUiEventId('merge-ui'), severity, title, message, sticky: false });
+  };
+  const mergeLocked = (slot: MergeLaneId): boolean => {
+    const projectId = states[slot]?.project?.id;
+    const state = workflowState(projectId ? jobs.filter((job) => job.projectId === projectId) : []);
+    return state === 'running' || state === 'paused' || busy === slot;
+  };
+  const applyTempPlan = applyTemp
+    ? planApplyTempFolderToAll(
+        MERGE_IDS.slice(0, laneCount).map((slot) => ({
+          slot,
+          name: forms[slot].name.trim() || `Quy trình ${mergeNumber(slot)}`,
+          tempFolder: forms[slot].tempFolder,
+          locked: mergeLocked(slot)
+        })),
+        applyTemp.slot,
+        applyTemp.folder
+      )
+    : null;
+  const confirmApplyTemp = async (): Promise<void> => {
+    if (!applyTemp || !applyTempPlan) return;
+    const { folder } = applyTemp;
+    for (const change of applyTempPlan.changes) {
+      updateForm(change.slot as MergeLaneId, (current) => ({ ...current, tempFolder: folder }));
+    }
+    saveWorkbenchPath('merge-temp', folder);
+    try {
+      if (applyTempAsDefault) {
+        const next = await window.desktop.settings.update({ defaultTempFolder: folder });
+        useAppStore.setState({ settings: next });
+      }
+      notify(
+        'Đã áp dụng thư mục xử lý tạm',
+        `Đã đổi ${applyTempPlan.changes.length} quy trình${applyTempPlan.skipped.length ? `, bỏ qua ${applyTempPlan.skipped.length} quy trình đang chạy` : ''}${applyTempAsDefault ? '; đặt làm mặc định cho danh sách mới' : ''}.`
+      );
+    } catch (error) {
+      setError(messageOf(error));
+    } finally {
+      setApplyTemp(null);
+      setApplyTempAsDefault(false);
+    }
   };
   const updateForm = (slot: MergeLaneId, updater: (current: MergeForm) => MergeForm): void => {
     deletedSlotsRef.current.delete(slot);
@@ -1165,6 +1209,7 @@ export function DownloadMergePage(): React.JSX.Element {
                 onClearProgress={() => clearProgress(slot)}
                 onClearLogs={() => clearLogs(slot, projectId)}
                 onDelete={() => setDeleteTarget(slot)}
+                onApplyTempToAll={() => setApplyTemp({ slot, folder: forms[slot].tempFolder.trim() })}
                 onCookies={() => openCookies(slot)}
                 onNotice={notify}
                 setError={setError}
@@ -1177,6 +1222,23 @@ export function DownloadMergePage(): React.JSX.Element {
         open={cookieOpen}
         onClose={() => setCookieOpen(false)}
         onConfigured={resumeAfterCookies}
+      />
+      <ConfirmDialog
+        open={applyTempPlan !== null}
+        title="Áp dụng thư mục xử lý tạm cho tất cả quy trình?"
+        message={
+          applyTempPlan && applyTempPlan.changes.length > 0
+            ? `Đổi thư mục xử lý tạm của ${applyTempPlan.changes.length} quy trình sang ${applyTemp?.folder ?? ''}. Thư mục nguồn và thành phẩm không đổi.`
+            : 'Không có quy trình nào khác cần đổi.'
+        }
+        details={applyTempPlan?.details ?? []}
+        option={{ label: 'Đặt làm mặc định cho danh sách mới', checked: applyTempAsDefault, onChange: setApplyTempAsDefault }}
+        confirmLabel="Áp dụng"
+        onConfirm={() => void confirmApplyTemp()}
+        onCancel={() => {
+          setApplyTemp(null);
+          setApplyTempAsDefault(false);
+        }}
       />
       <ConfirmDialog
         open={deleteTarget !== null}
@@ -1215,6 +1277,7 @@ function MergeLaneCard({
   onClearProgress,
   onClearLogs,
   onDelete,
+  onApplyTempToAll,
   onCookies,
   onNotice,
   setError
@@ -1234,6 +1297,7 @@ function MergeLaneCard({
   onClearProgress: () => Promise<void>;
   onClearLogs: () => Promise<void>;
   onDelete: () => void;
+  onApplyTempToAll: () => void;
   onCookies: () => void;
   onNotice: (title: string, message: string, severity?: 'info' | 'success' | 'warning') => void;
   setError: (error: string | null) => void;
@@ -1490,6 +1554,7 @@ function MergeLaneCard({
             <FolderField
               label="Thư mục xử lý tạm"
               warnIfSharedTemp
+              onApplyToAll={onApplyTempToAll}
               {...(projectId && dismissedSharedTemp?.[projectId] !== undefined
                 ? { sharedTempDismissedFolder: dismissedSharedTemp[projectId] }
                 : {})}

@@ -9,6 +9,8 @@ export interface ConfirmDialogProps {
   busy?: boolean;
   danger?: boolean;
   details?: string[];
+  /** Một ô đánh dấu tùy chọn ngay trên các nút (ví dụ "Đặt làm mặc định cho danh sách mới"). */
+  option?: { label: string; checked: boolean; onChange: (checked: boolean) => void } | undefined;
   secondaryLabel?: string | undefined;
   secondaryDanger?: boolean;
   onSecondary?: (() => void) | undefined;
@@ -25,6 +27,7 @@ export function ConfirmDialog({
   busy = false,
   danger = false,
   details = [],
+  option,
   secondaryLabel,
   secondaryDanger = false,
   onSecondary,
@@ -40,6 +43,12 @@ export function ConfirmDialog({
       <h2>{title}</h2>
       <p>{message}</p>
       {details.length > 0 && <ul>{details.map((detail) => <li key={detail}>{detail}</li>)}</ul>}
+      {option && (
+        <label className="confirm-option">
+          <input type="checkbox" checked={option.checked} disabled={busy} onChange={(event) => option.onChange(event.target.checked)} />
+          <span>{option.label}</span>
+        </label>
+      )}
       <div className="confirm-actions">
         <button className="btn" disabled={busy} onClick={onCancel}>{cancelLabel}</button>
         {secondaryLabel && onSecondary && <button

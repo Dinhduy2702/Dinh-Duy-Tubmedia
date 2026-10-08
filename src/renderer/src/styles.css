@@ -219,6 +219,9 @@ body{
 .info-hint-tip{display:none;position:absolute;z-index:45;top:calc(100% + 6px);left:0;width:min(340px,70vw);padding:.55rem .65rem;border:1px solid var(--border);border-radius:9px;background:var(--panel);color:var(--text);font-size:.74rem;font-weight:500;line-height:1.5;text-transform:none;letter-spacing:normal;text-align:left;white-space:normal;box-shadow:var(--shadow)}
 .info-hint:hover .info-hint-tip,.info-hint:focus-visible .info-hint-tip{display:block}
 .info-hint-end .info-hint-tip{left:auto;right:0}
+/* Phần C (2026-10-06): nút áp dụng thư mục tạm cho tất cả danh sách — chỉ icon, cùng hàng nút Chọn. */
+.folder-apply-all{flex:none;padding-left:.6rem;padding-right:.6rem}
+.confirm-option{display:flex;align-items:center;gap:.5rem;margin-top:.75rem;font-size:.85rem}
 .storage-attention-notice{background:var(--tone-bg);border:1px solid var(--tone-border);border-left-width:4px;color:var(--tone-text);border-radius:12px;padding:.85rem 1rem;margin:12px 16px 0}
 .storage-attention-notice svg{color:var(--tone-icon);flex:none}
 .system-cleanup-panel .storage-attention-notice{margin:.5rem 0 0}
