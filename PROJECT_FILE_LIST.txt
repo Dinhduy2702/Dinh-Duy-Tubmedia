@@ -338,6 +338,7 @@ src/renderer/src/components/DiagnosticDock.tsx
 src/renderer/src/components/ErrorBanner.tsx
 src/renderer/src/components/FolderField.tsx
 src/renderer/src/components/GpuEncoderIssueNotice.tsx
+src/renderer/src/components/HoverTip.tsx
 src/renderer/src/components/InfoDisclosure.tsx
 src/renderer/src/components/InfoHint.tsx
 src/renderer/src/components/JobProgressList.tsx
@@ -452,6 +453,7 @@ src/shared/utils/sha256-sums.ts
 src/shared/utils/shared-folder-policy.ts
 src/shared/utils/text-encoding.ts
 src/shared/utils/timestamp.ts
+src/shared/utils/tooltip-placement.ts
 src/shared/utils/ui-error.ts
 src/shared/utils/url.ts
 src/shared/utils/validation-message.ts
@@ -624,6 +626,7 @@ tests/unit/tool-manager-configured-path.test.ts
 tests/unit/tool-manager-cwd.test.ts
 tests/unit/tool-manager-nvenc-issue.test.ts
 tests/unit/tool-update-rate-limit.test.ts
+tests/unit/tooltip-placement.test.ts
 tests/unit/typography-system.test.ts
 tests/unit/ui-density.test.ts
 tests/unit/ui-screenshot-script.test.ts

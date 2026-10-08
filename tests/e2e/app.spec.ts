@@ -2498,7 +2498,8 @@ test('Cảnh báo thư mục tạm dùng chung: không có banner đầu trang, 
     const chip = shellWindow!.locator(`${scope} .shared-folder-chip`).first();
     await expect(chip).toBeVisible();
     await expect(chip).toHaveAttribute('aria-label', /Tải xuống \(Downloads\).*thư mục riêng/);
-    const tip = chip.locator('.shared-folder-tip');
+    // 2026-10-08: ô chú thích vẽ ở lớp trên cùng (HoverTip, role="tooltip"), không còn là phần tử con của icon.
+    const tip = shellWindow!.getByRole('tooltip');
     await shellWindow!.mouse.move(0, 0);
     await expect(tip, 'câu giải thích không để cứng trên giao diện').toBeHidden();
     await chip.hover();
@@ -2575,7 +2576,7 @@ test('Cảnh báo thư mục tạm dùng chung: không có banner đầu trang, 
     await expect(settingsTemp.locator('.shared-folder-chip')).toBeVisible();
     await expect(settingsTemp.locator('.shared-folder-chip')).toHaveAttribute('aria-label', /Tải xuống \(Downloads\)/);
     await settingsTemp.locator('.shared-folder-chip').hover();
-    await expect(settingsTemp.locator('.shared-folder-tip')).toBeVisible();
+    await expect(shellWindow!.getByRole('tooltip')).toContainText('Tải xuống (Downloads)');
     expect(await settingsTemp.locator('.field-hint-warning').count()).toBe(0);
     expect(fs.existsSync('C:\\Users\\TubmediaE2E'), 'không tạo thư mục thật nào ở đường dẫn giả').toBe(false);
   } finally {
@@ -2795,7 +2796,7 @@ test('Phần A giao diện: không còn chữ dài cố định, ⓘ hiện đ�
   };
   const longVisibleTexts = async (): Promise<string[]> =>
     shellWindow!.evaluate(() => {
-      const skip = '[role="dialog"], .info-hint-tip, .shared-folder-tip, .attention-center, .diagnostic-dock, input, textarea, select, pre, code, .logs-data-table, #notification-center-panel, .info-disclosure:not(.is-open) .info-disclosure-collapse, details:not([open]) > :not(summary)';
+      const skip = '[role="dialog"], .hover-tip, .attention-center, .diagnostic-dock, input, textarea, select, pre, code, .logs-data-table, #notification-center-panel, .info-disclosure:not(.is-open) .info-disclosure-collapse, details:not([open]) > :not(summary)';
       const found: string[] = [];
       for (const element of Array.from(document.querySelectorAll('main *, .app-main *'))) {
         if (element.closest(skip)) continue;
@@ -2864,9 +2865,9 @@ test('Phần A giao diện: không còn chữ dài cố định, ⓘ hiện đ�
     const hint = shellWindow!.locator('.info-hint').first();
     await expect(hint).toBeVisible();
     await shellWindow!.mouse.move(2, 2);
-    await expect(hint.locator('.info-hint-tip')).toBeHidden();
+    await expect(shellWindow!.getByRole('tooltip')).toHaveCount(0);
     await hint.hover();
-    await expect(hint.locator('.info-hint-tip')).toBeVisible();
+    await expect(shellWindow!.getByRole('tooltip')).toBeVisible();
     expect((await hint.getAttribute('aria-label'))?.length ?? 0).toBeGreaterThan(20);
   } finally {
     await closeElectronApplication();
@@ -3389,6 +3390,109 @@ test('Đợt 4 mục 15: không chạy công cụ đặt sẵn trong thư mục 
     const usedFfmpeg = await ffmpegPath();
     expect(path.resolve(usedFfmpeg!).toLowerCase(), 'không dùng ffmpeg trong thư mục đang đứng').not.toBe(path.resolve(planted).toLowerCase());
     expect(path.resolve(usedFfmpeg!).toLowerCase().startsWith(path.resolve(strangeCwd).toLowerCase())).toBe(false);
+  } finally {
+    await closeElectronApplication();
+    removeSandbox(sandbox);
+  }
+});
+
+/**
+ * Người dùng báo (2026-10-08) sau phần A: ô chú thích ⓘ (và ⚠ thư mục tạm dùng chung — cùng cơ chế) che nội dung bên dưới,
+ * "đứng" sai (rê sang ô thì ô ở lại), và bị cắt ở cửa sổ nhỏ. Đo thật ở cửa sổ nhỏ và toàn màn hình, mọi ⓘ/⚠ trên các trang
+ * đã thấy lỗi: ô phải nằm GỌN trong cửa sổ, không bị khung cha cắt/che (phần tử trên cùng tại các điểm trong ô là chính ô),
+ * không nhận chuột, ẩn khi rê sang chỗ ô đang hiện và khi rê ra xa.
+ */
+test('Ô chú thích ⓘ/⚠: tự chọn phía, nằm gọn trong cửa sổ, không bị cắt, hiện/ẩn đúng kiểu rê chuột', async () => {
+  test.setTimeout(240_000);
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-tooltip-'));
+  const env = {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    ),
+    NODE_ENV: 'test',
+    TUBMEDIA_E2E: '1',
+    TUBMEDIA_E2E_USER_DATA: path.join(sandbox, 'userdata'),
+    PLAYWRIGHT_TEST: '1',
+    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+  };
+  const trigger = '.info-hint, .shared-folder-chip';
+  type Shown = { visible: boolean; box?: { left: number; top: number; width: number; height: number }; outside?: boolean; hidden?: number; pointerEvents?: string };
+  const measure = async (): Promise<Shown> =>
+    shellWindow!.evaluate(() => {
+      const tip = [...document.querySelectorAll<HTMLElement>('[role="tooltip"], .info-hint-tip, .shared-folder-tip')].find((element) => {
+        const style = getComputedStyle(element);
+        return style.display !== 'none' && style.visibility !== 'hidden' && element.getBoundingClientRect().width > 0;
+      });
+      if (!tip) return { visible: false };
+      const rect = tip.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      let hidden = 0;
+      for (const fx of [0.1, 0.5, 0.9]) {
+        for (const fy of [0.15, 0.5, 0.85]) {
+          const x = rect.left + rect.width * fx;
+          const y = rect.top + rect.height * fy;
+          if (x < 0 || y < 0 || x >= vw || y >= vh) { hidden += 1; continue; }
+          // Ô không nhận chuột nên elementFromPoint bỏ qua nó — tạm bật để hỏi đúng "ô có nằm trên cùng tại đây không".
+          const previous = tip.style.pointerEvents;
+          tip.style.pointerEvents = 'auto';
+          const top = document.elementFromPoint(x, y);
+          tip.style.pointerEvents = previous;
+          if (!top || !(top === tip || tip.contains(top))) hidden += 1;
+        }
+      }
+      return {
+        visible: true,
+        box: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+        outside: rect.left < 0 || rect.top < 0 || rect.right > vw + 0.5 || rect.bottom > vh + 0.5,
+        hidden,
+        pointerEvents: getComputedStyle(tip).pointerEvents
+      };
+    });
+
+  try {
+    electronApplication = await electron.launch({ args: [mainEntry], cwd: projectRoot, env, timeout: 45_000 });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    let checked = 0;
+    for (const [width, height] of [[900, 620], [1920, 1040]] as const) {
+      await shellWindow.setViewportSize({ width, height });
+      for (const page of ['Tải danh sách', 'Ghép theo Timeline', 'Dọn dẹp máy', 'Cài đặt']) {
+        await shellWindow.getByRole('navigation', { name: 'Điều hướng chính' }).getByRole('button', { name: page, exact: true }).click();
+        await shellWindow.waitForTimeout(700);
+        const sections = page === 'Cài đặt' ? await shellWindow.locator('.settings-nav button').allTextContents() : [''];
+        for (const section of sections) {
+          if (section) {
+            await shellWindow.locator('.settings-nav button', { hasText: section }).first().click();
+            await shellWindow.waitForTimeout(300);
+          }
+          const count = await shellWindow.locator(trigger).count();
+          for (let index = 0; index < count; index += 1) {
+            const icon = shellWindow.locator(trigger).nth(index);
+            if (!(await icon.isVisible())) continue;
+            await icon.scrollIntoViewIfNeeded();
+            await icon.hover();
+            await expect.poll(async () => (await measure()).visible, { timeout: 3_000 }).toBe(true);
+            const where = `${width}×${height} ${page} ${section} #${index}`;
+            const shown = await measure();
+            expect(shown.outside, `${where}: ô nằm gọn trong cửa sổ`).toBe(false);
+            expect(shown.hidden, `${where}: ô không bị khung cha cắt/che`).toBe(0);
+            expect(shown.pointerEvents, `${where}: ô không nhận chuột`).toBe('none');
+            // Rê sang đúng chỗ ô đang hiện → ô phải ẩn (không "đứng" lại che nội dung bên dưới).
+            const box = shown.box!;
+            await shellWindow.mouse.move(box.left + box.width / 2, box.top + box.height / 2, { steps: 3 });
+            await expect.poll(async () => (await measure()).visible, { timeout: 2_000, message: `${where}: rê sang ô thì ô ẩn` }).toBe(false);
+            await icon.hover();
+            await expect.poll(async () => (await measure()).visible, { timeout: 3_000 }).toBe(true);
+            await shellWindow.mouse.move(3, height - 3);
+            await expect.poll(async () => (await measure()).visible, { timeout: 2_000, message: `${where}: rê ra xa thì ô ẩn` }).toBe(false);
+            checked += 1;
+          }
+        }
+      }
+    }
+    expect(checked, 'đã kiểm đủ các icon').toBeGreaterThan(20);
   } finally {
     await closeElectronApplication();
     removeSandbox(sandbox);

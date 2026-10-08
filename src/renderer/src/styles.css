@@ -210,15 +210,13 @@ body{
 .folder-field-label{display:flex;align-items:center;gap:.35rem;min-width:0}
 .shared-folder-chip{position:relative;display:inline-flex;align-items:center;justify-content:center;flex:none;width:1rem;height:1rem;border-radius:999px;color:var(--tone-warning-icon);cursor:help}
 .shared-folder-chip:focus-visible{outline:2px solid var(--tone-warning-border);outline-offset:1px}
-.shared-folder-tip{display:none;position:absolute;z-index:40;top:calc(100% + 6px);left:0;width:min(320px,70vw);padding:.5rem .6rem;border:1px solid var(--tone-warning-border);border-radius:9px;background:var(--tone-warning-bg);color:var(--tone-warning-text);font-size:.72rem;font-weight:600;line-height:1.45;text-transform:none;letter-spacing:normal;white-space:normal;box-shadow:var(--shadow)}
-.shared-folder-chip:hover .shared-folder-tip,.shared-folder-chip:focus-visible .shared-folder-tip{display:block}
 /* Phần A rà soát giao diện (2026-10-06): icon ⓘ thay cho chữ giải thích dài cố định — câu đầy đủ chỉ hiện khi rê chuột/focus. */
 .info-hint{position:relative;display:inline-flex;align-items:center;justify-content:center;flex:none;width:1.05rem;height:1.05rem;margin-left:.3rem;vertical-align:middle;border-radius:999px;color:var(--muted);cursor:help}
 .info-hint:hover,.info-hint:focus-visible{color:var(--text)}
 .info-hint:focus-visible{outline:2px solid var(--border);outline-offset:1px}
-.info-hint-tip{display:none;position:absolute;z-index:45;top:calc(100% + 6px);left:0;width:min(340px,70vw);padding:.55rem .65rem;border:1px solid var(--border);border-radius:9px;background:var(--panel);color:var(--text);font-size:.74rem;font-weight:500;line-height:1.5;text-transform:none;letter-spacing:normal;text-align:left;white-space:normal;box-shadow:var(--shadow)}
-.info-hint:hover .info-hint-tip,.info-hint:focus-visible .info-hint-tip{display:block}
-.info-hint-end .info-hint-tip{left:auto;right:0}
+/* Ô chú thích ⓘ/⚠ (HoverTip, 2026-10-08): vẽ ở lớp trên cùng, vị trí do placeTooltip tính theo khoảng trống thật trong cửa sổ; KHÔNG nhận chuột — không chặn nút bên dưới, không tự giữ mình mở. */
+.hover-tip{position:fixed;z-index:80;pointer-events:none;box-sizing:border-box;padding:.55rem .65rem;border:1px solid var(--border);border-radius:9px;background:var(--panel);color:var(--text);font-size:.74rem;font-weight:500;line-height:1.5;text-align:left;text-transform:none;letter-spacing:normal;white-space:normal;overflow-wrap:anywhere;overflow:hidden;box-shadow:var(--shadow)}
+.hover-tip-warning{border-color:var(--tone-warning-border);background:var(--tone-warning-bg);color:var(--tone-warning-text);font-weight:600}
 /* Phần C (2026-10-06): nút áp dụng thư mục tạm cho tất cả danh sách — chỉ icon, cùng hàng nút Chọn. */
 .folder-apply-all{flex:none;padding-left:.6rem;padding-right:.6rem}
 .confirm-option{display:flex;align-items:center;gap:.5rem;margin-top:.75rem;font-size:.85rem}

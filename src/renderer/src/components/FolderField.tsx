@@ -1,6 +1,7 @@
 import { useState, type ChangeEvent } from 'react';
 import { AlertTriangle, CopyCheck, FolderOpen, LoaderCircle } from 'lucide-react';
 import { useAppStore } from '../stores/app-store';
+import { HoverTip } from './HoverTip';
 import { sharedTempFolderWarning, sharedUserFolderKind } from '@shared/utils/shared-folder-policy';
 
 interface FolderFieldProps {
@@ -55,10 +56,9 @@ export function FolderField({
           trong hàng cấu hình (lưới căn đáy) vẫn thẳng nhau; dòng chữ dài dưới ô trước đây làm lệch cả hàng. Câu đầy
           đủ chỉ hiện khi rê chuột/focus. Chỉ là gợi ý: giữ thư mục chung vẫn dùng bình thường, không chặn gì. */}
       {sharedWarning && (
-        <span className="shared-folder-chip" role="img" tabIndex={0} aria-label={sharedWarning}>
+        <HoverTip text={sharedWarning} className="shared-folder-chip" tone="warning">
           <AlertTriangle size={12} aria-hidden="true" />
-          <span className="shared-folder-tip" aria-hidden="true">{sharedWarning}</span>
-        </span>
+        </HoverTip>
       )}
     </span>
     <div className="flex gap-2">

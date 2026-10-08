@@ -47,13 +47,11 @@ describe('cảnh báo thư mục tạm dùng chung chỉ còn nhãn ⚠ nhỏ (p
 
   it('icon ⚠ cùng hàng với tên ô, câu đầy đủ chỉ trong ô chú thích khi rê chuột/focus + aria-label, không còn dòng chữ dưới ô', () => {
     const field = readFileSync('src/renderer/src/components/FolderField.tsx', 'utf8');
-    expect(field).toContain('className="shared-folder-chip"');
-    expect(field).toContain('aria-label={sharedWarning}');
-    expect(field).toContain('className="shared-folder-tip"');
+    // 2026-10-08: ô chú thích chuyển sang HoverTip dùng chung (tự chọn phía, nằm gọn trong cửa sổ, aria-label = câu đầy đủ).
+    expect(field).toContain('<HoverTip text={sharedWarning} className="shared-folder-chip" tone="warning">');
     expect(field).not.toContain('field-hint-warning');
     const css = readFileSync('src/renderer/src/styles.css', 'utf8');
-    expect(css).toContain('.shared-folder-tip{display:none;');
-    expect(css).toContain('.shared-folder-chip:hover .shared-folder-tip,.shared-folder-chip:focus-visible .shared-folder-tip{display:block}');
+    expect(css).toContain('.hover-tip-warning{');
   });
 
   it.each([

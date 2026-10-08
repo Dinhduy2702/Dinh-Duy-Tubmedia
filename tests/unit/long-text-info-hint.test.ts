@@ -8,12 +8,13 @@ const read = (path: string): string => readFileSync(path, 'utf8');
 
 describe('Phần A — icon ⓘ thay chữ dài, banner khu cách ly vào chuông', () => {
   it('InfoHint: icon nhỏ, câu đầy đủ trong ô chú thích chỉ hiện khi rê chuột/focus, có aria-label', () => {
+    // 2026-10-08: ô chú thích chuyển sang HoverTip dùng chung (tự chọn phía, nằm gọn trong cửa sổ) — xem tooltip-placement.test.ts.
     const hint = read('src/renderer/src/components/InfoHint.tsx');
-    expect(hint).toContain('aria-label={text}');
-    expect(hint).toContain('className="info-hint-tip"');
-    const css = read('src/renderer/src/styles.css');
-    expect(css).toContain('.info-hint-tip{display:none;');
-    expect(css).toContain('.info-hint:hover .info-hint-tip,.info-hint:focus-visible .info-hint-tip{display:block}');
+    expect(hint).toContain('<HoverTip text={text}');
+    const tip = read('src/renderer/src/components/HoverTip.tsx');
+    expect(tip).toContain('aria-label={text}');
+    expect(tip).toContain('onPointerEnter={show}');
+    expect(tip).toContain('onFocus={show}');
   });
 
   it('lời nhắc khu cách ly không còn là banner — chỉ ghi vào chuông với id cố định', () => {
