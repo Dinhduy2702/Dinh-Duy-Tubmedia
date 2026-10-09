@@ -1,4 +1,7 @@
-import { Activity, CircleAlert, HardDrive, RefreshCcw, ShieldCheck, Wrench } from 'lucide-react';
+import { Activity, CircleAlert, GitCommitHorizontal, HardDrive, RefreshCcw, ShieldCheck, Wrench } from 'lucide-react';
+import { APP_VERSION_LABEL } from '@shared/constants/app';
+import { APP_BUILD_COMMIT } from '@shared/constants/build-info';
+import { buildCommitLabel } from '@shared/utils/build-commit';
 import { useState } from 'react';
 import { useAppStore } from '../stores/app-store';
 import { friendlyIssue, safeUiText } from '../utils/ui-error';
@@ -51,6 +54,8 @@ export function DiagnosticsPage(): React.JSX.Element {
         <div><Activity size={19} /><span>Tiến trình</span><b>{stats?.activeProcesses ?? 0}</b><small>{stats?.activeJobs ?? 0} tác vụ đang hoạt động</small></div>
         <div><HardDrive size={19} /><span>Bộ nhớ</span><b>{Math.round(stats?.memoryPercent ?? 0)}%</b><small>{bytes(stats?.memoryUsedBytes)} / {bytes(stats?.memoryTotalBytes)}</small></div>
         <div><Wrench size={19} /><span>Công cụ</span><b>{tools.length - unhealthy.length}/{tools.length}</b><small>{unhealthy.length ? 'Có công cụ cần xử lý' : 'Các công cụ chính sẵn sàng'}</small></div>
+        {/* Đợt 5: phiên bản + mã commit của bản build — phân biệt hai bản cài cùng số hiệu nhưng khác mã nguồn. */}
+        <div className="diagnostics-build"><GitCommitHorizontal size={19} /><span>Bản đang chạy</span><b>{APP_VERSION_LABEL}</b><small>Mã commit {buildCommitLabel(APP_BUILD_COMMIT)}</small></div>
       </div>
 
       <div className="diagnostics-grid mt-5">

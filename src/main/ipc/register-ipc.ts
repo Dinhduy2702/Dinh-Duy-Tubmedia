@@ -3,6 +3,7 @@ import { NVIDIA_DRIVER_DOWNLOAD_URL } from '@shared/utils/nvenc-diagnosis.js';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { IPC } from '@shared/contracts/channels.js';
+import { APP_BUILD_COMMIT } from '@shared/constants/build-info.js';
 import { runWithWireErrors } from './wire-error.js';
 import {
   backupCreateSchema,
@@ -441,6 +442,7 @@ export function registerIpc(ctx: AppContext): void {
     const diagnostic = {
       exportedAt: new Date().toISOString(),
       appVersion: app.getVersion(),
+      buildCommit: APP_BUILD_COMMIT,
       hardware: await ctx.settings.detectHardware(),
       tools: ctx.tools.list(),
       settings: {

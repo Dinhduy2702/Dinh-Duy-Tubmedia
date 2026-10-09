@@ -1,10 +1,21 @@
+import { execSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import { resolveBuildCommit } from './src/shared/utils/build-commit.js';
+
+// Đợt 5: mã commit của bản build, hiện ở Giới thiệu/Chẩn đoán và trong gói chẩn đoán.
+const buildCommit = JSON.stringify(
+  resolveBuildCommit({
+    git: () => execSync('git rev-parse HEAD', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }),
+    env: process.env
+  })
+);
 
 export default defineConfig({
   main: {
+    define: { __TUBMEDIA_BUILD_COMMIT__: buildCommit },
     plugins: [externalizeDepsPlugin()],
     resolve: {
       alias: {
@@ -31,6 +42,7 @@ export default defineConfig({
     }
   },
   renderer: {
+    define: { __TUBMEDIA_BUILD_COMMIT__: buildCommit },
     resolve: {
       alias: {
         '@renderer': resolve('src/renderer'),

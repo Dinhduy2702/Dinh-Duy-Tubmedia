@@ -1882,8 +1882,9 @@ test('A2: 3 đề xuất tinh gọn giao diện đã duyệt hoạt động đú
     await shellWindow.evaluate(() => document.querySelector<HTMLElement>('[data-page-id="diagnostics"]')?.click());
     await expect(
       shellWindow.locator('.diagnostics-summary > *'),
-      'trang Chẩn đoán chỉ còn đúng 3 thẻ (bỏ thẻ CPU trùng lặp)'
-    ).toHaveCount(3, { timeout: 10_000 });
+      'trang Chẩn đoán: 3 thẻ tài nguyên (bỏ thẻ CPU trùng lặp) + thẻ "Bản đang chạy" (Đợt 5, mã commit)'
+    ).toHaveCount(4, { timeout: 10_000 });
+    await expect(shellWindow.locator('.diagnostics-summary > .diagnostics-build')).toHaveCount(1);
     const diagnosticsSummaryText = await shellWindow.evaluate(
       () => document.querySelector('.diagnostics-summary')?.textContent ?? ''
     );
@@ -3616,6 +3617,46 @@ test('Đợt 5 huy hiệu idle: thẻ chưa có tác vụ ghi tiếng Việt', a
       const texts = await shellWindow.locator('.status-badge').allTextContents();
       for (const text of texts) expect(text.trim(), `${page}: huy hiệu không còn mã tiếng Anh`).not.toMatch(/^[a-z_-]+$/);
     }
+  } finally {
+    await closeElectronApplication();
+    removeSandbox(sandbox);
+  }
+});
+
+/**
+ * Đợt 5 (rà soát bản cài 2026-10-02 mục 17): bản cài cùng số hiệu nhưng khác mã nguồn — không cách nào biết bản đang chạy
+ * build từ commit nào. Giới thiệu và Chẩn đoán phải hiện mã commit của bản build (bản dev: HEAD lúc build).
+ */
+test('Đợt 5 mã commit: Giới thiệu và Chẩn đoán hiện mã commit của bản build', async () => {
+  test.setTimeout(120_000);
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-commit-'));
+  const env = {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    ),
+    NODE_ENV: 'test',
+    TUBMEDIA_E2E: '1',
+    TUBMEDIA_E2E_USER_DATA: path.join(sandbox, 'userdata'),
+    PLAYWRIGHT_TEST: '1',
+    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+  };
+  // Bản build trong out/ được tạo từ HEAD hiện tại (npm run check build ngay trước e2e).
+  const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectRoot, encoding: 'utf8' }).trim().slice(0, 7);
+  try {
+    electronApplication = await electron.launch({ args: [mainEntry], cwd: projectRoot, env, timeout: 45_000 });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    const nav = shellWindow.getByRole('navigation', { name: 'Điều hướng chính' });
+
+    await nav.getByRole('button', { name: 'Giới thiệu', exact: true }).click();
+    await expect(shellWindow.locator('[data-build-commit]')).toHaveAttribute('data-build-commit', head);
+    await expect(shellWindow.locator('.about-badges')).toContainText(head);
+
+    await nav.getByRole('button', { name: 'Chẩn đoán', exact: true }).click();
+    const build = shellWindow.locator('.diagnostics-build');
+    await expect(build).toContainText(head);
+    await expect(build).toContainText(/v\d+\.\d+\.\d+/);
   } finally {
     await closeElectronApplication();
     removeSandbox(sandbox);

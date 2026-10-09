@@ -5,11 +5,14 @@ import {
   Database,
   DownloadCloud,
   Film,
+  GitCommitHorizontal,
   ShieldCheck,
   Sparkles,
   Workflow
 } from 'lucide-react';
 import { APP_NAME, APP_VERSION_LABEL } from '@shared/constants/app';
+import { APP_BUILD_COMMIT } from '@shared/constants/build-info';
+import { buildCommitLabel } from '@shared/utils/build-commit';
 import { DeveloperSignature, TubmediaLogo, TubmediaMark } from '../components/TubmediaBrand';
 import { InfoHint } from '../components/InfoHint';
 
@@ -31,6 +34,7 @@ export function AboutPage(): React.JSX.Element {
         <p>Tải, kiểm tra và ghép video chất lượng cao trong một ứng dụng.<InfoHint text="Tải nhiều danh sách, kiểm tra toàn vẹn, chuẩn hóa có chọn lọc và ghép video chất lượng cao trong một ứng dụng Windows duy nhất." /></p>
         <div className="about-badges">
           <span><BadgeCheck size={15}/>{APP_VERSION_LABEL}</span>
+          <span data-build-commit={APP_BUILD_COMMIT} title="Mã commit của bản build — phân biệt hai bản cùng số hiệu nhưng khác mã nguồn"><GitCommitHorizontal size={15}/>Mã commit {buildCommitLabel(APP_BUILD_COMMIT)}</span>
           <span><ShieldCheck size={15}/>Hoạt động cục bộ trên máy tính</span>
           <span><Workflow size={15}/>1–6 quy trình độc lập</span>
         </div>
