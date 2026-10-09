@@ -313,6 +313,23 @@ test('không bắn thông báo nổi khi sửa danh sách link hoặc đổi s�
  * không cookie/tài khoản thật. Máy chủ hỗ trợ HTTP Range đúng chuẩn, mô phỏng đúng cách CDN thật hoạt
  * động khi tua video (yt-dlp giao việc tua cho ffmpeg với URL trực tiếp).
  */
+/**
+ * Cài đặt chèn sẵn vào CSDL thử phải còn nguyên sau khi app mở. CSDL mới chưa có khóa 'initialized' thì
+ * SettingsService.initialize() ghi cài đặt mặc định đè lên (mất đường dẫn công cụ → app tự tải yt-dlp từ mạng; bài kiểm vẫn
+ * chạy nhưng không còn kiểm đúng cấu hình đã định). Phát hiện phụ Đợt 5 (2026-10-09).
+ */
+async function expectSeededSettingsKept(page: Page, seeded: Record<string, unknown>): Promise<void> {
+  const settings = await page.evaluate(
+    () => (window as unknown as { desktop: { settings: { get: () => Promise<Record<string, unknown>> } } }).desktop.settings.get()
+  );
+  for (const [key, value] of Object.entries(seeded)) {
+    // Bước nâng cấp một lần 'app_update_in_app_silent_v1350' cố ý bật lại tự kiểm tra cập nhật cho CSDL chưa chạy bước đó —
+    // hành vi thật của app, không phải ghi đè nhầm.
+    if (key === 'autoCheckAppUpdates') continue;
+    expect(settings[key], `cài đặt chèn sẵn '${key}' còn nguyên sau khi mở app`).toEqual(value);
+  }
+}
+
 function resolveToolsDirectoryForTest(): string | null {
   const needed = ['yt-dlp.exe', 'ffmpeg.exe', 'ffprobe.exe'];
   const candidates = [
@@ -336,21 +353,20 @@ test('Giai đoạn 3: trích khung hình xem trước thật từ một đoạn 
   db.exec(
     'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
   );
+  const seededSettings = {
+    theme: 'dark',
+    startWithWindows: false,
+    autoCheckAppUpdates: false,
+    autoCheckToolUpdates: false,
+    ytdlpPath: path.join(toolsDirectory!, 'yt-dlp.exe'),
+    ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+    ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+  };
   db.prepare(
     'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
-  ).run(
-    'app',
-    JSON.stringify({
-      theme: 'dark',
-      startWithWindows: false,
-      autoCheckAppUpdates: false,
-      autoCheckToolUpdates: false,
-      ytdlpPath: path.join(toolsDirectory!, 'yt-dlp.exe'),
-      ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
-      ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
-    }),
-    new Date().toISOString()
-  );
+  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+  // Không có khóa này thì app coi CSDL là mới và ghi cài đặt mặc định đè lên — xem expectSeededSettingsKept.
+  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
   db.close();
 
   const clipDirectory = path.join(sandbox, 'nguon-that');
@@ -411,6 +427,7 @@ test('Giai đoạn 3: trích khung hình xem trước thật từ một đoạn 
     mainProcessId = electronApplication.process().pid;
     shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
     await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await expectSeededSettingsKept(shellWindow, seededSettings);
 
     // tsconfig.node.json (dùng cho tệp này) không thấy được env.d.ts của renderer (khai báo window.desktop)
     // — ép kiểu NGAY TRONG hàm evaluate (chạy thật trong cửa sổ trình duyệt lúc runtime); không thể truyền
@@ -469,21 +486,20 @@ test('Sửa lỗi 2026-09-23 — tải xong 1 video qua Tải nhanh không làm 
   db.exec(
     'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
   );
+  const seededSettings = {
+    theme: 'dark',
+    startWithWindows: false,
+    autoCheckAppUpdates: false,
+    autoCheckToolUpdates: false,
+    ytdlpPath: path.join(toolsDirectory!, 'yt-dlp.exe'),
+    ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+    ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+  };
   db.prepare(
     'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
-  ).run(
-    'app',
-    JSON.stringify({
-      theme: 'dark',
-      startWithWindows: false,
-      autoCheckAppUpdates: false,
-      autoCheckToolUpdates: false,
-      ytdlpPath: path.join(toolsDirectory!, 'yt-dlp.exe'),
-      ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
-      ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
-    }),
-    new Date().toISOString()
-  );
+  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+  // Không có khóa này thì app coi CSDL là mới và ghi cài đặt mặc định đè lên — xem expectSeededSettingsKept.
+  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
   db.close();
 
   const clipDirectory = path.join(sandbox, 'nguon-that');
@@ -545,6 +561,7 @@ test('Sửa lỗi 2026-09-23 — tải xong 1 video qua Tải nhanh không làm 
     mainProcessId = electronApplication.process().pid;
     shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
     await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await expectSeededSettingsKept(shellWindow, seededSettings);
 
     const consoleErrors: string[] = [];
     shellWindow.on('console', (msg) => {
@@ -644,20 +661,19 @@ test('Giai đoạn 6 mục 2: cắt tệp có sẵn trên máy (không qua tải
   db.exec(
     'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
   );
+  const seededSettings = {
+    theme: 'dark',
+    startWithWindows: false,
+    autoCheckAppUpdates: false,
+    autoCheckToolUpdates: false,
+    ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+    ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+  };
   db.prepare(
     'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
-  ).run(
-    'app',
-    JSON.stringify({
-      theme: 'dark',
-      startWithWindows: false,
-      autoCheckAppUpdates: false,
-      autoCheckToolUpdates: false,
-      ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
-      ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
-    }),
-    new Date().toISOString()
-  );
+  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+  // Không có khóa này thì app coi CSDL là mới và ghi cài đặt mặc định đè lên — xem expectSeededSettingsKept.
+  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
   db.close();
 
   const sourceFile = path.join(sandbox, 'video-nguon.mp4');
@@ -691,6 +707,7 @@ test('Giai đoạn 6 mục 2: cắt tệp có sẵn trên máy (không qua tải
     mainProcessId = electronApplication.process().pid;
     shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
     await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await expectSeededSettingsKept(shellWindow, seededSettings);
 
     interface DesktopLocalCutApi {
       tools: { list: () => Promise<Array<{ name: string; available: boolean }>> };
@@ -835,20 +852,19 @@ test('Giai đoạn 6 mục 3: đổi tỉ lệ khung hình khi cắt tệp có s
   db.exec(
     'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
   );
+  const seededSettings = {
+    theme: 'dark',
+    startWithWindows: false,
+    autoCheckAppUpdates: false,
+    autoCheckToolUpdates: false,
+    ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+    ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+  };
   db.prepare(
     'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
-  ).run(
-    'app',
-    JSON.stringify({
-      theme: 'dark',
-      startWithWindows: false,
-      autoCheckAppUpdates: false,
-      autoCheckToolUpdates: false,
-      ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
-      ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
-    }),
-    new Date().toISOString()
-  );
+  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+  // Không có khóa này thì app coi CSDL là mới và ghi cài đặt mặc định đè lên — xem expectSeededSettingsKept.
+  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
   db.close();
 
   // Nguồn 16:9 (640x360) — chuyển sang 9:16 dọc phải phóng to+mờ làm nền, không được méo/cắt mất video gốc.
@@ -883,6 +899,7 @@ test('Giai đoạn 6 mục 3: đổi tỉ lệ khung hình khi cắt tệp có s
     mainProcessId = electronApplication.process().pid;
     shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
     await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await expectSeededSettingsKept(shellWindow, seededSettings);
 
     interface DesktopLocalCutAspectApi {
       tools: { list: () => Promise<Array<{ name: string; available: boolean }>> };
@@ -1021,20 +1038,19 @@ test('Giai đoạn 6 mục 6: xem thông tin tệp — media:analyze trả đún
   db.exec(
     'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
   );
+  const seededSettings = {
+    theme: 'dark',
+    startWithWindows: false,
+    autoCheckAppUpdates: false,
+    autoCheckToolUpdates: false,
+    ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+    ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+  };
   db.prepare(
     'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
-  ).run(
-    'app',
-    JSON.stringify({
-      theme: 'dark',
-      startWithWindows: false,
-      autoCheckAppUpdates: false,
-      autoCheckToolUpdates: false,
-      ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
-      ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
-    }),
-    new Date().toISOString()
-  );
+  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+  // Không có khóa này thì app coi CSDL là mới và ghi cài đặt mặc định đè lên — xem expectSeededSettingsKept.
+  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
   db.close();
 
   // Thông số ĐÃ BIẾT trước, dựng bằng ffmpeg thật — dùng để đối chiếu với kết quả media:analyze thật.
@@ -1070,6 +1086,7 @@ test('Giai đoạn 6 mục 6: xem thông tin tệp — media:analyze trả đún
     mainProcessId = electronApplication.process().pid;
     shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
     await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await expectSeededSettingsKept(shellWindow, seededSettings);
 
     interface DesktopMediaApi {
       tools: { list: () => Promise<Array<{ name: string; available: boolean }>> };
@@ -1230,21 +1247,20 @@ test('B1: ghép video tự động tiếp tục đúng sau khi app bị đóng �
   db.exec(
     'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
   );
+  const seededSettings = {
+    theme: 'dark',
+    startWithWindows: false,
+    autoCheckAppUpdates: false,
+    autoCheckToolUpdates: false,
+    ytdlpPath: path.join(toolsDirectory!, 'yt-dlp.exe'),
+    ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+    ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+  };
   db.prepare(
     'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
-  ).run(
-    'app',
-    JSON.stringify({
-      theme: 'dark',
-      startWithWindows: false,
-      autoCheckAppUpdates: false,
-      autoCheckToolUpdates: false,
-      ytdlpPath: path.join(toolsDirectory!, 'yt-dlp.exe'),
-      ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
-      ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
-    }),
-    new Date().toISOString()
-  );
+  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+  // Không có khóa này thì app coi CSDL là mới và ghi cài đặt mặc định đè lên — xem expectSeededSettingsKept.
+  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
   db.close();
 
   const clipDirectory = path.join(sandbox, 'nguon-that');
@@ -1315,6 +1331,7 @@ test('B1: ghép video tự động tiếp tục đúng sau khi app bị đóng �
     const win1 = await app1.firstWindow({ timeout: 30_000 });
     shellWindow = win1;
     await win1.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await expectSeededSettingsKept(win1, seededSettings);
 
     let toolsReady = false;
     const toolsDeadline = Date.now() + 30_000;
@@ -1524,21 +1541,20 @@ test('B2: hai video cùng tiêu đề khác link đều được tải đầy đ
   db.exec(
     'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
   );
+  const seededSettings = {
+    theme: 'dark',
+    startWithWindows: false,
+    autoCheckAppUpdates: false,
+    autoCheckToolUpdates: false,
+    ytdlpPath: path.join(toolsDirectory!, 'yt-dlp.exe'),
+    ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+    ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+  };
   db.prepare(
     'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
-  ).run(
-    'app',
-    JSON.stringify({
-      theme: 'dark',
-      startWithWindows: false,
-      autoCheckAppUpdates: false,
-      autoCheckToolUpdates: false,
-      ytdlpPath: path.join(toolsDirectory!, 'yt-dlp.exe'),
-      ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
-      ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
-    }),
-    new Date().toISOString()
-  );
+  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+  // Không có khóa này thì app coi CSDL là mới và ghi cài đặt mặc định đè lên — xem expectSeededSettingsKept.
+  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
   db.close();
 
   // Hai clip THẬT khác nhau (kích thước khác nhau để phân biệt bằng ffprobe sau khi tải xong — chứng
@@ -1614,6 +1630,7 @@ test('B2: hai video cùng tiêu đề khác link đều được tải đầy đ
     mainProcessId = electronApplication.process().pid;
     shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
     await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await expectSeededSettingsKept(shellWindow, seededSettings);
 
     interface DesktopDownloadDupApi {
       tools: { list: () => Promise<Array<{ name: string; available: boolean }>> };
@@ -2158,20 +2175,19 @@ test('C1: gợi ý điểm cắt tự động tìm đúng khoảng lặng/đổi
   db.exec(
     'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
   );
+  const seededSettings = {
+    theme: 'dark',
+    startWithWindows: false,
+    autoCheckAppUpdates: false,
+    autoCheckToolUpdates: false,
+    ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+    ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+  };
   db.prepare(
     'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
-  ).run(
-    'app',
-    JSON.stringify({
-      theme: 'dark',
-      startWithWindows: false,
-      autoCheckAppUpdates: false,
-      autoCheckToolUpdates: false,
-      ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
-      ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
-    }),
-    new Date().toISOString()
-  );
+  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+  // Không có khóa này thì app coi CSDL là mới và ghi cài đặt mặc định đè lên — xem expectSeededSettingsKept.
+  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
   db.close();
 
   // Seed thẳng trạng thái Tải nhanh "vừa hoàn tất" trỏ tới video mẫu — để dùng đúng nút "Cắt đoạn này"
@@ -2229,6 +2245,7 @@ test('C1: gợi ý điểm cắt tự động tìm đúng khoảng lặng/đổi
     mainProcessId = electronApplication.process().pid;
     shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
     await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await expectSeededSettingsKept(shellWindow, seededSettings);
     await shellWindow.waitForSelector('.tool-status-button.is-ready', { timeout: 30_000 });
 
     // Xác nhận trước bằng IPC thật (không qua giao diện) — cùng đường dữ liệu main process thật, khớp
