@@ -3786,3 +3786,60 @@ test('Đợt 5 mục 19: link không phải trang video báo đúng "link không
     removeSandbox(sandbox);
   }
 });
+
+/**
+ * Đợt 5 mục 14 (rà soát bản cài 2026-10-02): Chẩn đoán → "Lỗi gần nhất" chỉ ghi "yt-dlp không hoàn tất được video…", không
+ * nêu nguyên nhân (403). Dòng nhật ký cũ (câu chung, nguyên nhân chỉ ở metadata) phải hiện đúng nguyên nhân.
+ */
+test('Đợt 5 mục 14: Chẩn đoán "Lỗi gần nhất" nêu đúng nguyên nhân lỗi tải', async () => {
+  test.setTimeout(120_000);
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-recent-error-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  const env = {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    ),
+    NODE_ENV: 'test',
+    TUBMEDIA_E2E: '1',
+    TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+    PLAYWRIGHT_TEST: '1',
+    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+  };
+  const launch = async (): Promise<void> => {
+    electronApplication = await electron.launch({ args: [mainEntry], cwd: projectRoot, env, timeout: 45_000 });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+  };
+
+  try {
+    await launch();
+    await closeElectronApplication();
+    const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+    const insert = db.prepare(
+      'INSERT INTO event_logs(id,timestamp,level,module,project_id,job_id,attempt_id,event_code,message,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)'
+    );
+    // Đúng câu chung mà bản 1.5.0–1.6.1 ghi cho MỌI nguyên nhân; nguyên nhân thật chỉ ở metadata.
+    const oldMessage =
+      'yt-dlp không hoàn tất được video. Nguyên nhân đã được phân loại và chi tiết kỹ thuật an toàn được giữ trong nhật ký chẩn đoán.';
+    insert.run(randomUUID(), new Date(Date.now() - 60_000).toISOString(), 'error', 'download', null, null, null, 'YTDLP_DOWNLOAD_FAILED', oldMessage,
+      JSON.stringify({ failureCategory: 'retryable', failureSubtype: 'http_403', httpStatus: 403, technicalSummary: 'ERROR: unable to download video data: HTTP Error 403: Forbidden' }));
+    insert.run(randomUUID(), new Date(Date.now() - 120_000).toISOString(), 'error', 'download', null, null, null, 'YTDLP_DOWNLOAD_FAILED', oldMessage,
+      JSON.stringify({ failureCategory: 'non_retryable', failureSubtype: 'unsupported_url', httpStatus: null }));
+    db.close();
+
+    await launch();
+    await shellWindow!.getByRole('navigation', { name: 'Điều hướng chính' }).getByRole('button', { name: 'Chẩn đoán', exact: true }).click();
+    const list = shellWindow!.locator('.diagnostics-error-list');
+    await expect(list.locator('article')).toHaveCount(2, { timeout: 15_000 });
+    await list.scrollIntoViewIfNeeded();
+    await shellWindow!.screenshot({ path: path.join(projectRoot, 'test-results', 'dot5-muc14-chan-doan.png') });
+    await expect(list.locator('article').nth(0)).toContainText('Máy chủ video tạm thời từ chối tải');
+    await expect(list.locator('article').nth(0)).toContainText('HTTP 403');
+    await expect(list.locator('article').nth(1)).toContainText('Liên kết không phải trang video');
+    await expect(list).not.toContainText('Không thể hoàn tất thao tác');
+  } finally {
+    await closeElectronApplication();
+    removeSandbox(sandbox);
+  }
+});

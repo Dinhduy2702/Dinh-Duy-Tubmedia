@@ -2,6 +2,8 @@ import { Activity, CircleAlert, GitCommitHorizontal, HardDrive, RefreshCcw, Shie
 import { APP_VERSION_LABEL } from '@shared/constants/app';
 import { APP_BUILD_COMMIT } from '@shared/constants/build-info';
 import { buildCommitLabel } from '@shared/utils/build-commit';
+import { failureSubtypeFromDetails, ytDlpFailureLogMessage } from '@shared/utils/download-failure';
+import type { LogEntry } from '@shared/types/domain';
 import { useState } from 'react';
 import { useAppStore } from '../stores/app-store';
 import { friendlyIssue, safeUiText } from '../utils/ui-error';
@@ -11,6 +13,16 @@ function bytes(value: number | undefined): string {
   const safe = Math.max(0, value ?? 0);
   if (safe < 1024 ** 3) return `${(safe / 1024 ** 2).toFixed(1)} MB`;
   return `${(safe / 1024 ** 3).toFixed(1)} GB`;
+}
+
+/**
+ * Câu hiển thị ở "Lỗi gần nhất" (Đợt 5 mục 14). Lỗi tải yt-dlp: dựng từ nguyên nhân đã phân loại trong metadata — dòng
+ * nhật ký ghi TRƯỚC bản sửa chỉ có câu chung "yt-dlp không hoàn tất được video…" nhưng metadata vẫn có failureSubtype.
+ */
+function diagnosticMessage(entry: LogEntry): string {
+  if (entry.eventCode !== 'YTDLP_DOWNLOAD_FAILED') return entry.message;
+  const subtype = failureSubtypeFromDetails(entry.metadata);
+  return subtype ? ytDlpFailureLogMessage(subtype) : entry.message;
 }
 
 export function DiagnosticsPage(): React.JSX.Element {
@@ -39,7 +51,12 @@ export function DiagnosticsPage(): React.JSX.Element {
   };
 
   const unhealthy = tools.filter((tool) => !tool.available || tool.health === 'broken');
-  const errors = logs.filter((entry) => entry.level === 'error').slice(0, 12);
+  // Mới nhất trước theo thời gian ghi: kho nhật ký trộn lịch sử (mới → cũ) với sự kiện trực tiếp nên thứ tự trong kho không
+  // bảo đảm — trước Đợt 5 mục 14, lịch sử nạp lúc mở app khiến "Lỗi gần nhất" có thể hiện 12 lỗi CŨ nhất.
+  const errors = logs
+    .filter((entry) => entry.level === 'error')
+    .sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp))
+    .slice(0, 12);
 
   return (
     <div className="page-shell diagnostics-page">
@@ -69,7 +86,7 @@ export function DiagnosticsPage(): React.JSX.Element {
         </section>
         <section className="card p-5">
           <div className="diagnostics-section-title"><CircleAlert size={20} /><div><h2>Lỗi gần nhất</h2><p>Không hiển thị token hoặc cookies nhạy cảm.</p></div><button className="btn btn-small" onClick={() => setPage('logs')}>Mở nhật ký</button></div>
-          <div className="diagnostics-error-list">{errors.map((entry) => { const issue = friendlyIssue(entry.message); return <article key={entry.id}><b>{issue.title}</b><p>{issue.message}</p><time>{new Date(entry.timestamp).toLocaleString('vi-VN')}</time></article>; })}</div>
+          <div className="diagnostics-error-list">{errors.map((entry) => { const issue = friendlyIssue(diagnosticMessage(entry)); return <article key={entry.id}><b>{issue.title}</b><p>{issue.message}</p><time>{new Date(entry.timestamp).toLocaleString('vi-VN')}</time></article>; })}</div>
           {!errors.length && <div className="diagnostics-empty"><ShieldCheck size={24} /><span>Chưa có lỗi được ghi trong phiên hiện tại.</span></div>}
         </section>
       </div>

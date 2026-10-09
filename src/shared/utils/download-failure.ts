@@ -99,6 +99,29 @@ export function exhaustedDownloadFailureMessage(
   return originalMessage;
 }
 
+const YTDLP_FAILURE_CAUSES: Record<YtDlpFailureSubtype, string> = {
+  disk_full: 'ổ đĩa không còn đủ dung lượng',
+  tool_missing: 'thiếu công cụ tải (yt-dlp/ffmpeg/aria2c)',
+  http_429: 'nền tảng đang giới hạn số lần tải (HTTP 429)',
+  authentication: 'nền tảng yêu cầu đăng nhập hoặc cookies hợp lệ',
+  removed: 'video đã bị xóa khỏi nền tảng',
+  unsupported_url: 'liên kết không phải trang video (yt-dlp báo Unsupported URL)',
+  unavailable: 'video không khả dụng (riêng tư, bị chặn theo vùng hoặc không còn định dạng phù hợp)',
+  http_403: 'máy chủ video từ chối yêu cầu (HTTP 403)',
+  fragment: 'một phần dữ liệu video bị gián đoạn',
+  extractor: 'nền tảng chưa trả dữ liệu video ổn định',
+  network: 'kết nối mạng hoặc máy chủ video không ổn định',
+  unknown: 'chưa xác định — xem chi tiết kỹ thuật trong Nhật ký'
+};
+
+/**
+ * Câu nhật ký YTDLP_DOWNLOAD_FAILED nêu NGUYÊN NHÂN đã phân loại (Đợt 5 mục 14: câu chung cũ khiến Chẩn đoán → "Lỗi gần
+ * nhất" không nói được lỗi gì). Trang Chẩn đoán cũng dùng hàm này để dựng lại câu cho dòng nhật ký cũ từ metadata.
+ */
+export function ytDlpFailureLogMessage(subtype: YtDlpFailureSubtype | null): string {
+  return `yt-dlp không hoàn tất được video: ${YTDLP_FAILURE_CAUSES[subtype ?? 'unknown']}.`;
+}
+
 /** Câu báo cho link không được hỗ trợ (Đợt 5 mục 19) — dùng ở DownloadEngine. */
 export function unsupportedSourceUrlMessage(): string {
   return (

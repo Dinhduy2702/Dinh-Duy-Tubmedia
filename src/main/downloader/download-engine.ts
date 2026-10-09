@@ -27,7 +27,12 @@ import {
   validateSelectedDownloadSize
 } from '@shared/utils/download-quality.js';
 import { FfmpegProgressTracker } from '@shared/utils/ffmpeg-progress.js';
-import { classifyYtDlpFailure, sanitizeYtDlpDiagnostic, unsupportedSourceUrlMessage } from '@shared/utils/download-failure.js';
+import {
+  classifyYtDlpFailure,
+  sanitizeYtDlpDiagnostic,
+  unsupportedSourceUrlMessage,
+  ytDlpFailureLogMessage
+} from '@shared/utils/download-failure.js';
 import { hasConfiguredCookies, shouldAttachConfiguredCookies } from '@shared/utils/cookie-policy.js';
 import { cleanExternalText } from '@shared/utils/text-encoding.js';
 import { downloadLinkTag } from '@shared/utils/url.js';
@@ -1349,7 +1354,7 @@ export class DownloadEngine {
         this.logger.error(
           'download',
           'YTDLP_DOWNLOAD_FAILED',
-          'yt-dlp không hoàn tất được video. Nguyên nhân đã được phân loại và chi tiết kỹ thuật an toàn được giữ trong nhật ký chẩn đoán.',
+          ytDlpFailureLogMessage(failure.subtype),
           {
             jobId: job.id,
             projectId: project.id,

@@ -535,6 +535,20 @@ function classifyIssue(value: unknown): FriendlyIssue {
     };
   }
 
+  // Đợt 5 mục 14: câu nhật ký lỗi tải đã nêu nguyên nhân (ytDlpFailureLogMessage) — các nguyên nhân chưa có luật riêng ở
+  // trên vẫn hiện tiêu đề "Không tải được video" và đúng nguyên nhân thay vì tiêu đề chung.
+  const ytDlpCause = /^yt-dlp không hoàn tất được video: (.+)$/i.exec(cleaned.trim());
+  if (ytDlpCause) {
+    const cause = ytDlpCause[1]!.replace(/\.$/, '');
+    return {
+      title: 'Không tải được video',
+      message: `Nguyên nhân: ${cause}.`,
+      steps: ['Mở Nhật ký riêng của danh sách để xem video nào bị lỗi và chi tiết kỹ thuật.', 'Xử lý nguyên nhân rồi chọn Thử lại đúng video.'],
+      technical,
+      tone: 'error'
+    };
+  }
+
   const fallback =
     containsTechnicalKeys(structured) || isTechnicalText(cleaned)
       ? 'Ứng dụng chưa thể hoàn tất thao tác này. Chi tiết kỹ thuật đã được lưu trong Nhật ký để hỗ trợ kiểm tra.'
