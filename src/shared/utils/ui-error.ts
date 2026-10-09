@@ -441,6 +441,20 @@ function classifyIssue(value: unknown): FriendlyIssue {
       tone: 'warning'
     };
   }
+  // Đợt 5 mục 19: link không phải trang video (trang báo, trang chủ, tìm kiếm...) — không phải lỗi mạng, thử lại vô ích.
+  if (lower.includes('liên kết này không được hỗ trợ') || lower.includes('unsupported url')) {
+    return {
+      title: 'Liên kết không phải trang video',
+      message:
+        'Trang này không có video mà công cụ tải nhận ra — thường là trang báo, trang chủ, trang tìm kiếm hoặc liên kết rút gọn.',
+      steps: [
+        'Mở đúng video trên trình duyệt rồi sao chép liên kết gốc của chính video đó.',
+        'Thêm lại liên kết đó vào danh sách; thử lại liên kết cũ sẽ vẫn lỗi.'
+      ],
+      technical,
+      tone: 'error'
+    };
+  }
   if (
     lower.includes('http 403') ||
     lower.includes('http error 403') ||

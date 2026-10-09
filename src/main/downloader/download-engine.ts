@@ -27,7 +27,7 @@ import {
   validateSelectedDownloadSize
 } from '@shared/utils/download-quality.js';
 import { FfmpegProgressTracker } from '@shared/utils/ffmpeg-progress.js';
-import { classifyYtDlpFailure, sanitizeYtDlpDiagnostic } from '@shared/utils/download-failure.js';
+import { classifyYtDlpFailure, sanitizeYtDlpDiagnostic, unsupportedSourceUrlMessage } from '@shared/utils/download-failure.js';
 import { hasConfiguredCookies, shouldAttachConfiguredCookies } from '@shared/utils/cookie-policy.js';
 import { cleanExternalText } from '@shared/utils/text-encoding.js';
 import { downloadLinkTag } from '@shared/utils/url.js';
@@ -1378,8 +1378,12 @@ export class DownloadEngine {
           );
         }
 
+        if (failure.subtype === 'unsupported_url') {
+          throw new DownloadFailedError(unsupportedSourceUrlMessage(), false, failureDetails);
+        }
+
         throw new DownloadFailedError(
-          'Video không khả dụng, URL không được hỗ trợ hoặc nền tảng đang từ chối truy cập. Mở Nhật ký riêng của danh sách để xem loại lỗi đã được phân loại.',
+          'Video không khả dụng hoặc nền tảng đang từ chối truy cập (video riêng tư, bị chặn theo vùng hoặc không còn định dạng phù hợp). Mở Nhật ký riêng của danh sách để xem loại lỗi đã được phân loại.',
           false,
           failureDetails
         );

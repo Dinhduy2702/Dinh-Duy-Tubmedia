@@ -7,6 +7,7 @@ export type YtDlpFailureSubtype =
   | 'http_429'
   | 'authentication'
   | 'removed'
+  | 'unsupported_url'
   | 'unavailable'
   | 'http_403'
   | 'fragment'
@@ -33,6 +34,7 @@ const ALL_FAILURE_SUBTYPES: ReadonlySet<YtDlpFailureSubtype> = new Set([
   'http_429',
   'authentication',
   'removed',
+  'unsupported_url',
   'unavailable',
   'http_403',
   'fragment',
@@ -95,6 +97,15 @@ export function exhaustedDownloadFailureMessage(
     return `Kết nối tới máy chủ video vẫn không ổn định ${attemptLabel}. Tubmedia đã dừng riêng video này và giữ dữ liệu tải dở để thử lại sau.`;
   }
   return originalMessage;
+}
+
+/** Câu báo cho link không được hỗ trợ (Đợt 5 mục 19) — dùng ở DownloadEngine. */
+export function unsupportedSourceUrlMessage(): string {
+  return (
+    'Liên kết này không được hỗ trợ: trang này không có video mà công cụ tải nhận ra (yt-dlp báo "Unsupported URL") — ' +
+    'thường là trang báo, trang chủ, trang tìm kiếm hoặc liên kết rút gọn. Hãy mở đúng video, sao chép liên kết gốc của ' +
+    'chính video đó rồi thêm lại vào danh sách.'
+  );
 }
 
 function includesAny(text: string, needles: readonly string[]): boolean {
@@ -176,6 +187,20 @@ export function classifyYtDlpFailure(text: string): YtDlpFailureDetail {
     };
   }
 
+  // Đợt 5 mục 19: yt-dlp nói rõ link KHÔNG phải trang video nó tải được (trang báo, trang chủ, tìm kiếm...) — loại riêng,
+  // không gộp vào "video không khả dụng".
+  if (
+    includesAny(lower, [
+      'unsupported url',
+      'no suitable extractor',
+      'url could not be handled',
+      'is not a valid url',
+      'unknown url type'
+    ])
+  ) {
+    return { category: 'non_retryable', subtype: 'unsupported_url', httpStatus: null, retryable: false };
+  }
+
   if (
     includesAny(lower, [
       'private video',
@@ -183,8 +208,6 @@ export function classifyYtDlpFailure(text: string): YtDlpFailureDetail {
       'this video is unavailable',
       'video has been removed',
       'video has been deleted',
-      'unsupported url',
-      'unsupported url:',
       'geo-restricted',
       'not available in your country',
       'requested format is not available',

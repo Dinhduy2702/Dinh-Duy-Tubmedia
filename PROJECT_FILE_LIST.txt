@@ -638,6 +638,7 @@ tests/unit/typography-system.test.ts
 tests/unit/ui-density.test.ts
 tests/unit/ui-screenshot-script.test.ts
 tests/unit/unified-download-progress-1.3.0.test.ts
+tests/unit/unsupported-url-dot5.test.ts
 tests/unit/update-center-release-notes.test.ts
 tests/unit/url.test.ts
 tests/unit/user-facing-notifications.test.ts

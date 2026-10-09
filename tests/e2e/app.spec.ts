@@ -3662,3 +3662,127 @@ test('Đợt 5 mã commit: Giới thiệu và Chẩn đoán hiện mã commit c�
     removeSandbox(sandbox);
   }
 });
+
+/**
+ * Đợt 5 mục 19 (rà soát bản cài 2026-10-02): link trang báo bị yt-dlp báo "Unsupported URL" nhưng Tubmedia xếp vào nhóm
+ * "unavailable" và báo câu chung. Chạy THẬT: yt-dlp thật + máy chủ cục bộ phát một trang HTML không có video (không mạng
+ * ngoài), tải qua Tải danh sách thật → tác vụ thất bại với loại lỗi riêng và câu cụ thể, hiện đúng câu đó trên giao diện.
+ */
+test('Đợt 5 mục 19: link không phải trang video báo đúng "link không được hỗ trợ" kèm câu cụ thể', async () => {
+  test.setTimeout(150_000);
+  const toolsDirectory = resolveToolsDirectoryForTest();
+  test.skip(!toolsDirectory, 'Không tìm thấy yt-dlp/ffmpeg/ffprobe trên máy này để chạy bài kiểm thật.');
+
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-unsupported-url-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+  db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
+  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run(
+    'app',
+    JSON.stringify({
+      theme: 'dark',
+      startWithWindows: false,
+      autoCheckAppUpdates: false,
+      autoCheckToolUpdates: false,
+      ytdlpPath: path.join(toolsDirectory!, 'yt-dlp.exe'),
+      ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+      ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+    }),
+    new Date().toISOString()
+  );
+  db.close();
+
+  let server: Server | undefined;
+  try {
+    server = createServer((_request, response) => {
+      response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      response.end('<html><head><title>Tin tuc hom nay</title></head><body><h1>Bai bao</h1><p>Khong co video.</p></body></html>');
+    });
+    const port = await new Promise<number>((resolvePort) => {
+      server!.listen(0, '127.0.0.1', () => resolvePort((server!.address() as { port: number }).port));
+    });
+    const pageUrl = `http://127.0.0.1:${port}/tin-tuc/bai-bao-123.html`;
+    const outputFolder = path.join(sandbox, 'ket-qua');
+    const tempFolder = path.join(sandbox, 'tam');
+    for (const folder of [outputFolder, tempFolder]) fs.mkdirSync(folder, { recursive: true });
+
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+        ),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+
+    interface DesktopUnsupportedApi {
+      tools: { list: () => Promise<Array<{ name: string; available: boolean }>> };
+      workbench: { startDownload: (input: Record<string, unknown>) => Promise<unknown> };
+      queue: {
+        list: () => Promise<Array<{ type: string; status: string; errorMessage: string | null }>>;
+        startupPrompt: () => Promise<{ count: number }>;
+      };
+      logs: { list: (query: Record<string, unknown>) => Promise<Array<{ eventCode: string; metadata?: Record<string, unknown> }>> };
+    }
+    await expect
+      .poll(
+        async () => {
+          const list = await shellWindow!.evaluate(() => (window as unknown as { desktop: DesktopUnsupportedApi }).desktop.tools.list());
+          return Boolean(list.find((item) => item.name === 'yt-dlp')?.available);
+        },
+        { timeout: 30_000 }
+      )
+      .toBe(true);
+
+    // Chờ hàng đợi khởi động xong (startupPrompt chờ đúng mốc đó). Tạo tác vụ TRƯỚC mốc này thì bước giữ tác vụ dở lúc
+    // mở app sẽ giữ nhầm cả tác vụ mới (APP_INTERRUPTED) — phát hiện khi viết bài này, đã báo riêng, chưa sửa.
+    await shellWindow.evaluate(() => (window as unknown as { desktop: DesktopUnsupportedApi }).desktop.queue.startupPrompt());
+    await shellWindow.evaluate(
+      (input) => (window as unknown as { desktop: DesktopUnsupportedApi }).desktop.workbench.startDownload(input),
+      { slot: 'download-1', name: 'Kiem tra link trang bao', linksText: pageUrl, outputFolder, tempFolder, resourceProfileId: 'resource-balanced' }
+    );
+
+    let job: { status: string; errorMessage: string | null } | undefined;
+    await expect
+      .poll(
+        async () => {
+          const jobs = await shellWindow!.evaluate(() => (window as unknown as { desktop: DesktopUnsupportedApi }).desktop.queue.list());
+          job = jobs.find((item) => item.type === 'download');
+          return job?.status;
+        },
+        { timeout: 90_000 }
+      )
+      .toBe('failed');
+    expect(job!.errorMessage, 'câu báo cụ thể cho link không được hỗ trợ').toContain('liên kết gốc');
+    expect(job!.errorMessage).not.toContain('nền tảng đang từ chối truy cập');
+
+    const logs = await shellWindow.evaluate(
+      () => (window as unknown as { desktop: DesktopUnsupportedApi }).desktop.logs.list({ limit: 500 })
+    );
+    const failure = logs.find((entry) => entry.eventCode === 'YTDLP_DOWNLOAD_FAILED');
+    expect(failure?.metadata?.failureSubtype, 'nhật ký ghi đúng loại lỗi').toBe('unsupported_url');
+
+    // Giao diện: trang Hàng đợi hiện tiêu đề riêng và câu cụ thể (không phải "Không thể hoàn tất thao tác").
+    await shellWindow.getByRole('navigation', { name: 'Điều hướng chính' }).getByRole('button', { name: 'Hàng đợi', exact: true }).click();
+    const stack = shellWindow.locator('.queue-workflow-stack');
+    await stack.locator('button[aria-expanded="false"][aria-label^="Mở "]').first().click();
+    await expect(stack.getByText('Liên kết không phải trang video').first()).toBeVisible({ timeout: 10_000 });
+    await stack.getByText('Liên kết không phải trang video').first().scrollIntoViewIfNeeded();
+    await shellWindow.screenshot({ path: path.join(projectRoot, 'test-results', 'dot5-muc19-hang-doi.png') });
+  } finally {
+    server?.close();
+    await closeElectronApplication();
+    removeSandbox(sandbox);
+  }
+});
