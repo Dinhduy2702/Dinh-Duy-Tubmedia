@@ -8606,3 +8606,22 @@ body {
 .merge-recovery-notice span { display: grid; gap: 3px; min-width: 0; }
 .merge-recovery-notice b { color: var(--text); }
 .merge-recovery-notice small { color: var(--muted); line-height: 1.45; }
+
+/* Đợt 5 mục 16: ghi chú quy trình ghép đang ẩn mà còn dữ liệu (Ghép theo Timeline). */
+.merge-hidden-lanes-note {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.75rem 0 0;
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--warn) 7%, var(--panel));
+  padding: 0.5rem 0.7rem;
+  color: var(--text);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.merge-hidden-lanes-note svg {
+  flex: none;
+}

@@ -15,6 +15,7 @@ import {
   Gauge,
   GripVertical,
   HardDrive,
+  Info,
   Layers3,
   ListOrdered,
   LoaderCircle,
@@ -69,6 +70,7 @@ import { loadWorkbenchPath, saveWorkbenchPath } from '../utils/workbench-path-me
 import { friendlyIssue } from '../utils/ui-error';
 import { audioModeLabel, jobTypeLabel, statusLabel } from '../utils/vi-labels';
 import { progressFillStyle } from '../utils/progress-style';
+import { hiddenLanesNote, hiddenLanesWithData, laneFormWhenShown } from '@shared/utils/merge-lane-visibility';
 
 interface MergeForm {
   name: string;
@@ -727,6 +729,8 @@ export function DownloadMergePage(): React.JSX.Element {
   const [cookieOpen, setCookieOpen] = useState(false);
   const [cookieTarget, setCookieTarget] = useState<MergeLaneId | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<MergeLaneId | null>(null);
+  // Đợt 5 mục 16: số quy trình chờ xác nhận khi "Bớt quy trình" sẽ ẩn một quy trình còn dữ liệu.
+  const [hideLaneCount, setHideLaneCount] = useState<number | null>(null);
   // Phần C (2026-10-06): áp dụng thư mục xử lý tạm cho tất cả quy trình của TRANG NÀY (không đụng Tải danh sách).
   const [applyTemp, setApplyTemp] = useState<{ slot: MergeLaneId; folder: string } | null>(null);
   // Đợt 3 mục 9: xóa nhật ký hỏi xác nhận trước (trước đây bấm là xóa ngay).
@@ -741,6 +745,14 @@ export function DownloadMergePage(): React.JSX.Element {
   const revisionRef = useRef<MergeMap<number>>(mapOf(() => 0));
   const laneCount = settings?.mergeLaneCount ?? 1;
   const recommendation = recommendedMergeLimit(hardware);
+  // Đợt 5 mục 16: "Bớt quy trình" chỉ ẩn — quy trình đã lưu vẫn còn dữ liệu và vẫn hiện ở Ghép & Xuất.
+  const laneEntries = MERGE_IDS.map((slot) => ({
+    slot,
+    name: forms[slot].name.trim() || `Quy trình ${mergeNumber(slot)}`,
+    hasData: Boolean(states[slot]?.project)
+  }));
+  const hiddenNote = hiddenLanesNote(hiddenLanesWithData(laneEntries, laneCount).map((lane) => lane.name));
+  const lanesToHide = hideLaneCount === null ? [] : hiddenLanesWithData(laneEntries.slice(0, laneCount), hideLaneCount);
 
   useEffect(() => {
     const snapshot = useAppStore.getState();
@@ -973,7 +985,7 @@ export function DownloadMergePage(): React.JSX.Element {
     }
   };
 
-  const changeLaneCount = async (value: number): Promise<void> => {
+  const changeLaneCount = async (value: number, confirmedHide = false): Promise<void> => {
     const nextCount = clampCount(value);
     if (nextCount < laneCount) {
       const hiddenRunning = MERGE_IDS.slice(nextCount).some((slot) => {
@@ -990,6 +1002,10 @@ export function DownloadMergePage(): React.JSX.Element {
         );
         return;
       }
+      if (!confirmedHide && hiddenLanesWithData(laneEntries.slice(0, laneCount), nextCount).length > 0) {
+        setHideLaneCount(nextCount);
+        return;
+      }
     }
     setBusy('global');
     try {
@@ -1000,17 +1016,21 @@ export function DownloadMergePage(): React.JSX.Element {
         const rememberedTemp =
           loadWorkbenchPath('merge-temp-default') ?? loadWorkbenchPath('merge-temp') ?? source.tempFolder;
         const rememberedOutput = loadWorkbenchPath('merge-output') ?? source.outputFolder;
+        // Quy trình đã lưu được hiện lại giữ nguyên form của nó (Đợt 5 mục 16); quy trình trống mới điền giá trị nhớ.
         setForms((current) => ({
           ...current,
-          [target]: {
-            ...current[target],
-            sourceFolder: rememberedSource,
-            tempFolder: rememberedTemp,
-            outputFolder: rememberedOutput,
-            qualityProfileId: source.qualityProfileId,
-            resourceProfileId: source.resourceProfileId,
-            aspectRatio: source.aspectRatio
-          }
+          [target]: laneFormWhenShown(
+            current[target],
+            {
+              sourceFolder: rememberedSource,
+              tempFolder: rememberedTemp,
+              outputFolder: rememberedOutput,
+              qualityProfileId: source.qualityProfileId,
+              resourceProfileId: source.resourceProfileId,
+              aspectRatio: source.aspectRatio
+            },
+            Boolean(states[target]?.project)
+          )
         }));
         setActiveLane(target);
       } else if (mergeNumber(activeLane) > nextCount) {
@@ -1113,6 +1133,12 @@ export function DownloadMergePage(): React.JSX.Element {
           </button>
         </div>
       </header>
+      {hiddenNote && (
+        <p className="merge-hidden-lanes-note" role="status">
+          <Info size={14} aria-hidden="true" />
+          <span>{hiddenNote}</span>
+        </p>
+      )}
 
       <div className="workflow-utility-stack mt-4">
         <ToolReadinessPanel workflow="merge" />
@@ -1253,6 +1279,24 @@ export function DownloadMergePage(): React.JSX.Element {
         onConfirm={() => {
           if (!clearLogsTarget) return;
           void clearLogs(clearLogsTarget.slot, clearLogsTarget.projectId).finally(() => setClearLogsTarget(null));
+        }}
+      />
+      <ConfirmDialog
+        open={hideLaneCount !== null}
+        title={
+          lanesToHide.length === 1 ? `Ẩn quy trình "${lanesToHide[0]!.name}"?` : `Ẩn ${lanesToHide.length} quy trình còn dữ liệu?`
+        }
+        message={`Bớt quy trình chỉ ẩn ${lanesToHide.map((lane) => `"${lane.name}"`).join(', ')} khỏi trang này.`}
+        details={[
+          'Danh sách liên kết, hàng đợi và nhật ký vẫn giữ nguyên, vẫn hiện ở trang Ghép & Xuất.',
+          'Bấm "Thêm quy trình" để hiện lại đúng như cũ.'
+        ]}
+        confirmLabel="Ẩn quy trình"
+        onCancel={() => setHideLaneCount(null)}
+        onConfirm={() => {
+          const target = hideLaneCount;
+          setHideLaneCount(null);
+          if (target !== null) void changeLaneCount(target, true);
         }}
       />
       <ConfirmDialog

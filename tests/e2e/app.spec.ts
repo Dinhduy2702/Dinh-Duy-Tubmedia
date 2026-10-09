@@ -4183,3 +4183,107 @@ test('Đợt 5 mục 13: Xem trước & Cắt liệt kê các video tải xong g
     removeSandbox(sandbox);
   }
 });
+
+/**
+ * Đợt 5 mục 16 (rà soát bản cài 1.5.0): Ghép theo Timeline hiện "1/6 quy trình" nhưng quy trình "Duy_12_09_2026" (đã lưu, còn
+ * dữ liệu) bị ẩn mà không nói gì — vẫn thấy ở trang Ghép & Xuất. Chèn đúng tình huống đó rồi kiểm trên giao diện thật:
+ * có ghi chú quy trình đang ẩn; "Thêm quy trình" hiện lại đúng thư mục ĐÃ LƯU của nó (không bị thư mục nhớ gần nhất đè);
+ * "Bớt quy trình" khi quy trình sắp ẩn còn dữ liệu thì hỏi xác nhận; dữ liệu vẫn còn sau khi ẩn.
+ */
+test('Đợt 5 mục 16: quy trình ghép còn dữ liệu bị ẩn khi bớt số quy trình — có ghi chú, hỏi xác nhận, hiện lại đúng dữ liệu', async () => {
+  test.setTimeout(120_000);
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-hidden-merge-lane-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  const env = {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    ),
+    NODE_ENV: 'test',
+    TUBMEDIA_E2E: '1',
+    TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+    PLAYWRIGHT_TEST: '1',
+    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+  };
+  const launch = async (): Promise<void> => {
+    electronApplication = await electron.launch({ args: [mainEntry], cwd: projectRoot, env, timeout: 45_000 });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await shellWindow.setViewportSize({ width: 1400, height: 900 });
+  };
+  const folder = (name: string): string => path.join(sandbox, name);
+  const tab = (name: string): ReturnType<Page['locator']> => shellWindow!.locator('.workflow-tab', { hasText: name });
+  const laneCountBadge = (): ReturnType<Page['locator']> => shellWindow!.locator('.download-merge-page .badge-strong');
+  const shot = (name: string): Promise<Buffer> =>
+    shellWindow!.screenshot({ path: path.join(projectRoot, 'test-results', `dot5-muc16-${name}.png`) });
+
+  try {
+    await launch();
+    await closeElectronApplication();
+    const now = new Date().toISOString();
+    const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+    const insertProject = db.prepare(
+      `INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,aspect_ratio,created_at,updated_at,archived_at)
+       VALUES(?,?,?,'','draft',?,?,?,?,?,'quality-source-size','resource-balanced',0,'original',?,?,NULL)`
+    );
+    insertProject.run(randomUUID(), 'Ghep_mot', '__WORKBENCH_MERGE_1__', folder('nguon-1'), folder('tam-1'), folder('xuat-1'), folder('q'), 'Ghep_mot', now, now);
+    insertProject.run(randomUUID(), 'Duy_12_09_2026', '__WORKBENCH_MERGE_2__', folder('nguon-2'), folder('tam-2'), folder('xuat-2'), folder('q'), 'Duy_12_09_2026', now, now);
+    const appRow = db.prepare("SELECT value_json FROM app_settings WHERE key='app'").get() as { value_json: string };
+    db.prepare("UPDATE app_settings SET value_json=? WHERE key='app'").run(JSON.stringify({ ...JSON.parse(appRow.value_json), mergeLaneCount: 1 }));
+    db.close();
+
+    await launch();
+    await shellWindow!.getByRole('navigation', { name: 'Điều hướng chính' }).getByRole('button', { name: 'Ghép theo Timeline', exact: true }).click();
+    await expect(tab('Ghep_mot')).toBeVisible({ timeout: 15_000 });
+    await expect(laneCountBadge()).toContainText('1/6 quy trình');
+
+    // 1) Đúng tình huống lúc rà soát: có ghi chú quy trình đang ẩn mà còn dữ liệu.
+    const note = shellWindow!.locator('.merge-hidden-lanes-note');
+    await expect(note).toBeVisible({ timeout: 5_000 });
+    await expect(note).toContainText('Duy_12_09_2026');
+    await expect(note).toContainText('Thêm quy trình');
+    await shot('ghi-chu-quy-trinh-an');
+
+    // 2) Hiện lại: đúng thư mục ĐÃ LƯU của quy trình đó.
+    await shellWindow!.getByRole('button', { name: 'Thêm quy trình' }).click();
+    await expect(laneCountBadge()).toContainText('2/6 quy trình');
+    await expect(tab('Duy_12_09_2026')).toHaveClass(/is-active/);
+    await expect(shellWindow!.locator('.compact-config-source input').first()).toHaveValue(folder('nguon-2'));
+    await expect(shellWindow!.locator('.compact-config-temp input').first()).toHaveValue(folder('tam-2'));
+    await expect(shellWindow!.locator('.compact-config-output input').first()).toHaveValue(folder('xuat-2'));
+    await expect(note).toHaveCount(0);
+
+    // 3) Bớt quy trình khi quy trình sắp ẩn còn dữ liệu → hỏi xác nhận; "Quay lại" thì không đổi gì.
+    await shellWindow!.getByRole('button', { name: 'Bớt quy trình' }).click();
+    const dialog = shellWindow!.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('Duy_12_09_2026');
+    await expect(dialog).toContainText('Ghép & Xuất');
+    await shot('hoi-xac-nhan-an');
+    await dialog.getByRole('button', { name: 'Quay lại' }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(laneCountBadge()).toContainText('2/6 quy trình');
+
+    // 4) Xác nhận → ẩn, ghi chú hiện lại, dữ liệu vẫn còn nguyên.
+    await shellWindow!.getByRole('button', { name: 'Bớt quy trình' }).click();
+    await shellWindow!.getByRole('dialog').getByRole('button', { name: 'Ẩn quy trình' }).click();
+    await expect(laneCountBadge()).toContainText('1/6 quy trình');
+    await expect(note).toContainText('Duy_12_09_2026');
+    const lanes = await shellWindow!.evaluate(() =>
+      (window as unknown as { desktop: { workbench: { state: () => Promise<{ mergeLanes: Array<{ slot: string; project: { finalFileName: string } | null }> }> } } })
+        .desktop.workbench.state()
+    );
+    expect(lanes.mergeLanes.find((lane) => lane.slot === 'merge-2')?.project?.finalFileName, 'quy trình ẩn vẫn giữ dữ liệu').toBe('Duy_12_09_2026');
+
+    // 5) Bớt một quy trình KHÔNG có dữ liệu thì không hỏi (như trước).
+    await shellWindow!.getByRole('button', { name: 'Thêm quy trình' }).click();
+    await shellWindow!.getByRole('button', { name: 'Thêm quy trình' }).click();
+    await expect(laneCountBadge()).toContainText('3/6 quy trình');
+    await shellWindow!.getByRole('button', { name: 'Bớt quy trình' }).click();
+    await expect(laneCountBadge()).toContainText('2/6 quy trình');
+    await expect(shellWindow!.getByRole('dialog')).toHaveCount(0);
+  } finally {
+    await closeElectronApplication();
+    removeSandbox(sandbox);
+  }
+});

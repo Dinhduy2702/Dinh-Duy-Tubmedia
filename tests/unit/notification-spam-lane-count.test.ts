@@ -26,7 +26,9 @@ describe('Vấn đề 1 (GĐ 2b, 2026-09-22) — đổi số danh sách/quy trì
   });
 
   it('"Ghép theo Timeline": changeLaneCount không còn gọi notify() khi đổi số quy trình thành công', () => {
-    const fn = block(mergeSource, 'const changeLaneCount = async', 2_000);
+    // 2_500: Đợt 5 mục 16 thêm bước hỏi xác nhận trước khi ẩn quy trình còn dữ liệu, hàm dài hơn (vẫn dừng trước
+    // applyRecommendation — hàm kế tiếp có notify() hợp lệ).
+    const fn = block(mergeSource, 'const changeLaneCount = async', 2_500);
     expect(fn).toContain('window.desktop.settings.update({ mergeLaneCount: nextCount })');
     expect(fn).toContain('setSettings(next);');
     expect(fn).not.toMatch(/setSettings\(next\);\s*notify\(/);
