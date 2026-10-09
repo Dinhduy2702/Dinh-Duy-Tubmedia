@@ -14,6 +14,7 @@ import {
 import { useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useAppStore } from '../stores/app-store';
+import { useIsLightTheme } from '../hooks/use-is-light-theme';
 import { createUiEventId } from '../utils/ui-id';
 import { compareAppVersions, isNewerAppVersion } from '../../../shared/app-version';
 
@@ -93,7 +94,7 @@ export function Topbar(): React.JSX.Element {
   const [busy, setBusy] = useState(false);
   const [themeBusy, setThemeBusy] = useState(false);
 
-  const isLight = document.documentElement.classList.contains('light');
+  const isLight = useIsLightTheme();
   const updateRemoteVersion = updateStatus?.info?.version ?? null;
   const updateRelation =
     updateRemoteVersion && updateStatus?.currentVersion
@@ -112,18 +113,14 @@ export function Topbar(): React.JSX.Element {
   const toggleTheme = async (): Promise<void> => {
     if (!settings || themeBusy) return;
     const nextTheme = isLight ? 'dark' : 'light';
-    const previousTheme = settings.theme;
-    document.documentElement.classList.toggle('light', nextTheme === 'light');
+    // Đổi ngay trong store (App bật lớp 'light', nhãn đổi cùng lúc qua useIsLightTheme); lưu lỗi thì trả lại như cũ.
+    const { setSettings } = useAppStore.getState();
+    setSettings({ ...settings, theme: nextTheme });
     setThemeBusy(true);
     try {
-      const next = await window.desktop.settings.update({ theme: nextTheme });
-      useAppStore.getState().setSettings(next);
+      setSettings(await window.desktop.settings.update({ theme: nextTheme }));
     } catch (error) {
-      document.documentElement.classList.toggle(
-        'light',
-        previousTheme === 'light' ||
-          (previousTheme === 'system' && window.matchMedia('(prefers-color-scheme: light)').matches)
-      );
+      setSettings(settings);
       setError(error instanceof Error ? error.message : String(error));
     } finally {
       setThemeBusy(false);

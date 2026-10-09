@@ -1,7 +1,8 @@
-import { lazy, Suspense, useEffect, useRef } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef } from 'react';
 import { LoaderCircle, RefreshCcw } from 'lucide-react';
 import { useAppStore } from '../stores/app-store';
 import { useDesktopEvents } from '../hooks/use-desktop-events';
+import { useIsLightTheme } from '../hooks/use-is-light-theme';
 import { Sidebar } from '../layout/Sidebar';
 import { Topbar } from '../layout/Topbar';
 import { AttentionCenter } from '../components/AttentionCenter';
@@ -92,18 +93,12 @@ export function App(): React.JSX.Element {
     void bootstrap();
   }, [bootstrap]);
 
-  useEffect(() => {
-    const media = window.matchMedia('(prefers-color-scheme: light)');
-    const apply = (): void => {
-      document.documentElement.classList.toggle(
-        'light',
-        settings?.theme === 'light' || (settings?.theme === 'system' && media.matches)
-      );
-    };
-    apply();
-    media.addEventListener('change', apply);
-    return () => media.removeEventListener('change', apply);
-  }, [settings?.theme]);
+  // Đợt 5 mục 10: cùng nguồn với nhãn Sáng/Tối ở thanh trên; useLayoutEffect bật lớp trước khi trình duyệt vẽ khung hình
+  // nên lớp của <html> và nhãn đổi trong cùng một lần vẽ.
+  const isLight = useIsLightTheme();
+  useLayoutEffect(() => {
+    document.documentElement.classList.toggle('light', isLight);
+  }, [isLight]);
 
   useEffect(() => {
     document.documentElement.classList.toggle('is-processing', processing);

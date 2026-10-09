@@ -367,6 +367,7 @@ src/renderer/src/env.d.ts
 src/renderer/src/features/projects/CreateProjectDialog.tsx
 src/renderer/src/features/projects/ImportLinksDialog.tsx
 src/renderer/src/hooks/use-desktop-events.ts
+src/renderer/src/hooks/use-is-light-theme.ts
 src/renderer/src/hooks/use-lane-logs.ts
 src/renderer/src/layout/Sidebar.tsx
 src/renderer/src/layout/Topbar.tsx
@@ -452,6 +453,7 @@ src/shared/utils/secret-redaction.ts
 src/shared/utils/sha256-sums.ts
 src/shared/utils/shared-folder-policy.ts
 src/shared/utils/text-encoding.ts
+src/shared/utils/theme.ts
 src/shared/utils/timestamp.ts
 src/shared/utils/tooltip-placement.ts
 src/shared/utils/ui-error.ts
@@ -615,6 +617,7 @@ tests/unit/taskbar-tray-icon.test.ts
 tests/unit/temporary-cleanup-protection.test.ts
 tests/unit/temporary-cleanup-unowned.test.ts
 tests/unit/temporary-cleanup.test.ts
+tests/unit/theme-label.test.ts
 tests/unit/timeline-merge-recovery-hotfix12.test.ts
 tests/unit/timeline-service-safety.test.ts
 tests/unit/timeline.test.ts

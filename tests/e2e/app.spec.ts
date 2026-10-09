@@ -3498,3 +3498,93 @@ test('Ô chú thích ⓘ/⚠: tự chọn phía, nằm gọn trong cửa sổ, k
     removeSandbox(sandbox);
   }
 });
+
+/**
+ * Đợt 5 mục 10 (rà soát bản cài 2026-10-02): nhãn/công tắc Sáng/Tối ở thanh trên đọc lớp DOM lúc vẽ nên ghi giao diện cũ
+ * sau khi đổi ở Cài đặt, và không đổi theo khi Windows chuyển sáng/tối lúc đang chọn "Theo giao diện Windows".
+ */
+test('Đợt 5 mục 10: nhãn Sáng/Tối ở thanh trên luôn khớp giao diện đang hiện', async () => {
+  test.setTimeout(120_000);
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-theme-'));
+  const env = {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    ),
+    NODE_ENV: 'test',
+    TUBMEDIA_E2E: '1',
+    TUBMEDIA_E2E_USER_DATA: path.join(sandbox, 'userdata'),
+    PLAYWRIGHT_TEST: '1',
+    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+  };
+  const state = async (): Promise<string> =>
+    shellWindow!.evaluate(() => {
+      const light = document.documentElement.classList.contains('light');
+      const label = document.querySelector('.topbar-theme-switch-label')?.textContent?.trim();
+      const checked = document.querySelector('.topbar-theme-switch')?.getAttribute('aria-checked');
+      return `${light ? 'html=sáng' : 'html=tối'} nhãn=${label} aria-checked=${checked}`;
+    });
+  const LIGHT = 'html=sáng nhãn=Sáng aria-checked=true';
+  const DARK = 'html=tối nhãn=Tối aria-checked=false';
+  // Lấy mẫu mỗi khung hình: thời gian dài nhất nhãn ở thanh trên LỆCH giao diện đang hiện (lớp 'light' của <html>).
+  const startSampler = async (): Promise<void> =>
+    shellWindow!.evaluate(() => {
+      const scope = window as unknown as { __themeLag?: { since: number | null; worst: number; stop: boolean } };
+      if (scope.__themeLag) scope.__themeLag.stop = true;
+      const lag = { since: null as number | null, worst: 0, stop: false };
+      scope.__themeLag = lag;
+      const tick = (now: number): void => {
+        if (lag.stop) return;
+        const light = document.documentElement.classList.contains('light');
+        const label = document.querySelector('.topbar-theme-switch-label')?.textContent?.trim();
+        const mismatch = label !== (light ? 'Sáng' : 'Tối');
+        if (mismatch) {
+          lag.since ??= now;
+          lag.worst = Math.max(lag.worst, now - lag.since);
+        } else lag.since = null;
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+  const worstLag = async (): Promise<number> =>
+    shellWindow!.evaluate(() => Math.round((window as unknown as { __themeLag: { worst: number } }).__themeLag.worst));
+  const chooseTheme = async (option: string): Promise<void> => {
+    await shellWindow!.locator('label', { hasText: /^Giao diện/ }).locator('select').first().selectOption({ label: option });
+    await shellWindow!.getByRole('button', { name: 'Lưu cài đặt' }).click();
+  };
+
+  try {
+    electronApplication = await electron.launch({ args: [mainEntry], cwd: projectRoot, env, timeout: 45_000 });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await shellWindow.emulateMedia({ colorScheme: 'dark' });
+    await shellWindow.getByRole('navigation', { name: 'Điều hướng chính' }).getByRole('button', { name: 'Cài đặt', exact: true }).click();
+    await shellWindow.locator('.settings-nav button', { hasText: 'Chung' }).first().click();
+    await startSampler();
+
+    // Đổi ở Cài đặt: Màu sáng rồi Màu tối — nhãn phải đổi theo ngay, không cần thao tác gì thêm.
+    await chooseTheme('Màu sáng');
+    await expect.poll(state, { timeout: 5_000 }).toBe(LIGHT);
+    await chooseTheme('Màu tối');
+    await expect.poll(state, { timeout: 5_000 }).toBe(DARK);
+
+    // "Theo giao diện Windows": Windows chuyển sáng/tối khi app đang mở → nhãn đổi theo.
+    await chooseTheme('Theo giao diện Windows');
+    await expect.poll(state, { timeout: 5_000 }).toBe(DARK);
+    await shellWindow.emulateMedia({ colorScheme: 'light' });
+    await expect.poll(state, { timeout: 5_000 }).toBe(LIGHT);
+    await shellWindow.emulateMedia({ colorScheme: 'dark' });
+    await expect.poll(state, { timeout: 5_000 }).toBe(DARK);
+
+    // Bấm công tắc ở thanh trên vẫn đúng.
+    await shellWindow.locator('.topbar-theme-switch').click();
+    await expect.poll(state, { timeout: 5_000 }).toBe(LIGHT);
+    await shellWindow.waitForTimeout(500);
+    // Suốt các lần đổi ở trên, nhãn không được lệch giao diện đang hiện quá 1–2 khung hình (trước khi sửa: lệch tới lần
+    // vẽ lại kế tiếp của thanh trên, khoảng một giây).
+    expect(await worstLag(), 'nhãn Sáng/Tối lệch giao diện đang hiện (ms)').toBeLessThan(150);
+  } finally {
+    await closeElectronApplication();
+    removeSandbox(sandbox);
+  }
+});
