@@ -3398,6 +3398,74 @@ test('Đợt 4 mục 15: không chạy công cụ đặt sẵn trong thư mục 
 });
 
 /**
+ * Phát hiện phụ Đợt 5 (2026-10-09), hệ quả mục 15: mở app từ mã nguồn bằng tệp main đã build (đúng như e2e và CI) thì
+ * app.getAppPath() là out\main → app không thấy tool\ của dự án, tự tải yt-dlp từ mạng vào out\main\tool sau mỗi lần
+ * build. Mở với dữ liệu tách biệt, KHÔNG cấu hình đường dẫn công cụ: yt-dlp phải lấy từ <gốc dự án>\tool.
+ */
+test('Phát hiện phụ Đợt 5: bản chạy từ mã nguồn dùng yt-dlp trong thư mục tool của dự án', async () => {
+  test.setTimeout(120_000);
+  const projectYtDlp = path.join(projectRoot, 'tool', 'yt-dlp.exe');
+  test.skip(!fs.existsSync(projectYtDlp), 'Thư mục tool của dự án chưa có yt-dlp.exe.');
+
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-source-tool-root-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+  db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
+  const putSetting = db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)');
+  putSetting.run(
+    'app',
+    JSON.stringify({ theme: 'dark', startWithWindows: false, autoCheckAppUpdates: false, autoCheckToolUpdates: false }),
+    new Date().toISOString()
+  );
+  putSetting.run('initialized', 'true', new Date().toISOString());
+  db.close();
+
+  type ToolRow = { name: string; available: boolean; executablePath: string | null };
+  try {
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+        ),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+
+    let ytDlpPath: string | null = null;
+    await expect
+      .poll(
+        async () => {
+          const tools = await shellWindow!.evaluate(
+            () => (window as unknown as { desktop: { tools: { list: () => Promise<ToolRow[]> } } }).desktop.tools.list()
+          );
+          const ytDlp = tools.find((tool) => tool.name === 'yt-dlp');
+          ytDlpPath = ytDlp?.available ? ytDlp.executablePath : null;
+          return ytDlpPath;
+        },
+        { timeout: 60_000 }
+      )
+      .not.toBeNull();
+    expect(path.resolve(ytDlpPath!).toLowerCase(), 'yt-dlp lấy từ <gốc dự án>\\tool').toBe(
+      path.resolve(projectYtDlp).toLowerCase()
+    );
+  } finally {
+    await closeElectronApplication();
+    removeSandbox(sandbox);
+  }
+});
+
+/**
  * Người dùng báo (2026-10-08) sau phần A: ô chú thích ⓘ (và ⚠ thư mục tạm dùng chung — cùng cơ chế) che nội dung bên dưới,
  * "đứng" sai (rê sang ô thì ô ở lại), và bị cắt ở cửa sổ nhỏ. Đo thật ở cửa sổ nhỏ và toàn màn hình, mọi ⓘ/⚠ trên các trang
  * đã thấy lỗi: ô phải nằm GỌN trong cửa sổ, không bị khung cha cắt/che (phần tử trên cùng tại các điểm trong ô là chính ô),

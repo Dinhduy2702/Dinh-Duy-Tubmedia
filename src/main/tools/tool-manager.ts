@@ -1,7 +1,7 @@
 import type { BrowserWindow } from 'electron';
-import { constants } from 'node:fs';
+import { constants, existsSync } from 'node:fs';
 import { access, mkdir, readdir, stat } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, parse } from 'node:path';
 import type { AppSettings, ToolStatus } from '@shared/types/domain.js';
 import type { ProcessManager } from '../processes/process-manager.js';
 import type { Logger } from '../logging/logger.js';
@@ -21,6 +21,23 @@ const versionArgs: Record<ToolName, string[]> = {
   ffplay: ['-version'],
   aria2c: ['-v']
 };
+
+/**
+ * Thư mục chứa tool\ của chính ứng dụng. Bản đóng gói: appPath. Bản chạy từ mã nguồn: gốc dự án — thư mục gần nhất có
+ * package.json tính từ appPath, vì mở bằng tệp main đã build (electron out/main/index.js — e2e, CI) thì appPath là
+ * out\main chứ không phải gốc dự án (phát hiện phụ Đợt 5, hệ quả mục 15). Chỉ đi lên từ appPath, không phụ thuộc thư mục
+ * đang đứng; không thấy package.json trong vài cấp thì giữ appPath.
+ */
+export function applicationToolRoot(appPath: string, packaged: boolean): string {
+  if (packaged) return appPath;
+  let directory = appPath;
+  for (let level = 0; level < 4; level += 1) {
+    if (existsSync(join(directory, 'package.json'))) return directory;
+    if (directory === parse(directory).root) break;
+    directory = dirname(directory);
+  }
+  return appPath;
+}
 
 function firstLine(text: string): string | null {
   return text.split(/\r?\n/).map((value) => value.trim()).find(Boolean) ?? null;
@@ -91,6 +108,7 @@ export class ToolManager {
   private requiredReadyTail: Promise<void> = Promise.resolve();
   private requiredRepairHandler: (() => Promise<ToolStatus[]>) | null = null;
   private readonly wingetCandidateCache = new Map<ToolName, string[]>();
+  private readonly toolRoot: string;
   private statuses: ToolStatus[] = TOOL_NAMES.map((name) => ({
     name,
     available: false,
@@ -109,9 +127,11 @@ export class ToolManager {
     private readonly getSettings: () => AppSettings,
     private readonly resourcesPath: string,
     private readonly userDataPath: string,
-    private readonly appPath: string,
+    appPath: string,
     private readonly packaged: boolean
-  ) {}
+  ) {
+    this.toolRoot = applicationToolRoot(appPath, packaged);
+  }
 
   public setWindow(window: BrowserWindow): void { this.window = window; }
 
@@ -191,7 +211,7 @@ export class ToolManager {
   public writableToolFolder(): string {
     return this.packaged
       ? join(this.userDataPath, 'tools', 'current')
-      : join(this.appPath, 'tool');
+      : join(this.toolRoot, 'tool');
   }
 
   public async ensureWritableToolFolder(): Promise<string> {
@@ -278,8 +298,8 @@ export class ToolManager {
     if (configured && await this.isFile(configured)) candidates.push({ path: configured, source: 'local' });
 
     // The user's portable folder: <project>\tool\yt-dlp.exe, ffmpeg.exe, ffprobe.exe, ffplay.exe...
-    candidates.push({ path: join(this.appPath, 'tool', executable), source: 'local' });
-    candidates.push({ path: join(this.appPath, 'tools', executable), source: 'local' });
+    candidates.push({ path: join(this.toolRoot, 'tool', executable), source: 'local' });
+    candidates.push({ path: join(this.toolRoot, 'tools', executable), source: 'local' });
     // Đợt 4 mục 15 (rà soát bản cài 1.5.0): KHÔNG tìm trong <thư mục đang đứng khi mở app>\tool. Thư mục đó do cách mở app
     // quyết định (lối tắt, dòng lệnh, mở từ thư mục tải về…), trước đây lại được ưu tiên hơn cả công cụ đi kèm bộ cài — ai
     // đặt được ffmpeg.exe/yt-dlp.exe vào đó là app chạy tệp đó. Bản chạy từ mã nguồn đã có thư mục tool của chính app ở trên.
