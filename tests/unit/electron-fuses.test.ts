@@ -57,7 +57,8 @@ describe('biến môi trường chỉ dành cho phát triển', () => {
     TUBMEDIA_E2E: '1',
     TUBMEDIA_E2E_USER_DATA: 'C:\\e2e-data',
     TUBMEDIA_E2E_FAKE_UPDATE_STATUS_JSON: '{"state":"available"}',
-    TUBMEDIA_E2E_SHUTDOWN_HANG_STEP: 'queue'
+    TUBMEDIA_E2E_SHUTDOWN_HANG_STEP: 'queue',
+    TUBMEDIA_E2E_QUEUE_START_DELAY_MS: '8000'
   } as NodeJS.ProcessEnv;
 
   it('bản đóng gói bỏ qua hoàn toàn ELECTRON_RENDERER_URL và TUBMEDIA_E2E', () => {
@@ -66,7 +67,8 @@ describe('biến môi trường chỉ dành cho phát triển', () => {
       e2e: false,
       e2eUserData: undefined,
       fakeUpdateStatusJson: undefined,
-      e2eShutdownHangStep: undefined
+      e2eShutdownHangStep: undefined,
+      e2eQueueStartDelayMs: 0
     });
   });
 
@@ -76,7 +78,8 @@ describe('biến môi trường chỉ dành cho phát triển', () => {
       e2e: true,
       e2eUserData: 'C:\\e2e-data',
       fakeUpdateStatusJson: '{"state":"available"}',
-      e2eShutdownHangStep: 'queue'
+      e2eShutdownHangStep: 'queue',
+      e2eQueueStartDelayMs: 8000
     });
   });
 
@@ -86,14 +89,16 @@ describe('biến môi trường chỉ dành cho phát triển', () => {
       e2e: false,
       e2eUserData: undefined,
       fakeUpdateStatusJson: undefined,
-      e2eShutdownHangStep: undefined
+      e2eShutdownHangStep: undefined,
+      e2eQueueStartDelayMs: 0
     });
     expect(readDevelopmentEnvironment({ TUBMEDIA_E2E: 'true', ELECTRON_RENDERER_URL: '' }, false)).toEqual({
       rendererUrl: undefined,
       e2e: false,
       e2eUserData: undefined,
       fakeUpdateStatusJson: undefined,
-      e2eShutdownHangStep: undefined
+      e2eShutdownHangStep: undefined,
+      e2eQueueStartDelayMs: 0
     });
   });
 

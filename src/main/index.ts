@@ -34,7 +34,7 @@ let shutdownMode: 'preserve' | 'cancel' = 'preserve';
 let allowWindowClose = false;
 
 const developmentEnvironment = readDevelopmentEnvironment(process.env, app.isPackaged);
-const { e2e: isE2E, e2eUserData, fakeUpdateStatusJson, e2eShutdownHangStep } = developmentEnvironment;
+const { e2e: isE2E, e2eUserData, fakeUpdateStatusJson, e2eShutdownHangStep, e2eQueueStartDelayMs } = developmentEnvironment;
 
 if (isE2E && e2eUserData) {
   app.setPath('userData', e2eUserData);
@@ -357,6 +357,8 @@ function initializeApplication(): void {
         error instanceof Error ? error.message : String(error)
       );
     })
+    // Chỉ khi chạy e2e từ mã nguồn (mặc định 0): mô phỏng kết nối công cụ lâu lúc mở app.
+    .then(() => (e2eQueueStartDelayMs > 0 ? new Promise<void>((resolve) => setTimeout(resolve, e2eQueueStartDelayMs)) : undefined))
     .finally(() => {
       // Hàng đợi chỉ được khôi phục sau khi trạng thái công cụ đã được xác định.
       // Cổng canExecute trong QueueManager tiếp tục giữ tác vụ nếu công cụ bắt buộc vẫn thiếu.

@@ -167,6 +167,8 @@ export class AppContext {
     );
   }
   public initialize(): void {
+    // Trước mọi bước khác và trước khi đăng ký IPC: tác vụ có lúc mở app (chỉ những tác vụ này mới bị giữ "dở dang").
+    this.queue.markAppOpened();
     this.settings.initialize();
     logMigrationReports(this.database.migrationReports, this.logger);
     // Bản sao cookies tạm còn sót khi app bị tắt ngang giữa lượt yt-dlp: xóa (chứa cookies — không để lại).

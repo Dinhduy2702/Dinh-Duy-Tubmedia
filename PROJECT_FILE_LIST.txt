@@ -480,6 +480,7 @@ tests/integration/queue-attempts.test.ts
 tests/integration/queue-load-governor.test.ts
 tests/integration/queue-retry-requeue.test.ts
 tests/integration/queue-startup-hold.test.ts
+tests/integration/queue-startup-session-jobs.test.ts
 tests/integration/queue-temp-cleanup-safety.test.ts
 tests/integration/restore-sources-policy.test.ts
 tests/integration/settings-restore-policy.test.ts

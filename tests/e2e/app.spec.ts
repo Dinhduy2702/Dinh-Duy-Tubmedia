@@ -3691,6 +3691,9 @@ test('Đợt 5 mục 19: link không phải trang video báo đúng "link không
     }),
     new Date().toISOString()
   );
+  // CSDL mới chưa có khóa 'initialized' thì SettingsService.initialize() ghi đè cài đặt mặc định lên cài đặt chèn ở trên
+  // (mất đường dẫn công cụ → app tự tải yt-dlp từ mạng, chậm và phụ thuộc mạng). Đánh dấu đã khởi tạo để giữ cài đặt.
+  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
   db.close();
 
   let server: Server | undefined;
@@ -3745,8 +3748,8 @@ test('Đợt 5 mục 19: link không phải trang video báo đúng "link không
       )
       .toBe(true);
 
-    // Chờ hàng đợi khởi động xong (startupPrompt chờ đúng mốc đó). Tạo tác vụ TRƯỚC mốc này thì bước giữ tác vụ dở lúc
-    // mở app sẽ giữ nhầm cả tác vụ mới (APP_INTERRUPTED) — phát hiện khi viết bài này, đã báo riêng, chưa sửa.
+    // Chờ hàng đợi khởi động xong (startupPrompt chờ đúng mốc đó) để bài này chỉ kiểm phân loại lỗi. Tác vụ tạo TRƯỚC mốc
+    // này từng bị giữ nhầm APP_INTERRUPTED (phát hiện khi viết bài này) — đã sửa, có bài riêng "Khởi động: tác vụ tạo ngay…".
     await shellWindow.evaluate(() => (window as unknown as { desktop: DesktopUnsupportedApi }).desktop.queue.startupPrompt());
     await shellWindow.evaluate(
       (input) => (window as unknown as { desktop: DesktopUnsupportedApi }).desktop.workbench.startDownload(input),
@@ -3839,6 +3842,150 @@ test('Đợt 5 mục 14: Chẩn đoán "Lỗi gần nhất" nêu đúng nguyên 
     await expect(list.locator('article').nth(1)).toContainText('Liên kết không phải trang video');
     await expect(list).not.toContainText('Không thể hoàn tất thao tác');
   } finally {
+    await closeElectronApplication();
+    removeSandbox(sandbox);
+  }
+});
+
+/**
+ * Phát hiện 2026-10-09 (khi làm Đợt 5 mục 19): mở app rồi tải NGAY — trước khi hàng đợi khởi động xong (chờ kết nối công
+ * cụ: vài giây, có khi vài phút nếu phải tải/sửa công cụ) — thì tác vụ mới bị giữ nhầm ở APP_INTERRUPTED "Ứng dụng bị đóng
+ * giữa chừng". Hai lần mở app thật:
+ *  1) tạo một tác vụ rồi tắt ngang app khi nó còn đang chạy → tác vụ dở dang THẬT của lần trước;
+ *  2) mở lại (làm chậm khởi động hàng đợi 15 s để chắc chắn rơi vào khoảng có lỗi), tạo tác vụ mới ngay khi cửa sổ vừa mở,
+ *     TỰ KIỂM là đã tạo trước mốc khởi động xong; khẳng định: tác vụ cũ VẪN bị giữ (Đợt 1 mục 2 không đổi), tác vụ mới
+ *     chạy bình thường.
+ */
+test('Khởi động: tác vụ tạo ngay khi vừa mở app không bị giữ nhầm là "dở dang"; tác vụ dở của lần trước vẫn bị giữ', async () => {
+  test.setTimeout(240_000);
+  const toolsDirectory = resolveToolsDirectoryForTest();
+  test.skip(!toolsDirectory, 'Không tìm thấy yt-dlp/ffmpeg/ffprobe trên máy này để chạy bài kiểm thật.');
+
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-startup-new-job-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+  db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
+  const putSetting = db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)');
+  putSetting.run(
+    'app',
+    JSON.stringify({
+      theme: 'dark',
+      startWithWindows: false,
+      autoCheckAppUpdates: false,
+      autoCheckToolUpdates: false,
+      ytdlpPath: path.join(toolsDirectory!, 'yt-dlp.exe'),
+      ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+      ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+    }),
+    new Date().toISOString()
+  );
+  // CSDL mới chưa có khóa 'initialized' thì SettingsService.initialize() ghi đè cài đặt mặc định lên cài đặt chèn ở trên
+  // (mất đường dẫn công cụ → app tự tải yt-dlp từ mạng, chậm và phụ thuộc mạng). Đánh dấu đã khởi tạo để giữ cài đặt.
+  putSetting.run('initialized', 'true', new Date().toISOString());
+  db.close();
+
+  type JobRow = { id: string; type: string; status: string; errorCode: string | null; createdAt: string };
+  interface DesktopStartupApi {
+    workbench: { startDownload: (input: Record<string, unknown>) => Promise<unknown> };
+    queue: { list: () => Promise<JobRow[]>; startupPrompt: () => Promise<{ count: number }> };
+  }
+  let server: Server | undefined;
+  try {
+    // /treo: không bao giờ trả lời → tác vụ còn "đang chạy" khi tắt app. Đường khác: trang HTML không có video.
+    server = createServer((request, response) => {
+      if (request.url?.startsWith('/treo')) return;
+      response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      response.end('<html><head><title>Trang khong co video</title></head><body>Khong co video.</body></html>');
+    });
+    const port = await new Promise<number>((resolvePort) => {
+      server!.listen(0, '127.0.0.1', () => resolvePort((server!.address() as { port: number }).port));
+    });
+    const lane = (slot: string, name: string, url: string): Record<string, unknown> => {
+      const outputFolder = path.join(sandbox, slot, 'ket-qua');
+      const tempFolder = path.join(sandbox, slot, 'tam');
+      for (const folder of [outputFolder, tempFolder]) fs.mkdirSync(folder, { recursive: true });
+      return { slot, name, linksText: url, outputFolder, tempFolder, resourceProfileId: 'resource-balanced' };
+    };
+    const launch = async (delayMs: string): Promise<void> => {
+      electronApplication = await electron.launch({
+        args: [mainEntry],
+        cwd: projectRoot,
+        env: {
+          ...Object.fromEntries(
+            Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+          ),
+          NODE_ENV: 'test',
+          TUBMEDIA_E2E: '1',
+          TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+          TUBMEDIA_E2E_QUEUE_START_DELAY_MS: delayMs,
+          PLAYWRIGHT_TEST: '1',
+          ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+        },
+        timeout: 45_000
+      });
+      mainProcessId = electronApplication.process().pid;
+      shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+      await shellWindow.waitForFunction(() => Boolean((window as unknown as { desktop?: unknown }).desktop), undefined, {
+        timeout: 30_000
+      });
+    };
+    const jobs = (): Promise<JobRow[]> =>
+      shellWindow!.evaluate(() => (window as unknown as { desktop: DesktopStartupApi }).desktop.queue.list());
+    const queueReady = (): Promise<{ count: number }> =>
+      shellWindow!.evaluate(() => (window as unknown as { desktop: DesktopStartupApi }).desktop.queue.startupPrompt());
+    const startDownload = (input: Record<string, unknown>): Promise<unknown> =>
+      shellWindow!.evaluate(
+        (value) => (window as unknown as { desktop: DesktopStartupApi }).desktop.workbench.startDownload(value),
+        input
+      );
+
+    // 1) Lần mở trước: tác vụ đang chạy thì app bị tắt ngang.
+    await launch('0');
+    await queueReady();
+    await startDownload(lane('download-2', 'Lan mo truoc', `http://127.0.0.1:${port}/treo/video.html`));
+    let oldJobId = '';
+    await expect
+      .poll(
+        async () => {
+          const job = (await jobs()).find((item) => item.type === 'download');
+          oldJobId = job?.id ?? '';
+          return job?.status;
+        },
+        { timeout: 30_000 }
+      )
+      .toMatch(/analyzing|downloading/);
+    forceKillProcessTree(mainProcessId);
+    await closeElectronApplication();
+
+    // 2) Mở lại, tải NGAY khi cửa sổ vừa mở.
+    await launch('15000');
+    await startDownload(lane('download-1', 'Tai ngay khi vua mo app', `http://127.0.0.1:${port}/trang-khong-co-video.html`));
+    const fresh = (await jobs()).find((item) => item.type === 'download' && item.id !== oldJobId)!;
+    // Chờ hàng đợi khởi động xong (startupPrompt trả về đúng lúc đó) rồi xác nhận ĐÚNG là tác vụ mới được tạo trước mốc
+    // này — nếu không, bài này chưa chạm tới lỗi.
+    await queueReady();
+    expect(Date.parse(fresh.createdAt), 'tác vụ mới được tạo TRƯỚC khi hàng đợi khởi động xong').toBeLessThan(Date.now() - 1_000);
+
+    const old = (await jobs()).find((item) => item.id === oldJobId)!;
+    expect(old.status, 'tác vụ dở của lần trước VẪN bị giữ').toBe('paused');
+    expect(old.errorCode).toBe('APP_INTERRUPTED');
+
+    let last: JobRow | undefined;
+    await expect
+      .poll(
+        async () => {
+          last = (await jobs()).find((item) => item.id === fresh.id);
+          return ['failed', 'paused', 'completed', 'cancelled'].includes(last?.status ?? '');
+        },
+        { timeout: 90_000 }
+      )
+      .toBe(true);
+    expect(last!.errorCode, 'tác vụ mới không bị giữ nhầm "ứng dụng bị đóng giữa chừng"').not.toBe('APP_INTERRUPTED');
+    expect(last!.status, 'tác vụ mới chạy thật (trang không có video → thất bại có phân loại)').toBe('failed');
+  } finally {
+    server?.closeAllConnections();
+    server?.close();
     await closeElectronApplication();
     removeSandbox(sandbox);
   }

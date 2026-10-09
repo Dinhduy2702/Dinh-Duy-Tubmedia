@@ -11,6 +11,9 @@ export interface DevelopmentEnvironment {
   /** 2026-10-06: tên bước dọn dẹp khi thoát cố ý làm TREO, để bài e2e "Thoát an toàn" chứng minh app vẫn thoát hẳn.
    * Chỉ có tác dụng khi e2e=true và chạy từ mã nguồn. */
   e2eShutdownHangStep: string | undefined;
+  /** 2026-10-09: làm chậm queue.start() (ms, tối đa 60 s) — mô phỏng kết nối công cụ lâu lúc mở app, để bài e2e tạo tác vụ
+   * chắc chắn TRƯỚC khi hàng đợi khởi động xong. Chỉ có tác dụng khi e2e=true và chạy từ mã nguồn; còn lại 0. */
+  e2eQueueStartDelayMs: number;
 }
 
 /**
@@ -28,15 +31,19 @@ export function readDevelopmentEnvironment(
       e2e: false,
       e2eUserData: undefined,
       fakeUpdateStatusJson: undefined,
-      e2eShutdownHangStep: undefined
+      e2eShutdownHangStep: undefined,
+      e2eQueueStartDelayMs: 0
     };
   }
+  const queueStartDelay = Number(env.TUBMEDIA_E2E_QUEUE_START_DELAY_MS);
   return {
     rendererUrl: env.ELECTRON_RENDERER_URL || undefined,
     e2e: env.TUBMEDIA_E2E === '1',
     e2eUserData: env.TUBMEDIA_E2E_USER_DATA || undefined,
     fakeUpdateStatusJson: env.TUBMEDIA_E2E_FAKE_UPDATE_STATUS_JSON || undefined,
     e2eShutdownHangStep:
-      env.TUBMEDIA_E2E === '1' ? env.TUBMEDIA_E2E_SHUTDOWN_HANG_STEP || undefined : undefined
+      env.TUBMEDIA_E2E === '1' ? env.TUBMEDIA_E2E_SHUTDOWN_HANG_STEP || undefined : undefined,
+    e2eQueueStartDelayMs:
+      env.TUBMEDIA_E2E === '1' && Number.isFinite(queueStartDelay) ? Math.min(Math.max(0, Math.trunc(queueStartDelay)), 60_000) : 0
   };
 }

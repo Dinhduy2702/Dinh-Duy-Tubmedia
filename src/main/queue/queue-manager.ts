@@ -200,6 +200,9 @@ export class QueueManager {
     this.startupReadyResolve = resolve;
   });
   private startupPromptConsumed = false;
+  private appOpenedJobIds: ReadonlySet<string> | null = null;
+  private readonly claimedBeforeStartup = new Set<string>();
+  private startupDone = false;
   private cookieJar: CookieJarStore | null = null;
 
   /** Trạng thái tệp cookies (số thế hệ lưu qua app, hash app ghi lần cuối) để biết cookies có THẬT SỰ đổi. */
@@ -231,6 +234,25 @@ export class QueueManager {
     private readonly logger: Logger,
     private readonly canExecute: () => boolean = () => true
   ) {}
+  /**
+   * Chụp danh sách tác vụ ĐÃ CÓ lúc mở app (AppContext.initialize — trước khi đăng ký IPC, nên giao diện chưa tạo được tác
+   * vụ nào). Phát hiện 2026-10-09 (Đợt 5): start() chỉ chạy sau khi kết nối xong công cụ (vài giây, giao diện đã dùng
+   * được); bước giữ tác vụ dở lúc khởi động từng giữ MỌI tác vụ đang chờ — kể cả tác vụ người dùng vừa tạo, vừa bấm Tiếp tục
+   * hay Thử lại trong khoảng đó — ở APP_INTERRUPTED "Ứng dụng bị đóng giữa chừng". Giờ chỉ giữ tác vụ có trong ảnh chụp này
+   * mà người dùng chưa đụng tới. Không gọi (test cũ dựng QueueManager trực tiếp) → giữ như trước: mọi tác vụ lúc start().
+   */
+  public markAppOpened(): void {
+    this.appOpenedJobIds = new Set(this.repo.list().map((job) => job.id));
+  }
+  /** Người dùng bấm Tiếp tục/Thử lại tác vụ cũ trước khi hàng đợi khởi động xong: làm theo người dùng, không giữ lại. */
+  private claimBeforeStartup(jobIds: Iterable<string>): void {
+    if (this.startupDone || !this.appOpenedJobIds) return;
+    for (const jobId of jobIds) this.claimedBeforeStartup.add(jobId);
+  }
+  private heldAtStartup(job: QueueJob): boolean {
+    if (!this.appOpenedJobIds) return true;
+    return this.appOpenedJobIds.has(job.id) && !this.claimedBeforeStartup.has(job.id);
+  }
   public setWindow(window: BrowserWindow): void {
     this.window = window;
   }
@@ -266,7 +288,7 @@ export class QueueManager {
     //    MAX_STARTUP_INTERRUPTIONS thì giữ hẳn, kể cả khi người dùng bật tự tiếp tục — tránh một tác vụ
     //    làm sập app rồi chạy lại vô hạn mỗi lần mở.
     for (const job of this.repo.list()) {
-      if (!STARTUP_CRASHED_STATUSES.has(job.status)) continue;
+      if (!STARTUP_CRASHED_STATUSES.has(job.status) || !this.heldAtStartup(job)) continue;
       const interruptions = startupInterruptionsOf(job) + 1;
       if (interruptions > MAX_STARTUP_INTERRUPTIONS) {
         this.repo.update(
@@ -324,6 +346,8 @@ export class QueueManager {
     const touchedProjects = new Set<string>();
     let held = 0;
     for (const job of this.repo.list()) {
+      // Tác vụ tạo (hoặc được người dùng tiếp tục/thử lại) sau lúc mở app không phải "tác vụ dở của lần trước".
+      if (!this.heldAtStartup(job)) continue;
       const startupHeld = job.status === 'paused' && job.errorCode === STARTUP_HELD_CODE;
       const diskBlocked = job.status === 'paused' && job.errorCode === 'DISK_FULL';
       if (!STARTUP_RUNNABLE_STATUSES.has(job.status) && !startupHeld && !diskBlocked) continue;
@@ -369,6 +393,8 @@ export class QueueManager {
   }
 
   private markStartupReady(): void {
+    this.startupDone = true;
+    this.claimedBeforeStartup.clear();
     this.startupReadyResolve?.();
     this.startupReadyResolve = null;
   }
@@ -2350,6 +2376,7 @@ export class QueueManager {
     if (emitChange) this.emit();
   }
   public async resume(jobId: string, emitChange = true): Promise<void> {
+    this.claimBeforeStartup([jobId]);
     const active = this.active.get(jobId);
     const current = this.repo.get(jobId);
     if (!current) throw new InvalidInputError('Tác vụ không tồn tại.');
@@ -2458,6 +2485,7 @@ export class QueueManager {
   }
 
   public retry(jobId: string): void {
+    this.claimBeforeStartup([jobId]);
     const current = this.repo.get(jobId);
     if (!current) throw new InvalidInputError('Tác vụ không tồn tại.');
     if (!['failed', 'interrupted'].includes(current.status)) {
@@ -2481,6 +2509,9 @@ export class QueueManager {
     this.emit();
   }
   public retryFailed(projectId?: string): number {
+    this.claimBeforeStartup(
+      this.repo.list(projectId).filter((job) => job.status === 'failed').map((job) => job.id)
+    );
     this.clearBlockingNoticeKeys(projectId);
     const count = this.repo.retryFailed(projectId);
     this.emit();
