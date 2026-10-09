@@ -53,8 +53,8 @@ const CUT_SUGGESTION_REASON_LABEL: Record<CutSuggestion['startReason'], string> 
 };
 
 /** Bước ② Xem trước & Cắt — hành trình một video (điều hướng 3 bước, đặc tả GĐ 2a).
- * Tải nhanh (bước ①) chưa có lịch sử nhiều tệp qua IPC, nên trang này cho thấy TRUNG THỰC kết quả tải
- * gần nhất (nếu đã xong). Bộ cắt riêng, đơn giản (Giai đoạn 6 mục 2 — 2026-09-23) cắt một đoạn từ MỘT
+ * Đợt 5 mục 13 (rà soát bản cài 1.5.0): liệt kê các video Tải nhanh (bước ①) đã xong mà tệp vẫn còn trên máy,
+ * mới nhất trước (trước đây chỉ xét tác vụ gần nhất — một lần hủy là báo "Chưa có video nào tải xong"). Bộ cắt riêng, đơn giản (Giai đoạn 6 mục 2 — 2026-09-23) cắt một đoạn từ MỘT
  * VIDEO CÓ SẴN TRÊN MÁY (không qua tải) — nhập giờ bắt đầu/kết thúc, xem khung hình thật, chọn sao chép
  * nhanh hoặc cắt chính xác (mã hóa lại). Mục 3 (2026-09-24) thêm đổi tỉ lệ khung hình (9:16/1:1/16:9,
  * nền mờ kiểu CapCut) ngay trong cùng công cụ này — chọn tỉ lệ khác 'original' luôn buộc mã hóa lại nên
@@ -66,7 +66,7 @@ const CUT_SUGGESTION_REASON_LABEL: Record<CutSuggestion['startReason'], string> 
  * chuẩn hóa NHIỀU tệp cùng lúc (Smart Merge) vẫn ở trang Ghép theo Timeline — không lặp lại ở đây. */
 export function StepPreviewCutPage(): React.JSX.Element {
   const setPage = useAppStore((state) => state.setPage);
-  const [latest, setLatest] = useState<QuickDownloadStatus | null>(null);
+  const [recent, setRecent] = useState<QuickDownloadStatus[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   const [sourceFile, setSourceFile] = useState<string | null>(null);
@@ -101,9 +101,9 @@ export function StepPreviewCutPage(): React.JSX.Element {
   useEffect(() => {
     let mounted = true;
     void window.desktop.quickDownload
-      .current()
-      .then((current) => {
-        if (mounted) setLatest(current);
+      .recentCompleted()
+      .then((items) => {
+        if (mounted) setRecent(items);
       })
       .finally(() => {
         if (mounted) setLoaded(true);
@@ -135,7 +135,6 @@ export function StepPreviewCutPage(): React.JSX.Element {
     return () => window.clearInterval(timer);
   }, [status?.taskId, status?.phase]);
 
-  const ready = latest?.phase === 'completed' && Boolean(latest.outputPath);
   const running = Boolean(status && !TERMINAL_PHASES.has(status.phase));
 
   function parsedSeconds(value: string): number | null {
@@ -167,10 +166,10 @@ export function StepPreviewCutPage(): React.JSX.Element {
     }
   }
 
-  function useDownloadedFile(): void {
-    if (!latest?.outputPath) return;
-    setSourceFile(latest.outputPath);
-    setOutputDirectory(latest.outputDirectory || null);
+  function pickDownloadedFile(download: QuickDownloadStatus): void {
+    if (!download.outputPath) return;
+    setSourceFile(download.outputPath);
+    setOutputDirectory(download.outputDirectory || null);
     setStatus(null);
     setError(null);
     setSuggestions([]);
@@ -293,7 +292,7 @@ export function StepPreviewCutPage(): React.JSX.Element {
       title="Video vừa tải"
       subtitle={
         <>
-          Kết quả gần nhất từ{' '}
+          Các video tải xong gần đây từ{' '}
           <span className="tm-step-ref">
             <Download size={13} aria-hidden="true" />
             bước Tải
@@ -301,26 +300,30 @@ export function StepPreviewCutPage(): React.JSX.Element {
         </>
       }
     >
-      {!loaded ? null : ready && latest ? (
-        <div className="step-preview-ready">
-          <div>
-            <b>{latest.title || 'Video đã tải'}</b>
-            <small>{latest.outputPath}</small>
-          </div>
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <button type="button" className="btn" onClick={useDownloadedFile}>
-              <Scissors size={15}/>
-              Cắt đoạn này
-            </button>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => void window.desktop.quickDownload.revealOutput(latest.taskId)}
-            >
-              <FolderOpen size={15}/>
-              Mở vị trí file
-            </button>
-          </div>
+      {!loaded ? null : recent.length > 0 ? (
+        <div className="step-preview-recent-list">
+          {recent.map((download) => (
+            <div key={download.taskId} className="step-preview-recent-row local-cut-file-row">
+              <div>
+                <b>{download.title || 'Video đã tải'}</b>
+                <small title={download.outputPath ?? undefined}>{download.outputPath}</small>
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button type="button" className="btn" disabled={running} onClick={() => pickDownloadedFile(download)}>
+                  <Scissors size={15}/>
+                  Cắt đoạn này
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => void window.desktop.quickDownload.revealOutput(download.taskId)}
+                >
+                  <FolderOpen size={15}/>
+                  Mở vị trí file
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       ) : (
         <EmptyState

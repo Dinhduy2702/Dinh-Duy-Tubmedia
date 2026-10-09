@@ -4075,3 +4075,111 @@ test('Khởi động: tác vụ tạo ngay khi vừa mở app không bị giữ 
     removeSandbox(sandbox);
   }
 });
+
+/**
+ * Đợt 5 mục 13 (rà soát bản cài 1.5.0): trang "Xem trước & Cắt" báo "Chưa có video nào tải xong" dù Tải nhanh có 4 video
+ * hoàn tất — vì chỉ xét tác vụ Tải nhanh gần nhất (khi đó là một tác vụ đã hủy). Chèn lịch sử Tải nhanh đúng như vậy (4 video
+ * xong, tệp còn trên máy; 1 video xong nhưng tệp đã bị xóa; tác vụ mới nhất đã hủy) rồi mở trang thật.
+ */
+test('Đợt 5 mục 13: Xem trước & Cắt liệt kê các video tải xong gần đây dù tác vụ gần nhất đã hủy', async () => {
+  test.setTimeout(120_000);
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-recent-quick-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  const outputDirectory = path.join(sandbox, 'Downloads');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+  fs.mkdirSync(path.join(userDataDirectory, 'quick-download'), { recursive: true });
+  fs.mkdirSync(outputDirectory, { recursive: true });
+  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+  db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
+  const putSetting = db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)');
+  putSetting.run(
+    'app',
+    JSON.stringify({ theme: 'dark', startWithWindows: false, autoCheckAppUpdates: false, autoCheckToolUpdates: false }),
+    new Date().toISOString()
+  );
+  putSetting.run('initialized', 'true', new Date().toISOString());
+  db.close();
+
+  const status = (taskId: string, title: string, phase: string, hour: number, file: string | null): Record<string, unknown> => ({
+    taskId,
+    mode: 'full',
+    mediaMode: 'video-audio',
+    phase,
+    progress: phase === 'completed' ? 100 : 40,
+    title,
+    message: '',
+    speed: '',
+    eta: '',
+    downloadedBytes: 0,
+    totalBytes: 0,
+    outputPath: file,
+    outputDirectory,
+    requestedStartSeconds: null,
+    requestedEndSeconds: null,
+    actualDurationSeconds: null,
+    accurateCut: false,
+    startedAt: `2026-10-01T0${hour}:00:00.000Z`,
+    completedAt: `2026-10-01T0${hour}:05:00.000Z`,
+    error: phase === 'cancelled' ? 'Đã hủy' : null,
+    errorCode: null,
+    warnings: []
+  });
+  const file = (name: string): string => path.join(outputDirectory, name);
+  for (const name of ['video-mot.mp4', 'video-hai.mp4', 'video-ba.mp4', 'video-bon.mp4']) fs.writeFileSync(file(name), 'video');
+  fs.writeFileSync(
+    path.join(userDataDirectory, 'quick-download', 'state.json'),
+    JSON.stringify({
+      version: 1,
+      statuses: [
+        status('t1', 'Video một', 'completed', 1, file('video-mot.mp4')),
+        status('t2', 'Video hai', 'completed', 2, file('video-hai.mp4')),
+        status('t3', 'Video đã xóa khỏi máy', 'completed', 3, file('video-da-xoa.mp4')),
+        status('t4', 'Video ba', 'completed', 4, file('video-ba.mp4')),
+        status('t5', 'Video bốn', 'completed', 5, file('video-bon.mp4')),
+        status('t6', 'Video đã hủy', 'cancelled', 6, null)
+      ]
+    })
+  );
+
+  try {
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+        ),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await shellWindow.click('text=Xem trước & Cắt');
+    await shellWindow.waitForSelector('text=Cắt tệp có sẵn trên máy', { timeout: 10_000 });
+
+    const recentCard = shellWindow.locator('.tm-card', { hasText: 'Video vừa tải' });
+    await expect(recentCard.locator('.step-preview-recent-row')).toHaveCount(4, { timeout: 10_000 });
+    await expect(recentCard).not.toContainText('Chưa có video nào tải xong');
+    await expect(recentCard.locator('.step-preview-recent-row b')).toHaveText(['Video bốn', 'Video ba', 'Video hai', 'Video một']);
+    await expect(recentCard).not.toContainText('Video đã xóa khỏi máy');
+    await expect(recentCard).not.toContainText('Video đã hủy');
+    await shellWindow.screenshot({ path: path.join(projectRoot, 'test-results', 'dot5-muc13-danh-sach.png') });
+
+    // Chọn video thứ ba trong danh sách → ô "Cắt tệp có sẵn trên máy" nhận đúng tệp đó.
+    await recentCard.locator('.step-preview-recent-row').nth(2).getByRole('button', { name: 'Cắt đoạn này' }).click();
+    const cutCard = shellWindow.locator('.tm-card', { hasText: 'Cắt tệp có sẵn trên máy' });
+    await expect(cutCard.locator('.local-cut-file-row small').first()).toHaveText(file('video-hai.mp4'));
+    // Thư mục lưu đoạn cắt tự điền theo thư mục của video đó.
+    await expect(cutCard.locator('.local-cut-file-row small').nth(1)).toHaveText(outputDirectory);
+    await shellWindow.screenshot({ path: path.join(projectRoot, 'test-results', 'dot5-muc13-chon-video.png') });
+  } finally {
+    await closeElectronApplication();
+    removeSandbox(sandbox);
+  }
+});

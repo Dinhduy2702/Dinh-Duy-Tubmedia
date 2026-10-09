@@ -569,6 +569,7 @@ export function registerIpc(ctx: AppContext): void {
     outputDirectory: ctx.quickDownload.defaultOutputDirectory()
   }));
   noArgs(IPC.quickDownload.current, () => ctx.quickDownload.currentStatus());
+  noArgs(IPC.quickDownload.recentCompleted, () => ctx.quickDownload.recentCompleted());
   handle(IPC.quickDownload.chooseDirectory, chooseFolderSchema, async ({ defaultPath }) => {
     const result = await dialog.showOpenDialog({
       ...(defaultPath ? { defaultPath } : {}),

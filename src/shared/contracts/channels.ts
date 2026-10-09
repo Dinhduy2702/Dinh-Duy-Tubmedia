@@ -121,6 +121,7 @@ export const IPC = {
   quickDownload: {
     defaults: 'quick-download:defaults',
     current: 'quick-download:current',
+    recentCompleted: 'quick-download:recent-completed',
     chooseDirectory: 'quick-download:choose-directory',
     start: 'quick-download:start',
     status: 'quick-download:status',

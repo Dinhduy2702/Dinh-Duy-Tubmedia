@@ -214,6 +214,23 @@ export class QuickDownloadService {
     return latest ? cloneStatus(latest) : null;
   }
 
+  /**
+   * Đợt 5 mục 13 (rà soát bản cài 1.5.0): các video Tải nhanh đã xong mà tệp vẫn còn trên máy, mới nhất trước — cho trang
+   * "Xem trước & Cắt". Trước đây trang chỉ xét tác vụ gần nhất, nên chỉ cần một lần hủy là báo "Chưa có video nào tải xong".
+   */
+  public async recentCompleted(limit = 5): Promise<QuickDownloadStatus[]> {
+    const completed = [...this.statuses.values()]
+      .filter((status) => status.phase === 'completed' && status.outputPath)
+      .sort((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt));
+    const result: QuickDownloadStatus[] = [];
+    for (const status of completed) {
+      if (result.length >= limit) break;
+      const info = await stat(status.outputPath!).catch(() => null);
+      if (info?.isFile()) result.push(cloneStatus(status));
+    }
+    return result;
+  }
+
   public async pauseActive(): Promise<QuickDownloadStatus | null> {
     const taskId = this.activeTask?.status.taskId;
     return taskId ? this.pause(taskId) : null;

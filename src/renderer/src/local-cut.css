@@ -13,6 +13,17 @@
   word-break: break-all;
 }
 
+/* Đợt 5 mục 13: danh sách video Tải nhanh đã xong ở thẻ "Video vừa tải". */
+.step-preview-recent-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.step-preview-recent-row + .step-preview-recent-row {
+  border-top: 1px solid var(--border);
+  padding-top: 0.6rem;
+}
+
 .local-cut-range-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

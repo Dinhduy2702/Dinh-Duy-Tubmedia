@@ -199,6 +199,7 @@ export interface DesktopApi {
   quickDownload: {
     defaults(): Promise<{ outputDirectory: string }>;
     current(): Promise<QuickDownloadStatus | null>;
+    recentCompleted(): Promise<QuickDownloadStatus[]>;
     chooseDirectory(currentDirectory?: string): Promise<string | null>;
     start(input: QuickDownloadRequest): Promise<QuickDownloadStatus>;
     status(taskId: string): Promise<QuickDownloadStatus | null>;
