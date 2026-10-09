@@ -3588,3 +3588,36 @@ test('Đợt 5 mục 10: nhãn Sáng/Tối ở thanh trên luôn khớp giao di�
     removeSandbox(sandbox);
   }
 });
+
+/** Đợt 5: huy hiệu đầu thẻ Danh sách tải / Quy trình ghép chưa có tác vụ hiện chữ tiếng Anh "idle". */
+test('Đợt 5 huy hiệu idle: thẻ chưa có tác vụ ghi tiếng Việt', async () => {
+  test.setTimeout(120_000);
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-idle-'));
+  const env = {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    ),
+    NODE_ENV: 'test',
+    TUBMEDIA_E2E: '1',
+    TUBMEDIA_E2E_USER_DATA: path.join(sandbox, 'userdata'),
+    PLAYWRIGHT_TEST: '1',
+    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+  };
+  try {
+    electronApplication = await electron.launch({ args: [mainEntry], cwd: projectRoot, env, timeout: 45_000 });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    for (const page of ['Tải danh sách', 'Ghép theo Timeline']) {
+      await shellWindow.getByRole('navigation', { name: 'Điều hướng chính' }).getByRole('button', { name: page, exact: true }).click();
+      const badge = shellWindow.locator('.status-badge[data-status="idle"]').first();
+      await expect(badge, page).toBeVisible({ timeout: 10_000 });
+      await expect(badge, page).toHaveText('Chưa bắt đầu');
+      const texts = await shellWindow.locator('.status-badge').allTextContents();
+      for (const text of texts) expect(text.trim(), `${page}: huy hiệu không còn mã tiếng Anh`).not.toMatch(/^[a-z_-]+$/);
+    }
+  } finally {
+    await closeElectronApplication();
+    removeSandbox(sandbox);
+  }
+});

@@ -609,6 +609,7 @@ tests/unit/shutdown-sequence.test.ts
 tests/unit/smart-merge-pipeline-v120.test.ts
 tests/unit/source-completeness.test.ts
 tests/unit/startup-fast.test.ts
+tests/unit/status-labels-vi.test.ts
 tests/unit/system-cleanup-estimate-guard.test.ts
 tests/unit/system-cleanup-navigation.test.ts
 tests/unit/system-cleanup-policy.test.ts

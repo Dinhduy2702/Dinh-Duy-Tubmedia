@@ -33,7 +33,10 @@ const OTHER_STATUS_LABELS: Record<string, string> = {
   warn: 'Cảnh báo',
   error: 'Lỗi',
   debug: 'Gỡ lỗi',
-  unknown: 'Không xác định'
+  unknown: 'Không xác định',
+  // Trạng thái thẻ Danh sách tải / Quy trình ghép (Đợt 5: huy hiệu thẻ chưa có tác vụ từng hiện nguyên mã "idle").
+  idle: 'Chưa bắt đầu',
+  running: 'Đang chạy'
 };
 
 const AUDIO_MODE_LABELS: Record<string, string> = {
