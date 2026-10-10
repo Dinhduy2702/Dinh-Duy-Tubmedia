@@ -22,7 +22,7 @@ jobs:
     timeout-minutes: 120
     env:
       GH_TOKEN: ${{ github.token }}
-      EXPECTED_VERSION: 1.6.1
+      EXPECTED_VERSION: 1.6.2
 
     steps:
       - name: Checkout exact release commit

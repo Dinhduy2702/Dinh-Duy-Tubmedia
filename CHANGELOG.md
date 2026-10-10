@@ -1,3 +1,18 @@
+# Tubmedia 1.6.2
+
+- Mở ứng dụng rồi tải ngay không còn bị chặn nhầm: tác vụ bạn vừa tạo (hoặc vừa bấm Tiếp tục / Thử lại) trong lúc ứng dụng còn đang kết nối công cụ không còn bị giữ lại với lời báo "Ứng dụng bị đóng giữa chừng", và không bị đếm vào hộp "Có N tác vụ chưa xong". Tác vụ dở thật từ lần mở trước vẫn được hỏi Tiếp tục / Để sau như cũ.
+- Trang "Xem trước & Cắt" liệt kê các video tải xong gần đây (mới nhất trước), không còn báo "Chưa có video nào tải xong" chỉ vì lần tải gần nhất đã bị hủy. Mỗi video có nút "Cắt đoạn này" và "Mở vị trí file"; video đã bị xóa khỏi máy không hiện trong danh sách.
+- Ghép theo Timeline: "Bớt quy trình" chỉ ẩn quy trình, dữ liệu vẫn giữ nguyên — giờ ứng dụng nói rõ điều đó:
+  - Bớt một quy trình còn dữ liệu thì ứng dụng hỏi xác nhận trước, nêu tên quy trình sẽ ẩn.
+  - Khi có quy trình đang ẩn mà còn dữ liệu, đầu trang có ghi chú nêu tên quy trình đó và cách hiện lại.
+  - Bấm "Thêm quy trình" để hiện lại thì quy trình giữ đúng thư mục và thiết lập đã lưu của nó (trước đây có thể bị thay bằng thư mục của quy trình khác).
+- Link không phải trang video (ví dụ trang chủ, trang tìm kiếm, trang không có video) giờ được báo đúng là "Liên kết không phải trang video" kèm gợi ý dùng link của chính video, thay vì báo chung chung "video không khả dụng".
+- Trang Chẩn đoán: mục "Lỗi gần nhất" nêu đúng nguyên nhân lỗi tải (ví dụ link không phải trang video, cần đăng nhập hoặc cookies, video đã bị xóa) và xếp lỗi mới nhất lên trước.
+- Ô chú thích ⓘ và ⚠ tự chọn phía còn đủ chỗ, luôn nằm gọn trong cửa sổ (kể cả cửa sổ nhỏ), không che chữ đang được giải thích, và tự ẩn khi rê chuột ra khỏi biểu tượng.
+- Nhãn Sáng/Tối ở thanh trên luôn khớp với giao diện đang hiện (kể cả khi để "theo Windows" và Windows đổi chế độ).
+- Thẻ Danh sách tải và Quy trình ghép chưa có tác vụ ghi "Chưa bắt đầu" thay vì chữ tiếng Anh "idle".
+- Trang Giới thiệu, Chẩn đoán và gói chẩn đoán xuất ra có ghi mã bản build (mã commit), giúp hỗ trợ biết chính xác bạn đang dùng bản nào.
+
 # Tubmedia 1.6.1
 
 - Thoát ứng dụng không bao giờ bị treo nữa: bấm X (hoặc "Thoát an toàn" ở khay hệ thống) thì ứng dụng tắt hẳn trong tối đa khoảng 15 giây, kể cả khi một bước dọn dẹp bị kẹt — không còn phải vào Task Manager để tắt. Mỗi lần thoát được ghi lại trong tệp logs\shutdown.log để dễ kiểm tra nếu có sự cố.
