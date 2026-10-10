@@ -603,7 +603,7 @@ test('Sửa lỗi 2026-09-23 — tải xong 1 video qua Tải nhanh không làm 
     }
     expect(toolsReady, 'yt-dlp/ffmpeg phải sẵn sàng trong 30s').toBe(true);
 
-    await shellWindow.click('text=Tải 1 video');
+    await shellWindow.click('[data-page-id="step-download"]');
     await shellWindow.waitForSelector('.quick-download-folder-input', { timeout: 10_000 });
     await shellWindow.fill('input[placeholder*="youtube.com"]', clipUrl);
     await shellWindow.click('button:has-text("Tải toàn bộ video")');
@@ -625,9 +625,9 @@ test('Sửa lỗi 2026-09-23 — tải xong 1 video qua Tải nhanh không làm 
         sawSpinningWhileDownloading = Boolean(svgClass?.includes('animate-spin'));
       }
       if (current && ['processing', 'verifying'].includes(current.phase) && !midFlightClickOk) {
-        await shellWindow.click('text=Hàng đợi', { timeout: 6000 });
+        await shellWindow.click('[data-page-id="activity"]', { timeout: 6000 });
         midFlightClickOk = await shellWindow.evaluate(() => document.body.innerText.includes('Hàng đợi'));
-        await shellWindow.click('text=Tải 1 video', { timeout: 6000 });
+        await shellWindow.click('[data-page-id="step-download"]', { timeout: 6000 });
       }
       if (current && ['completed', 'failed', 'cancelled'].includes(current.phase)) {
         finalPhase = current.phase;
@@ -756,7 +756,7 @@ test('Giai đoạn 6 mục 2: cắt tệp có sẵn trên máy (không qua tải
     }
     expect(toolsReady, 'ffmpeg phải sẵn sàng trong 30s').toBe(true);
 
-    await shellWindow.click('text=Xem trước & Cắt');
+    await shellWindow.click('[data-page-id="step-preview-cut"]');
     await shellWindow.waitForSelector('text=Cắt tệp có sẵn trên máy', { timeout: 10_000 });
 
     const [startFrame, endFrame] = await Promise.all([
@@ -2280,7 +2280,7 @@ test('C1: gợi ý điểm cắt tự động tìm đúng khoảng lặng/đổi
     expect(directSuggestions[0]?.endSeconds).toBeCloseTo(3.02, 1);
 
     // Luồng giao diện thật: Xem trước & Cắt → dùng video "vừa tải" → bấm Gợi ý điểm cắt tự động.
-    await shellWindow.click('text=Xem trước & Cắt');
+    await shellWindow.click('[data-page-id="step-preview-cut"]');
     await shellWindow.getByRole('button', { name: 'Cắt đoạn này' }).click();
     await shellWindow.waitForSelector('text=Cắt tệp có sẵn trên máy', { timeout: 10_000 });
 
@@ -4177,7 +4177,7 @@ test('Đợt 5 mục 13: Xem trước & Cắt liệt kê các video tải xong g
     mainProcessId = electronApplication.process().pid;
     shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
     await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
-    await shellWindow.click('text=Xem trước & Cắt');
+    await shellWindow.click('[data-page-id="step-preview-cut"]');
     await shellWindow.waitForSelector('text=Cắt tệp có sẵn trên máy', { timeout: 10_000 });
 
     const recentCard = shellWindow.locator('.tm-card', { hasText: 'Video vừa tải' });
