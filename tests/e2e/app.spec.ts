@@ -2486,6 +2486,177 @@ test('P2: định dạng có tiếng mà tệp tải về mất luồng tiếng 
 });
 
 /**
+ * P3 (2026-10-10): chế độ mặc định "nguồn cao nhất" từng cho ra tiếng Opus trong MP4 (tái hiện thật với YouTube) — nhiều phần
+ * mềm dựng và trình phát Windows "không có tiếng". Hai link cục bộ, tải thật bằng yt-dlp với cài đặt mặc định:
+ *  1. manifest DASH có cả tiếng Opus 160k lẫn AAC 128k → phải chọn AAC (trước đây `bv+ba/b` chọn Opus);
+ *  2. tệp MP4 chỉ có tiếng Opus → phải chuyển riêng phần tiếng sang AAC, luồng hình giữ nguyên từng byte.
+ */
+test('P3: chế độ nguồn cao nhất không để tiếng Opus trong MP4 — ưu tiên AAC, không có thì chuyển tiếng, hình giữ nguyên', async () => {
+  test.setTimeout(180_000);
+  const toolsDirectory = resolveToolsDirectoryForTest();
+  test.skip(!toolsDirectory, 'Không tìm thấy yt-dlp/ffmpeg/ffprobe trên máy này để chạy bài kiểm thật.');
+
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-opus-mp4-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+  db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
+  const seededSettings = {
+    theme: 'dark',
+    startWithWindows: false,
+    autoCheckAppUpdates: false,
+    autoCheckToolUpdates: false,
+    ytdlpPath: path.join(toolsDirectory!, 'yt-dlp.exe'),
+    ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+    ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+  };
+  db.prepare(
+    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  db.close();
+
+  const ffmpeg = path.join(toolsDirectory!, 'ffmpeg.exe');
+  const ffprobe = path.join(toolsDirectory!, 'ffprobe.exe');
+  const make = (name: string, args: string[]): Buffer => {
+    const file = path.join(sandbox, name);
+    expect(spawnSync(ffmpeg, ['-y', ...args, '-movflags', '+faststart', file], { stdio: 'ignore', windowsHide: true, timeout: 60_000 }).status, name).toBe(0);
+    return fs.readFileSync(file);
+  };
+  const videoInput = ['-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=15:duration=4'];
+  const videoCodec = ['-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p'];
+  const files: Record<string, Buffer> = {
+    '/p3/v.mp4': make('v.mp4', [...videoInput, ...videoCodec]),
+    '/p3/a-aac.mp4': make('a-aac.mp4', ['-f', 'lavfi', '-i', 'sine=frequency=440:duration=4', '-c:a', 'aac', '-b:a', '128k']),
+    '/p3/a-opus.mp4': make('a-opus.mp4', ['-f', 'lavfi', '-i', 'sine=frequency=440:duration=4', '-c:a', 'libopus', '-b:a', '160k']),
+    '/p3/chi-opus.mp4': make('chi-opus.mp4', [...videoInput, '-f', 'lavfi', '-i', 'sine=frequency=660:duration=4', ...videoCodec, '-c:a', 'libopus', '-b:a', '128k', '-shortest'])
+  };
+  const audioCodecOf = (file: string): string =>
+    execFileSync(ffprobe, ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', file], { encoding: 'utf8', windowsHide: true }).trim();
+  const videoPacketsMd5 = (file: string): string =>
+    execFileSync(ffmpeg, ['-v', 'error', '-i', file, '-map', '0:v:0', '-c', 'copy', '-f', 'md5', '-'], { encoding: 'utf8', windowsHide: true }).trim();
+  expect(audioCodecOf(path.join(sandbox, 'chi-opus.mp4'))).toBe('opus');
+
+  let server: Server | undefined;
+  try {
+    server = createServer((request, response) => {
+      const pathname = (request.url ?? '').split('?')[0]!;
+      const port = (server!.address() as { port: number }).port;
+      if (pathname === '/p3/video.mpd') {
+        response.writeHead(200, { 'Content-Type': 'application/dash+xml' });
+        response.end(
+          '<?xml version="1.0" encoding="UTF-8"?>' +
+            '<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT4S" minBufferTime="PT2S" profiles="urn:mpeg:dash:profile:isoff-on-demand:2011"><Period>' +
+            `<AdaptationSet mimeType="video/mp4"><Representation id="v360" codecs="avc1.64001e" bandwidth="400000" width="640" height="360"><BaseURL>http://127.0.0.1:${port}/p3/v.mp4</BaseURL></Representation></AdaptationSet>` +
+            '<AdaptationSet mimeType="audio/mp4" lang="en">' +
+            `<Representation id="a-opus" codecs="opus" bandwidth="160000" audioSamplingRate="48000"><BaseURL>http://127.0.0.1:${port}/p3/a-opus.mp4</BaseURL></Representation>` +
+            `<Representation id="a-aac" codecs="mp4a.40.2" bandwidth="128000" audioSamplingRate="44100"><BaseURL>http://127.0.0.1:${port}/p3/a-aac.mp4</BaseURL></Representation>` +
+            '</AdaptationSet></Period></MPD>'
+        );
+        return;
+      }
+      const data = files[pathname];
+      if (!data) {
+        response.writeHead(404);
+        response.end();
+        return;
+      }
+      const range = request.headers.range;
+      const start = range ? Number(/bytes=(\d*)-/.exec(range)?.[1] ?? 0) : 0;
+      const endMatch = range ? /bytes=\d*-(\d+)/.exec(range) : null;
+      const end = endMatch ? Math.min(Number(endMatch[1]), data.length - 1) : data.length - 1;
+      response.writeHead(range ? 206 : 200, {
+        'Content-Type': 'video/mp4',
+        'Content-Length': String(end - start + 1),
+        'Accept-Ranges': 'bytes',
+        ...(range ? { 'Content-Range': `bytes ${start}-${end}/${data.length}` } : {})
+      });
+      response.end(data.subarray(start, end + 1));
+    });
+    const port = await new Promise<number>((resolvePort) => {
+      server!.listen(0, '127.0.0.1', () => resolvePort((server!.address() as { port: number }).port));
+    });
+
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+        TUBMEDIA_E2E_DRIVE_ROOT: path.join(sandbox, 'o-dia'),
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await expectSeededSettingsKept(shellWindow, seededSettings);
+
+    interface Job { id: string; type: string; status: string; errorMessage: string | null; input: Record<string, unknown> }
+    interface DesktopOpusApi {
+      tools: { list: () => Promise<Array<{ name: string; available: boolean }>> };
+      settings: { get: () => Promise<Record<string, unknown>> };
+      workbench: { startDownload: (input: Record<string, unknown>) => Promise<unknown> };
+      queue: { list: () => Promise<Job[]> };
+    }
+    const listJobs = (): Promise<Job[]> =>
+      shellWindow!.evaluate(() => (window as unknown as { desktop: DesktopOpusApi }).desktop.queue.list());
+    const toolsDeadline = Date.now() + 30_000;
+    let toolsReady = false;
+    while (Date.now() < toolsDeadline && !toolsReady) {
+      const list = await shellWindow.evaluate(() => (window as unknown as { desktop: DesktopOpusApi }).desktop.tools.list());
+      toolsReady = Boolean(list.find((item) => item.name === 'yt-dlp')?.available && list.find((item) => item.name === 'ffmpeg')?.available);
+      if (!toolsReady) await sleep(300);
+    }
+    expect(toolsReady, 'yt-dlp/ffmpeg phải sẵn sàng trong 30s').toBe(true);
+    const current = await shellWindow.evaluate(() => (window as unknown as { desktop: DesktopOpusApi }).desktop.settings.get());
+    expect(current, 'bài này kiểm đúng chế độ mặc định "nguồn cao nhất"').toMatchObject({ downloadMaxHeight: 0, downloadCodecPreference: 'auto', downloadContainerPreference: 'auto' });
+
+    await shellWindow.evaluate(
+      (input) => (window as unknown as { desktop: DesktopOpusApi }).desktop.workbench.startDownload(input),
+      {
+        slot: 'download-1',
+        name: 'Kiem tra Opus',
+        linksText: [`http://127.0.0.1:${port}/p3/video.mpd`, `http://127.0.0.1:${port}/p3/chi-opus.mp4`].join('\n'),
+        outputFolder: path.join(sandbox, 'tai-danh-sach'),
+        tempFolder: path.join(sandbox, 'tam'),
+        resourceProfileId: 'resource-balanced'
+      }
+    );
+    let jobs: Job[] = [];
+    const deadline = Date.now() + 120_000;
+    while (Date.now() < deadline) {
+      jobs = (await listJobs()).filter((job) => job.type === 'download');
+      if (jobs.length === 2 && jobs.every((job) => ['completed', 'skipped', 'failed', 'cancelled'].includes(job.status))) break;
+      await sleep(300);
+    }
+    expect(jobs.map((job) => `${job.status} ${job.errorMessage ?? ''}`.trim())).toEqual(['completed', 'completed']);
+    const outputOf = (suffix: string): string => {
+      const found = jobs.find((job) => String(job.input.url).endsWith(suffix))?.input.outputPath;
+      return typeof found === 'string' ? found : '';
+    };
+
+    const dash = outputOf('/p3/video.mpd');
+    expect(path.extname(dash)).toBe('.mp4');
+    expect(audioCodecOf(dash), 'nguồn có cả Opus lẫn AAC → phải chọn AAC').toBe('aac');
+
+    const converted = outputOf('/p3/chi-opus.mp4');
+    expect(path.extname(converted)).toBe('.mp4');
+    expect(audioCodecOf(converted), 'nguồn chỉ có Opus → tiếng phải được chuyển sang AAC').toBe('aac');
+    expect(videoPacketsMd5(converted), 'luồng hình phải giữ nguyên từng byte (không mã hóa lại)').toBe(videoPacketsMd5(path.join(sandbox, 'chi-opus.mp4')));
+    expect(fs.readdirSync(path.dirname(converted)).filter((name) => name.includes('.tubmedia-')), 'không sót tệp tạm').toEqual([]);
+  } finally {
+    server?.close();
+    await closeElectronApplication();
+    removeSandbox(sandbox);
+  }
+});
+
+/**
  * A1 (2026-09-25) — yêu cầu mới đã được duyệt: tăng giới hạn quy trình song song từ 4 lên 6 cho cả "Tải
  * danh sách" và "Ghép theo Timeline" (maxGlobalMergeJobs — trần GHÉP ĐỒNG THỜI thật — cố tình giữ nguyên
  * 1-4 theo khuyến nghị phần cứng có sẵn của app, không đổi). Bài kiểm thật này xác nhận toàn bộ đường dây

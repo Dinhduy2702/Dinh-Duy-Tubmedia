@@ -138,7 +138,8 @@ describe('download quality', () => {
     expect(downloadPolicyForWorkflow(mergeSourceSettings, 'download-merge')).toBe(
       MERGE_SOURCE_DOWNLOAD_POLICY
     );
-    expect(HIGHEST_SOURCE_FORMAT_SELECTOR).toBe('bv+ba/b');
+    // P3 (2026-10-10): hình vẫn tốt nhất; tiếng ưu tiên AAC (mp4a) để MP4 phát được tiếng ở mọi phần mềm, không có thì lấy tiếng khác.
+    expect(HIGHEST_SOURCE_FORMAT_SELECTOR).toBe('bv+ba[acodec^=mp4a]/bv+ba/b');
     expect(MERGE_SOURCE_FORMAT_SELECTOR).toBe('bv*+ba/b');
     expect(MERGE_SOURCE_FORMAT_SORT).toBeNull();
     expect(HIGHEST_SOURCE_FORMAT_SORT).toBe('res,fps,size,tbr,vbr,hdr,vcodec,abr,acodec');
@@ -351,5 +352,22 @@ describe('download quality', () => {
     expect(result.ok).toBe(false);
     expect(result.blockingReasons.join(' ')).toContain('H.264');
     expect(result.blockingReasons.join(' ')).toContain('HDR');
+  });
+
+  it('P3: chế độ nguồn cao nhất ưu tiên tiếng AAC nhưng vẫn tải được khi nguồn chỉ có tiếng khác hoặc chỉ có bản gộp', () => {
+    const branches = HIGHEST_SOURCE_FORMAT_SELECTOR.split('/');
+    expect(branches[0]).toBe('bv+ba[acodec^=mp4a]');
+    expect(branches).toContain('bv+ba');
+    expect(branches.at(-1)).toBe('b');
+  });
+
+  it('P3: CapCut — mọi nhánh có tiếng (+ba hoặc bản gộp b) đứng trước nhánh chỉ có hình bv* không kèm tiếng', () => {
+    for (const mode of ['capcut_sdr_1080p', 'capcut_sdr_2k'] as const) {
+      const branches = buildDownloadFormatSelector(settings({ downloadCompatibilityMode: mode })).split('/');
+      const videoOnly = branches.map((branch, index) => ({ branch, index })).filter(({ branch }) => branch.startsWith('bv*') && !branch.includes('+ba'));
+      const withAudio = branches.map((branch, index) => ({ branch, index })).filter(({ branch }) => branch.includes('+ba') || branch.startsWith('b['));
+      expect(videoOnly.length, mode).toBeGreaterThan(0);
+      expect(Math.min(...videoOnly.map(({ index }) => index)), `${mode}: ${branches.join(' / ')}`).toBeGreaterThan(Math.max(...withAudio.map(({ index }) => index)));
+    }
   });
 });

@@ -14,7 +14,7 @@ import {
   SourceRemovedError
 } from '@shared/errors/app-errors.js';
 import type { AppSettings, MediaInfo, QueueJob, ResourceProfile, VerificationLevel } from '@shared/types/domain.js';
-import { audioIssueFor, audioIssueNote, formatPromisesAudio, type AudioIssue } from '@shared/utils/audio-presence.js';
+import { audioIssueFor, audioIssueNote, audioNeedsAacForMp4, formatPromisesAudio, type AudioIssue } from '@shared/utils/audio-presence.js';
 import {
   downloadPolicyForWorkflow,
   formatSelectorForWorkflow,
@@ -218,14 +218,24 @@ export class DownloadEngine {
     appSettings: AppSettings,
     resource: ResourceProfile,
     signal: AbortSignal,
-    onProgress: (progress: DownloadProgress) => void
+    onProgress: (progress: DownloadProgress) => void,
+    allowAudioConversion = false
   ): Promise<string> {
     if (appSettings.downloadContainerPreference === 'mkv') return input;
-    if (extname(input).toLowerCase() === '.mp4') return input;
+    const alreadyMp4 = extname(input).toLowerCase() === '.mp4';
+    // P3 (2026-10-10): Tải danh sách — tiếng Opus/Vorbis/FLAC… nằm trong MP4 thì nhiều phần mềm dựng và trình phát Windows
+    // "không có tiếng". Chuyển riêng phần tiếng sang AAC, hình giữ nguyên (-c:v copy). Nguồn của quy trình ghép giữ nguyên vì
+    // bước ghép tự chuẩn hóa tiếng.
+    const audioCodec =
+      !allowAudioConversion || job.input.workflow === 'download-merge'
+        ? null
+        : (await this.analyzer.analyze(input, job.id)).audioCodec;
+    const convertAudio = audioNeedsAacForMp4(audioCodec);
+    if (alreadyMp4 && !convertAudio) return input;
 
     const ffmpeg = this.tools.get('ffmpeg');
     if (!ffmpeg.available || !ffmpeg.executablePath) {
-      if (appSettings.downloadContainerPreference === 'mp4') {
+      if (appSettings.downloadContainerPreference === 'mp4' && !alreadyMp4) {
         throw new ToolNotFoundError('ffmpeg');
       }
       return input;
@@ -238,7 +248,8 @@ export class DownloadEngine {
       stage: 'processing'
     });
     const desiredOutput = input.slice(0, -extname(input).length) + '.mp4';
-    const output = await nonConflictingPath(desiredOutput);
+    // Tệp đã là MP4 thì ghi đè đúng tệp đó (tệp vừa tải, chưa danh sách nào dùng) qua tệp tạm bên cạnh.
+    const output = alreadyMp4 ? input : await nonConflictingPath(desiredOutput);
     const pending = output.replace(/\.mp4$/i, `.tubmedia-${job.id}.pending.mp4`);
     const result = await this.processes.run({
       jobId: job.id,
@@ -254,8 +265,9 @@ export class DownloadEngine {
         '0:v:0',
         '-map',
         '0:a:0?',
-        '-c',
+        '-c:v',
         'copy',
+        ...(convertAudio ? ['-c:a', 'aac', '-b:a', '192k'] : ['-c:a', 'copy']),
         '-movflags',
         '+faststart',
         pending
@@ -266,6 +278,15 @@ export class DownloadEngine {
     });
     if (result.code !== 0) {
       await rm(pending, { force: true });
+      if (alreadyMp4) {
+        this.logger.warn(
+          'download',
+          'DOWNLOAD_AUDIO_CONVERT_FAILED',
+          `Không chuyển được tiếng ${audioCodec ?? ''} sang AAC; giữ nguyên tệp đã tải.`,
+          { jobId: job.id, ...(job.projectId ? { projectId: job.projectId } : {}), metadata: { input, stderr: result.stderrTail } }
+        );
+        return input;
+      }
       if (appSettings.downloadContainerPreference === 'mp4') {
         throw new DownloadFailedError(
           `Không thể đóng gói lại tệp sang MP4: ${result.stderrTail || 'FFmpeg thất bại.'}`
@@ -291,7 +312,7 @@ export class DownloadEngine {
     });
     if (!checked.ok) {
       await rm(pending, { force: true });
-      if (appSettings.downloadContainerPreference === 'mp4') {
+      if (appSettings.downloadContainerPreference === 'mp4' && !alreadyMp4) {
         throw new DownloadFailedError(
           `Tệp MP4 sau khi đóng gói lại không hợp lệ: ${checked.reasons.join('; ')}`
         );
@@ -299,8 +320,35 @@ export class DownloadEngine {
       return input;
     }
 
-    const committedOutput = await commitFileWithoutOverwrite(pending, output);
-    await rm(input, { force: true });
+    let committedOutput: string;
+    if (alreadyMp4) {
+      // Thay tệp gốc bằng bản đã chuyển tiếng: giữ bản gốc tới khi bản mới đã vào đúng chỗ.
+      const original = input.replace(/\.mp4$/i, `.tubmedia-${job.id}.original.mp4`);
+      await rename(input, original);
+      try {
+        await rename(pending, input);
+      } catch (error) {
+        await rename(original, input);
+        throw error;
+      }
+      await rm(original, { force: true });
+      committedOutput = input;
+    } else {
+      committedOutput = await commitFileWithoutOverwrite(pending, output);
+      await rm(input, { force: true });
+    }
+    if (convertAudio) {
+      this.logger.info(
+        'download',
+        'DOWNLOAD_AUDIO_CONVERTED_AAC',
+        `Tiếng ${audioCodec} trong MP4 nhiều phần mềm không phát được — đã chuyển riêng phần tiếng sang AAC 192 kbps, hình giữ nguyên: ${basename(committedOutput)}.`,
+        {
+          jobId: job.id,
+          ...(job.projectId ? { projectId: job.projectId } : {}),
+          metadata: { input, output: committedOutput, audioCodec }
+        }
+      );
+    }
     return committedOutput;
   }
 
@@ -559,7 +607,9 @@ export class DownloadEngine {
     resource: ResourceProfile,
     signal: AbortSignal,
     onProgress: (progress: DownloadProgress) => void,
-    forceFaststart = false
+    forceFaststart = false,
+    /** P3: chỉ tệp VỪA tải mới được chuyển tiếng sang AAC tại chỗ — tệp có sẵn có thể đang là nguồn của danh sách khác. */
+    freshDownload = false
   ): Promise<string> {
     // ADAPTIVE_SETTINGS_HOTFIX8_PREPARE
     if (
@@ -568,7 +618,7 @@ export class DownloadEngine {
     ) {
       return this.makeCapCutCompatible(job, input, appSettings, resource, signal, onProgress, forceFaststart);
     }
-    return this.remuxToPreferredContainer(job, input, appSettings, resource, signal, onProgress);
+    return this.remuxToPreferredContainer(job, input, appSettings, resource, signal, onProgress, freshDownload);
   }
 
   private async materializeForProject(sourcePath: string, projectFolder: string, job: QueueJob): Promise<string> {
@@ -1489,6 +1539,7 @@ export class DownloadEngine {
       resource,
       signal,
       onProgress,
+      true,
       true
     );
     await this.verifyFinal(

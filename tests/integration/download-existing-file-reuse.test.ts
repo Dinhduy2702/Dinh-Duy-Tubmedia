@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { AppDatabase } from '@main/database/database.js';
 import { ProjectRepository } from '@main/database/repositories/project-repository.js';
@@ -40,6 +40,14 @@ let measuredMaxVolumeDb: number | null = -3;
 let measureAudio: ReturnType<typeof vi.fn>;
 /** P2: dòng __VDMSP_FORMAT__ yt-dlp giả in ra (định dạng đã chọn); null = không in. */
 let ytdlpFormatLine: string | null = null;
+/** P3: codec tiếng của tệp yt-dlp giả tải về, và phần mở rộng tệp; ffmpeg giả ghi tệp mang dấu AAC_MARK (đã chuyển sang AAC). */
+let downloadedAudioCodec = 'aac';
+let ytdlpExt = 'mp4';
+let ffmpegCalls: string[][] = [];
+let ffmpegAvailable = false;
+const AAC_MARK = 'AACM';
+const audioCodecOf = (path: string): string =>
+  existsSync(path) && readFileSync(path).subarray(0, 4).toString() === AAC_MARK ? 'aac' : downloadedAudioCodec;
 
 const mediaInfo = (fileSize: number): MediaInfo => ({
   duration: 522.3,
@@ -156,10 +164,16 @@ beforeEach(() => {
   noAudioStream = false;
   measuredMaxVolumeDb = -3;
   ytdlpFormatLine = null;
+  downloadedAudioCodec = 'aac';
+  ytdlpExt = 'mp4';
+  ffmpegCalls = [];
+  ffmpegAvailable = false;
   toolsGet = vi.fn((name: string) =>
     name === 'yt-dlp' && ytdlpAvailable
       ? { available: true, executablePath: join(folder, 'yt-dlp-gia.exe') }
-      : { available: false, executablePath: null }
+      : name === 'ffmpeg' && ffmpegAvailable
+        ? { available: true, executablePath: join(folder, 'ffmpeg-gia.exe') }
+        : { available: false, executablePath: null }
   );
   const quarantine = new QuarantineService(logger as never, {
     items: quarantineItems,
@@ -167,8 +181,12 @@ beforeEach(() => {
     rootOf: () => driveRoot
   });
   const analyzer = {
-    analyze: vi.fn(() =>
-      Promise.resolve(noAudioStream ? { ...mediaInfo(4096), audioCodec: null, audioBitrate: null, sampleRate: null, channels: null, channelLayout: null } : mediaInfo(4096))
+    analyze: vi.fn((path: string) =>
+      Promise.resolve(
+        noAudioStream
+          ? { ...mediaInfo(4096), audioCodec: null, audioBitrate: null, sampleRate: null, channels: null, channelLayout: null }
+          : { ...mediaInfo(4096), audioCodec: audioCodecOf(path) }
+      )
     )
   };
   measureAudio = vi.fn(() =>
@@ -186,11 +204,17 @@ beforeEach(() => {
   };
   // yt-dlp giả: ghi tệp đúng theo mẫu -o engine truyền vào rồi báo đường dẫn như yt-dlp thật (__VDMSP_FILE__).
   const processes = {
-    run: vi.fn((options: { args: string[]; onStdoutLine?: (line: string) => void }) => {
+    run: vi.fn((options: { tool?: string; args: string[]; onStdoutLine?: (line: string) => void }) => {
+      if (options.tool === 'ffmpeg') {
+        // ffmpeg giả: ghi tệp đích (tham số cuối) mang dấu AAC_MARK như thể đã chuyển tiếng sang AAC.
+        ffmpegCalls.push(options.args);
+        writeFileSync(options.args.at(-1)!, Buffer.concat([Buffer.from(AAC_MARK), Buffer.alloc(4096, 5)]));
+        return Promise.resolve({ code: 0, stdoutTail: '', stderrTail: '' });
+      }
       const template = options.args[options.args.indexOf('-o') + 1] ?? '';
       ytdlpOutputTemplates.push(template);
       const output = template.replace(/%\((\w+)\)[.\d]*[sB]/g, (_match, field: string) =>
-        field === 'ext' ? 'mp4' : field === 'id' ? 'ID_TAI_LAI' : 'Ban tai lai'
+        field === 'ext' ? ytdlpExt : field === 'id' ? 'ID_TAI_LAI' : 'Ban tai lai'
       );
       writeVideo(output, 5000);
       if (ytdlpFormatLine) options.onStdoutLine?.(`__VDMSP_FORMAT__:${ytdlpFormatLine}`);
@@ -466,5 +490,78 @@ describe('P2 — định dạng có tiếng mà tệp tải về không có lu�
 
     expect(result).toMatchObject({ skipped: false, audioIssue: 'missing' });
     expect(quarantineItems.listActive()).toEqual([]);
+  });
+});
+
+// P3 (2026-10-10): tiếng Opus (hoặc Vorbis/FLAC…) nằm trong MP4 thì nhiều phần mềm dựng và trình phát Windows "không có tiếng".
+// Tải danh sách: tệp MP4 có tiếng như vậy → chuyển riêng phần tiếng sang AAC, giữ nguyên hình (-c:v copy). Nguồn của quy trình
+// ghép giữ nguyên vì bước ghép tự chuẩn hóa tiếng.
+describe('P3 — Tải danh sách không để tiếng Opus nằm trong MP4', () => {
+  const fresh = (name: string, id: string) => {
+    const own = join(driveRoot, name, 'video');
+    mkdirSync(own, { recursive: true });
+    const project = makeProject(name, own);
+    const sourceId = insertSource(project.id, `https://www.youtube.com/watch?v=${id}`, 'youtube', id);
+    ytdlpAvailable = true;
+    ffmpegAvailable = true;
+    return { own, project, sourceId };
+  };
+  const convertCalls = (): string[][] => ffmpegCalls.filter((args) => args.includes('-c:a') && args[args.indexOf('-c:a') + 1] === 'aac');
+
+  it('tệp tải về đã là .mp4 nhưng tiếng Opus → chuyển tiếng sang AAC ngay trên tệp đó, hình giữ nguyên', async () => {
+    const { own, project, sourceId } = fresh('Opus mp4', 'opusMP4vid1');
+    downloadedAudioCodec = 'opus';
+
+    const result = await run(jobFor(project.id, sourceId, 'download-only'));
+
+    expect(convertCalls(), 'phải chạy ffmpeg chuyển tiếng sang AAC').toHaveLength(1);
+    const args = convertCalls()[0]!;
+    expect(args[args.indexOf('-c:v') + 1], 'hình không được mã hóa lại').toBe('copy');
+    expect(result.outputPath.endsWith('.mp4')).toBe(true);
+    expect(audioCodecOf(result.outputPath), 'tệp cuối mang tiếng AAC').toBe('aac');
+    expect(readdirSync(own).filter((name) => name.endsWith('.mp4')), 'chỉ còn đúng một tệp, không sót tệp tạm').toEqual([basename(result.outputPath)]);
+    expect(logger.info.mock.calls.map((call) => String(call[1]))).toContain('DOWNLOAD_AUDIO_CONVERTED_AAC');
+  });
+
+  it('tệp tải về là .mkv tiếng Opus → đóng gói sang MP4 kèm chuyển tiếng sang AAC (trước đây chép nguyên Opus vào MP4)', async () => {
+    const { project, sourceId } = fresh('Opus mkv', 'opusMKVvid1');
+    downloadedAudioCodec = 'opus';
+    ytdlpExt = 'mkv';
+
+    const result = await run(jobFor(project.id, sourceId, 'download-only'));
+
+    expect(result.outputPath.endsWith('.mp4')).toBe(true);
+    expect(convertCalls()).toHaveLength(1);
+    expect(audioCodecOf(result.outputPath)).toBe('aac');
+  });
+
+  it('đối chứng: MP4 tiếng AAC → không chạy ffmpeg; nguồn quy trình ghép tiếng Opus → giữ nguyên (bước ghép tự chuẩn hóa)', async () => {
+    const plain = fresh('AAC mp4', 'aacMP4video');
+    await run(jobFor(plain.project.id, plain.sourceId, 'download-only'));
+    expect(ffmpegCalls).toEqual([]);
+
+    const merge = fresh('Nguon ghep opus', 'mergeOPUS01');
+    downloadedAudioCodec = 'opus';
+    const result = await run(jobFor(merge.project.id, merge.sourceId, 'download-merge'));
+    expect(convertCalls()).toEqual([]);
+    expect(audioCodecOf(result.outputPath)).toBe('opus');
+  });
+
+  it('đối chứng: dùng lại tệp MP4 tiếng Opus đã có sẵn → KHÔNG ghi đè tệp đó (có thể đang là nguồn của danh sách khác)', async () => {
+    const own = join(driveRoot, 'Opus co san', 'video');
+    mkdirSync(own, { recursive: true });
+    const url = 'https://www.youtube.com/watch?v=opusEXIST01';
+    const file = join(own, `Video Opus có sẵn [opusEXIST01] [${downloadLinkTag(url)}].mp4`);
+    writeVideo(file);
+    const project = makeProject('Opus co san', own);
+    const sourceId = insertSource(project.id, url, 'youtube', 'opusEXIST01');
+    ffmpegAvailable = true;
+    downloadedAudioCodec = 'opus';
+
+    const result = await run(jobFor(project.id, sourceId, 'download-only'));
+
+    expect(result).toMatchObject({ outputPath: file, skipped: true });
+    expect(ffmpegCalls).toEqual([]);
+    expect(readFileSync(file).length, 'tệp có sẵn giữ nguyên nội dung').toBe(4096);
   });
 });

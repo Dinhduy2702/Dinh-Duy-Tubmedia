@@ -7,6 +7,7 @@ import {
   audioIssueFor,
   audioIssueLabel,
   audioIssueNote,
+  audioNeedsAacForMp4,
   formatPromisesAudio,
   parseVolumeDetect
 } from '../../src/shared/utils/audio-presence.js';
@@ -52,6 +53,13 @@ describe('P2 — định dạng yt-dlp đã chọn có hứa luồng tiếng kh�
   it('codec tiếng thật (mp4a, opus, aac…) → có; none / NA / rỗng / không rõ → không (không được coi là mất tiếng)', () => {
     for (const codec of ['mp4a.40.2', 'opus', 'aac', 'mp4a.40.5', ' Opus ']) expect(formatPromisesAudio(codec), codec).toBe(true);
     for (const codec of ['none', 'NA', 'na', 'N/A', 'unknown', '', '   ', null, undefined]) expect(formatPromisesAudio(codec), String(codec)).toBe(false);
+  });
+});
+
+describe('P3 — tiếng nào cần chuyển sang AAC khi nằm trong MP4', () => {
+  it('Opus / Vorbis / FLAC / PCM trong MP4 nhiều phần mềm không phát được → cần chuyển; AAC, MP3, AC-3, E-AC-3, ALAC giữ nguyên', () => {
+    for (const codec of ['opus', 'vorbis', 'flac', 'pcm_s16le', 'OPUS']) expect(audioNeedsAacForMp4(codec), codec).toBe(true);
+    for (const codec of ['aac', 'mp3', 'ac3', 'eac3', 'alac', null, undefined, '']) expect(audioNeedsAacForMp4(codec), String(codec)).toBe(false);
   });
 });
 

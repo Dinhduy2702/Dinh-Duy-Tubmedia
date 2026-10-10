@@ -4,7 +4,11 @@ export type DownloadWorkflow = 'download-only' | 'download-merge';
 export const DOWNLOAD_LIST_POLICY_VERSION = 'download-list-multiplatform-v5';
 export const MERGE_SOURCE_DOWNLOAD_POLICY = 'merge-best-source-multiplatform-v7';
 export const GOOGLE_DRIVE_ORIGINAL_DOWNLOAD_POLICY = 'merge-google-drive-native-download-v7';
-export const HIGHEST_SOURCE_FORMAT_SELECTOR = 'bv+ba/b';
+/**
+ * P3 (2026-10-10): hình vẫn là hình tốt nhất; tiếng ưu tiên AAC (mp4a) — `bv+ba` thuần chọn Opus của YouTube rồi bị đóng gói
+ * vào MP4, nhiều phần mềm dựng/trình phát "không có tiếng". Nguồn không có tiếng AAC thì vẫn lấy tiếng tốt nhất như cũ.
+ */
+export const HIGHEST_SOURCE_FORMAT_SELECTOR = 'bv+ba[acodec^=mp4a]/bv+ba/b';
 export const REFERENCE_1080P_FORMAT_SELECTOR = [
   'bv*[ext=mp4][vcodec^=avc1][height<=1080][height>=720]+ba[ext=m4a]',
   'bv*[ext=mp4][height<=1080][height>=720]+ba[ext=m4a]',
@@ -164,14 +168,15 @@ function buildCapCutFormatSelector(settings: AppSettings): string {
     `bv*${range}${h264}+ba`,
     `bv*${range}+ba${aac}`,
     `bv*${range}+ba`,
-    `bv*${exact}${h264}`,
-    `bv*${exact}`,
-    `bv*${range}${h264}`,
-    `bv*${range}`,
+    // P3: bản gộp sẵn hình + tiếng (b) đứng TRƯỚC các nhánh bv* không kèm tiếng — bv* có thể là định dạng chỉ có hình.
     `b${exact}${h264}`,
     `b${exact}`,
     `b${range}${h264}`,
-    `b${range}`
+    `b${range}`,
+    `bv*${exact}${h264}`,
+    `bv*${exact}`,
+    `bv*${range}${h264}`,
+    `bv*${range}`
   ];
   return branches.join('/');
 }

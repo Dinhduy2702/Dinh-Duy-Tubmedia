@@ -62,3 +62,13 @@ export function formatPromisesAudio(acodec: string | null | undefined): boolean 
   const value = acodec?.trim().toLowerCase();
   return Boolean(value) && !['none', 'na', 'n/a', 'null', 'unknown'].includes(value!);
 }
+
+/**
+ * P3 (2026-10-10): codec tiếng mà nhiều phần mềm dựng (Premiere Pro…) và trình phát Windows không đọc được khi nằm trong vỏ MP4
+ * — người dùng thấy "video không có tiếng" dù tệp có luồng tiếng. AAC/MP3/AC-3/E-AC-3/ALAC trong MP4 phát được ở mọi nơi.
+ */
+export function audioNeedsAacForMp4(codec: string | null | undefined): boolean {
+  const value = codec?.trim().toLowerCase();
+  if (!value) return false;
+  return !['aac', 'mp3', 'ac3', 'eac3', 'alac'].includes(value);
+}
