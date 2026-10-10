@@ -89,6 +89,8 @@ export function isFinalDownloadForLinkTag(fileName: string, linkTag: string): bo
 
 export class DownloadEngine {
   private readonly cookieRequiredJobs = new Set<string>();
+  /** S2: tác vụ đã gặp tệp có sẵn đang được danh sách khác dùng — lượt tải lại phải ghi ra tệp mới tên khác. */
+  private readonly sharedFileKeptJobs = new Set<string>();
   private cookieJar: CookieJarStore | null = null;
 
   /** yt-dlp nhận bản sao tạm của tệp cookies cho mỗi lượt (xem cookie-jar-store.ts). */
@@ -535,13 +537,19 @@ export class DownloadEngine {
     return this.remuxToPreferredContainer(job, input, appSettings, resource, signal, onProgress);
   }
 
-  private async materializeForProject(sourcePath: string, projectFolder: string): Promise<string> {
+  private async materializeForProject(sourcePath: string, projectFolder: string, job: QueueJob): Promise<string> {
     if (resolve(dirname(sourcePath)) === resolve(projectFolder)) return sourcePath;
 
     await ensureDirectory(projectFolder);
     const materialized = join(projectFolder, basename(sourcePath));
     const existing = await this.verifier.verify(materialized, 'fast').catch(() => ({ ok: false }));
     if (!existing.ok) {
+      // S2: không xóa tệp cùng tên mà danh sách khác đang dùng để thay bằng bản sao.
+      if (job.sourceId && this.sources.othersUsingFile(materialized, job.sourceId).length > 0) {
+        throw new DownloadFailedError(
+          `Không tạo được bản video trong thư mục danh sách vì tệp cùng tên ${basename(materialized)} đang là nguồn của danh sách khác.`
+        );
+      }
       await rm(materialized, { force: true });
       try {
         await link(sourcePath, materialized);
@@ -591,7 +599,7 @@ export class DownloadEngine {
       });
       if (checked.ok) return candidate;
       const project = job.projectId ? this.projects.get(job.projectId) : null;
-      if (project) {
+      if (project && !this.keptBecauseShared(candidate, job, project.id)) {
         await this.quarantine
           .move(
             candidate,
@@ -636,7 +644,7 @@ export class DownloadEngine {
       });
       if (checked.ok) return candidate;
       const project = job.projectId ? this.projects.get(job.projectId) : null;
-      if (project) {
+      if (project && !this.keptBecauseShared(candidate, job, project.id)) {
         await this.quarantine
           .move(
             candidate,
@@ -649,6 +657,24 @@ export class DownloadEngine {
     return null;
   }
 
+  /**
+   * S2 (2026-10-10): tệp có sẵn mà bản ghi nguồn của danh sách KHÁC đang trỏ tới thì không bao giờ bị dời/xóa — ghép của danh
+   * sách đó đọc tệp qua chính bản ghi ấy (lỗi "Duy_12_10_2026" ENOENT). Đánh dấu để lượt tải lại ghi ra tệp mới tên khác.
+   */
+  private keptBecauseShared(path: string, job: QueueJob, projectId: string): boolean {
+    if (!job.sourceId) return false;
+    const others = this.sources.othersUsingFile(path, job.sourceId);
+    if (others.length === 0) return false;
+    this.sharedFileKeptJobs.add(job.id);
+    this.logger.info(
+      'download',
+      'SOURCE_FILE_SHARED_KEPT',
+      `Tệp ${basename(path)} đang là nguồn của danh sách khác nên được giữ nguyên chỗ; danh sách này sẽ tải ra tệp riêng nếu cần tải lại.`,
+      { jobId: job.id, projectId, metadata: { path, usedBySources: others.map((source) => source.id) } }
+    );
+    return true;
+  }
+
   /** Mục 5: giữ bản cũ trong khu cách ly trong lúc tải bản mới; không chuyển được thì để nguyên và ghi nhật ký. */
   private async keepOutdatedSource(
     path: string,
@@ -657,6 +683,7 @@ export class DownloadEngine {
     projectId: string,
     sourceId: string
   ): Promise<void> {
+    if (this.keptBecauseShared(path, job, projectId)) return;
     await this.quarantine
       .move(path, reason, { jobId: job.id, projectId, sourceId, kind: 'outdated-source' })
       .catch((error: unknown) => {
@@ -678,6 +705,7 @@ export class DownloadEngine {
     if (!job.sourceId || !job.projectId) {
       throw new DownloadFailedError('Tác vụ tải thiếu dữ liệu nguồn hoặc dự án.');
     }
+    this.sharedFileKeptJobs.delete(job.id);
     let source = this.sources.get(job.sourceId);
     const project = this.projects.get(job.projectId);
     if (!source || !project) {
@@ -818,7 +846,7 @@ export class DownloadEngine {
             }
           }
 
-          let readyPath = await this.materializeForProject(cachedPath, project.sourceFolder);
+          let readyPath = await this.materializeForProject(cachedPath, project.sourceFolder, job);
           const beforeRemux = readyPath;
           readyPath = await this.prepareDownloadedFile(
             job,
@@ -916,11 +944,13 @@ export class DownloadEngine {
               metadata: { path: cachedPath, recovery: 'quarantine-and-redownload' }
             }
           );
-          const fastCheck = await this.verifier.verify(cachedPath, 'fast');
-          if (!fastCheck.ok) {
-            await this.quarantine
-              .move(cachedPath, fastCheck.reasons.join('; '), { jobId: job.id, projectId: project.id })
-              .catch(() => undefined);
+          if (!this.keptBecauseShared(cachedPath, job, project.id)) {
+            const fastCheck = await this.verifier.verify(cachedPath, 'fast');
+            if (!fastCheck.ok) {
+              await this.quarantine
+                .move(cachedPath, fastCheck.reasons.join('; '), { jobId: job.id, projectId: project.id })
+                .catch(() => undefined);
+            }
           }
         }
         this.sources.clearFileCache(source.id);
@@ -949,11 +979,14 @@ export class DownloadEngine {
       stage: 'analyzing',
       displayName: cleanExternalText(source.title) ?? source.originalUrl
     });
+    // S2: tệp cùng tên đang là nguồn của danh sách khác → ghi ra tệp riêng của danh sách này (mã liên kết vẫn đứng cuối để
+    // lần sau vẫn nhận ra), không bao giờ ghi đè hay dời tệp đang được dùng.
+    const ownCopyTag = this.sharedFileKeptJobs.delete(job.id) ? ` [ban-rieng-${project.id.slice(0, 8)}]` : '';
     const outputTemplate = join(
       project.sourceFolder,
       workflow === 'download-merge'
-        ? `%(title).145B [Nguon-chat-luong-cao] [%(id)s] [${linkTag}].%(ext)s`
-        : `%(title).165B [%(id)s] [${linkTag}].%(ext)s`
+        ? `%(title).145B [Nguon-chat-luong-cao] [%(id)s]${ownCopyTag} [${linkTag}].%(ext)s`
+        : `%(title).165B [%(id)s]${ownCopyTag} [${linkTag}].%(ext)s`
     );
     const args = [
       '--no-playlist',

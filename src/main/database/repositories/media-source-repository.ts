@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import { runInTransaction, type SqliteDatabase } from '../sqlite.js';
 import { parseJsonOr } from '@shared/utils/safe-json.js';
 import type { MediaInfo, MediaSource } from '@shared/types/domain.js';
@@ -45,6 +46,21 @@ export class MediaSourceRepository {
         .prepare("SELECT source_file FROM media_sources WHERE source_file IS NOT NULL AND source_file<>''")
         .all() as Array<{ source_file: string }>
     ).map((row) => row.source_file);
+  }
+  /** S2: các bản ghi nguồn KHÁC (mọi danh sách) đang trỏ tới đúng tệp này — ghép đọc tệp nguồn qua chính bản ghi đó. */
+  public othersUsingFile(path: string, exceptSourceId: string): MediaSource[] {
+    const key = (value: string): string => {
+      const absolute = resolve(value);
+      return process.platform === 'win32' ? absolute.toLowerCase() : absolute;
+    };
+    const wanted = key(path);
+    return (
+      this.db
+        .prepare("SELECT * FROM media_sources WHERE source_file IS NOT NULL AND source_file<>'' AND id<>?")
+        .all(exceptSourceId) as unknown as Row[]
+    )
+      .filter((row) => key(row.source_file ?? '') === wanted)
+      .map(map);
   }
   public get(id: string): MediaSource | null {
     const r = this.db.prepare('SELECT * FROM media_sources WHERE id=?').get(id) as Row | undefined;

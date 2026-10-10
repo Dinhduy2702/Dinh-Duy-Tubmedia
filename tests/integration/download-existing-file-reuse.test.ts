@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -30,6 +30,9 @@ let engine: DownloadEngine;
 let settings: AppSettings;
 let logger: { info: ReturnType<typeof vi.fn>; warn: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn>; debug: ReturnType<typeof vi.fn> };
 let toolsGet: ReturnType<typeof vi.fn>;
+let ytdlpAvailable = false;
+let brokenFiles = new Set<string>();
+let ytdlpOutputTemplates: string[] = [];
 
 const mediaInfo = (fileSize: number): MediaInfo => ({
   duration: 522.3,
@@ -140,7 +143,14 @@ beforeEach(() => {
   quarantineItems = new QuarantineRepository(database.db);
   settings = { ...defaultAppSettings, cookiesFilePath: '', cookiesBrowser: 'none' };
   logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
-  toolsGet = vi.fn(() => ({ available: false, executablePath: null }));
+  ytdlpAvailable = false;
+  brokenFiles = new Set<string>();
+  ytdlpOutputTemplates = [];
+  toolsGet = vi.fn((name: string) =>
+    name === 'yt-dlp' && ytdlpAvailable
+      ? { available: true, executablePath: join(folder, 'yt-dlp-gia.exe') }
+      : { available: false, executablePath: null }
+  );
   const quarantine = new QuarantineService(logger as never, {
     items: quarantineItems,
     projects,
@@ -150,14 +160,27 @@ beforeEach(() => {
   const verifier = {
     verify: vi.fn((path: string, level: string) =>
       Promise.resolve(
-        existsSync(path)
+        existsSync(path) && !brokenFiles.has(path)
           ? { ok: true, path, level, reasons: [], duration: 522.3 }
           : { ok: false, path, level, reasons: ['Tệp không tồn tại hoặc không đọc được.'], duration: 0 }
       )
     )
   };
+  // yt-dlp giả: ghi tệp đúng theo mẫu -o engine truyền vào rồi báo đường dẫn như yt-dlp thật (__VDMSP_FILE__).
+  const processes = {
+    run: vi.fn((options: { args: string[]; onStdoutLine?: (line: string) => void }) => {
+      const template = options.args[options.args.indexOf('-o') + 1] ?? '';
+      ytdlpOutputTemplates.push(template);
+      const output = template.replace(/%\((\w+)\)[.\d]*[sB]/g, (_match, field: string) =>
+        field === 'ext' ? 'mp4' : field === 'id' ? 'ID_TAI_LAI' : 'Ban tai lai'
+      );
+      writeVideo(output, 5000);
+      options.onStdoutLine?.(`__VDMSP_FILE__:${output}`);
+      return Promise.resolve({ code: 0, stdoutTail: '', stderrTail: '' });
+    })
+  };
   engine = new DownloadEngine(
-    {} as never,
+    processes as never,
     { get: toolsGet } as never,
     sources,
     projects,
@@ -229,5 +252,72 @@ describe('S1 — tệp có sẵn tìm thấy trong thư mục nguồn được D
 
     await expect(run(jobFor(project.id, sourceId, 'download-only'))).rejects.toMatchObject({ code: 'TOOL_NOT_FOUND' });
     expect(eventCodes()).toContain('SOURCE_CACHE_POLICY_UPGRADE');
+  });
+});
+
+// S2 (2026-10-10): KHÔNG BAO GIỜ dời hay xóa một tệp mà bản ghi nguồn của danh sách khác đang trỏ tới (ghép đọc tệp nguồn
+// qua chính bản ghi đó). Nếu danh sách này buộc phải tải lại thì tải ra TỆP MỚI tên khác, để tệp đang được dùng nguyên chỗ.
+describe('S2 — không dời tệp danh sách khác đang dùng; buộc tải lại thì tải ra tệp mới', () => {
+  const sharedSetup = () => {
+    const shared = join(driveRoot, 'Ghép video', 'video');
+    mkdirSync(shared, { recursive: true });
+    const url = 'https://drive.google.com/file/d/1nbW3fJZdRQOu6nKfE_-dspF6lWDrktEv/view';
+    const mediaId = '1nbW3fJZdRQOu6nKfE_-dspF6lWDrktEv';
+    const file = join(shared, `TA718_TBN.mp4 [Nguon-chat-luong-cao] [${mediaId}] [${downloadLinkTag(url)}].mp4`);
+    writeVideo(file, 4096);
+    const policy = downloadPolicyForWorkflow(settingsForDownloadWorkflow(settings, 'download-merge'), 'download-merge', 'google-drive');
+    const owner = makeProject('Duy_12_10_2026', shared);
+    const ownerSource = insertSource(owner.id, url, 'google-drive', mediaId, { path: file, policy });
+    const other = makeProject('Duy_17_10_2026', shared);
+    return { shared, url, mediaId, file, policy, owner, ownerSource, other };
+  };
+
+  it('bản ghi của danh sách này mang chính sách cũ nhưng tệp đang là nguồn của danh sách khác → giữ nguyên tệp, tải ra tệp mới', async () => {
+    const { url, mediaId, file, policy, ownerSource, other } = sharedSetup();
+    const otherSource = insertSource(other.id, url, 'google-drive', mediaId, { path: file, policy: 'merge-best-source-multiplatform-v6' });
+    ytdlpAvailable = true;
+
+    const result = await run(jobFor(other.id, otherSource, 'download-merge'));
+
+    expect(existsSync(file), 'tệp danh sách kia đang dùng phải còn nguyên chỗ').toBe(true);
+    expect(readFileSync(file).length).toBe(4096);
+    expect(quarantineItems.listActive()).toEqual([]);
+    expect(sources.get(ownerSource)?.sourceFile).toBe(file);
+    expect(result.outputPath).not.toBe(file);
+    expect(existsSync(result.outputPath)).toBe(true);
+    expect(sources.get(otherSource)).toMatchObject({ sourceFile: result.outputPath, downloadPolicy: policy });
+    expect(ytdlpOutputTemplates).toHaveLength(1);
+    expect(eventCodes()).toContain('SOURCE_FILE_SHARED_KEPT');
+  });
+
+  it('tệp dùng chung không qua được kiểm tra của danh sách này → vẫn không bị dời vào khu cách ly', async () => {
+    const { url, mediaId, file, policy, ownerSource, other } = sharedSetup();
+    const otherSource = insertSource(other.id, url, 'google-drive', mediaId, { path: file, policy });
+    brokenFiles.add(file);
+    ytdlpAvailable = true;
+
+    const result = await run(jobFor(other.id, otherSource, 'download-merge'));
+
+    expect(existsSync(file)).toBe(true);
+    expect(quarantineItems.listActive()).toEqual([]);
+    expect(sources.get(ownerSource)?.sourceFile).toBe(file);
+    expect(result.outputPath).not.toBe(file);
+    expect(sources.get(otherSource)?.sourceFile).toBe(result.outputPath);
+  });
+
+  it('đối chứng: tệp chỉ thuộc riêng danh sách này mang chính sách cũ → giữ bản cũ trong khu cách ly như mục 5', async () => {
+    const own = join(driveRoot, 'Rieng', 'video');
+    mkdirSync(own, { recursive: true });
+    const url = 'https://www.youtube.com/watch?v=onlyMINE001';
+    const file = join(own, `Video riêng [onlyMINE001] [${downloadLinkTag(url)}].mp4`);
+    writeVideo(file);
+    const project = makeProject('Danh sách riêng', own);
+    const sourceId = insertSource(project.id, url, 'youtube', 'onlyMINE001', { path: file, policy: 'download-list-multiplatform-v1:{}' });
+    ytdlpAvailable = true;
+
+    await run(jobFor(project.id, sourceId, 'download-only'));
+
+    expect(quarantineItems.listActive().map((item) => item.originalPath)).toEqual([file]);
+    expect(eventCodes()).not.toContain('SOURCE_FILE_SHARED_KEPT');
   });
 });

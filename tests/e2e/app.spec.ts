@@ -1745,7 +1745,7 @@ test('B2: hai video cùng tiêu đề khác link đều được tải đầy đ
  * sách thứ nhất mất tệp giữa chừng. Tải thật bằng yt-dlp từ máy chủ cục bộ; đếm yêu cầu tới máy chủ để chứng minh không tải lại.
  * Khu cách ly nằm ở <gốc ổ>\Tubmedia — bài kiểm cũng bắt buộc thư mục đó KHÔNG được tạo ra trên ổ chứa sandbox.
  */
-test('S1: danh sách thứ hai cùng thư mục, cùng link dùng lại tệp đã tải — không dời tệp, không tải lại', async () => {
+test('S1 + S2: danh sách thứ hai cùng thư mục, cùng link dùng lại tệp đã tải; buộc tải lại thì ra tệp riêng, không dời tệp đang dùng', async () => {
   test.setTimeout(150_000);
   const toolsDirectory = resolveToolsDirectoryForTest();
   test.skip(!toolsDirectory, 'Không tìm thấy yt-dlp/ffmpeg/ffprobe trên máy này để chạy bài kiểm thật.');
@@ -1897,6 +1897,27 @@ test('S1: danh sách thứ hai cùng thư mục, cùng link dùng lại tệp đ
       { encoding: 'utf8', windowsHide: true }
     ).trim();
     expect(audio, 'tệp dùng lại vẫn đủ tiếng').toBe('aac');
+
+    // S2: đổi cài đặt chất lượng → chính sách tải đã lưu của danh sách thứ hai thành "cũ". Chạy lại danh sách thứ hai phải
+    // tải lại, nhưng tệp kia vẫn là nguồn của danh sách thứ nhất → giữ nguyên chỗ, bản mới ghi ra tệp riêng tên khác.
+    await shellWindow.evaluate(
+      (patch) => (window as unknown as { desktop: { settings: { update: (value: unknown) => Promise<unknown> } } }).desktop.settings.update(patch),
+      { downloadMaxHeight: 2160 }
+    );
+    const rerun = await startAndWait('download-2', 'Danh sach thu hai');
+    expect(rerun.status, 'chạy lại danh sách thứ hai phải tải xong').toBe('completed');
+    expect(rerun.projectId).toBe(second.projectId);
+    const ownCopy = typeof rerun.input.outputPath === 'string' ? rerun.input.outputPath : '';
+    expect(ownCopy, 'bản tải lại phải là tệp riêng, không ghi đè tệp đang dùng').not.toBe(firstPath);
+    expect(path.basename(ownCopy)).toContain('[ban-rieng-');
+    expect(fs.existsSync(ownCopy)).toBe(true);
+    expect(requests, 'lần chạy lại phải thật sự tải lại qua máy chủ').toBeGreaterThan(requestsAfterFirst);
+    const statShared = fs.statSync(firstPath);
+    expect(statShared.ino, 'tệp danh sách thứ nhất đang dùng phải nguyên chỗ, không bị dời rồi thay').toBe(statBefore.ino);
+    expect(statShared.mtimeMs).toBe(statBefore.mtimeMs);
+    if (!quarantineRootExisted) {
+      expect(fs.existsSync(quarantineRoot), `không được tạo khu cách ly ${quarantineRoot}`).toBe(false);
+    }
   } finally {
     server?.close();
     await closeElectronApplication();
