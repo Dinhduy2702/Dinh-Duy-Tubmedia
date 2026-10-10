@@ -60,6 +60,7 @@ import { InfoHint } from '../components/InfoHint';
 import { ToolReadinessPanel } from '../components/ToolReadinessPanel';
 import { FolderField } from '../components/FolderField';
 import { StatusBadge } from '../components/StatusBadge';
+import { AudioIssueSummary } from '../components/AudioIssueNotice';
 import { CompactLogRow } from '../components/CompactLogRow';
 import { EmptyState } from '../components/ui/EmptyState';
 import { useAppStore } from '../stores/app-store';
@@ -1759,6 +1760,7 @@ function MergeLaneCard({
             <span>{progress.toFixed(1)}% toàn quy trình</span>
             <span>{progressDetail}</span>
           </div>
+          <AudioIssueSummary jobs={jobs} />
         </div>
         <details className="workflow-detail-disclosure" open={form.timelineOnly}>
           <summary><span><ListOrdered size={16}/>{form.timelineOnly ? 'Timeline không ghép video' : 'Chi tiết đầu ra, dung lượng và timeline'}</span><ChevronDown size={16}/></summary>

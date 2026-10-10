@@ -2116,6 +2116,192 @@ test('S3: ghép thấy tệp nguồn bị thiếu thì tự tải lại video đ
 });
 
 /**
+ * P1 (2026-10-10, điều tra "tải nhiều video cùng lúc, một số không có tiếng"): tái hiện thật cho thấy video "không có tiếng"
+ * là do NGUỒN (không có luồng âm thanh, hoặc âm thanh im lặng tuyệt đối như YouTube Q7bzbdvwgBU −91 dB) và app không báo gì.
+ * Bài này tải thật (yt-dlp + ffmpeg đo thật) 3 video từ máy chủ cục bộ: có tiếng / im lặng / không có luồng tiếng, qua cả
+ * "Tải danh sách" lẫn "Ghép theo Timeline", rồi kiểm tra huy hiệu, dòng tóm tắt và kết quả ghép trên giao diện thật.
+ */
+test('P1: video không có tiếng hoặc im lặng từ nguồn được đo thật và báo rõ ở danh sách, Hàng đợi và thành phẩm ghép', async () => {
+  test.setTimeout(240_000);
+  const toolsDirectory = resolveToolsDirectoryForTest();
+  test.skip(!toolsDirectory, 'Không tìm thấy yt-dlp/ffmpeg/ffprobe trên máy này để chạy bài kiểm thật.');
+
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-audio-issue-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+  db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
+  const seededSettings = {
+    theme: 'dark',
+    startWithWindows: false,
+    autoCheckAppUpdates: false,
+    autoCheckToolUpdates: false,
+    ytdlpPath: path.join(toolsDirectory!, 'yt-dlp.exe'),
+    ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+    ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+  };
+  db.prepare(
+    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  db.close();
+
+  const makeClip = (name: string, audioArgs: string[]): Buffer => {
+    const clipPath = path.join(sandbox, name);
+    const made = spawnSync(
+      path.join(toolsDirectory!, 'ffmpeg.exe'),
+      ['-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=15:duration=4', ...audioArgs,
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-shortest', clipPath],
+      { stdio: 'ignore', windowsHide: true, timeout: 60_000 }
+    );
+    expect(made.status, `ffmpeg phải dựng được ${name}`).toBe(0);
+    return fs.readFileSync(clipPath);
+  };
+  const clips: Record<string, Buffer> = {
+    '/p1/co-tieng.mp4': makeClip('co-tieng.mp4', ['-f', 'lavfi', '-i', 'sine=frequency=440:duration=4', '-c:a', 'aac']),
+    '/p1/im-lang.mp4': makeClip('im-lang.mp4', ['-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', '4', '-c:a', 'aac']),
+    '/p1/khong-tieng.mp4': makeClip('khong-tieng.mp4', ['-an'])
+  };
+
+  let server: Server | undefined;
+  try {
+    server = createServer((request, response) => {
+      const data = clips[(request.url ?? '').split('?')[0]!];
+      if (!data) {
+        response.writeHead(404);
+        response.end();
+        return;
+      }
+      const range = request.headers.range;
+      const start = range ? Number(/bytes=(\d*)-/.exec(range)?.[1] ?? 0) : 0;
+      const end = data.length - 1;
+      response.writeHead(range ? 206 : 200, {
+        'Content-Type': 'video/mp4',
+        'Content-Length': String(end - start + 1),
+        'Accept-Ranges': 'bytes',
+        ...(range ? { 'Content-Range': `bytes ${start}-${end}/${data.length}` } : {})
+      });
+      response.end(data.subarray(start));
+    });
+    const port = await new Promise<number>((resolvePort) => {
+      server!.listen(0, '127.0.0.1', () => resolvePort((server!.address() as { port: number }).port));
+    });
+    const links = Object.keys(clips).map((pathname) => `http://127.0.0.1:${port}${pathname}`).join('\n');
+
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await expectSeededSettingsKept(shellWindow, seededSettings);
+
+    interface Job { id: string; type: string; status: string; projectId: string | null; input: Record<string, unknown> }
+    interface DesktopAudioIssueApi {
+      tools: { list: () => Promise<Array<{ name: string; available: boolean }>> };
+      workbench: {
+        startDownload: (input: Record<string, unknown>) => Promise<unknown>;
+        startMerge: (input: Record<string, unknown>) => Promise<unknown>;
+      };
+      queue: { list: () => Promise<Job[]> };
+    }
+    const listJobs = (): Promise<Job[]> =>
+      shellWindow!.evaluate(() => (window as unknown as { desktop: DesktopAudioIssueApi }).desktop.queue.list());
+    const toolsDeadline = Date.now() + 30_000;
+    let toolsReady = false;
+    while (Date.now() < toolsDeadline && !toolsReady) {
+      const list = await shellWindow.evaluate(() => (window as unknown as { desktop: DesktopAudioIssueApi }).desktop.tools.list());
+      toolsReady = Boolean(list.find((item) => item.name === 'yt-dlp')?.available && list.find((item) => item.name === 'ffmpeg')?.available);
+      if (!toolsReady) await sleep(300);
+    }
+    expect(toolsReady, 'yt-dlp/ffmpeg phải sẵn sàng trong 30s').toBe(true);
+    const issueOf = (jobs: Job[], suffix: string): unknown =>
+      jobs.find((job) => job.type === 'download' && String(job.input.url).endsWith(suffix))?.input.audioIssue ?? null;
+
+    // ---- Tải danh sách ----
+    const listFolder = path.join(sandbox, 'tai-danh-sach');
+    await shellWindow.evaluate(
+      (input) => (window as unknown as { desktop: DesktopAudioIssueApi }).desktop.workbench.startDownload(input),
+      { slot: 'download-1', name: 'Kiem tra tieng', linksText: links, outputFolder: listFolder, tempFolder: path.join(sandbox, 'tam-ds'), resourceProfileId: 'resource-balanced' }
+    );
+    let listJobsDone: Job[] = [];
+    const listDeadline = Date.now() + 90_000;
+    while (Date.now() < listDeadline) {
+      listJobsDone = (await listJobs()).filter((job) => job.type === 'download');
+      if (listJobsDone.length === 3 && listJobsDone.every((job) => ['completed', 'skipped', 'failed', 'cancelled'].includes(job.status))) break;
+      await sleep(300);
+    }
+    expect(listJobsDone.map((job) => job.status), 'cả 3 video phải tải xong').toEqual(['completed', 'completed', 'completed']);
+    expect(issueOf(listJobsDone, '/p1/co-tieng.mp4'), 'video có tiếng: không cảnh báo').toBeNull();
+    expect(issueOf(listJobsDone, '/p1/im-lang.mp4'), 'video im lặng (đo thật bằng ffmpeg)').toBe('silent');
+    expect(issueOf(listJobsDone, '/p1/khong-tieng.mp4'), 'video không có luồng tiếng').toBe('missing');
+
+    await shellWindow.click('[data-page-id="activity"]');
+    const badges = shellWindow.locator('.audio-issue-badge');
+    await expect(badges, 'Hàng đợi: đúng 2 video có huy hiệu').toHaveCount(2, { timeout: 10_000 });
+    await expect(shellWindow.locator('.audio-issue-badge[data-audio-issue="silent"]')).toHaveText('Tiếng im lặng');
+    await expect(shellWindow.locator('.audio-issue-badge[data-audio-issue="missing"]')).toHaveText('Không có tiếng');
+
+    // Mở lại trang Tải danh sách (danh sách được khởi chạy qua IPC nên trang phải nạp lại trạng thái từ CSDL).
+    await shellWindow.click('[data-page-id="download-workbench"]');
+    const summary = shellWindow.locator('.audio-issue-summary').first();
+    await expect(summary, 'thẻ danh sách phải có dòng tóm tắt video không có tiếng').toBeVisible({ timeout: 10_000 });
+    await expect(summary).toContainText('2 video không có tiếng từ nguồn');
+
+    // ---- Ghép theo Timeline: thành phẩm phải ghi rõ đoạn nào không có tiếng ----
+    const before = new Set((await listJobs()).map((job) => job.id));
+    await shellWindow.evaluate(
+      (input) => (window as unknown as { desktop: DesktopAudioIssueApi }).desktop.workbench.startMerge(input),
+      {
+        slot: 'merge-1',
+        name: 'Kiem tra tieng ghep',
+        linksText: links,
+        sourceFolder: path.join(sandbox, 'nguon-ghep'),
+        tempFolder: path.join(sandbox, 'tam-ghep'),
+        outputFolder: path.join(sandbox, 'ket-qua'),
+        finalFileName: 'Thanh-pham-kiem-tra-tieng.mp4',
+        qualityProfileId: 'quality-smart-merge',
+        resourceProfileId: 'resource-balanced',
+        exportTimelineTxt: false,
+        timelineOnly: false,
+        aspectRatio: 'original'
+      }
+    );
+    let merge: Job | undefined;
+    const mergeDeadline = Date.now() + 150_000;
+    while (Date.now() < mergeDeadline) {
+      merge = (await listJobs()).find((job) => job.type === 'merge' && !before.has(job.id));
+      if (merge && ['completed', 'skipped', 'failed', 'cancelled'].includes(merge.status)) break;
+      await sleep(300);
+    }
+    expect(merge?.status, 'ghép phải hoàn tất').toBe('completed');
+    expect(merge?.input.mergeAudioIssues).toEqual([
+      expect.objectContaining({ position: 2, issue: 'silent' }),
+      expect.objectContaining({ position: 3, issue: 'missing' })
+    ]);
+    const resultMessage = typeof merge?.input.resultMessage === 'string' ? merge.input.resultMessage : '';
+    expect(resultMessage).toContain('vị trí 2');
+    expect(resultMessage).toContain('vị trí 3');
+    await shellWindow.click('[data-page-id="download-merge"]');
+    await expect(shellWindow.locator('.audio-issue-summary').first()).toContainText('2 video không có tiếng từ nguồn', { timeout: 10_000 });
+  } finally {
+    server?.close();
+    await closeElectronApplication();
+    removeSandbox(sandbox);
+  }
+});
+
+/**
  * A1 (2026-09-25) — yêu cầu mới đã được duyệt: tăng giới hạn quy trình song song từ 4 lên 6 cho cả "Tải
  * danh sách" và "Ghép theo Timeline" (maxGlobalMergeJobs — trần GHÉP ĐỒNG THỜI thật — cố tình giữ nguyên
  * 1-4 theo khuyến nghị phần cứng có sẵn của app, không đổi). Bài kiểm thật này xác nhận toàn bộ đường dây

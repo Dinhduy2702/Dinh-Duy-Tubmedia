@@ -21,6 +21,7 @@ import { detailToneFor, toneTextVar } from '@shared/utils/notice-tone';
 import { displayedAttempt } from '@shared/utils/attempt-display';
 import { progressFillStyle } from '../utils/progress-style';
 import { StatusBadge } from '../components/StatusBadge';
+import { AudioIssueBadge } from '../components/AudioIssueNotice';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CompactDetail } from '../components/CompactDetail';
 import { UnifiedDownloadProgress } from '../components/UnifiedDownloadProgress';
@@ -293,6 +294,7 @@ function QueueChildRows({
                   <span>{jobTypeLabel(job.type)}</span>
                   {outputPath && <small title={outputPath}>{outputPath}</small>}
                 </div>
+                <AudioIssueBadge job={job} />
                 <StatusBadge status={job.status} fixed />
               </div>
 

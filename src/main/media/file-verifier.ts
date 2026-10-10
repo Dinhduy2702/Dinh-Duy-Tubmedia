@@ -2,6 +2,7 @@ import { constants } from 'node:fs';
 import { access, stat } from 'node:fs/promises';
 import type { VerificationLevel } from '@shared/types/domain.js';
 import { VerificationFailedError } from '@shared/errors/app-errors.js';
+import { parseVolumeDetect, type AudioLevel } from '@shared/utils/audio-presence.js';
 import type { MediaAnalyzer } from './media-analyzer.js';
 import type { ProcessManager } from '../processes/process-manager.js';
 import type { ToolManager } from '../tools/tool-manager.js';
@@ -186,6 +187,38 @@ export class FileVerifier {
     private readonly processes: ProcessManager,
     private readonly tools: ToolManager
   ) {}
+
+  /**
+   * P1 (2026-10-10): giải mã luồng tiếng đầu tiên qua bộ lọc volumedetect để biết tệp có tiếng nghe được không. Chỉ giải mã
+   * tiếng (-vn) nên nhanh. Thiếu ffmpeg hoặc ffmpeg lỗi → null: không đoán.
+   */
+  public async measureAudio(
+    path: string,
+    options: { jobId?: string; projectId?: string | null; signal?: AbortSignal } = {}
+  ): Promise<AudioLevel | null> {
+    const ffmpeg = this.tools.get('ffmpeg');
+    if (!ffmpeg.available || !ffmpeg.executablePath) return null;
+    const lines: string[] = [];
+    try {
+      const result = await this.processes.run({
+        jobId: `${options.jobId ?? `measure-${Date.now()}`}-audio-level`,
+        ...(options.projectId ? { projectId: options.projectId } : {}),
+        tool: 'ffmpeg',
+        executablePath: ffmpeg.executablePath,
+        args: ['-hide_banner', '-nostdin', '-nostats', '-i', path, '-map', '0:a:0', '-vn', '-af', 'volumedetect', '-f', 'null', '-'],
+        timeoutMs: 30 * 60 * 1000,
+        priority: 'below_normal',
+        ...(options.signal ? { signal: options.signal } : {}),
+        onStderrLine: (line) => {
+          if (line.includes('_volume:')) lines.push(line);
+        }
+      });
+      if (result.code !== 0) return null;
+      return parseVolumeDetect(lines.join('\n'));
+    } catch {
+      return null;
+    }
+  }
 
   private async analyzeAudioOnly(
     path: string,

@@ -38,6 +38,7 @@ import { InvalidInputError, ProcessingFailedError, type AppError } from '@shared
 import { buildCleanupProtection } from '../files/cleanup-protection.js';
 import { cleanupTemporaryArtifacts } from '../files/temporary-cleanup.js';
 import { sanitizeNullableSeconds, sanitizeProgress } from '@shared/utils/progress-policy.js';
+import { audioIssueLabel, audioIssueNote, isAudioIssue, type AudioIssue } from '@shared/utils/audio-presence.js';
 import { initialJobStatus, resolveResumeStatus } from '@shared/utils/job-state-machine.js';
 import {
   exhaustedDownloadFailureMessage,
@@ -48,6 +49,13 @@ import { toneForErrorCode } from '@shared/utils/notice-tone.js';
 
 /** S3: số lượt ghép tự đưa video nguồn bị thiếu đi tải lại trước khi dừng hẳn và báo lỗi. */
 const MAX_MISSING_SOURCE_REQUEUES = 2;
+
+/** P1: một video của quy trình ghép không có tiếng / im lặng từ nguồn. */
+interface MergeAudioIssue {
+  position: number;
+  title: string;
+  issue: AudioIssue;
+}
 
 interface ActiveJob {
   job: QueueJob;
@@ -198,6 +206,8 @@ export class QueueManager {
   private readonly cleanupInProgress = new Set<string>();
   private readonly blockingNoticeKeys = new Set<string>();
   private readonly keptOldVersionCounts = new Map<string, number>();
+  /** P1: theo danh sách — các tác vụ tải đã báo không có tiếng (mã tác vụ → tên video). */
+  private readonly audioIssueJobs = new Map<string, Map<string, string>>();
   private startupReadyResolve: (() => void) | null = null;
   private readonly startupReady = new Promise<void>((resolve) => {
     this.startupReadyResolve = resolve;
@@ -732,6 +742,79 @@ export class QueueManager {
       code: 'SOURCE_OLD_VERSION_KEPT',
       sticky: false,
       ...(job.projectId ? { projectId: job.projectId } : {})
+    };
+    this.window.webContents.send(IPC.events.attention, notice);
+  }
+
+  /**
+   * P1 (2026-10-10): video tải xong nhưng không có tiếng / tiếng im lặng (do nguồn). Gộp theo danh sách như "Đã giữ bản cũ"
+   * để 20 video im lặng chỉ hiện một thông báo, số đếm tăng dần.
+   */
+  private notifyAudioIssue(job: QueueJob, issue: AudioIssue): void {
+    const scope = job.projectId ?? job.id;
+    const entries = this.audioIssueJobs.get(scope) ?? new Map<string, string>();
+    const source = job.sourceId ? this.sources.get(job.sourceId) : null;
+    entries.set(job.id, source?.title ?? job.input.displayName?.toString() ?? job.input.url?.toString() ?? 'Video');
+    this.audioIssueJobs.set(scope, entries);
+    if (!this.window || this.window.isDestroyed()) return;
+    const titles = [...entries.values()];
+    const named = titles.slice(0, 3).map((title) => `"${title}"`).join(', ') + (titles.length > 3 ? '…' : '');
+    const notice: AttentionNotice = {
+      id: `audio-issue-${scope}`,
+      severity: 'warning',
+      title: 'Có video không có tiếng',
+      message:
+        `${titles.length} video tải xong nhưng không có tiếng từ nguồn: ${named}. ` +
+        (titles.length === 1 ? `${audioIssueNote(issue)} ` : 'Nguồn không có luồng âm thanh hoặc âm thanh im lặng hoàn toàn — tải lại cũng không có tiếng. ') +
+        'Xem huy hiệu "Không có tiếng" / "Tiếng im lặng" trên từng video ở trang Hàng đợi.',
+      code: 'DOWNLOAD_AUDIO_ISSUE',
+      sticky: false,
+      ...(job.projectId ? { projectId: job.projectId } : {})
+    };
+    this.window.webContents.send(IPC.events.attention, notice);
+  }
+
+  /**
+   * P1: các video của quy trình ghép mà lượt tải gần nhất ghi là không có tiếng / im lặng, theo thứ tự trong danh sách.
+   * Đoạn của các video này trong thành phẩm sẽ im lặng (ghép chèn im lặng cho nguồn không có luồng âm thanh).
+   */
+  private mergeAudioIssues(projectId: string, items: ReturnType<ItemRepository['list']>): MergeAudioIssue[] {
+    const latest = new Map<string, QueueJob>();
+    for (const job of this.repo.list(projectId)) {
+      if (job.type !== 'download' || !job.sourceId || !['completed', 'skipped'].includes(job.status)) continue;
+      const known = latest.get(job.sourceId);
+      if (!known || job.updatedAt > known.updatedAt) latest.set(job.sourceId, job);
+    }
+    const issues: MergeAudioIssue[] = [];
+    for (const item of items) {
+      const issue = item.sourceId ? latest.get(item.sourceId)?.input.audioIssue : null;
+      if (!isAudioIssue(issue)) continue;
+      const source = item.sourceId ? this.sources.get(item.sourceId) : null;
+      issues.push({ position: item.position, title: source?.title ?? `Video_${String(item.position).padStart(3, '0')}`, issue });
+    }
+    return issues;
+  }
+
+  private warnMergeAudioIssues(job: QueueJob, projectId: string, issues: readonly MergeAudioIssue[]): void {
+    const listed = issues.map((entry) => `vị trí ${entry.position} "${entry.title}" (${audioIssueLabel(entry.issue).toLowerCase()})`).join(', ');
+    const message =
+      `Thành phẩm sẽ có ${issues.length} đoạn không có tiếng vì nguồn không có tiếng: ${listed}. ` +
+      'Tubmedia vẫn ghép bình thường và chèn im lặng ở các đoạn này; nếu cần tiếng, hãy thay link khác cho các video trên.';
+    this.logger.warn('merge', 'MERGE_SOURCE_AUDIO_ISSUES', message, {
+      jobId: job.id,
+      projectId,
+      metadata: { issues }
+    });
+    if (!this.window || this.window.isDestroyed()) return;
+    const notice: AttentionNotice = {
+      id: `merge-audio-issue-${projectId}`,
+      severity: 'warning',
+      title: 'Thành phẩm có đoạn không có tiếng',
+      message,
+      code: 'MERGE_SOURCE_AUDIO_ISSUES',
+      sticky: false,
+      projectId,
+      jobId: job.id
     };
     this.window.webContents.send(IPC.events.attention, notice);
   }
@@ -1532,12 +1615,15 @@ export class QueueManager {
           );
           completionStatus = result.skipped ? 'skipped' : 'completed';
           if (result.keptOldVersions?.length) this.notifyKeptOldVersions(job, result.keptOldVersions);
+          if (result.audioIssue) this.notifyAudioIssue(job, result.audioIssue);
           const source = job.sourceId ? this.sources.get(job.sourceId) : null;
           this.repo.updateInput(job.id, {
             outputPath: result.outputPath,
             displayName: source?.title ?? job.input.displayName ?? job.input.url ?? 'Video đã tải',
             resultMessage: result.resultMessage,
             reusedExistingFile: result.skipped,
+            audioIssue: result.audioIssue ?? null,
+            audioMaxVolumeDb: result.audioMaxVolumeDb ?? null,
             cookieFailureConfirmed: false,
             cookieRetryRequested: false,
             resumeStatus: null
@@ -1977,6 +2063,9 @@ export class QueueManager {
     const allItems = this.items.list(project.id).filter((x) => x.enabled && x.validity !== 'invalid');
     const timelineOnly = job.input.timelineOnly === true;
     if (await this.requeueMissingMergeSources(job, project.id, allItems, timelineOnly)) return 'requeued';
+    const audioIssues = timelineOnly ? [] : this.mergeAudioIssues(project.id, allItems);
+    this.repo.updateInput(job.id, { mergeAudioIssues: audioIssues });
+    if (audioIssues.length > 0) this.warnMergeAudioIssues(job, project.id, audioIssues);
     const inputs = allItems.map((item) => {
       const source = item.sourceId ? this.sources.get(item.sourceId) : null;
       const path = timelineOnly ? source?.sourceFile : (item.clipFile ?? source?.sourceFile);
@@ -2111,11 +2200,14 @@ export class QueueManager {
       mergeRecoveryMode: result.recoveryMode,
       reusedExistingOutput: result.reusedExisting,
       resultMessage:
-        result.recoveryMode === 'verified-final'
+        (result.recoveryMode === 'verified-final'
           ? 'Thành phẩm hiện có đã được hậu kiểm đầy đủ và dùng lại; không ghép thêm video.'
           : result.recoveryMode === 'verified-checkpoint'
             ? 'Checkpoint hoàn chỉnh đã được xác minh; quy trình tiếp tục từ bước xuất cuối.'
-            : 'Đã ghép mới và hậu kiểm thành phẩm đầy đủ.',
+            : 'Đã ghép mới và hậu kiểm thành phẩm đầy đủ.') +
+        (audioIssues.length > 0
+          ? ` Lưu ý: ${audioIssues.map((entry) => `đoạn video vị trí ${entry.position} ("${entry.title}") ${entry.issue === 'missing' ? 'không có tiếng' : 'im lặng'}`).join('; ')} — do nguồn không có tiếng.`
+          : ''),
       timelineTxt: result.timeline.txt,
       exportTimelineTxt,
       mergeWarnings: result.warnings,

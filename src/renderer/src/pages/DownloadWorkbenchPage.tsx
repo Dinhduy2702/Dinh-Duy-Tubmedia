@@ -42,6 +42,7 @@ import { InfoDisclosure } from '../components/InfoDisclosure';
 import { ToolReadinessPanel } from '../components/ToolReadinessPanel';
 import { FolderField } from '../components/FolderField';
 import { StatusBadge } from '../components/StatusBadge';
+import { AudioIssueSummary } from '../components/AudioIssueNotice';
 import { CompactLogRow } from '../components/CompactLogRow';
 import { useAppStore } from '../stores/app-store';
 import { useLaneLogs } from '../hooks/use-lane-logs';
@@ -1189,6 +1190,7 @@ function LaneCard({
             <span>{progress.toFixed(1)}% toàn danh sách</span>
             <span>{progressDetail}</span>
           </div>
+          <AudioIssueSummary jobs={jobs} />
         </div>
         <div className="lane-primary-actions">
           <button

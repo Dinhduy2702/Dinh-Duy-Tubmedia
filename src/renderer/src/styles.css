@@ -223,3 +223,8 @@ body{
 .storage-attention-notice{background:var(--tone-bg);border:1px solid var(--tone-border);border-left-width:4px;color:var(--tone-text);border-radius:12px;padding:.85rem 1rem;margin:12px 16px 0}
 .storage-attention-notice svg{color:var(--tone-icon);flex:none}
 .system-cleanup-panel .storage-attention-notice{margin:.5rem 0 0}
+/* P1 (2026-10-10): video không có tiếng / tiếng im lặng từ nguồn — huy hiệu trên dòng tác vụ và dòng tóm tắt dưới thanh tiến độ. */
+.audio-issue-badge{display:inline-flex;align-items:center;gap:.25rem;flex:none;border:1px solid var(--tone-warning-border);border-radius:999px;background:var(--tone-warning-bg);padding:.12rem .45rem;color:var(--tone-warning-text);font-size:.62rem;font-weight:800;white-space:nowrap;cursor:help}
+.audio-issue-summary{display:flex;align-items:center;gap:.4rem;margin-top:.45rem;border:1px solid var(--tone-warning-border);border-radius:9px;background:var(--tone-warning-bg);padding:.35rem .55rem;color:var(--tone-warning-text);font-size:.72rem;font-weight:700}
+.audio-issue-summary>svg{flex:none;color:var(--tone-warning-icon)}
+.audio-issue-tip{display:inline-flex;align-items:center;justify-content:center;margin-left:auto;cursor:help;color:var(--tone-warning-icon)}

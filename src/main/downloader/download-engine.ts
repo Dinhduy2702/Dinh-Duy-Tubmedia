@@ -13,7 +13,8 @@ import {
   ToolNotFoundError,
   SourceRemovedError
 } from '@shared/errors/app-errors.js';
-import type { AppSettings, QueueJob, ResourceProfile, VerificationLevel } from '@shared/types/domain.js';
+import type { AppSettings, MediaInfo, QueueJob, ResourceProfile, VerificationLevel } from '@shared/types/domain.js';
+import { audioIssueFor, audioIssueNote, type AudioIssue } from '@shared/utils/audio-presence.js';
 import {
   downloadPolicyForWorkflow,
   formatSelectorForWorkflow,
@@ -73,6 +74,10 @@ export interface DownloadResult {
   resultMessage: string;
   /** Mục 5: bản cũ vừa được bản mới thay — vẫn nằm trong khu cách ly, hàng đợi báo "Đã giữ bản cũ". */
   keptOldVersions?: Array<{ path: string; bytes: number }>;
+  /** P1: tệp không có luồng tiếng ('missing') hoặc tiếng im lặng hoàn toàn ('silent') — do nguồn, không phải lỗi tải. */
+  audioIssue?: AudioIssue;
+  /** P1: đỉnh âm lượng đo được (dB) khi tiếng im lặng. */
+  audioMaxVolumeDb?: number;
 }
 
 export function isFinalDownloadForMediaId(fileName: string, mediaId: string): boolean {
@@ -176,6 +181,35 @@ export class DownloadEngine {
         metadata: { path, level, duration: checked.duration }
       }
     );
+  }
+
+  /** P1 (2026-10-10): đo tiếng tệp vừa tải/dùng lại; nguồn không có tiếng hoặc im lặng thì ghi cảnh báo rõ ràng. */
+  private async assessAudio(
+    job: QueueJob,
+    projectId: string,
+    path: string,
+    info: MediaInfo,
+    signal: AbortSignal
+  ): Promise<Pick<DownloadResult, 'audioIssue' | 'audioMaxVolumeDb'>> {
+    const hasAudioStream = Boolean(info.audioCodec);
+    const level = hasAudioStream ? await this.verifier.measureAudio(path, { jobId: job.id, projectId, signal }) : null;
+    const issue = audioIssueFor({ hasAudioStream, maxVolumeDb: level?.maxVolumeDb ?? null });
+    if (!issue) return {};
+    this.logger.warn(
+      'download',
+      issue === 'missing' ? 'DOWNLOAD_AUDIO_MISSING' : 'DOWNLOAD_AUDIO_SILENT',
+      `${basename(path)}: ${audioIssueNote(issue)}`,
+      {
+        jobId: job.id,
+        projectId,
+        metadata: { path, audioCodec: info.audioCodec, maxVolumeDb: level?.maxVolumeDb ?? null, meanVolumeDb: level?.meanVolumeDb ?? null }
+      }
+    );
+    const maxVolumeDb = level?.maxVolumeDb;
+    return {
+      audioIssue: issue,
+      ...(typeof maxVolumeDb === 'number' && Number.isFinite(maxVolumeDb) ? { audioMaxVolumeDb: maxVolumeDb } : {})
+    };
   }
 
   private async remuxToPreferredContainer(
@@ -886,10 +920,14 @@ export class DownloadEngine {
               }
             }
           );
+          const cachedAudio = await this.assessAudio(job, project.id, readyPath, finalInfo, signal);
           return {
             outputPath: readyPath,
             skipped: true,
-            resultMessage: `Đã tải trước đó – đã kiểm tra hợp lệ và bỏ qua tải lại: ${readyPath}`
+            resultMessage:
+              `Đã tải trước đó – đã kiểm tra hợp lệ và bỏ qua tải lại: ${readyPath}` +
+              (cachedAudio.audioIssue ? ` Lưu ý: ${audioIssueNote(cachedAudio.audioIssue)}` : ''),
+            ...cachedAudio
           };
         }
 
@@ -1623,16 +1661,19 @@ export class DownloadEngine {
       appSettings.downloadAllowBelowMinimum &&
       appSettings.downloadMinHeight > 0 &&
       info.height < appSettings.downloadMinHeight;
-    return {
-      outputPath: finalPath,
-      skipped: false,
-      resultMessage: capCutReady
+    const audio = await this.assessAudio(job, project.id, finalPath, info, signal);
+    const resultMessage = capCutReady
         ? `Đã giữ nguyên video master chất lượng cao và tạo riêng bản edit mượt cho CapCut: ${finalPath}`
         : workflow === 'download-merge'
           ? `Đã tải nguồn tốt nhất mà ${source.platform || 'nền tảng'} cung cấp để ghép, chưa mã hóa giảm chất lượng: ${finalPath}`
           : acceptedMinimumFallback
             ? `Đã tải thành công ${info.height}p — thấp hơn mức mong muốn ${appSettings.downloadMinHeight}p nhưng là fallback được danh sách cho phép: ${finalPath}`
-            : `Đã tải và kiểm tra hoàn tất: ${finalPath}`,
+            : `Đã tải và kiểm tra hoàn tất: ${finalPath}`;
+    return {
+      outputPath: finalPath,
+      skipped: false,
+      resultMessage: audio.audioIssue ? `${resultMessage} Lưu ý: ${audioIssueNote(audio.audioIssue)}` : resultMessage,
+      ...audio,
       ...(keptOldVersions.length
         ? { keptOldVersions: keptOldVersions.map((item) => ({ path: item.quarantinePath, bytes: item.bytes })) }
         : {})

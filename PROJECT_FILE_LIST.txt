@@ -329,6 +329,7 @@ src/renderer/src/brand.css
 src/renderer/src/brand/brand-colors.ts
 src/renderer/src/brand/logo-data.ts
 src/renderer/src/components/AttentionCenter.tsx
+src/renderer/src/components/AudioIssueNotice.tsx
 src/renderer/src/components/BrandKit.tsx
 src/renderer/src/components/CompactDetail.tsx
 src/renderer/src/components/CompactLogRow.tsx
@@ -423,6 +424,7 @@ src/shared/types/domain.ts
 src/shared/utils/active-download-workers-label.ts
 src/shared/utils/apply-temp-folder.ts
 src/shared/utils/attempt-display.ts
+src/shared/utils/audio-presence.ts
 src/shared/utils/build-commit.ts
 src/shared/utils/concat-compatibility.ts
 src/shared/utils/cookie-policy.ts
@@ -480,6 +482,7 @@ tests/integration/merge-missing-source-requeue.test.ts
 tests/integration/migration-attempts-reset.test.ts
 tests/integration/quarantine-service.test.ts
 tests/integration/queue-attempts.test.ts
+tests/integration/queue-audio-issue.test.ts
 tests/integration/queue-load-governor.test.ts
 tests/integration/queue-retry-requeue.test.ts
 tests/integration/queue-startup-hold.test.ts
@@ -494,6 +497,7 @@ tests/unit/active-download-workers-label.test.ts
 tests/unit/app-update-version.test.ts
 tests/unit/apply-temp-folder.test.ts
 tests/unit/attempt-display.test.ts
+tests/unit/audio-presence.test.ts
 tests/unit/batch-error-aggregation-r18.test.ts
 tests/unit/brand-layout.test.ts
 tests/unit/brand-logo.test.ts

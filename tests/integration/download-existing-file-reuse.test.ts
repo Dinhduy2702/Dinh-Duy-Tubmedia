@@ -33,6 +33,11 @@ let toolsGet: ReturnType<typeof vi.fn>;
 let ytdlpAvailable = false;
 let brokenFiles = new Set<string>();
 let ytdlpOutputTemplates: string[] = [];
+/** P1: tệp tải về không có luồng tiếng (bộ phân tích giả trả audioCodec null). */
+let noAudioStream = false;
+/** P1: đỉnh âm lượng (dB) mà ffmpeg volumedetect giả đo được; null = đo không được. */
+let measuredMaxVolumeDb: number | null = -3;
+let measureAudio: ReturnType<typeof vi.fn>;
 
 const mediaInfo = (fileSize: number): MediaInfo => ({
   duration: 522.3,
@@ -146,6 +151,8 @@ beforeEach(() => {
   ytdlpAvailable = false;
   brokenFiles = new Set<string>();
   ytdlpOutputTemplates = [];
+  noAudioStream = false;
+  measuredMaxVolumeDb = -3;
   toolsGet = vi.fn((name: string) =>
     name === 'yt-dlp' && ytdlpAvailable
       ? { available: true, executablePath: join(folder, 'yt-dlp-gia.exe') }
@@ -156,7 +163,14 @@ beforeEach(() => {
     projects,
     rootOf: () => driveRoot
   });
-  const analyzer = { analyze: vi.fn(() => Promise.resolve(mediaInfo(4096))) };
+  const analyzer = {
+    analyze: vi.fn(() =>
+      Promise.resolve(noAudioStream ? { ...mediaInfo(4096), audioCodec: null, audioBitrate: null, sampleRate: null, channels: null, channelLayout: null } : mediaInfo(4096))
+    )
+  };
+  measureAudio = vi.fn(() =>
+    Promise.resolve(measuredMaxVolumeDb === null ? null : { meanVolumeDb: measuredMaxVolumeDb - 12, maxVolumeDb: measuredMaxVolumeDb })
+  );
   const verifier = {
     verify: vi.fn((path: string, level: string) =>
       Promise.resolve(
@@ -164,7 +178,8 @@ beforeEach(() => {
           ? { ok: true, path, level, reasons: [], duration: 522.3 }
           : { ok: false, path, level, reasons: ['Tệp không tồn tại hoặc không đọc được.'], duration: 0 }
       )
-    )
+    ),
+    measureAudio
   };
   // yt-dlp giả: ghi tệp đúng theo mẫu -o engine truyền vào rồi báo đường dẫn như yt-dlp thật (__VDMSP_FILE__).
   const processes = {
@@ -319,5 +334,75 @@ describe('S2 — không dời tệp danh sách khác đang dùng; buộc tải l
 
     expect(quarantineItems.listActive().map((item) => item.originalPath)).toEqual([file]);
     expect(eventCodes()).not.toContain('SOURCE_FILE_SHARED_KEPT');
+  });
+});
+
+// P1 (2026-10-10): sau khi tải, đo tiếng của tệp. Nguồn không có luồng tiếng hoặc im lặng hoàn toàn (YouTube Q7bzbdvwgBU đo
+// −91 dB) phải được báo rõ cho người dùng — trước đây chỉ có một dòng nhật ký "Video không có audio stream" hoặc không gì cả.
+describe('P1 — đo tiếng sau khi tải và báo rõ video không có tiếng / im lặng', () => {
+  const freshSetup = (name: string, id: string) => {
+    const own = join(driveRoot, name, 'video');
+    mkdirSync(own, { recursive: true });
+    const url = `https://www.youtube.com/watch?v=${id}`;
+    const project = makeProject(name, own);
+    const sourceId = insertSource(project.id, url, 'youtube', id);
+    ytdlpAvailable = true;
+    return { own, url, project, sourceId };
+  };
+  const warnCodes = (): string[] => logger.warn.mock.calls.map((call) => String(call[1]));
+
+  it('tải mới, nguồn im lặng (đỉnh −91 dB) → kết quả ghi rõ "im lặng", nhật ký cảnh báo DOWNLOAD_AUDIO_SILENT', async () => {
+    const { project, sourceId } = freshSetup('Im lang', 'Q7bzbdvwgBU');
+    measuredMaxVolumeDb = -91;
+
+    const result = await run(jobFor(project.id, sourceId, 'download-only'));
+
+    expect(result.skipped).toBe(false);
+    expect(result).toMatchObject({ audioIssue: 'silent', audioMaxVolumeDb: -91 });
+    expect(result.resultMessage).toContain('im lặng');
+    expect(warnCodes()).toContain('DOWNLOAD_AUDIO_SILENT');
+    expect(measureAudio.mock.calls.map((call) => call[0] as string)).toEqual([result.outputPath]);
+  });
+
+  it('tải mới, nguồn không có luồng tiếng → "missing", DOWNLOAD_AUDIO_MISSING, không cần đo âm lượng', async () => {
+    const { project, sourceId } = freshSetup('Khong tieng', 'noAUDIO0001');
+    noAudioStream = true;
+
+    const result = await run(jobFor(project.id, sourceId, 'download-only'));
+
+    expect(result).toMatchObject({ audioIssue: 'missing' });
+    expect(result.resultMessage).toContain('không có luồng âm thanh');
+    expect(warnCodes()).toContain('DOWNLOAD_AUDIO_MISSING');
+    expect(measureAudio).not.toHaveBeenCalled();
+  });
+
+  it('dùng lại tệp đã tải trước đó (bỏ qua tải lại) mà tệp im lặng → vẫn báo "silent"', async () => {
+    const own = join(driveRoot, 'Dung lai', 'video');
+    mkdirSync(own, { recursive: true });
+    const url = 'https://www.youtube.com/watch?v=silentREUSE';
+    const file = join(own, `Video im lặng [silentREUSE] [${downloadLinkTag(url)}].mp4`);
+    writeVideo(file);
+    const project = makeProject('Dung lai', own);
+    const sourceId = insertSource(project.id, url, 'youtube', 'silentREUSE');
+    measuredMaxVolumeDb = -91;
+
+    const result = await run(jobFor(project.id, sourceId, 'download-only'));
+
+    expect(result).toMatchObject({ outputPath: file, skipped: true, audioIssue: 'silent' });
+    expect(result.resultMessage).toContain('im lặng');
+    expect(warnCodes()).toContain('DOWNLOAD_AUDIO_SILENT');
+  });
+
+  it('đối chứng: tiếng bình thường (−3 dB) hoặc đo không được → không cảnh báo gì', async () => {
+    const normal = freshSetup('Binh thuong', 'normalAUD01');
+    const ok = await run(jobFor(normal.project.id, normal.sourceId, 'download-only'));
+    expect(ok.audioIssue).toBeUndefined();
+
+    const unknown = freshSetup('Khong do duoc', 'unknownAUD1');
+    measuredMaxVolumeDb = null;
+    const notMeasured = await run(jobFor(unknown.project.id, unknown.sourceId, 'download-only'));
+    expect(notMeasured.audioIssue).toBeUndefined();
+    expect(warnCodes()).not.toContain('DOWNLOAD_AUDIO_SILENT');
+    expect(warnCodes()).not.toContain('DOWNLOAD_AUDIO_MISSING');
   });
 });
