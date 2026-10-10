@@ -2302,6 +2302,190 @@ test('P1: video không có tiếng hoặc im lặng từ nguồn được đo th
 });
 
 /**
+ * P2 (2026-10-10): định dạng yt-dlp đã chọn CÓ luồng tiếng mà tệp nhận được lại KHÔNG có → mất tiếng thật khi tải, phải coi là
+ * tải lỗi và tự tải lại. Máy chủ cục bộ phục vụ một manifest DASH khai báo codecs="avc1…,mp4a.40.2" (yt-dlp báo acodec
+ * mp4a.40.2) nhưng trả về tệp CHỈ CÓ HÌNH; ngay khi tệp lỗi vào khu cách ly (trước lượt thử lại), máy chủ trả tệp đủ tiếng.
+ * Khu cách ly đặt dưới thư mục tạm của bài qua TUBMEDIA_E2E_DRIVE_ROOT — không bao giờ tạo <ổ thật>\Tubmedia.
+ */
+test('P2: định dạng có tiếng mà tệp tải về mất luồng tiếng thì coi là lỗi, cách ly tệp lỗi và tự tải lại ra tệp đủ tiếng', async () => {
+  test.setTimeout(180_000);
+  const toolsDirectory = resolveToolsDirectoryForTest();
+  test.skip(!toolsDirectory, 'Không tìm thấy yt-dlp/ffmpeg/ffprobe trên máy này để chạy bài kiểm thật.');
+
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-audio-lost-'));
+  const fakeDrive = path.join(sandbox, 'o-dia');
+  const realQuarantineRoot = path.join(path.parse(sandbox).root, 'Tubmedia');
+  const realQuarantineRootExisted = fs.existsSync(realQuarantineRoot);
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+  db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
+  const seededSettings = {
+    theme: 'dark',
+    startWithWindows: false,
+    autoCheckAppUpdates: false,
+    autoCheckToolUpdates: false,
+    ytdlpPath: path.join(toolsDirectory!, 'yt-dlp.exe'),
+    ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+    ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+  };
+  db.prepare(
+    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  db.close();
+
+  const ffmpeg = path.join(toolsDirectory!, 'ffmpeg.exe');
+  const ffprobe = path.join(toolsDirectory!, 'ffprobe.exe');
+  const withAudio = path.join(sandbox, 'du-tieng.mp4');
+  const videoOnly = path.join(sandbox, 'chi-hinh.mp4');
+  expect(
+    spawnSync(ffmpeg, ['-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=15:duration=4', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=4',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', '-movflags', '+faststart', withAudio],
+    { stdio: 'ignore', windowsHide: true, timeout: 60_000 }).status
+  ).toBe(0);
+  expect(spawnSync(ffmpeg, ['-y', '-i', withAudio, '-map', '0:v:0', '-c', 'copy', '-movflags', '+faststart', videoOnly], { stdio: 'ignore', windowsHide: true }).status).toBe(0);
+  const streamsOf = (file: string): string =>
+    execFileSync(ffprobe, ['-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', file], { encoding: 'utf8', windowsHide: true })
+      .trim()
+      .split(/\r?\n/)
+      .join(',');
+  expect(streamsOf(videoOnly)).toBe('video');
+  const goodData = fs.readFileSync(withAudio);
+  const brokenData = fs.readFileSync(videoOnly);
+
+  const quarantineRoot = path.join(fakeDrive, 'Tubmedia', 'quarantine');
+  const quarantinedFiles = (): string[] => {
+    if (!fs.existsSync(quarantineRoot)) return [];
+    return fs.readdirSync(quarantineRoot, { recursive: true, encoding: 'utf8' }).filter((name) => name.endsWith('.mp4')).map((name) => path.join(quarantineRoot, name));
+  };
+  let serveGood = false;
+  const watcher = setInterval(() => {
+    if (!serveGood && quarantinedFiles().length > 0) serveGood = true;
+  }, 30);
+  let brokenServed = 0;
+  let goodServed = 0;
+  let server: Server | undefined;
+  try {
+    server = createServer((request, response) => {
+      const pathname = (request.url ?? '').split('?')[0];
+      if (pathname === '/p2/video.mpd') {
+        const port = (server!.address() as { port: number }).port;
+        response.writeHead(200, { 'Content-Type': 'application/dash+xml' });
+        response.end(
+          '<?xml version="1.0" encoding="UTF-8"?>' +
+            '<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT4S" minBufferTime="PT2S" profiles="urn:mpeg:dash:profile:isoff-on-demand:2011">' +
+            '<Period><AdaptationSet mimeType="video/mp4"><Representation id="muxed" codecs="avc1.64001e,mp4a.40.2" bandwidth="500000" width="640" height="360">' +
+            `<BaseURL>http://127.0.0.1:${port}/p2/media.mp4</BaseURL></Representation></AdaptationSet></Period></MPD>`
+        );
+        return;
+      }
+      if (pathname !== '/p2/media.mp4') {
+        response.writeHead(404);
+        response.end();
+        return;
+      }
+      const data = serveGood ? goodData : brokenData;
+      if (serveGood) goodServed += 1;
+      else brokenServed += 1;
+      const range = request.headers.range;
+      const start = range ? Number(/bytes=(\d*)-/.exec(range)?.[1] ?? 0) : 0;
+      const endMatch = range ? /bytes=\d*-(\d+)/.exec(range) : null;
+      const end = endMatch ? Math.min(Number(endMatch[1]), data.length - 1) : data.length - 1;
+      response.writeHead(range ? 206 : 200, {
+        'Content-Type': 'video/mp4',
+        'Content-Length': String(end - start + 1),
+        'Accept-Ranges': 'bytes',
+        ...(range ? { 'Content-Range': `bytes ${start}-${end}/${data.length}` } : {})
+      });
+      response.end(data.subarray(start, end + 1));
+    });
+    const port = await new Promise<number>((resolvePort) => {
+      server!.listen(0, '127.0.0.1', () => resolvePort((server!.address() as { port: number }).port));
+    });
+
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+        TUBMEDIA_E2E_DRIVE_ROOT: fakeDrive,
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await expectSeededSettingsKept(shellWindow, seededSettings);
+
+    interface Job { id: string; type: string; status: string; attempts: number; errorMessage: string | null; input: Record<string, unknown> }
+    interface DesktopAudioLostApi {
+      tools: { list: () => Promise<Array<{ name: string; available: boolean }>> };
+      workbench: { startDownload: (input: Record<string, unknown>) => Promise<unknown> };
+      queue: { list: () => Promise<Job[]> };
+    }
+    const listJobs = (): Promise<Job[]> =>
+      shellWindow!.evaluate(() => (window as unknown as { desktop: DesktopAudioLostApi }).desktop.queue.list());
+    const toolsDeadline = Date.now() + 30_000;
+    let toolsReady = false;
+    while (Date.now() < toolsDeadline && !toolsReady) {
+      const list = await shellWindow.evaluate(() => (window as unknown as { desktop: DesktopAudioLostApi }).desktop.tools.list());
+      toolsReady = Boolean(list.find((item) => item.name === 'yt-dlp')?.available && list.find((item) => item.name === 'ffmpeg')?.available);
+      if (!toolsReady) await sleep(300);
+    }
+    expect(toolsReady, 'yt-dlp/ffmpeg phải sẵn sàng trong 30s').toBe(true);
+
+    const outputFolder = path.join(fakeDrive, 'tai-danh-sach');
+    await shellWindow.evaluate(
+      (input) => (window as unknown as { desktop: DesktopAudioLostApi }).desktop.workbench.startDownload(input),
+      {
+        slot: 'download-1',
+        name: 'Kiem tra mat tieng',
+        linksText: `http://127.0.0.1:${port}/p2/video.mpd`,
+        outputFolder,
+        tempFolder: path.join(fakeDrive, 'tam'),
+        resourceProfileId: 'resource-balanced'
+      }
+    );
+    let job: Job | undefined;
+    let sawRetrying = false;
+    const deadline = Date.now() + 120_000;
+    while (Date.now() < deadline) {
+      job = (await listJobs()).find((item) => item.type === 'download');
+      if (job?.status === 'retrying' || (job?.errorMessage ?? '').includes('mất luồng âm thanh')) sawRetrying = true;
+      if (job && ['completed', 'skipped', 'failed', 'cancelled'].includes(job.status)) break;
+      await sleep(100);
+    }
+
+    expect(brokenServed, 'lượt đầu phải thật sự nhận tệp chỉ có hình').toBeGreaterThan(0);
+    expect(sawRetrying, 'tác vụ phải bị coi là lỗi rồi tự thử lại').toBe(true);
+    expect(job?.status, `phải tự tải lại thành công (lỗi: ${job?.errorMessage ?? '-'})`).toBe('completed');
+    expect(job?.attempts, 'đúng một lượt lỗi trước khi tải lại thành công').toBe(1);
+    expect(goodServed, 'lượt tải lại phải lấy tệp mới từ máy chủ').toBeGreaterThan(0);
+    const outputPath = typeof job?.input.outputPath === 'string' ? job.input.outputPath : '';
+    expect(fs.existsSync(outputPath), `tệp kết quả phải có: ${outputPath}`).toBe(true);
+    expect(streamsOf(outputPath), 'tệp cuối cùng phải đủ hình + tiếng').toBe('video,audio');
+    expect(job?.input.audioIssue ?? null, 'tệp cuối có tiếng thật → không còn cảnh báo').toBeNull();
+    const kept = quarantinedFiles();
+    expect(kept, 'tệp lỗi (chỉ có hình) phải được giữ trong khu cách ly của ổ đĩa giả').toHaveLength(1);
+    expect(streamsOf(kept[0]!)).toBe('video');
+    if (!realQuarantineRootExisted) {
+      expect(fs.existsSync(realQuarantineRoot), `không được tạo ${realQuarantineRoot}`).toBe(false);
+    }
+  } finally {
+    clearInterval(watcher);
+    server?.close();
+    await closeElectronApplication();
+    removeSandbox(sandbox);
+  }
+});
+
+/**
  * A1 (2026-09-25) — yêu cầu mới đã được duyệt: tăng giới hạn quy trình song song từ 4 lên 6 cho cả "Tải
  * danh sách" và "Ghép theo Timeline" (maxGlobalMergeJobs — trần GHÉP ĐỒNG THỜI thật — cố tình giữ nguyên
  * 1-4 theo khuyến nghị phần cứng có sẵn của app, không đổi). Bài kiểm thật này xác nhận toàn bộ đường dây

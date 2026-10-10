@@ -58,7 +58,8 @@ describe('biến môi trường chỉ dành cho phát triển', () => {
     TUBMEDIA_E2E_USER_DATA: 'C:\\e2e-data',
     TUBMEDIA_E2E_FAKE_UPDATE_STATUS_JSON: '{"state":"available"}',
     TUBMEDIA_E2E_SHUTDOWN_HANG_STEP: 'queue',
-    TUBMEDIA_E2E_QUEUE_START_DELAY_MS: '8000'
+    TUBMEDIA_E2E_QUEUE_START_DELAY_MS: '8000',
+    TUBMEDIA_E2E_DRIVE_ROOT: 'C:\\e2e-sandbox\\o-dia'
   } as NodeJS.ProcessEnv;
 
   it('bản đóng gói bỏ qua hoàn toàn ELECTRON_RENDERER_URL và TUBMEDIA_E2E', () => {
@@ -68,7 +69,8 @@ describe('biến môi trường chỉ dành cho phát triển', () => {
       e2eUserData: undefined,
       fakeUpdateStatusJson: undefined,
       e2eShutdownHangStep: undefined,
-      e2eQueueStartDelayMs: 0
+      e2eQueueStartDelayMs: 0,
+      e2eDriveRoot: undefined
     });
   });
 
@@ -79,7 +81,8 @@ describe('biến môi trường chỉ dành cho phát triển', () => {
       e2eUserData: 'C:\\e2e-data',
       fakeUpdateStatusJson: '{"state":"available"}',
       e2eShutdownHangStep: 'queue',
-      e2eQueueStartDelayMs: 8000
+      e2eQueueStartDelayMs: 8000,
+      e2eDriveRoot: 'C:\\e2e-sandbox\\o-dia'
     });
   });
 
@@ -90,7 +93,8 @@ describe('biến môi trường chỉ dành cho phát triển', () => {
       e2eUserData: undefined,
       fakeUpdateStatusJson: undefined,
       e2eShutdownHangStep: undefined,
-      e2eQueueStartDelayMs: 0
+      e2eQueueStartDelayMs: 0,
+      e2eDriveRoot: undefined
     });
     expect(readDevelopmentEnvironment({ TUBMEDIA_E2E: 'true', ELECTRON_RENDERER_URL: '' }, false)).toEqual({
       rendererUrl: undefined,
@@ -98,8 +102,14 @@ describe('biến môi trường chỉ dành cho phát triển', () => {
       e2eUserData: undefined,
       fakeUpdateStatusJson: undefined,
       e2eShutdownHangStep: undefined,
-      e2eQueueStartDelayMs: 0
+      e2eQueueStartDelayMs: 0,
+      e2eDriveRoot: undefined
     });
+  });
+
+  it('P2: gốc ổ đĩa giả cho khu cách ly chỉ có tác dụng khi TUBMEDIA_E2E=1 (bài e2e không bao giờ tạo <ổ thật>\\Tubmedia)', () => {
+    expect(readDevelopmentEnvironment({ TUBMEDIA_E2E_DRIVE_ROOT: 'C:\\x' }, false).e2eDriveRoot).toBeUndefined();
+    expect(readDevelopmentEnvironment({ TUBMEDIA_E2E: '1', TUBMEDIA_E2E_DRIVE_ROOT: '' }, false).e2eDriveRoot).toBeUndefined();
   });
 
   it('cửa sổ chính và tiến trình main chỉ đọc các biến này qua readDevelopmentEnvironment', () => {

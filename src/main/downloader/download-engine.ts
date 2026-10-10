@@ -14,7 +14,7 @@ import {
   SourceRemovedError
 } from '@shared/errors/app-errors.js';
 import type { AppSettings, MediaInfo, QueueJob, ResourceProfile, VerificationLevel } from '@shared/types/domain.js';
-import { audioIssueFor, audioIssueNote, type AudioIssue } from '@shared/utils/audio-presence.js';
+import { audioIssueFor, audioIssueNote, formatPromisesAudio, type AudioIssue } from '@shared/utils/audio-presence.js';
 import {
   downloadPolicyForWorkflow,
   formatSelectorForWorkflow,
@@ -1502,6 +1502,23 @@ export class DownloadEngine {
     );
 
     const info = await this.analyzer.analyze(finalPath, job.id);
+    // P2 (2026-10-10): định dạng đã chọn CÓ luồng tiếng mà tệp nhận được lại không có → mất tiếng thật trong lúc tải/ghép luồng
+    // (không phải do nguồn — nguồn chỉ có hình thì acodec là "none"). Coi là tải lỗi thử lại được; cách ly tệp lỗi để lượt
+    // tải lại không tìm thấy rồi dùng lại nhầm nó theo mã liên kết.
+    if (formatPromisesAudio(selectedAudioCodec) && !info.audioCodec) {
+      const reason = `Định dạng ${selectedFormatId || 'đã chọn'} có luồng âm thanh (${selectedAudioCodec}) nhưng tệp tải về không có luồng âm thanh.`;
+      this.logger.warn('download', 'DOWNLOAD_AUDIO_STREAM_LOST', reason, {
+        jobId: job.id,
+        projectId: project.id,
+        metadata: { path: finalPath, selectedFormatId, selectedAudioCodec }
+      });
+      const quarantined = await this.quarantine.move(finalPath, reason, { jobId: job.id, projectId: project.id });
+      throw new DownloadFailedError(
+        `Tệp tải về bị mất luồng âm thanh: ${reason} Tubmedia đã chuyển tệp lỗi vào khu cách ly (${quarantined}) và sẽ tự tải lại.`,
+        true,
+        { reason: 'AUDIO_STREAM_LOST', selectedFormatId, selectedAudioCodec }
+      );
+    }
     const selectedSize = validateSelectedDownloadSize(
       info.fileSize,
       isCapCutDownloadMode(appSettings.downloadCompatibilityMode) ||

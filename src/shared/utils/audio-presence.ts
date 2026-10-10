@@ -53,3 +53,12 @@ export function audioIssueNote(issue: AudioIssue): string {
     ? 'Video này không có luồng âm thanh ngay từ nguồn (người đăng tải lên không có tiếng) — không phải lỗi tải.'
     : 'Luồng âm thanh của video này im lặng hoàn toàn ngay từ nguồn — tải lại cũng không có tiếng.';
 }
+
+/**
+ * P2 (2026-10-10): định dạng yt-dlp đã chọn có HỨA luồng tiếng không (acodec của định dạng cuối, vd. "mp4a.40.2" cho 137+140).
+ * "none" = nguồn chỉ có hình theo định dạng; "NA"/rỗng = nền tảng không công bố (Google Drive, link trực tiếp) → không hứa.
+ */
+export function formatPromisesAudio(acodec: string | null | undefined): boolean {
+  const value = acodec?.trim().toLowerCase();
+  return Boolean(value) && !['none', 'na', 'n/a', 'null', 'unknown'].includes(value!);
+}

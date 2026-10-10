@@ -19,6 +19,7 @@ import { ToolManager } from '../tools/tool-manager.js';
 import { MediaAnalyzer } from '../media/media-analyzer.js';
 import { FileVerifier } from '../media/file-verifier.js';
 import { QuarantineService } from '../media/quarantine-service.js';
+import { readDevelopmentEnvironment } from '../runtime/development-environment.js';
 import { DownloadEngine } from '../downloader/download-engine.js';
 import { ClipEngine } from '../clips/clip-engine.js';
 import { NormalizeEngine } from '../normalize/normalize-engine.js';
@@ -38,6 +39,9 @@ import { QuickDownloadService } from '../download/quick-download-service.js';
 import { PreviewFrameService } from '../download/preview-frame-service.js';
 import { logMigrationReports } from '../database/migration-report.js';
 import { CookieJarStore } from '../cookies/cookie-jar-store.js';
+
+/** P2: chỉ có giá trị khi chạy e2e từ mã nguồn (xem development-environment.ts); bản đóng gói luôn undefined. */
+const E2E_DRIVE_ROOT = readDevelopmentEnvironment(process.env, app.isPackaged).e2eDriveRoot;
 
 export class AppContext {
   public readonly userData = app.getPath('userData');
@@ -82,7 +86,12 @@ export class AppContext {
   // một tác vụ "bắn một phát rồi xong").
   public readonly previewFrame = new PreviewFrameService(this.processes, this.tools, this.settings, this.logger);
   public readonly quarantineRepo = new QuarantineRepository(this.database.db);
-  public readonly quarantine = new QuarantineService(this.logger, { items: this.quarantineRepo, projects: this.projectRepo });
+  public readonly quarantine = new QuarantineService(this.logger, {
+    items: this.quarantineRepo,
+    projects: this.projectRepo,
+    // P2: bài e2e đặt gốc ổ đĩa giả trong thư mục tạm của bài — không bao giờ tạo <ổ thật>\Tubmedia khi chạy kiểm thử.
+    ...(E2E_DRIVE_ROOT ? { rootOf: () => E2E_DRIVE_ROOT } : {})
+  });
   public readonly downloader = new DownloadEngine(
     this.processes,
     this.tools,

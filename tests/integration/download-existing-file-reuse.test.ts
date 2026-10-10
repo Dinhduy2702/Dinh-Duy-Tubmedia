@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -38,6 +38,8 @@ let noAudioStream = false;
 /** P1: đỉnh âm lượng (dB) mà ffmpeg volumedetect giả đo được; null = đo không được. */
 let measuredMaxVolumeDb: number | null = -3;
 let measureAudio: ReturnType<typeof vi.fn>;
+/** P2: dòng __VDMSP_FORMAT__ yt-dlp giả in ra (định dạng đã chọn); null = không in. */
+let ytdlpFormatLine: string | null = null;
 
 const mediaInfo = (fileSize: number): MediaInfo => ({
   duration: 522.3,
@@ -153,6 +155,7 @@ beforeEach(() => {
   ytdlpOutputTemplates = [];
   noAudioStream = false;
   measuredMaxVolumeDb = -3;
+  ytdlpFormatLine = null;
   toolsGet = vi.fn((name: string) =>
     name === 'yt-dlp' && ytdlpAvailable
       ? { available: true, executablePath: join(folder, 'yt-dlp-gia.exe') }
@@ -190,6 +193,7 @@ beforeEach(() => {
         field === 'ext' ? 'mp4' : field === 'id' ? 'ID_TAI_LAI' : 'Ban tai lai'
       );
       writeVideo(output, 5000);
+      if (ytdlpFormatLine) options.onStdoutLine?.(`__VDMSP_FORMAT__:${ytdlpFormatLine}`);
       options.onStdoutLine?.(`__VDMSP_FILE__:${output}`);
       return Promise.resolve({ code: 0, stdoutTail: '', stderrTail: '' });
     })
@@ -404,5 +408,63 @@ describe('P1 — đo tiếng sau khi tải và báo rõ video không có tiếng
     expect(notMeasured.audioIssue).toBeUndefined();
     expect(warnCodes()).not.toContain('DOWNLOAD_AUDIO_SILENT');
     expect(warnCodes()).not.toContain('DOWNLOAD_AUDIO_MISSING');
+  });
+});
+
+// P2 (2026-10-10): định dạng yt-dlp đã chọn CÓ luồng tiếng (vd. 137+140 → acodec mp4a.40.2) mà tệp nhận được lại không có luồng
+// tiếng → mất tiếng thật trong lúc tải/ghép luồng, không phải do nguồn. Phải coi là tải lỗi (thử lại được) và cách ly tệp lỗi
+// để lượt tự tải lại không dùng lại nhầm nó (S1 tìm tệp có sẵn theo mã liên kết trong thư mục).
+describe('P2 — định dạng có tiếng mà tệp tải về không có luồng tiếng → tải lỗi, tự tải lại', () => {
+  const fresh = (name: string, id: string, platform = 'youtube') => {
+    const own = join(driveRoot, name, 'video');
+    mkdirSync(own, { recursive: true });
+    const url = platform === 'youtube' ? `https://www.youtube.com/watch?v=${id}` : `https://drive.google.com/file/d/${id}/view`;
+    const project = makeProject(name, own);
+    const sourceId = insertSource(project.id, url, platform, id);
+    ytdlpAvailable = true;
+    noAudioStream = true;
+    return { own, project, sourceId };
+  };
+  const format = (formatId: string, vcodec: string, acodec: string): string =>
+    [formatId, '1080', '30', '2500', '', '', vcodec, acodec, '', '', '', '', '522.3'].join('|');
+
+  it('định dạng 137+140 (acodec mp4a.40.2) mà tệp không có tiếng → lỗi DOWNLOAD_FAILED thử lại được, tệp lỗi vào khu cách ly', async () => {
+    const { own, project, sourceId } = fresh('Mat tieng', 'lostAUDIO01');
+    ytdlpFormatLine = format('137+140', 'avc1.640028', 'mp4a.40.2');
+
+    const failure = await run(jobFor(project.id, sourceId, 'download-only')).then(
+      () => null,
+      (error: unknown) => error as { code?: string; retryable?: boolean; message?: string }
+    );
+
+    expect(failure, 'phải báo lỗi tải, không được coi là tải thành công').not.toBeNull();
+    expect(failure).toMatchObject({ code: 'DOWNLOAD_FAILED', retryable: true });
+    expect(failure?.message).toContain('mất luồng âm thanh');
+    expect(failure?.message).toContain('137+140');
+    expect(logger.warn.mock.calls.map((call) => String(call[1]))).toContain('DOWNLOAD_AUDIO_STREAM_LOST');
+    const quarantined = quarantineItems.listActive();
+    expect(quarantined, 'tệp lỗi phải vào khu cách ly để lượt tải lại không dùng lại nó').toHaveLength(1);
+    expect(readdirSync(own).filter((name) => name.endsWith('.mp4')), 'không còn tệp lỗi trong thư mục danh sách').toEqual([]);
+    expect(sources.get(sourceId)?.sourceFile ?? null, 'không ghi nhận tệp lỗi làm nguồn').toBeNull();
+  });
+
+  it('đối chứng: định dạng chỉ có hình theo nguồn (acodec none) mà không có tiếng → vẫn tải xong, chỉ báo "missing" như P1', async () => {
+    const { project, sourceId } = fresh('Nguon khong tieng', 'videoONLY01');
+    ytdlpFormatLine = format('3621', 'avc1.4d401f', 'none');
+
+    const result = await run(jobFor(project.id, sourceId, 'download-only'));
+
+    expect(result).toMatchObject({ skipped: false, audioIssue: 'missing' });
+    expect(quarantineItems.listActive()).toEqual([]);
+  });
+
+  it('đối chứng: Google Drive (acodec NA — nền tảng không công bố) mà không có tiếng → vẫn tải xong, báo "missing"', async () => {
+    const { project, sourceId } = fresh('Drive khong tieng', '1DriveNoAudioXYZ', 'google-drive');
+    ytdlpFormatLine = format('source', 'NA', 'NA');
+
+    const result = await run(jobFor(project.id, sourceId, 'download-merge'));
+
+    expect(result).toMatchObject({ skipped: false, audioIssue: 'missing' });
+    expect(quarantineItems.listActive()).toEqual([]);
   });
 });

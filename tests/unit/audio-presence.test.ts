@@ -7,6 +7,7 @@ import {
   audioIssueFor,
   audioIssueLabel,
   audioIssueNote,
+  formatPromisesAudio,
   parseVolumeDetect
 } from '../../src/shared/utils/audio-presence.js';
 import { FileVerifier } from '../../src/main/media/file-verifier.js';
@@ -44,6 +45,13 @@ describe('P1 — phân loại tiếng của tệp đã tải', () => {
     expect(audioIssueNote('missing')).toContain('không có luồng âm thanh');
     expect(audioIssueNote('silent')).toContain('im lặng');
     expect(audioIssueNote('silent')).toContain('nguồn');
+  });
+});
+
+describe('P2 — định dạng yt-dlp đã chọn có hứa luồng tiếng không', () => {
+  it('codec tiếng thật (mp4a, opus, aac…) → có; none / NA / rỗng / không rõ → không (không được coi là mất tiếng)', () => {
+    for (const codec of ['mp4a.40.2', 'opus', 'aac', 'mp4a.40.5', ' Opus ']) expect(formatPromisesAudio(codec), codec).toBe(true);
+    for (const codec of ['none', 'NA', 'na', 'N/A', 'unknown', '', '   ', null, undefined]) expect(formatPromisesAudio(codec), String(codec)).toBe(false);
   });
 });
 
