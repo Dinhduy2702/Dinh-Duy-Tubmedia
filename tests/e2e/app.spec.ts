@@ -330,6 +330,19 @@ async function expectSeededSettingsKept(page: Page, seeded: Record<string, unkno
   }
 }
 
+/**
+ * Cửa sổ e2e là cửa sổ thật trên màn hình: con trỏ chuột THẬT (người đang dùng máy, hoặc con trỏ đứng yên khi cửa sổ mở ra
+ * bên dưới) lướt qua thì Windows gửi sự kiện chuột thật vào cửa sổ, đè lên vị trí chuột giả lập của Playwright. Bài cần chuột
+ * GIỮ YÊN (ô chú thích ⓘ/⚠ chỉ hiện khi đang rê vào; thông báo tạm dừng tự tắt khi bị rê vào) vì thế đỏ chập chờn — đo
+ * 2026-10-09: sự kiện pointerout mang đúng tọa độ con trỏ thật; dời con trỏ thật qua cửa sổ → ô chú thích bị ẩn 5/5.
+ * Chặn chuột thật cho cửa sổ; chuột của Playwright đi qua DevTools nên không bị ảnh hưởng.
+ */
+async function blockRealMouse(app: ElectronApplication | undefined): Promise<void> {
+  await app!.evaluate(({ BrowserWindow }) => {
+    for (const window of BrowserWindow.getAllWindows()) window.setIgnoreMouseEvents(true);
+  });
+}
+
 function resolveToolsDirectoryForTest(): string | null {
   const needed = ['yt-dlp.exe', 'ffmpeg.exe', 'ffprobe.exe'];
   const candidates = [
@@ -2493,6 +2506,7 @@ test('Cảnh báo thư mục tạm dùng chung: không có banner đầu trang, 
     mainProcessId = electronApplication.process().pid;
     shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
     await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await blockRealMouse(electronApplication);
   };
   const goTo = async (label: string): Promise<void> => {
     await shellWindow!.getByRole('navigation', { name: 'Điều hướng chính' }).getByRole('button', { name: label, exact: true }).click();
@@ -2680,6 +2694,7 @@ test('Phần B thông báo: thay thông báo trùng, đã tắt thì không hi�
     mainProcessId = electronApplication.process().pid;
     shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
     await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await blockRealMouse(electronApplication);
     await shellWindow.waitForTimeout(1500);
   };
   const send = async (channel: string, payload: unknown): Promise<void> => {
@@ -2810,6 +2825,7 @@ test('Phần A giao diện: không còn chữ dài cố định, ⓘ hiện đ�
     mainProcessId = electronApplication.process().pid;
     shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
     await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await blockRealMouse(electronApplication);
     await shellWindow.setViewportSize({ width: 1400, height: 900 });
   };
   const longVisibleTexts = async (): Promise<string[]> =>
@@ -3541,6 +3557,7 @@ test('Ô chú thích ⓘ/⚠: tự chọn phía, nằm gọn trong cửa sổ, k
     mainProcessId = electronApplication.process().pid;
     shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
     await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await blockRealMouse(electronApplication);
     let checked = 0;
     for (const [width, height] of [[900, 620], [1920, 1040]] as const) {
       await shellWindow.setViewportSize({ width, height });
