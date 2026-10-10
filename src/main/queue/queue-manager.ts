@@ -3,7 +3,7 @@ import { formatDiskShortfall } from '@shared/utils/disk-shortfall-format.js';
 import { type BrowserWindow } from 'electron';
 import { cpus, freemem, totalmem } from 'node:os';
 import { rm, stat, statfs } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { AttentionNotice, JobType, QueueJob, ResourceProfile } from '@shared/types/domain.js';
 import { IPC } from '@shared/contracts/channels.js';
 import { retryDelayMs } from '@shared/utils/retry.js';
@@ -45,6 +45,9 @@ import {
 } from '@shared/utils/download-failure.js';
 import { effectiveMemoryReserveBytes } from '@shared/utils/resource-memory.js';
 import { toneForErrorCode } from '@shared/utils/notice-tone.js';
+
+/** S3: số lượt ghép tự đưa video nguồn bị thiếu đi tải lại trước khi dừng hẳn và báo lỗi. */
+const MAX_MISSING_SOURCE_REQUEUES = 2;
 
 interface ActiveJob {
   job: QueueJob;
@@ -1544,9 +1547,13 @@ export class QueueManager {
         case 'clip':
           await this.runClip(job, profile, signal);
           break;
-        case 'merge':
-          completionStatus = (await this.runMerge(job, profile, signal)) ? 'skipped' : 'completed';
+        case 'merge': {
+          const outcome = await this.runMerge(job, profile, signal);
+          // S3: đã đưa video nguồn bị thiếu đi tải lại — tác vụ ghép đang chờ lại, không hoàn tất.
+          if (outcome === 'requeued') return;
+          completionStatus = outcome ? 'skipped' : 'completed';
           break;
+        }
         case 'analyze':
         case 'normalize':
         case 'verify':
@@ -1865,12 +1872,111 @@ export class QueueManager {
     );
     this.items.setClipFile(item.id, path);
   }
-  private async runMerge(job: QueueJob, profile: ResourceProfile, signal: AbortSignal): Promise<boolean> {
+  /**
+   * S3 (2026-10-10, lỗi ghép "Duy_12_10_2026"): trước khi ghép, mọi tệp nguồn (và tệp đã cắt) phải còn trên đĩa. Thiếu
+   * tệp — vd. một danh sách khác từng dời tệp nguồn đi giữa chừng — thì tạo lại tác vụ tải (và cắt) cho đúng video đó rồi
+   * cho tác vụ ghép quay về chờ, thay vì báo "ENOENT ... stat" thô và mất lượt ghép duy nhất. Tối đa
+   * MAX_MISSING_SOURCE_REQUEUES lượt; quá thì dừng với lỗi tiếng Việt nêu đúng tên tệp và vị trí video.
+   */
+  private async requeueMissingMergeSources(
+    job: QueueJob,
+    projectId: string,
+    items: ReturnType<ItemRepository['list']>,
+    timelineOnly: boolean
+  ): Promise<boolean> {
+    const exists = (path: string | null | undefined): Promise<boolean> =>
+      path ? stat(path).then((file) => file.isFile(), () => false) : Promise.resolve(false);
+    const missing: Array<{ item: (typeof items)[number]; file: string | null; sourceMissing: boolean; needsClip: boolean }> = [];
+    for (const item of items) {
+      if (!item.sourceId) continue;
+      const source = this.sources.get(item.sourceId);
+      const needsClip =
+        !timelineOnly &&
+        (item.timestampStartSeconds !== null || item.timestampEndSeconds !== null || item.audioMode === 'mute');
+      const sourceMissing = !(await exists(source?.sourceFile));
+      if (sourceMissing || (needsClip && !(await exists(item.clipFile)))) {
+        missing.push({ item, file: sourceMissing ? (source?.sourceFile ?? null) : item.clipFile, sourceMissing, needsClip });
+      }
+    }
+    if (missing.length === 0) return false;
+    const describe = (entry: (typeof missing)[number]): string =>
+      `${entry.file ? `"${basename(entry.file)}"` : 'tệp nguồn'} (video vị trí ${entry.item.position})`;
+    const requeues = typeof job.input.missingSourceRequeues === 'number' ? job.input.missingSourceRequeues : 0;
+    if (requeues >= MAX_MISSING_SOURCE_REQUEUES) {
+      const more = missing.length > 1 ? ` và ${missing.length - 1} video khác` : '';
+      throw new ProcessingFailedError(
+        `Không tìm thấy ${describe(missing[0]!)}${more} dù Tubmedia đã tự tải lại ${requeues} lần — tệp có thể đang bị ` +
+          'chương trình khác dời hoặc xóa. Hãy kiểm tra thư mục nguồn rồi chọn Thử lại.'
+      );
+    }
+    const downloadBySource = new Map<string, QueueJob>();
+    const dependencies: string[] = [];
+    for (const entry of missing) {
+      const sourceId = entry.item.sourceId!;
+      let download = downloadBySource.get(sourceId);
+      if (entry.sourceMissing && !download) {
+        const source = this.sources.get(sourceId);
+        download = this.repo.create({
+          projectId,
+          type: 'download',
+          sourceId,
+          input: {
+            url: entry.item.normalizedUrl,
+            displayName: source?.title ?? entry.item.normalizedUrl ?? entry.item.originalText,
+            workflow: 'download-merge'
+          },
+          priority: 100,
+          maxAttempts: 3
+        });
+        downloadBySource.set(sourceId, download);
+      }
+      if (entry.needsClip) {
+        const clip = this.repo.create({
+          projectId,
+          type: 'clip',
+          sourceId,
+          itemId: entry.item.id,
+          input: { dependsOn: download ? [download.id] : [] },
+          priority: 50,
+          maxAttempts: 2
+        });
+        dependencies.push(clip.id);
+      } else if (download) dependencies.push(download.id);
+    }
+    const stage = 'Chờ tải lại video nguồn bị thiếu';
+    this.repo.updateInput(job.id, {
+      dependsOn: [...new Set(dependencies)],
+      missingSourceRequeues: requeues + 1,
+      progressStage: stage,
+      progressPhases: undefined
+    });
+    // merging → pending không phải bước hợp lệ của máy trạng thái; đi qua retrying như các lượt đưa lại hàng đợi khác.
+    this.repo.update(job.id, { status: 'retrying', progress: 0, speed: null, etaSeconds: null });
+    this.emitProgress(this.repo.update(job.id, { status: 'pending', startedAt: null }));
+    this.logger.warn(
+      'merge',
+      'MERGE_SOURCE_MISSING_REQUEUED',
+      `Chưa ghép được vì thiếu ${missing.map(describe).join(', ')} — Tubmedia tự tải lại video đó rồi ghép tiếp.`,
+      {
+        jobId: job.id,
+        projectId,
+        metadata: {
+          missing: missing.map((entry) => ({ position: entry.item.position, path: entry.file })),
+          requeue: requeues + 1,
+          newJobs: dependencies
+        }
+      }
+    );
+    this.emit();
+    return true;
+  }
+  private async runMerge(job: QueueJob, profile: ResourceProfile, signal: AbortSignal): Promise<boolean | 'requeued'> {
     if (!job.projectId) throw new Error('Tác vụ ghép thiếu thông tin dự án.');
     const project = this.projects.get(job.projectId);
     if (!project) throw new Error('Dự án không tồn tại.');
     const allItems = this.items.list(project.id).filter((x) => x.enabled && x.validity !== 'invalid');
     const timelineOnly = job.input.timelineOnly === true;
+    if (await this.requeueMissingMergeSources(job, project.id, allItems, timelineOnly)) return 'requeued';
     const inputs = allItems.map((item) => {
       const source = item.sourceId ? this.sources.get(item.sourceId) : null;
       const path = timelineOnly ? source?.sourceFile : (item.clipFile ?? source?.sourceFile);

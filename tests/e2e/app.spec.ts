@@ -1926,6 +1926,196 @@ test('S1 + S2: danh sách thứ hai cùng thư mục, cùng link dùng lại t�
 });
 
 /**
+ * S3 (2026-10-10, lỗi ghép "Duy_12_10_2026"): tệp nguồn biến mất trong lúc danh sách ghép còn đang tải các video khác —
+ * đúng kịch bản thật (danh sách khác từng dời tệp đi giữa chừng). Máy chủ cục bộ giữ video 2 lại; trong lúc đó bài XÓA
+ * THẬT tệp nguồn video 1 đã tải xong. Khi bắt đầu ghép, app phải tự tải lại video 1 rồi ghép xong — không báo ENOENT.
+ */
+test('S3: ghép thấy tệp nguồn bị thiếu thì tự tải lại video đó rồi ghép tiếp, không báo lỗi ENOENT thô', async () => {
+  test.setTimeout(180_000);
+  const toolsDirectory = resolveToolsDirectoryForTest();
+  test.skip(!toolsDirectory, 'Không tìm thấy yt-dlp/ffmpeg/ffprobe trên máy này để chạy bài kiểm thật.');
+
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-merge-missing-source-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+  db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
+  const seededSettings = {
+    theme: 'dark',
+    startWithWindows: false,
+    autoCheckAppUpdates: false,
+    autoCheckToolUpdates: false,
+    ytdlpPath: path.join(toolsDirectory!, 'yt-dlp.exe'),
+    ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+    ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+  };
+  db.prepare(
+    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  db.close();
+
+  const makeClip = (name: string, frequency: number): Buffer => {
+    const clipPath = path.join(sandbox, name);
+    const made = spawnSync(
+      path.join(toolsDirectory!, 'ffmpeg.exe'),
+      ['-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=15:duration=4', '-f', 'lavfi', '-i', `sine=frequency=${frequency}:duration=4`,
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', '-shortest', clipPath],
+      { stdio: 'ignore', windowsHide: true, timeout: 60_000 }
+    );
+    expect(made.status, `ffmpeg phải dựng được ${name}`).toBe(0);
+    return fs.readFileSync(clipPath);
+  };
+  const clips: Record<string, Buffer> = { '/s3/video1.mp4': makeClip('video1.mp4', 440), '/s3/video2.mp4': makeClip('video2.mp4', 660) };
+
+  // Video 2 chỉ được trả khi bài mở cổng (tối đa 60 s) — để video 1 tải xong và bị xóa TRƯỚC khi ghép bắt đầu.
+  let openGate: () => void = () => undefined;
+  const gate = new Promise<void>((resolveGate) => {
+    openGate = resolveGate;
+    setTimeout(resolveGate, 60_000);
+  });
+  const requests: Record<string, number> = {};
+  let server: Server | undefined;
+  try {
+    server = createServer((request, response) => {
+      const pathname = (request.url ?? '').split('?')[0]!;
+      const data = clips[pathname];
+      if (!data) {
+        response.writeHead(404);
+        response.end();
+        return;
+      }
+      requests[pathname] = (requests[pathname] ?? 0) + 1;
+      const send = (): void => {
+        const range = request.headers.range;
+        const start = range ? Number(/bytes=(\d*)-/.exec(range)?.[1] ?? 0) : 0;
+        const end = data.length - 1;
+        response.writeHead(range ? 206 : 200, {
+          'Content-Type': 'video/mp4',
+          'Content-Length': String(end - start + 1),
+          'Accept-Ranges': 'bytes',
+          ...(range ? { 'Content-Range': `bytes ${start}-${end}/${data.length}` } : {})
+        });
+        response.end(data.subarray(start));
+      };
+      if (pathname === '/s3/video2.mp4') void gate.then(send);
+      else send();
+    });
+    const port = await new Promise<number>((resolvePort) => {
+      server!.listen(0, '127.0.0.1', () => resolvePort((server!.address() as { port: number }).port));
+    });
+    const video1Url = `http://127.0.0.1:${port}/s3/video1.mp4`;
+    const video2Url = `http://127.0.0.1:${port}/s3/video2.mp4`;
+    const sourceFolder = path.join(sandbox, 'nguon');
+    const tempFolder = path.join(sandbox, 'tam');
+    const outputFolder = path.join(sandbox, 'ket-qua');
+    for (const folder of [sourceFolder, tempFolder, outputFolder]) fs.mkdirSync(folder, { recursive: true });
+
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await expectSeededSettingsKept(shellWindow, seededSettings);
+
+    interface Job { id: string; type: string; status: string; errorMessage: string | null; input: Record<string, unknown> }
+    interface DesktopMissingSourceApi {
+      tools: { list: () => Promise<Array<{ name: string; available: boolean }>> };
+      workbench: { startMerge: (input: Record<string, unknown>) => Promise<unknown> };
+      queue: { list: () => Promise<Job[]> };
+    }
+    const listJobs = (): Promise<Job[]> =>
+      shellWindow!.evaluate(() => (window as unknown as { desktop: DesktopMissingSourceApi }).desktop.queue.list());
+
+    const toolsDeadline = Date.now() + 30_000;
+    let toolsReady = false;
+    while (Date.now() < toolsDeadline && !toolsReady) {
+      const list = await shellWindow.evaluate(() => (window as unknown as { desktop: DesktopMissingSourceApi }).desktop.tools.list());
+      toolsReady = Boolean(list.find((item) => item.name === 'yt-dlp')?.available && list.find((item) => item.name === 'ffmpeg')?.available);
+      if (!toolsReady) await sleep(300);
+    }
+    expect(toolsReady, 'yt-dlp/ffmpeg phải sẵn sàng trong 30s').toBe(true);
+
+    await shellWindow.evaluate(
+      (input) => (window as unknown as { desktop: DesktopMissingSourceApi }).desktop.workbench.startMerge(input),
+      {
+        slot: 'merge-1',
+        name: 'Kiem tra thieu tep nguon',
+        linksText: `${video1Url}\n${video2Url}`,
+        sourceFolder,
+        tempFolder,
+        outputFolder,
+        finalFileName: 'Thanh-pham-thieu-nguon.mp4',
+        qualityProfileId: 'quality-smart-merge',
+        resourceProfileId: 'resource-balanced',
+        exportTimelineTxt: false,
+        timelineOnly: false,
+        aspectRatio: 'original'
+      }
+    );
+
+    // Video 1 tải xong (video 2 còn bị giữ) → xóa thật tệp nguồn video 1, như khi danh sách khác dời nó đi.
+    let video1Path = '';
+    const firstDeadline = Date.now() + 60_000;
+    while (Date.now() < firstDeadline && !video1Path) {
+      const done = (await listJobs()).find((job) => job.type === 'download' && String(job.input.url).endsWith('/s3/video1.mp4') && job.status === 'completed');
+      if (done && typeof done.input.outputPath === 'string') video1Path = done.input.outputPath;
+      else await sleep(250);
+    }
+    expect(video1Path, `video 1 phải tải xong trước khi mở cổng video 2: ${JSON.stringify((await listJobs()).map((job) => [job.type, job.status, job.input.url, job.input.outputPath]))}`).not.toBe('');
+    const mergeBefore = (await listJobs()).find((job) => job.type === 'merge');
+    expect(mergeBefore?.status, 'ghép phải còn đang chờ video 2 lúc tệp video 1 bị xóa').toBe('pending');
+    fs.rmSync(video1Path);
+    const video1RequestsBefore = requests['/s3/video1.mp4'] ?? 0;
+    openGate();
+
+    let merge: Job | undefined;
+    let sawRequeueStage = false;
+    const mergeDeadline = Date.now() + 120_000;
+    while (Date.now() < mergeDeadline) {
+      merge = (await listJobs()).find((job) => job.type === 'merge');
+      const stage = merge?.input.progressStage;
+      if (typeof stage === 'string' && stage.includes('Chờ tải lại')) sawRequeueStage = true;
+      if (merge && ['completed', 'skipped', 'failed', 'cancelled'].includes(merge.status)) break;
+      await sleep(250);
+    }
+    expect(merge?.errorMessage ?? '', 'không được báo lỗi ENOENT thô').not.toMatch(/ENOENT|no such file/i);
+    expect(merge?.status, `ghép phải hoàn tất sau khi tự tải lại video 1 (lỗi: ${merge?.errorMessage ?? '-'})`).toBe('completed');
+    expect(merge?.input.missingSourceRequeues, 'đúng một lượt tự tải lại').toBe(1);
+    expect(sawRequeueStage, 'giao diện phải thấy bước "Chờ tải lại video nguồn bị thiếu"').toBe(true);
+    expect(requests['/s3/video1.mp4'] ?? 0, 'video 1 phải được tải lại thật qua máy chủ').toBeGreaterThan(video1RequestsBefore);
+    expect(fs.existsSync(video1Path), 'tệp nguồn video 1 phải có lại trên đĩa').toBe(true);
+    const jobs = await listJobs();
+    expect(jobs.filter((job) => job.status === 'failed'), 'không tác vụ nào thất bại').toEqual([]);
+
+    const outputPath = typeof merge?.input.outputPath === 'string' ? merge.input.outputPath : '';
+    expect(fs.existsSync(outputPath), `thành phẩm phải có trên đĩa: ${outputPath}`).toBe(true);
+    const probe = (args: string[]): string =>
+      execFileSync(path.join(toolsDirectory!, 'ffprobe.exe'), ['-v', 'error', ...args, outputPath], { encoding: 'utf8', windowsHide: true }).trim();
+    const duration = Number(probe(['-show_entries', 'format=duration', '-of', 'csv=p=0']));
+    expect(duration, 'thành phẩm đủ 2 video 4 giây').toBeGreaterThan(7);
+    expect(duration).toBeLessThan(9.5);
+    expect(probe(['-select_streams', 'a:0', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0']), 'thành phẩm đủ tiếng').toBe('aac');
+  } finally {
+    openGate();
+    server?.close();
+    await closeElectronApplication();
+    removeSandbox(sandbox);
+  }
+});
+
+/**
  * A1 (2026-09-25) — yêu cầu mới đã được duyệt: tăng giới hạn quy trình song song từ 4 lên 6 cho cả "Tải
  * danh sách" và "Ghép theo Timeline" (maxGlobalMergeJobs — trần GHÉP ĐỒNG THỜI thật — cố tình giữ nguyên
  * 1-4 theo khuyến nghị phần cứng có sẵn của app, không đổi). Bài kiểm thật này xác nhận toàn bộ đường dây
