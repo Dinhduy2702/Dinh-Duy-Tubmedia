@@ -1740,6 +1740,171 @@ test('B2: hai video cùng tiêu đề khác link đều được tải đầy đ
 });
 
 /**
+ * S1 (2026-10-10, lỗi ghép "Duy_12_10_2026" ENOENT): danh sách thứ hai cùng thư mục lưu, cùng link tìm thấy tệp danh sách
+ * thứ nhất đã tải → phải DÙNG LẠI đúng tệp đó. Trước đây tệp bị coi là "bản cũ", bị dời vào khu cách ly rồi tải lại — danh
+ * sách thứ nhất mất tệp giữa chừng. Tải thật bằng yt-dlp từ máy chủ cục bộ; đếm yêu cầu tới máy chủ để chứng minh không tải lại.
+ * Khu cách ly nằm ở <gốc ổ>\Tubmedia — bài kiểm cũng bắt buộc thư mục đó KHÔNG được tạo ra trên ổ chứa sandbox.
+ */
+test('S1: danh sách thứ hai cùng thư mục, cùng link dùng lại tệp đã tải — không dời tệp, không tải lại', async () => {
+  test.setTimeout(150_000);
+  const toolsDirectory = resolveToolsDirectoryForTest();
+  test.skip(!toolsDirectory, 'Không tìm thấy yt-dlp/ffmpeg/ffprobe trên máy này để chạy bài kiểm thật.');
+
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-existing-reuse-'));
+  const quarantineRoot = path.join(path.parse(sandbox).root, 'Tubmedia');
+  const quarantineRootExisted = fs.existsSync(quarantineRoot);
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+  db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
+  const seededSettings = {
+    theme: 'dark',
+    startWithWindows: false,
+    autoCheckAppUpdates: false,
+    autoCheckToolUpdates: false,
+    ytdlpPath: path.join(toolsDirectory!, 'yt-dlp.exe'),
+    ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+    ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+  };
+  db.prepare(
+    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  db.close();
+
+  const clipPath = path.join(sandbox, 'nguon.mp4');
+  const made = spawnSync(
+    path.join(toolsDirectory!, 'ffmpeg.exe'),
+    ['-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=15:duration=4', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=4',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', '-shortest', clipPath],
+    { stdio: 'ignore', windowsHide: true, timeout: 60_000 }
+  );
+  expect(made.status, 'ffmpeg phải dựng được clip nguồn').toBe(0);
+  const clipData = fs.readFileSync(clipPath);
+
+  let server: Server | undefined;
+  let requests = 0;
+  try {
+    server = createServer((request, response) => {
+      requests += 1;
+      const range = request.headers.range;
+      const end = clipData.length - 1;
+      if (range) {
+        const start = Number(/bytes=(\d*)-/.exec(range)?.[1] ?? 0);
+        response.writeHead(206, {
+          'Content-Type': 'video/mp4',
+          'Content-Range': `bytes ${start}-${end}/${clipData.length}`,
+          'Content-Length': String(end - start + 1),
+          'Accept-Ranges': 'bytes'
+        });
+        response.end(clipData.subarray(start));
+      } else {
+        response.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': String(clipData.length), 'Accept-Ranges': 'bytes' });
+        response.end(clipData);
+      }
+    });
+    const port = await new Promise<number>((resolvePort) => {
+      server!.listen(0, '127.0.0.1', () => resolvePort((server!.address() as { port: number }).port));
+    });
+    const url = `http://127.0.0.1:${port}/videos/chung/clip.mp4`;
+    const sharedFolder = path.join(sandbox, 'thu-muc-chung');
+    fs.mkdirSync(sharedFolder, { recursive: true });
+
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await expectSeededSettingsKept(shellWindow, seededSettings);
+
+    interface Job { id: string; type: string; status: string; projectId: string | null; input: Record<string, unknown> }
+    interface DesktopReuseApi {
+      tools: { list: () => Promise<Array<{ name: string; available: boolean }>> };
+      workbench: { startDownload: (input: Record<string, unknown>) => Promise<unknown> };
+      queue: { list: () => Promise<Job[]> };
+    }
+    const listJobs = (): Promise<Job[]> =>
+      shellWindow!.evaluate(() => (window as unknown as { desktop: DesktopReuseApi }).desktop.queue.list());
+
+    const toolsDeadline = Date.now() + 30_000;
+    let toolsReady = false;
+    while (Date.now() < toolsDeadline && !toolsReady) {
+      const list = await shellWindow.evaluate(() => (window as unknown as { desktop: DesktopReuseApi }).desktop.tools.list());
+      toolsReady = Boolean(list.find((item) => item.name === 'yt-dlp')?.available && list.find((item) => item.name === 'ffmpeg')?.available);
+      if (!toolsReady) await sleep(300);
+    }
+    expect(toolsReady, 'yt-dlp/ffmpeg phải sẵn sàng trong 30s').toBe(true);
+
+    const startAndWait = async (slot: string, name: string): Promise<Job> => {
+      const before = new Set((await listJobs()).map((job) => job.id));
+      await shellWindow!.evaluate(
+        (input) => (window as unknown as { desktop: DesktopReuseApi }).desktop.workbench.startDownload(input),
+        {
+          slot,
+          name,
+          linksText: url,
+          outputFolder: sharedFolder,
+          tempFolder: path.join(sandbox, `tam-${slot}`),
+          resourceProfileId: 'resource-balanced'
+        }
+      );
+      const deadline = Date.now() + 60_000;
+      while (Date.now() < deadline) {
+        const job = (await listJobs()).find((item) => item.type === 'download' && !before.has(item.id));
+        if (job && ['completed', 'skipped', 'failed', 'cancelled', 'paused'].includes(job.status)) return job;
+        await sleep(300);
+      }
+      throw new Error(`Tác vụ tải của ${name} không kết thúc trong 60s`);
+    };
+
+    const first = await startAndWait('download-1', 'Danh sach thu nhat');
+    expect(first.status, 'danh sách thứ nhất phải tải xong').toBe('completed');
+    const firstPath = typeof first.input.outputPath === 'string' ? first.input.outputPath : '';
+    expect(fs.existsSync(firstPath), `tệp của danh sách thứ nhất phải có trên đĩa: ${firstPath}`).toBe(true);
+    const statBefore = fs.statSync(firstPath);
+    const requestsAfterFirst = requests;
+    expect(requestsAfterFirst, 'danh sách thứ nhất phải thật sự tải qua máy chủ cục bộ').toBeGreaterThan(0);
+
+    const second = await startAndWait('download-2', 'Danh sach thu hai');
+    expect(second.status, 'danh sách thứ hai phải dùng lại tệp (bỏ qua tải lại), không thất bại').toBe('skipped');
+    expect(second.input.reusedExistingFile).toBe(true);
+    expect(second.projectId).not.toBe(first.projectId);
+    expect(second.input.outputPath, 'danh sách thứ hai dùng lại ĐÚNG tệp đã có').toBe(firstPath);
+    expect(second.input.resultMessage, 'kết quả phải ghi là bỏ qua tải lại').toContain('bỏ qua tải lại');
+    expect(requests, 'không được gửi thêm yêu cầu tải nào tới máy chủ').toBe(requestsAfterFirst);
+
+    const statAfter = fs.statSync(firstPath);
+    expect(statAfter.ino, 'tệp không được bị dời đi rồi thay bằng tệp khác').toBe(statBefore.ino);
+    expect(statAfter.mtimeMs).toBe(statBefore.mtimeMs);
+    expect(fs.readdirSync(sharedFolder).filter((name) => name.endsWith('.mp4'))).toEqual([path.basename(firstPath)]);
+    if (!quarantineRootExisted) {
+      expect(fs.existsSync(quarantineRoot), `không được tạo khu cách ly ${quarantineRoot}`).toBe(false);
+    }
+    const audio = execFileSync(
+      path.join(toolsDirectory!, 'ffprobe.exe'),
+      ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', firstPath],
+      { encoding: 'utf8', windowsHide: true }
+    ).trim();
+    expect(audio, 'tệp dùng lại vẫn đủ tiếng').toBe('aac');
+  } finally {
+    server?.close();
+    await closeElectronApplication();
+    removeSandbox(sandbox);
+  }
+});
+
+/**
  * A1 (2026-09-25) — yêu cầu mới đã được duyệt: tăng giới hạn quy trình song song từ 4 lên 6 cho cả "Tải
  * danh sách" và "Ghép theo Timeline" (maxGlobalMergeJobs — trần GHÉP ĐỒNG THỜI thật — cố tình giữ nguyên
  * 1-4 theo khuyến nghị phần cứng có sẵn của app, không đổi). Bài kiểm thật này xác nhận toàn bộ đường dây

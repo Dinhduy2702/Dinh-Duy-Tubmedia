@@ -701,7 +701,10 @@ export class DownloadEngine {
         (await this.findExistingByMediaId(project.sourceFolder, source.mediaId, job, workflow));
       if (discovered) {
         const discoveredInfo = await this.analyzer.analyze(discovered, job.id);
-        this.sources.setFile(source.id, discovered, discoveredInfo);
+        // S1 (2026-10-10): ghi nhận theo ĐÚNG chính sách hiện tại để đi tiếp vào nhánh dùng lại bên dưới (kiểm tra đầy đủ
+        // + kiểm tra chất lượng). Trước đây ghi chính sách null → nhánh "bản cũ" lập tức dời tệp vào khu cách ly và tải lại
+        // (102/102 lần trong nhật ký thật), kể cả khi tệp đang là nguồn của danh sách khác cùng thư mục → ghép báo ENOENT.
+        this.sources.setFile(source.id, discovered, discoveredInfo, 'valid', downloadPolicy);
         source = this.sources.get(source.id) ?? source;
         this.logger.info(
           'download',
