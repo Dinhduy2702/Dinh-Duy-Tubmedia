@@ -1,6 +1,6 @@
 {
-  "version": "1.6.2",
-  "appVersion": "1.6.2",
+  "version": "1.6.3",
+  "appVersion": "1.6.3",
   "requiredDirectories": [
     "installer",
     "resources",

@@ -1,3 +1,16 @@
+# Tubmedia 1.6.3
+
+- Ghép theo Timeline không còn lỗi "ENOENT" vì mất tệp nguồn giữa chừng khi nhiều danh sách dùng chung một thư mục nguồn:
+  - Video đã có sẵn trong thư mục (cùng link) giờ được dùng lại thật sự, không còn bị chuyển vào khu cách ly rồi tải lại từ đầu.
+  - Tubmedia không bao giờ dời hay xóa một tệp đang là nguồn của danh sách khác. Nếu danh sách này buộc phải tải lại (ví dụ vì vừa đổi cài đặt chất lượng), bản mới được lưu thành tệp riêng (tên có "[ban-rieng-…]"), tệp đang được dùng giữ nguyên chỗ.
+  - Lúc bắt đầu ghép mà thiếu tệp nguồn, Tubmedia tự tải lại đúng video đó rồi ghép tiếp, thay vì báo lỗi. Tải lại 2 lần vẫn không có thì báo lỗi tiếng Việt nêu rõ tên tệp và vị trí video.
+- Video không có tiếng được báo rõ ngay khi gặp:
+  - Sau khi tải, Tubmedia đo tiếng của từng video. Video mà nguồn không có tiếng hoặc âm thanh im lặng hoàn toàn có huy hiệu "Không có tiếng" / "Tiếng im lặng" ở trang Hàng đợi, dòng "N video không có tiếng từ nguồn" trên thẻ danh sách và thẻ ghép (rê chuột để xem tên video), kèm một thông báo.
+  - Quy trình ghép báo trước những đoạn sẽ không có tiếng (vị trí và tên video) và ghi rõ trong kết quả thành phẩm.
+  - Trường hợp này do nguồn (người đăng tải video lên không có tiếng) — tải lại cũng không có tiếng; Tubmedia không chặn tải hay ghép.
+- Video tải về bị mất luồng âm thanh dù định dạng của nguồn có tiếng giờ được coi là tải lỗi: Tubmedia giữ tệp lỗi trong khu cách ly và tự tải lại.
+- Chế độ tải "nguồn cao nhất" ưu tiên tiếng AAC. Video MP4 mang tiếng Opus (nhiều phần mềm dựng và trình phát trên Windows không phát được, nên tưởng là "không có tiếng") được tự chuyển riêng phần tiếng sang AAC, hình giữ nguyên. Chế độ CapCut ưu tiên bản có tiếng trước bản chỉ có hình.
+
 # Tubmedia 1.6.2
 
 - Mở ứng dụng rồi tải ngay không còn bị chặn nhầm: tác vụ bạn vừa tạo (hoặc vừa bấm Tiếp tục / Thử lại) trong lúc ứng dụng còn đang kết nối công cụ không còn bị giữ lại với lời báo "Ứng dụng bị đóng giữa chừng", và không bị đếm vào hộp "Có N tác vụ chưa xong". Tác vụ dở thật từ lần mở trước vẫn được hỏi Tiếp tục / Để sau như cũ.
