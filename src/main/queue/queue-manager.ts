@@ -18,8 +18,10 @@ import {
   effectiveConcurrentDownloadLists,
   independentDownloadProjectCanStart,
   laneSlotAvailable,
+  MAX_JOB_STARTS_PER_WINDOW,
   platformDownloadCap,
   queueExecutionLane,
+  recentJobStarts,
   type QueueExecutionLane
 } from '@shared/utils/queue-lane.js';
 import { recommendedConcurrentLists } from '@shared/utils/hardware-recommendation.js';
@@ -205,6 +207,8 @@ export class QueueManager {
   private timer: NodeJS.Timeout | null = null;
   private schedulerRunning = false;
   private tickRunning = false;
+  /** Lag bước 2: mốc các lần bắt đầu tác vụ gần đây (xem MAX_JOB_STARTS_PER_WINDOW). */
+  private jobStartTimes: number[] = [];
   private paused = false;
   private previousCpu = cpus();
   // VẤN ĐỀ 2 mục 1 (2026-09-22): một bộ điều tiết theo hồ sơ tài nguyên (ngưỡng cao lấy từ
@@ -1194,6 +1198,8 @@ export class QueueManager {
       this.autoConcurrentDownloadLists()
     );
     const mergeWorkflowCap = Math.max(1, Math.min(4, this.settings.get().maxGlobalMergeJobs));
+    this.jobStartTimes = recentJobStarts(this.jobStartTimes, Date.now());
+    let startsLeft = MAX_JOB_STARTS_PER_WINDOW - this.jobStartTimes.length;
     for (const job of fairPending) {
       if (!this.schedulerRunning) break;
       if (this.active.has(job.id)) continue;
@@ -1207,6 +1213,8 @@ export class QueueManager {
           continue;
         }
       }
+      // Lag bước 2: hết suất bắt đầu của cửa sổ 350 ms này thì để lượt sau (vẫn xét làn ở trên để báo đúng danh sách chờ lượt).
+      if (startsLeft <= 0) continue;
       const profile = this.profileFor(job);
       const activeOfType = [...this.active.values()].filter((x) => x.job.type === job.type).length;
       const activeOfProjectType = [...this.active.values()].filter(
@@ -1248,6 +1256,8 @@ export class QueueManager {
         continue;
       }
       this.runJob(job, profile); // intentionally detached; state is retained in active map
+      this.jobStartTimes.push(Date.now());
+      startsLeft -= 1;
     }
     this.waitingLaneProjects = { downloadLists: waitingDownloadLists, mergeWorkflows: waitingMergeWorkflows };
     if (stateChanged) this.emit();

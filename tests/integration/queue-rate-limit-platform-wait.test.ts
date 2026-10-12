@@ -19,7 +19,7 @@ import type { AttentionNotice, Project, QueueJob, ResourceProfile } from '@share
 // QueueManager trên CSDL thật; chỉ giả lập bộ tải. Thời gian chờ được rút ngắn bằng đúng ngõ e2e dùng.
 
 type Behavior = 'rate-limited' | 'ok' | 'hold';
-type Internals = { tick: () => Promise<void>; schedulerRunning: boolean; active: Map<string, unknown> };
+type Internals = { tick: () => Promise<void>; schedulerRunning: boolean; active: Map<string, unknown>; jobStartTimes: number[] };
 
 const resource: ResourceProfile = {
   id: 'resource-429',
@@ -53,7 +53,12 @@ let started: string[];
 let logger: { info: ReturnType<typeof vi.fn>; warn: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn>; debug: ReturnType<typeof vi.fn> };
 
 const internals = (): Internals => manager as unknown as Internals;
-const tick = (): Promise<void> => internals().tick();
+// Nhịp "bắt đầu dần" (Lag bước 2, tối đa 2 tác vụ mỗi 350 ms) có bài kiểm riêng ở queue-list-concurrency — ở đây mỗi lượt tick
+// coi như một cửa sổ mới để chỉ kiểm hành vi 429.
+const tick = (): Promise<void> => {
+  internals().jobStartTimes = [];
+  return internals().tick();
+};
 const idle = async (): Promise<void> => {
   const deadline = Date.now() + 5_000;
   while (internals().active.size > 0 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));

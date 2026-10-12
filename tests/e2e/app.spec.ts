@@ -5578,3 +5578,178 @@ test('Lag bước 1: tối đa N danh sách tải chạy cùng lúc, mỗi danh 
     removeSandbox(sandbox);
   }
 });
+
+/**
+ * Lag bước 2 (2026-10-12): bắt đầu dần. Đo thật: mỗi lần mở yt-dlp tốn ≈0,77 s CPU, trước đây một lượt tick mở hết mọi video
+ * còn chỗ trong cùng một lúc (2 danh sách × 4 luồng = 8 yt-dlp trong vài ms → máy đứng hình). Giờ mỗi lượt tick (350 ms) chỉ
+ * bắt đầu tối đa 2 tác vụ. yt-dlp thật, máy chủ cục bộ trả video chậm: 8 video vẫn chạy cùng lúc như cũ, nhưng thời điểm bắt
+ * đầu (startedAt) trải ra — không lúc nào có quá 2 video bắt đầu trong cùng 300 ms.
+ */
+test('Lag bước 2: 2 danh sách × 4 luồng bắt đầu dần (tối đa 2 video mỗi lượt) nhưng vẫn chạy đủ 8 cùng lúc', async () => {
+  test.setTimeout(180_000);
+  const toolsDirectory = resolveToolsDirectoryForTest();
+  test.skip(!toolsDirectory, 'Không tìm thấy yt-dlp/ffmpeg/ffprobe trên máy này để chạy bài kiểm thật.');
+
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-burst-'));
+  const fakeDrive = path.join(sandbox, 'o-dia');
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+  db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
+  const seededSettings = {
+    theme: 'dark',
+    startWithWindows: false,
+    autoCheckAppUpdates: false,
+    autoCheckToolUpdates: false,
+    ytdlpPath: path.join(toolsDirectory!, 'yt-dlp.exe'),
+    ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+    ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+  };
+  db.prepare(
+    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  db.close();
+
+  const ffmpeg = path.join(toolsDirectory!, 'ffmpeg.exe');
+  const clip = path.join(sandbox, 'clip.mp4');
+  expect(
+    spawnSync(ffmpeg, ['-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=15:duration=3', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', '-movflags', '+faststart', clip],
+    { stdio: 'ignore', windowsHide: true, timeout: 60_000 }).status
+  ).toBe(0);
+  const clipData = fs.readFileSync(clip);
+
+  // Trả video rất chậm (~12 giây mỗi tệp) để 8 video chắc chắn chạy trùng thời gian.
+  const requested = new Set<string>();
+  let finishedCount = 0;
+  // Đếm số VIDEO khác nhau đang được truyền (yt-dlp có thể mở hơn một kết nối cho một tệp).
+  const runningByPath = new Map<string, number>();
+  let maxRunningAtOnce = 0;
+  const track = (pathname: string, delta: number): void => {
+    runningByPath.set(pathname, (runningByPath.get(pathname) ?? 0) + delta);
+    maxRunningAtOnce = Math.max(maxRunningAtOnce, [...runningByPath.values()].filter((count) => count > 0).length);
+  };
+  let server: Server | undefined;
+  try {
+    server = createServer((request, response) => {
+      const pathname = (request.url ?? '').split('?')[0] ?? '';
+      if (!/^\/burst\/[ab][1-4]\.mp4$/.test(pathname)) {
+        response.writeHead(404);
+        response.end();
+        return;
+      }
+      requested.add(pathname);
+      const range = request.headers.range;
+      const start = range ? Number(/bytes=(\d*)-/.exec(range)?.[1] ?? 0) : 0;
+      const endMatch = range ? /bytes=\d*-(\d+)/.exec(range) : null;
+      const end = endMatch ? Math.min(Number(endMatch[1]), clipData.length - 1) : clipData.length - 1;
+      const body = clipData.subarray(start, end + 1);
+      response.writeHead(range ? 206 : 200, {
+        'Content-Type': 'video/mp4',
+        'Content-Length': String(body.length),
+        'Accept-Ranges': 'bytes',
+        ...(range ? { 'Content-Range': `bytes ${start}-${end}/${clipData.length}` } : {})
+      });
+      track(pathname, 1);
+      const pieces = 40;
+      const size = Math.ceil(body.length / pieces);
+      let index = 0;
+      const timer = setInterval(() => {
+        if (response.destroyed) {
+          clearInterval(timer);
+          track(pathname, -1);
+          return;
+        }
+        response.write(body.subarray(index * size, (index + 1) * size));
+        index += 1;
+        if (index >= pieces) {
+          clearInterval(timer);
+          response.end();
+          track(pathname, -1);
+          finishedCount += 1;
+        }
+      }, 300);
+    });
+    const port = await new Promise<number>((resolvePort) => {
+      server!.listen(0, '127.0.0.1', () => resolvePort((server!.address() as { port: number }).port));
+    });
+
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+        TUBMEDIA_E2E_DRIVE_ROOT: fakeDrive,
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await expectSeededSettingsKept(shellWindow, seededSettings);
+
+    interface Job { type: string; status: string; startedAt: string | null; errorMessage: string | null }
+    interface DesktopBurstApi {
+      tools: { list: () => Promise<Array<{ name: string; available: boolean }>> };
+      workbench: { startDownload: (input: Record<string, unknown>) => Promise<unknown> };
+      queue: { list: () => Promise<Job[]> };
+      settings: { update: (patch: Record<string, unknown>) => Promise<{ maxConcurrentDownloadLists?: number }> };
+    }
+    await expect
+      .poll(
+        async () => {
+          const list = await shellWindow!.evaluate(() => (window as unknown as { desktop: DesktopBurstApi }).desktop.tools.list());
+          return Boolean(list.find((item) => item.name === 'yt-dlp')?.available && list.find((item) => item.name === 'ffmpeg')?.available);
+        },
+        { timeout: 30_000 }
+      )
+      .toBe(true);
+    const saved = await shellWindow.evaluate(
+      () => (window as unknown as { desktop: DesktopBurstApi }).desktop.settings.update({ maxConcurrentDownloadLists: 2 })
+    );
+    expect(saved.maxConcurrentDownloadLists).toBe(2);
+
+    const startList = (slot: string, name: string, prefix: string): Promise<unknown> =>
+      shellWindow!.evaluate(
+        (input) => (window as unknown as { desktop: DesktopBurstApi }).desktop.workbench.startDownload(input),
+        {
+          slot,
+          name,
+          linksText: [1, 2, 3, 4].map((index) => `http://127.0.0.1:${port}/burst/${prefix}${index}.mp4`).join('\n'),
+          outputFolder: path.join(fakeDrive, name),
+          tempFolder: path.join(fakeDrive, `tam-${name}`),
+          resourceProfileId: 'resource-full'
+        }
+      );
+    await Promise.all([startList('download-1', 'danh-sach-a', 'a'), startList('download-2', 'danh-sach-b', 'b')]);
+
+    // Đủ 8 video chạy cùng lúc như trước (bắt đầu dần không làm giảm số luồng).
+    await expect.poll(() => requested.size, { timeout: 60_000 }).toBe(8);
+    expect(finishedCount, 'cả 8 video đã bắt đầu trước khi video nào tải xong').toBe(0);
+
+    const jobs = (await shellWindow.evaluate(() => (window as unknown as { desktop: DesktopBurstApi }).desktop.queue.list())).filter(
+      (item) => item.type === 'download'
+    );
+    const startTimes = jobs
+      .map((item) => Date.parse(item.startedAt ?? ''))
+      .filter(Number.isFinite)
+      .sort((x, y) => x - y);
+    const describeJobs = jobs.map((item) => `${item.status}:${item.errorMessage ?? '-'}`).join(' | ');
+    expect(startTimes, `8 video đều đã bắt đầu (${describeJobs})`).toHaveLength(8);
+    const offsets = startTimes.map((time) => time - startTimes[0]!).join(', ');
+    const mostInWindow = Math.max(...startTimes.map((time) => startTimes.filter((other) => other >= time && other < time + 300).length));
+    expect(mostInWindow, `tối đa 2 video bắt đầu trong cùng 300 ms (lệch so với video đầu: ${offsets} ms)`).toBeLessThanOrEqual(2);
+    expect(startTimes[7]! - startTimes[0]!, `8 video bắt đầu trải ra ít nhất 3 lượt tick (${offsets} ms)`).toBeGreaterThanOrEqual(900);
+    expect(maxRunningAtOnce, 'máy chủ thấy đủ 8 video tải cùng lúc').toBe(8);
+  } finally {
+    server?.close();
+    await closeElectronApplication();
+    removeSandbox(sandbox);
+  }
+});

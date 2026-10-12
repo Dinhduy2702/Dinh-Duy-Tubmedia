@@ -46,3 +46,17 @@ export const PLATFORM_DOWNLOAD_CAPS: Readonly<Record<string, number>> = Object.f
 export function platformDownloadCap(platform: string | null): number | null {
   return platform ? (PLATFORM_DOWNLOAD_CAPS[platform] ?? null) : null;
 }
+
+/**
+ * Lag bước 2: bắt đầu dần — tối đa MAX_JOB_STARTS_PER_WINDOW tác vụ được BẮT ĐẦU trong mỗi JOB_START_WINDOW_MS (đúng nhịp
+ * tick 350 ms khi có việc). Mỗi lần mở yt-dlp tốn ≈0,77 s CPU; mở 8 tiến trình cùng lúc làm máy đứng hình vài giây. Tính theo
+ * THỜI GIAN chứ không theo lượt tick, vì mỗi lần hàng đợi đổi trạng thái (emit) đều gọi tick ngay — các lượt tick sát nhau
+ * vẫn chung một suất. Tổng số chạy cùng lúc không đổi.
+ */
+export const MAX_JOB_STARTS_PER_WINDOW = 2;
+export const JOB_START_WINDOW_MS = 350;
+
+/** Các lần bắt đầu còn nằm trong cửa sổ hiện tại (bỏ mốc cũ và mốc "tương lai" khi đồng hồ máy bị lùi). */
+export function recentJobStarts(startTimes: readonly number[], now: number): number[] {
+  return startTimes.filter((time) => time <= now && now - time < JOB_START_WINDOW_MS);
+}

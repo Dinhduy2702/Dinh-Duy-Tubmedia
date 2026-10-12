@@ -56,6 +56,18 @@ let started: QueueJob[];
 const internals = (): Internals => manager as unknown as Internals;
 const tick = (): Promise<void> => internals().tick();
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 30));
+// Lag bước 2: mỗi 350 ms chỉ bắt đầu tối đa 2 tác vụ. Đồng hồ (chỉ Date) được giả lập; mỗi lượt tick "cách nhau" 400 ms
+// như nhịp tick thật, chạy đủ lượt để mọi chỗ còn trống được lấp.
+const nextTickWindow = (): void => {
+  vi.setSystemTime(Date.now() + 400);
+};
+const tickUntilSettled = async (): Promise<void> => {
+  for (let round = 0; round < 8; round += 1) {
+    nextTickWindow();
+    await tick();
+    await settle();
+  }
+};
 
 const makeProject = (name: string): Project => {
   const project = projects.create({
@@ -88,6 +100,7 @@ const finishAll = async (project: Project): Promise<void> => {
 };
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
   folder = mkdtempSync(join(tmpdir(), 'tubmedia-lists-'));
   database = new AppDatabase(join(folder, 'db.sqlite'));
   projects = new ProjectRepository(database.db);
@@ -126,6 +139,7 @@ afterEach(async () => {
   internals().schedulerRunning = false;
   database.close();
   rmSync(folder, { recursive: true, force: true });
+  vi.useRealTimers();
 });
 
 describe('Lag bước 1 — trần số danh sách tải / quy trình ghép chạy cùng lúc, mỗi cái vẫn đủ luồng', () => {
@@ -133,20 +147,17 @@ describe('Lag bước 1 — trần số danh sách tải / quy trình ghép ch�
     const [a, b, c] = [makeProject('A'), makeProject('B'), makeProject('C')];
     for (const project of [a, b, c]) addDownloads(project, 5, 'tiktok');
 
-    await tick();
-    await settle();
+    await tickUntilSettled();
     expect([startedIn(a), startedIn(b), startedIn(c)], 'A và B chạy đủ 4 luồng, C chờ').toEqual([4, 4, 0]);
     expect(manager.waitingLanes().downloadLists).toEqual([c.id]);
 
     await finishAll(a);
-    await tick();
-    await settle();
+    await tickUntilSettled();
     expect(startedIn(a), 'A còn 1 video — vẫn giữ lượt').toBe(5);
     expect(startedIn(c), 'A chưa xong hẳn → C vẫn chờ').toBe(0);
 
     await finishAll(a);
-    await tick();
-    await settle();
+    await tickUntilSettled();
     expect(startedIn(c), 'A xong hẳn → C vào lượt với đủ 4 luồng').toBe(4);
     expect(manager.waitingLanes().downloadLists).toEqual([]);
   });
@@ -156,16 +167,14 @@ describe('Lag bước 1 — trần số danh sách tải / quy trình ghép ch�
     internals().autoConcurrentDownloadLists = () => 1;
     const [a, b] = [makeProject('A'), makeProject('B')];
     for (const project of [a, b]) addDownloads(project, 3, 'tiktok');
-    await tick();
-    await settle();
+    await tickUntilSettled();
     expect([startedIn(a), startedIn(b)]).toEqual([3, 0]);
   });
 
   it('quy trình ghép: tối đa maxGlobalMergeJobs quy trình chạy cùng lúc, mỗi quy trình đủ luồng tải (không chia đều cho mọi quy trình)', async () => {
     const [m1, m2] = [makeProject('Ghep 1'), makeProject('Ghep 2')];
     for (const project of [m1, m2]) addDownloads(project, 4, 'tiktok', { workflow: 'download-merge' });
-    await tick();
-    await settle();
+    await tickUntilSettled();
     expect([startedIn(m1), startedIn(m2)]).toEqual([4, 0]);
     expect(manager.waitingLanes().mergeWorkflows).toEqual([m2.id]);
   });
@@ -175,8 +184,7 @@ describe('Lag bước 1 — trần số danh sách tải / quy trình ghép ch�
     addDownloads(list, 2, 'tiktok');
     addDownloads(merge, 2, 'tiktok', { workflow: 'download-merge' });
     settings = { ...settings, maxConcurrentDownloadLists: 1, maxGlobalMergeJobs: 1 };
-    await tick();
-    await settle();
+    await tickUntilSettled();
     expect([startedIn(list), startedIn(merge)]).toEqual([2, 2]);
   });
 
@@ -186,8 +194,7 @@ describe('Lag bước 1 — trần số danh sách tải / quy trình ghép ch�
     addDownloads(a, 4, 'youtube');
     addDownloads(b, 4, 'youtube');
     addDownloads(merge, 2, 'youtube', { workflow: 'download-merge' });
-    await tick();
-    await settle();
+    await tickUntilSettled();
     const youtubeStarted = started.filter((job) => String(job.input.url).includes('youtube.com')).length;
     expect(youtubeStarted).toBe(6);
 
@@ -195,8 +202,58 @@ describe('Lag bước 1 — trần số danh sách tải / quy trình ghép ch�
     settings = { ...settings, maxConcurrentDownloadLists: 4 };
     addDownloads(tiktokA, 4, 'tiktok');
     addDownloads(tiktokB, 4, 'tiktok');
+    await tickUntilSettled();
+    expect(startedIn(tiktokA) + startedIn(tiktokB)).toBe(8);
+  });
+});
+
+// Lag bước 2 (2026-10-12). Đo thật: mỗi lần mở yt-dlp tốn ≈0,77 s CPU; một lượt tick trước đây mở hết mọi video còn chỗ
+// trong cùng một lúc (2 danh sách × 4 luồng = 8 tiến trình trong vài ms → máy đứng hình vài giây). Giờ mỗi 350 ms chỉ bắt đầu
+// tối đa 2 tác vụ — tính theo THỜI GIAN, vì mỗi lần hàng đợi đổi trạng thái (emit) đều gọi tick ngay. Tổng số chạy cùng lúc
+// vẫn như bước 1.
+describe('Lag bước 2 — bắt đầu dần, tối đa 2 tác vụ mỗi 350 ms', () => {
+  it('2 danh sách × 4 luồng: mỗi lượt tick (cách 400 ms) chỉ mở thêm 2 video, sau 4 lượt đủ 8 như cũ', async () => {
+    const [a, b, c] = [makeProject('A'), makeProject('B'), makeProject('C')];
+    for (const project of [a, b, c]) addDownloads(project, 5, 'tiktok');
+
+    const counts: number[] = [];
+    for (let round = 0; round < 5; round += 1) {
+      nextTickWindow();
+      await tick();
+      await settle();
+      counts.push(started.length);
+    }
+    expect(counts, 'mỗi lượt +2, dừng ở 8 (trần 2 danh sách × 4 luồng)').toEqual([2, 4, 6, 8, 8]);
+    expect([startedIn(a), startedIn(b), startedIn(c)]).toEqual([4, 4, 0]);
+  });
+
+  it('nhiều lượt tick sát nhau (do hàng đợi đổi trạng thái gọi tick ngay) vẫn chung suất 2 tác vụ của cửa sổ 350 ms', async () => {
+    const [a, b] = [makeProject('A'), makeProject('B')];
+    for (const project of [a, b]) addDownloads(project, 4, 'tiktok');
+    for (let round = 0; round < 4; round += 1) {
+      await tick();
+      await settle();
+    }
+    expect(started.length, '4 lượt tick trong cùng một khoảnh khắc chỉ mở 2 video').toBe(2);
+    vi.setSystemTime(Date.now() + 349);
+    await tick();
+    expect(started.length, 'chưa đủ 350 ms — chưa mở thêm').toBe(2);
+    vi.setSystemTime(Date.now() + 1);
     await tick();
     await settle();
-    expect(startedIn(tiktokA) + startedIn(tiktokB)).toBe(8);
+    expect(started.length, 'qua cửa sổ mới — mở thêm 2').toBe(4);
+  });
+
+  it('lượt tick đã hết suất bắt đầu vẫn báo đúng danh sách đang chờ lượt (không nhấp nháy "Đang chờ lượt")', async () => {
+    const [a, b, c] = [makeProject('A'), makeProject('B'), makeProject('C')];
+    for (const project of [a, b, c]) addDownloads(project, 5, 'tiktok');
+    nextTickWindow();
+    await tick();
+    await settle();
+    expect(started.length).toBe(2);
+    await tick();
+    await settle();
+    expect(started.length, 'cùng cửa sổ — không mở thêm').toBe(2);
+    expect(manager.waitingLanes().downloadLists, 'A và B đã giữ lượt, C chờ — dù lượt này đã hết suất').toEqual([c.id]);
   });
 });

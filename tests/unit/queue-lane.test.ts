@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  JOB_START_WINDOW_MS,
+  MAX_JOB_STARTS_PER_WINDOW,
   PLATFORM_DOWNLOAD_CAPS,
   effectiveConcurrentDownloadLists,
   independentDownloadProjectCanStart,
   laneSlotAvailable,
   platformDownloadCap,
-  queueExecutionLane
+  queueExecutionLane,
+  recentJobStarts
 } from '../../src/shared/utils/queue-lane.js';
 import { recommendedConcurrentLists } from '../../src/shared/utils/hardware-recommendation.js';
 
@@ -58,5 +61,19 @@ describe('trần riêng theo nền tảng (lưới an toàn chống 429)', () =>
     expect(platformDownloadCap('youtube')).toBe(6);
     expect(platformDownloadCap('tiktok')).toBeNull();
     expect(platformDownloadCap(null)).toBeNull();
+  });
+});
+
+describe('Lag bước 2 — bắt đầu dần', () => {
+  it('tối đa 2 tác vụ mỗi 350 ms (đúng nhịp tick khi có việc)', () => {
+    expect(MAX_JOB_STARTS_PER_WINDOW).toBe(2);
+    expect(JOB_START_WINDOW_MS).toBe(350);
+  });
+
+  it('chỉ giữ các lần bắt đầu còn trong cửa sổ; bỏ mốc "tương lai" khi đồng hồ máy bị lùi', () => {
+    expect(recentJobStarts([1_000, 1_200, 1_349], 1_350)).toEqual([1_200, 1_349]);
+    expect(recentJobStarts([1_000], 1_349)).toEqual([1_000]);
+    expect(recentJobStarts([5_000, 900], 1_000)).toEqual([900]);
+    expect(recentJobStarts([], 1_000)).toEqual([]);
   });
 });
