@@ -297,6 +297,9 @@ export interface AppSettings {
   downloadLaneCount: 1 | 2 | 3 | 4 | 5 | 6;
   mergeLaneCount: 1 | 2 | 3 | 4 | 5 | 6;
   maxGlobalMergeJobs: 1 | 2 | 3 | 4;
+  /** Lag bước 1 (2026-10-12): số danh sách tải chạy "full" cùng lúc — 0 = tự động theo máy, 1–6 = đúng số đã chọn. Lưu
+   * ngoài khối 'app' (EXTRA_SETTING_KEYS) để quay lui bản cũ không hỏng. */
+  maxConcurrentDownloadLists: 0 | 1 | 2 | 3 | 4 | 5 | 6;
   downloadCompatibilityMode: DownloadCompatibilityMode;
   /** ADAPTIVE_SETTINGS_HOTFIX8_CONTRACT: optional for backward-compatible saved settings. */
   downloadEditCopyMode?: 'off' | 'capcut_sdr_1080p' | 'capcut_sdr_2k';
@@ -399,7 +402,16 @@ export interface SystemStats {
   systemLoadThrottled: boolean;
   /** Hướng B 429: các nền tảng đang nghỉ / đã dừng / đang tăng dần lại vì HTTP 429 — huy hiệu "Đang chờ do giới hạn …". */
   rateLimitWaits: RateLimitWaitState[];
+  /** Lag bước 1: danh sách tải / quy trình ghép đang chờ lượt và trần đang áp dụng. */
+  laneWaits: LaneWaitState;
   sampledAt: string;
+}
+
+export interface LaneWaitState {
+  downloadLists: string[];
+  mergeWorkflows: string[];
+  downloadListCap: number;
+  mergeWorkflowCap: number;
 }
 
 export interface RateLimitWaitState {

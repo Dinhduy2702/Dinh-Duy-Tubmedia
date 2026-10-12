@@ -104,7 +104,8 @@ beforeEach(() => {
   started = [];
   logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
   const settings = {
-    get: () => defaultAppSettings,
+    // Cố định số danh sách chạy cùng lúc (không phụ thuộc phần cứng máy chạy test) — bài này kiểm cổng 429, không kiểm trần danh sách.
+    get: () => ({ ...defaultAppSettings, maxConcurrentDownloadLists: 6 }),
     profiles: () => ({ qualities: builtInQualityProfiles, resources: [resource] })
   };
   const downloader = {

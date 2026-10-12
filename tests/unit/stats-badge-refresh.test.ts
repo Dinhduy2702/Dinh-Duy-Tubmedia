@@ -24,6 +24,7 @@ const base: SystemStats = {
   encodeFps: 0,
   systemLoadThrottled: false,
   rateLimitWaits: [],
+  laneWaits: { downloadLists: [], mergeWorkflows: [], downloadListCap: 2, mergeWorkflowCap: 2 },
   sampledAt: '2026-10-12T10:00:00Z'
 };
 
@@ -35,6 +36,12 @@ describe('setStats — huy hiệu trạng thái hàng đợi', () => {
     expect(useAppStore.getState().stats?.rateLimitWaits).toHaveLength(1);
     useAppStore.getState().setStats({ ...base });
     expect(useAppStore.getState().stats?.rateLimitWaits).toHaveLength(0);
+  });
+
+  it('Lag bước 1: danh sách bắt đầu / thôi chờ lượt được cập nhật dù CPU/RAM không đổi', () => {
+    useAppStore.setState({ stats: base });
+    useAppStore.getState().setStats({ ...base, laneWaits: { ...base.laneWaits, downloadLists: ['p3'] } });
+    expect(useAppStore.getState().stats?.laneWaits.downloadLists).toEqual(['p3']);
   });
 
   it('"Đang giảm tải" bật/tắt được dù CPU/RAM không đổi', () => {

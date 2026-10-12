@@ -18,6 +18,14 @@ function plan(
   return { listCount, workersPerList, globalWorkers, fullVerificationWorkers, note };
 }
 
+/**
+ * Số danh sách nên chạy cùng lúc theo máy — dùng chung cho khuyến nghị ở giao diện và cho ô "Số danh sách tải chạy cùng lúc"
+ * khi để tự động (Lag bước 1, 2026-10-12): ≤8 lõi hoặc RAM trống ≤16 GB → 1, mạnh hơn → 2.
+ */
+export function recommendedConcurrentLists(logicalCpuCount: number, freeMemoryBytes: number): 1 | 2 {
+  return Math.max(1, logicalCpuCount) <= 8 || gib(freeMemoryBytes) <= 16 ? 1 : 2;
+}
+
 export function recommendDownloadConcurrency(
   hardware: HardwareProfile
 ): DownloadConcurrencyRecommendation {

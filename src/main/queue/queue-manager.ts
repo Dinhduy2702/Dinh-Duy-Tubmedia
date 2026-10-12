@@ -4,7 +4,7 @@ import { type BrowserWindow } from 'electron';
 import { cpus, freemem, totalmem } from 'node:os';
 import { rm, stat, statfs } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import type { AttentionNotice, JobType, QueueJob, RateLimitWaitState, ResourceProfile } from '@shared/types/domain.js';
+import type { AttentionNotice, JobType, LaneWaitState, QueueJob, RateLimitWaitState, ResourceProfile } from '@shared/types/domain.js';
 import { IPC } from '@shared/contracts/channels.js';
 import { retryDelayMs } from '@shared/utils/retry.js';
 import { hasConfiguredCookies, isCookieBlockingCode } from '@shared/utils/cookie-policy.js';
@@ -15,10 +15,14 @@ import {
 } from '../cookies/cookie-fingerprint.js';
 import type { CookieJarStore } from '../cookies/cookie-jar-store.js';
 import {
+  effectiveConcurrentDownloadLists,
   independentDownloadProjectCanStart,
-  mergeSourceDownloadLimit,
-  queueExecutionLane
+  laneSlotAvailable,
+  platformDownloadCap,
+  queueExecutionLane,
+  type QueueExecutionLane
 } from '@shared/utils/queue-lane.js';
+import { recommendedConcurrentLists } from '@shared/utils/hardware-recommendation.js';
 import type { QueueRepository } from '../database/repositories/queue-repository.js';
 import type { ProjectRepository } from '../database/repositories/project-repository.js';
 import type { ItemRepository } from '../database/repositories/item-repository.js';
@@ -215,6 +219,8 @@ export class QueueManager {
   private readonly audioIssueJobs = new Map<string, Map<string, string>>();
   /** Hướng B 429: nghỉ theo NỀN TẢNG trên toàn ứng dụng khi dính HTTP 429 (xem PlatformRateLimitGate). */
   private rateLimits = new PlatformRateLimitGate();
+  private waitingLaneProjects: { downloadLists: string[]; mergeWorkflows: string[] } = { downloadLists: [], mergeWorkflows: [] };
+  private autoListsCache: { at: number; value: number } | null = null;
   private startupReadyResolve: (() => void) | null = null;
   private readonly startupReady = new Promise<void>((resolve) => {
     this.startupReadyResolve = resolve;
@@ -940,6 +946,34 @@ export class QueueManager {
     return [...this.loadGovernors.values()].some((governor) => governor.isThrottled());
   }
 
+  /** Lag bước 1: danh sách tải / quy trình ghép đang chờ lượt vì đã đủ số chạy cùng lúc (theo lượt tick gần nhất). */
+  public waitingLanes(): LaneWaitState {
+    return {
+      downloadLists: [...this.waitingLaneProjects.downloadLists],
+      mergeWorkflows: [...this.waitingLaneProjects.mergeWorkflows],
+      downloadListCap: effectiveConcurrentDownloadLists(this.settings.get().maxConcurrentDownloadLists, this.autoConcurrentDownloadLists()),
+      mergeWorkflowCap: Math.max(1, Math.min(4, this.settings.get().maxGlobalMergeJobs))
+    };
+  }
+
+  /** Các danh sách / quy trình đang giữ lượt: có ít nhất một tác vụ đang chạy trong làn đó. */
+  private laneHolders(lane: QueueExecutionLane): Set<string> {
+    const holders = new Set<string>();
+    for (const entry of this.active.values()) {
+      if (entry.job.projectId && queueExecutionLane(entry.job) === lane) holders.add(entry.job.projectId);
+    }
+    return holders;
+  }
+
+  /** Ô "Số danh sách tải chạy cùng lúc" để tự động: khuyến nghị phần cứng (đo lại mỗi phút vì RAM trống thay đổi). */
+  private autoConcurrentDownloadLists(): number {
+    const now = Date.now();
+    if (!this.autoListsCache || now - this.autoListsCache.at > 60_000) {
+      this.autoListsCache = { at: now, value: recommendedConcurrentLists(cpus().length, freemem()) };
+    }
+    return this.autoListsCache.value;
+  }
+
   /** Hướng B 429: các nền tảng đang nghỉ / đã dừng / đang tăng dần lại — cho huy hiệu "Đang chờ do giới hạn …". */
   public rateLimitWaits(): RateLimitWaitState[] {
     return this.rateLimits.snapshot(Date.now());
@@ -1153,23 +1187,44 @@ export class QueueManager {
         if (next) fairPending.push(next);
       }
     }
+    const waitingDownloadLists: string[] = [];
+    const waitingMergeWorkflows: string[] = [];
+    const downloadListCap = effectiveConcurrentDownloadLists(
+      this.settings.get().maxConcurrentDownloadLists,
+      this.autoConcurrentDownloadLists()
+    );
+    const mergeWorkflowCap = Math.max(1, Math.min(4, this.settings.get().maxGlobalMergeJobs));
     for (const job of fairPending) {
       if (!this.schedulerRunning) break;
       if (this.active.has(job.id)) continue;
+      // Lag bước 1: tối đa N danh sách tải / maxGlobalMergeJobs quy trình ghép chạy "full" cùng lúc; cái khác chờ lượt.
+      const executionLane = queueExecutionLane(job);
+      if (job.projectId && (executionLane === 'download-list' || executionLane === 'merge-workflow')) {
+        const cap = executionLane === 'download-list' ? downloadListCap : mergeWorkflowCap;
+        if (!laneSlotAvailable(job.projectId, this.laneHolders(executionLane), cap)) {
+          const waiting = executionLane === 'download-list' ? waitingDownloadLists : waitingMergeWorkflows;
+          if (!waiting.includes(job.projectId)) waiting.push(job.projectId);
+          continue;
+        }
+      }
       const profile = this.profileFor(job);
       const activeOfType = [...this.active.values()].filter((x) => x.job.type === job.type).length;
       const activeOfProjectType = [...this.active.values()].filter(
         (x) => x.job.type === job.type && x.job.projectId === job.projectId
       ).length;
       if (job.type === 'download') {
+        const platform = this.downloadPlatformOf(job);
+        const activeOfPlatform = (): number =>
+          [...this.active.values()].filter(
+            (entry) => entry.job.type === 'download' && this.downloadPlatformOf(entry.job) === platform
+          ).length;
+        // Hướng A 429: trần riêng theo nền tảng trên toàn ứng dụng (YouTube 6), cả làn ghép.
+        const platformCap = platformDownloadCap(platform);
+        if (platformCap !== null && activeOfPlatform() >= platformCap) continue;
         // Hướng B 429: nền tảng đang nghỉ (hoặc đang tăng dần lại) thì không bắt đầu video mới của nó ở BẤT KỲ danh sách nào.
         if (this.rateLimits.hasAny()) {
-          const platform = this.downloadPlatformOf(job);
           if (platform) {
-            const activeOfPlatform = [...this.active.values()].filter(
-              (entry) => entry.job.type === 'download' && this.downloadPlatformOf(entry.job) === platform
-            ).length;
-            const allowed = this.rateLimits.canStart(platform, activeOfPlatform, Date.now());
+            const allowed = this.rateLimits.canStart(platform, activeOfPlatform(), Date.now());
             for (const resumed of this.rateLimits.takeResumed()) {
               this.logger.info(
                 'queue',
@@ -1181,17 +1236,8 @@ export class QueueManager {
             if (!allowed) continue;
           }
         }
-        const lane = queueExecutionLane(job);
-        if (lane === 'download-list') {
-          if (!independentDownloadProjectCanStart(activeOfProjectType, profile)) continue;
-        }
-        if (lane === 'merge-workflow') {
-          const activeInLane = [...this.active.values()].filter(
-            (entry) => entry.job.type === 'download' && queueExecutionLane(entry.job) === lane
-          ).length;
-          const laneLimit = mergeSourceDownloadLimit(this.settings.get(), profile);
-          if (activeOfProjectType >= profile.downloadWorkers || activeInLane >= laneLimit) continue;
-        }
+        // Mỗi danh sách / quy trình đang giữ lượt chạy đủ downloadWorkers của hồ sơ (không chia nhỏ luồng).
+        if (!independentDownloadProjectCanStart(activeOfProjectType, profile)) continue;
       } else if (job.type === 'merge') {
         const globalMergeLimit = Math.max(1, Math.min(4, this.settings.get().maxGlobalMergeJobs));
         if (activeOfProjectType >= 1 || activeOfType >= globalMergeLimit) continue;
@@ -1203,6 +1249,7 @@ export class QueueManager {
       }
       this.runJob(job, profile); // intentionally detached; state is retained in active map
     }
+    this.waitingLaneProjects = { downloadLists: waitingDownloadLists, mergeWorkflows: waitingMergeWorkflows };
     if (stateChanged) this.emit();
   }
   private runJob(job: QueueJob, profile: ResourceProfile): void {

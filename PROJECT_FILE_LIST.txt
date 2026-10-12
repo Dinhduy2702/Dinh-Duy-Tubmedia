@@ -63,6 +63,7 @@ FIX_UNIT_TEST_GATE_v1.2.0_VI.md
 FIX10_TIMESTAMP_REPAIR_ERROR_DETAIL_v1.2.0_VI.md
 FIX11_RETRY_PATH_PERSISTENCE_DRIVE_ROOT_VI.md
 FIX12_RATE_LIMIT_429_PLATFORM_WAIT_VI.md
+FIX13_LANE_CONCURRENCY_CAP_VI.md
 FIX3_RATE_CONTROL_UNIT_TEST_v1.2.0_VI.md
 FIX4_BUNDLED_FFMPEG_PAYLOAD_v1.2.0_VI.md
 FIX5_CHANGELOG_ORDER_v1.2.0_VI.md
@@ -345,6 +346,7 @@ src/renderer/src/components/HoverTip.tsx
 src/renderer/src/components/InfoDisclosure.tsx
 src/renderer/src/components/InfoHint.tsx
 src/renderer/src/components/JobProgressList.tsx
+src/renderer/src/components/LaneWaitNotice.tsx
 src/renderer/src/components/NotificationCenter.tsx
 src/renderer/src/components/ProjectQuarantinePanel.tsx
 src/renderer/src/components/quarantine-anchors.ts
@@ -487,6 +489,7 @@ tests/integration/migration-attempts-reset.test.ts
 tests/integration/quarantine-service.test.ts
 tests/integration/queue-attempts.test.ts
 tests/integration/queue-audio-issue.test.ts
+tests/integration/queue-list-concurrency.test.ts
 tests/integration/queue-load-governor.test.ts
 tests/integration/queue-rate-limit-platform-wait.test.ts
 tests/integration/queue-retry-requeue.test.ts

@@ -10,11 +10,14 @@ const workbench = readFileSync(resolve(root, 'src/renderer/src/pages/DownloadWor
 const theme = readFileSync(resolve(root, 'src/renderer/src/tubmedia-theme.css'), 'utf8');
 
 describe('danh sách tải độc lập và giao diện accordion 1.3.0', () => {
-  it('không dùng giới hạn toàn cục của danh sách khác để chặn download-list', () => {
+  // Lag bước 1 (2026-10-12, người dùng duyệt): vẫn không CHIA luồng của danh sách khác — mỗi danh sách đang chạy dùng đủ luồng
+  // của hồ sơ — nhưng có trần SỐ DANH SÁCH / QUY TRÌNH chạy cùng lúc (laneSlotAvailable). Hành vi kiểm ở
+  // tests/integration/queue-list-concurrency.test.ts.
+  it('mỗi danh sách đang chạy dùng đủ luồng của chính hồ sơ; chỉ giới hạn SỐ danh sách chạy cùng lúc', () => {
     expect(queueLane).toContain('independentDownloadProjectCanStart');
-    expect(queueManager).toContain("if (lane === 'download-list')");
+    expect(queueLane).toContain('export function laneSlotAvailable');
     expect(queueManager).toContain('independentDownloadProjectCanStart(activeOfProjectType, profile)');
-    expect(queueManager).toContain("if (lane === 'merge-workflow')");
+    expect(queueManager).toContain("executionLane === 'download-list' ? downloadListCap : mergeWorkflowCap");
   });
 
   it('mỗi danh sách có điều khiển riêng và danh sách khác tiếp tục chạy', () => {

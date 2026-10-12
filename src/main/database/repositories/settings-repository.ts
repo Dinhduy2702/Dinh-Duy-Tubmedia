@@ -5,7 +5,7 @@ import type { AppSettings, QualityProfile, ResourceProfile } from '@shared/types
 
 /** Cài đặt thêm từ 1.5.1, lưu ở dòng riêng để khối 'app' vẫn khớp schema của 1.5.0. */
 const EXTRA_SETTINGS_ROW = 'app_extra';
-const EXTRA_SETTING_KEYS = ['autoResumeInterruptedOnStartup', 'dismissedSharedTempWarnings'] as const satisfies ReadonlyArray<keyof AppSettings>;
+const EXTRA_SETTING_KEYS = ['autoResumeInterruptedOnStartup', 'dismissedSharedTempWarnings', 'maxConcurrentDownloadLists'] as const satisfies ReadonlyArray<keyof AppSettings>;
 
 /**
  * Hồ sơ tự động cũ `resource-auto-<thời điểm>` tên dạng "(cũ, dd/mm/yyyy …)" — xếp theo chữ thì 14/09 đứng sau

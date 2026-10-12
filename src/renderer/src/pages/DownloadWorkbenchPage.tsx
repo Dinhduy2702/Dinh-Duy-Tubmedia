@@ -43,6 +43,7 @@ import { ToolReadinessPanel } from '../components/ToolReadinessPanel';
 import { FolderField } from '../components/FolderField';
 import { StatusBadge } from '../components/StatusBadge';
 import { AudioIssueSummary } from '../components/AudioIssueNotice';
+import { LaneWaitNotice } from '../components/LaneWaitNotice';
 import { CompactLogRow } from '../components/CompactLogRow';
 import { useAppStore } from '../stores/app-store';
 import { useLaneLogs } from '../hooks/use-lane-logs';
@@ -382,7 +383,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
       await Promise.all([refreshJobs(), refreshProjects()]);
       notify(
         `${laneTitle(slot)} đã bắt đầu`,
-        `${profile.downloadWorkers} video tối đa trong danh sách này; danh sách bắt đầu độc lập và chạy song song, không phải chờ danh sách khác.`
+        `${profile.downloadWorkers} video tối đa trong danh sách này; danh sách bắt đầu độc lập và chạy song song; nếu đã đủ số danh sách chạy cùng lúc (Cài đặt) thì danh sách này chờ lượt rồi tự bắt đầu.`
       );
     } catch (error) {
       setError(messageOf(error));
@@ -1190,6 +1191,7 @@ function LaneCard({
             <span>{progress.toFixed(1)}% toàn danh sách</span>
             <span>{progressDetail}</span>
           </div>
+          <LaneWaitNotice projectId={jobs.find((job) => job.projectId)?.projectId} kind="download" />
           <AudioIssueSummary jobs={jobs} />
         </div>
         <div className="lane-primary-actions">

@@ -535,7 +535,8 @@ export const useAppStore = create<State>((set, get) => ({
         previous.activeProcesses === stats.activeProcesses &&
         // Huy hiệu "Đang giảm tải" và "Đang chờ do giới hạn …" đổi được khi CPU/RAM gần như không đổi — phải so riêng.
         previous.systemLoadThrottled === stats.systemLoadThrottled &&
-        JSON.stringify(previous.rateLimitWaits ?? []) === JSON.stringify(stats.rateLimitWaits ?? [])
+        JSON.stringify(previous.rateLimitWaits ?? []) === JSON.stringify(stats.rateLimitWaits ?? []) &&
+        JSON.stringify(previous.laneWaits ?? null) === JSON.stringify(stats.laneWaits ?? null)
       )
         return state;
       return { stats };
