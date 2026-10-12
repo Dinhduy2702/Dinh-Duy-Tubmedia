@@ -5580,12 +5580,14 @@ test('Lag bước 1: tối đa N danh sách tải chạy cùng lúc, mỗi danh 
 });
 
 /**
- * Lag bước 2 (2026-10-12): bắt đầu dần. Đo thật: mỗi lần mở yt-dlp tốn ≈0,77 s CPU, trước đây một lượt tick mở hết mọi video
+ * Lag bước 2 + 3 (2026-10-12). Bước 3: trước đây mỗi thay đổi hàng đợi gửi CẢ danh sách tác vụ sang giao diện ngay (24 video =
+ * 24 lần gửi sát nhau); giờ tối đa 1 lần / 300 ms, lần cuối mang dữ liệu mới nhất.
+ * Bước 2: bắt đầu dần. Đo thật: mỗi lần mở yt-dlp tốn ≈0,77 s CPU, trước đây một lượt tick mở hết mọi video
  * còn chỗ trong cùng một lúc (2 danh sách × 4 luồng = 8 yt-dlp trong vài ms → máy đứng hình). Giờ mỗi lượt tick (350 ms) chỉ
  * bắt đầu tối đa 2 tác vụ. yt-dlp thật, máy chủ cục bộ trả video chậm: 8 video vẫn chạy cùng lúc như cũ, nhưng thời điểm bắt
  * đầu (startedAt) trải ra — không lúc nào có quá 2 video bắt đầu trong cùng 300 ms.
  */
-test('Lag bước 2: 2 danh sách × 4 luồng bắt đầu dần (tối đa 2 video mỗi lượt) nhưng vẫn chạy đủ 8 cùng lúc', async () => {
+test('Lag bước 2 + 3: 2 danh sách × 4 luồng bắt đầu dần, vẫn chạy đủ 8 cùng lúc; danh sách tác vụ gửi sang giao diện tối đa 1 lần / 300 ms', async () => {
   test.setTimeout(180_000);
   const toolsDirectory = resolveToolsDirectoryForTest();
   test.skip(!toolsDirectory, 'Không tìm thấy yt-dlp/ffmpeg/ffprobe trên máy này để chạy bài kiểm thật.');
@@ -5727,6 +5729,17 @@ test('Lag bước 2: 2 danh sách × 4 luồng bắt đầu dần (tối đa 2 v
           resourceProfileId: 'resource-full'
         }
       );
+    // Lag bước 3: giao diện ghi lại mỗi lần nhận CẢ danh sách tác vụ (queueChanged).
+    await shellWindow.evaluate(() => {
+      const target = window as unknown as {
+        __queueChanged: Array<{ at: number; total: number; completed: number }>;
+        desktop: { events: { onQueueChanged: (listener: (jobs: Array<{ status: string }>) => void) => unknown } };
+      };
+      target.__queueChanged = [];
+      target.desktop.events.onQueueChanged((jobs) => {
+        target.__queueChanged.push({ at: Date.now(), total: jobs.length, completed: jobs.filter((job) => job.status === 'completed').length });
+      });
+    });
     await Promise.all([startList('download-1', 'danh-sach-a', 'a'), startList('download-2', 'danh-sach-b', 'b')]);
 
     // Đủ 8 video chạy cùng lúc như trước (bắt đầu dần không làm giảm số luồng).
@@ -5747,6 +5760,25 @@ test('Lag bước 2: 2 danh sách × 4 luồng bắt đầu dần (tối đa 2 v
     expect(mostInWindow, `tối đa 2 video bắt đầu trong cùng 300 ms (lệch so với video đầu: ${offsets} ms)`).toBeLessThanOrEqual(2);
     expect(startTimes[7]! - startTimes[0]!, `8 video bắt đầu trải ra ít nhất 3 lượt tick (${offsets} ms)`).toBeGreaterThanOrEqual(900);
     expect(maxRunningAtOnce, 'máy chủ thấy đủ 8 video tải cùng lúc').toBe(8);
+
+    // Lag bước 3: chờ cả 8 video xong (mỗi video xong / danh sách đổi trạng thái đều là một thay đổi hàng đợi).
+    await expect
+      .poll(
+        async () =>
+          (await shellWindow!.evaluate(() => (window as unknown as { desktop: DesktopBurstApi }).desktop.queue.list())).filter(
+            (item) => item.type === 'download' && item.status === 'completed'
+          ).length,
+        { timeout: 90_000 }
+      )
+      .toBe(8);
+    await sleep(800);
+    const changes = await shellWindow.evaluate(
+      () => (window as unknown as { __queueChanged: Array<{ at: number; total: number; completed: number }> }).__queueChanged
+    );
+    const gaps = changes.slice(1).map((change, index) => change.at - changes[index]!.at);
+    expect(changes.length, 'giao diện có nhận danh sách tác vụ').toBeGreaterThanOrEqual(2);
+    expect(Math.min(...gaps), `không có hai lần gửi cả danh sách sát nhau (khoảng cách ms: ${gaps.join(', ')})`).toBeGreaterThanOrEqual(250);
+    expect(changes.at(-1)!.completed, 'lần gửi cuối mang trạng thái mới nhất — đủ 8 video đã xong').toBe(8);
   } finally {
     server?.close();
     await closeElectronApplication();

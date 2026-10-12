@@ -74,6 +74,8 @@ interface ActiveJob {
   /** Hướng B 429: lúc bắt đầu lượt chạy này — video chạy từ trước lần dính 429 gần nhất không tính thêm lần. */
   startedAtMs: number;
 }
+/** Lag bước 3: khoảng tối thiểu giữa hai lần gửi CẢ danh sách tác vụ sang giao diện. */
+const QUEUE_CHANGED_THROTTLE_MS = 300;
 const TERMINAL_STATUSES = new Set(['completed', 'skipped', 'cancelled', 'failed']);
 const PAUSABLE_STATUSES = new Set([
   'pending',
@@ -209,6 +211,9 @@ export class QueueManager {
   private tickRunning = false;
   /** Lag bước 2: mốc các lần bắt đầu tác vụ gần đây (xem MAX_JOB_STARTS_PER_WINDOW). */
   private jobStartTimes: number[] = [];
+  /** Lag bước 3: lần gửi danh sách tác vụ đang chờ gộp (xem sendQueueChanged). */
+  private queueChangedTimer: NodeJS.Timeout | null = null;
+  private queueChangedPending = false;
   private paused = false;
   private previousCpu = cpus();
   // VẤN ĐỀ 2 mục 1 (2026-09-22): một bộ điều tiết theo hồ sơ tài nguyên (ngưỡng cao lấy từ
@@ -474,6 +479,7 @@ export class QueueManager {
     this.schedulerRunning = false;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    this.cancelQueueChangedSend();
     for (const active of this.active.values()) {
       if (preserveForResume)
         this.repo.update(active.job.id, {
@@ -539,10 +545,37 @@ export class QueueManager {
     this.scheduleTick(0);
   }
   private emit(): void {
-    if (this.window && !this.window.isDestroyed()) {
-      this.window.webContents.send(IPC.events.queueChanged, this.repo.list());
-    }
+    this.sendQueueChanged();
     this.wakeScheduler();
+  }
+  /**
+   * Lag bước 3: gửi CẢ danh sách tác vụ sang giao diện tối đa 1 lần mỗi QUEUE_CHANGED_THROTTLE_MS. Thay đổi đầu tiên sau lúc
+   * yên được gửi ngay; các thay đổi trong 300 ms sau đó gộp vào đúng 1 lần gửi cuối, đọc dữ liệu MỚI NHẤT lúc gửi. Trước đây
+   * 24 video bắt đầu / xong = 24 lần gửi sát nhau (250 tác vụ ≈450 KB mỗi lần), vòng lặp main khựng tới 837 ms. Tiến độ từng
+   * tác vụ vẫn đi riêng qua emitProgress, không bị gộp.
+   */
+  private sendQueueChanged(): void {
+    if (this.queueChangedTimer) {
+      this.queueChangedPending = true;
+      return;
+    }
+    if (!this.window || this.window.isDestroyed()) return;
+    this.window.webContents.send(IPC.events.queueChanged, this.repo.list());
+    this.queueChangedTimer = setTimeout(() => {
+      this.queueChangedTimer = null;
+      if (!this.queueChangedPending) return;
+      this.queueChangedPending = false;
+      try {
+        this.sendQueueChanged();
+      } catch (error) {
+        this.logger.error('queue', 'QUEUE_CHANGED_SEND_FAILED', error instanceof Error ? error.message : String(error));
+      }
+    }, QUEUE_CHANGED_THROTTLE_MS);
+  }
+  private cancelQueueChangedSend(): void {
+    if (this.queueChangedTimer) clearTimeout(this.queueChangedTimer);
+    this.queueChangedTimer = null;
+    this.queueChangedPending = false;
   }
   private emitProgress(job: QueueJob): void {
     if (this.window && !this.window.isDestroyed()) this.window.webContents.send(IPC.events.jobProgress, job);
@@ -559,11 +592,18 @@ export class QueueManager {
     if (type === 'analyze' || type === 'verify') return profile.analyzeWorkers;
     return 1;
   }
-  private dependencyState(job: QueueJob, all: QueueJob[]): 'ready' | 'waiting' | 'failed' {
-    const dependencies = Array.isArray(job.input.dependsOn)
-      ? job.input.dependsOn.filter((x): x is string => typeof x === 'string')
-      : [];
-    const states = dependencies.map((id) => all.find((x) => x.id === id)?.status);
+  private dependencyIds(job: QueueJob): string[] {
+    return Array.isArray(job.input.dependsOn) ? job.input.dependsOn.filter((x): x is string => typeof x === 'string') : [];
+  }
+  /** Trạng thái mọi phụ thuộc của các tác vụ chờ: lấy từ danh sách chưa xong, còn lại (đã xong / đã xóa) tra CSDL theo id. */
+  private dependencyStatuses(pendingJobs: readonly QueueJob[], unfinished: readonly QueueJob[]): Map<string, QueueJob['status']> {
+    const statuses = new Map(unfinished.map((job) => [job.id, job.status] as const));
+    const missing = pendingJobs.flatMap((job) => this.dependencyIds(job)).filter((id) => !statuses.has(id));
+    if (missing.length) for (const [id, status] of this.repo.statusesById(missing)) statuses.set(id, status);
+    return statuses;
+  }
+  private dependencyState(job: QueueJob, statuses: ReadonlyMap<string, QueueJob['status']>): 'ready' | 'waiting' | 'failed' {
+    const states = this.dependencyIds(job).map((id) => statuses.get(id));
     if (states.some((status) => status === undefined || status === 'failed' || status === 'cancelled'))
       return 'failed';
     return states.every((status) => status === 'completed' || status === 'skipped') ? 'ready' : 'waiting';
@@ -1143,8 +1183,9 @@ export class QueueManager {
   private async tick(): Promise<void> {
     if (this.paused || !this.canExecute()) return;
     if (await this.guardActiveDiskSpace()) return;
-    let all = this.repo.list();
-    if (await this.recoverDiskFullProjects(all)) all = this.repo.list();
+    // Lag bước 3: chỉ đọc tác vụ chưa xong — tác vụ đã xong chỉ cần tra trạng thái khi là phụ thuộc (dependencyStatuses).
+    let all = this.repo.listUnfinished();
+    if (await this.recoverDiskFullProjects(all)) all = this.repo.listUnfinished();
     const cpuPercent = this.cpuPercent();
     // VẤN ĐỀ 2 mục 1 (2026-09-22): lấy mẫu bộ điều tiết CHO MỌI HỒ SƠ đang có tác vụ hoạt động, MỖI LƯỢT
     // tick — không chỉ khi có tác vụ đang CHỜ được xét (resourcesAllow). Nếu chỉ lấy mẫu lúc xét tác vụ
@@ -1163,8 +1204,10 @@ export class QueueManager {
     }
     const pending: QueueJob[] = [];
     let stateChanged = false;
-    for (const job of all.filter((x) => x.status === 'pending')) {
-      const dependency = this.dependencyState(job, all);
+    const pendingJobs = all.filter((x) => x.status === 'pending');
+    const statuses = this.dependencyStatuses(pendingJobs, all);
+    for (const job of pendingJobs) {
+      const dependency = this.dependencyState(job, statuses);
       if (dependency === 'failed') {
         this.repo.update(job.id, {
           status: 'failed',

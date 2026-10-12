@@ -20,6 +20,7 @@ import type { AppSettings, Project, QueueJob, ResourceProfile } from '@shared/ty
 type Internals = {
   tick: () => Promise<void>;
   schedulerRunning: boolean;
+  tickRunning: boolean;
   active: Map<string, unknown>;
   autoConcurrentDownloadLists: () => number;
 };
@@ -54,7 +55,17 @@ let held: Map<string, () => void>;
 let started: QueueJob[];
 
 const internals = (): Internals => manager as unknown as Internals;
-const tick = (): Promise<void> => internals().tick();
+// Giống bộ lập lịch thật: không bao giờ có hai lượt tick chạy song song (cờ tickRunning). Không có bước này, lượt tick tự
+// động (tác vụ xong → emit → tick ngay) có thể chạy chen với lượt tick của bài kiểm khi máy bận, gây kết quả sai ngẫu nhiên.
+const tick = async (): Promise<void> => {
+  while (internals().tickRunning) await new Promise((resolve) => setTimeout(resolve, 5));
+  internals().tickRunning = true;
+  try {
+    await internals().tick();
+  } finally {
+    internals().tickRunning = false;
+  }
+};
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 30));
 // Lag bước 2: mỗi 350 ms chỉ bắt đầu tối đa 2 tác vụ. Đồng hồ (chỉ Date) được giả lập; mỗi lượt tick "cách nhau" 400 ms
 // như nhịp tick thật, chạy đủ lượt để mọi chỗ còn trống được lấp.
