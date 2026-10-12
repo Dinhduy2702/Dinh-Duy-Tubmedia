@@ -4,7 +4,7 @@ import { type BrowserWindow } from 'electron';
 import { cpus, freemem, totalmem } from 'node:os';
 import { rm, stat, statfs } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import type { AttentionNotice, JobType, QueueJob, ResourceProfile } from '@shared/types/domain.js';
+import type { AttentionNotice, JobType, QueueJob, RateLimitWaitState, ResourceProfile } from '@shared/types/domain.js';
 import { IPC } from '@shared/contracts/channels.js';
 import { retryDelayMs } from '@shared/utils/retry.js';
 import { hasConfiguredCookies, isCookieBlockingCode } from '@shared/utils/cookie-policy.js';
@@ -46,6 +46,9 @@ import {
 } from '@shared/utils/download-failure.js';
 import { effectiveMemoryReserveBytes } from '@shared/utils/resource-memory.js';
 import { toneForErrorCode } from '@shared/utils/notice-tone.js';
+import { detectPlatform } from '@shared/utils/url.js';
+import { RATE_LIMIT_MAX_AUTO_ROUNDS, formatAutoResumeEta, rateLimitPlatformLabel } from '@shared/utils/rate-limit-backoff.js';
+import { PlatformRateLimitGate } from './platform-rate-limit-gate.js';
 
 /** S3: số lượt ghép tự đưa video nguồn bị thiếu đi tải lại trước khi dừng hẳn và báo lỗi. */
 const MAX_MISSING_SOURCE_REQUEUES = 2;
@@ -62,6 +65,8 @@ interface ActiveJob {
   controller: AbortController;
   promise: Promise<void>;
   sourceLock: string | null;
+  /** Hướng B 429: lúc bắt đầu lượt chạy này — video chạy từ trước lần dính 429 gần nhất không tính thêm lần. */
+  startedAtMs: number;
 }
 const TERMINAL_STATUSES = new Set(['completed', 'skipped', 'cancelled', 'failed']);
 const PAUSABLE_STATUSES = new Set([
@@ -208,6 +213,8 @@ export class QueueManager {
   private readonly keptOldVersionCounts = new Map<string, number>();
   /** P1: theo danh sách — các tác vụ tải đã báo không có tiếng (mã tác vụ → tên video). */
   private readonly audioIssueJobs = new Map<string, Map<string, string>>();
+  /** Hướng B 429: nghỉ theo NỀN TẢNG trên toàn ứng dụng khi dính HTTP 429 (xem PlatformRateLimitGate). */
+  private rateLimits = new PlatformRateLimitGate();
   private startupReadyResolve: (() => void) | null = null;
   private readonly startupReady = new Promise<void>((resolve) => {
     this.startupReadyResolve = resolve;
@@ -933,6 +940,99 @@ export class QueueManager {
     return [...this.loadGovernors.values()].some((governor) => governor.isThrottled());
   }
 
+  /** Hướng B 429: các nền tảng đang nghỉ / đã dừng / đang tăng dần lại — cho huy hiệu "Đang chờ do giới hạn …". */
+  public rateLimitWaits(): RateLimitWaitState[] {
+    return this.rateLimits.snapshot(Date.now());
+  }
+
+  /** Chỉ bài e2e/integration (TUBMEDIA_E2E_RATE_LIMIT_WAIT_MS): rút ngắn thời gian nghỉ của mọi vòng. */
+  public setRateLimitWaitOverrideMs(waitMs: number): void {
+    this.rateLimits = new PlatformRateLimitGate(Math.random, waitMs);
+  }
+
+  /** Nền tảng của tác vụ tải (khóa của detectPlatform), hoặc null nếu không xác định được. */
+  private downloadPlatformOf(job: QueueJob): string | null {
+    const url = typeof job.input.url === 'string' ? job.input.url : null;
+    if (url) {
+      try {
+        return detectPlatform(url).platform;
+      } catch {
+        // URL hỏng — thử nguồn đã lưu.
+      }
+    }
+    const source = job.sourceId ? this.sources.get(job.sourceId) : null;
+    return source?.platform ?? null;
+  }
+
+  /**
+   * Hướng B 429: video dính HTTP 429. Lần đầu (hoặc lần đầu sau khi tự tiếp tục) thì cả ứng dụng nghỉ với nền tảng đó và
+   * video quay lại chờ; video đang tải dở từ trước cũng dính thì chỉ quay lại chờ. Sau 3 vòng tự tiếp tục vẫn dính thì dừng
+   * hẳn như trước: tạm dừng danh sách, thông báo đứng cố định, chờ người dùng xác minh rồi bấm Tiếp tục.
+   * @returns true nếu đã xử lý xong (video quay lại chờ); false nếu phải dừng hẳn (người gọi tạm dừng như mã chặn khác).
+   */
+  private handleSourceRateLimited(job: QueueJob, message: string): { handled: true } | { handled: false; message: string } {
+    const platform = this.downloadPlatformOf(job);
+    if (!platform) return { handled: false, message };
+    const label = rateLimitPlatformLabel(platform);
+    const now = Date.now();
+    const outcome = this.rateLimits.recordHit(platform, this.active.get(job.id)?.startedAtMs ?? now, now);
+    if (outcome.kind === 'stopped') {
+      const stoppedMessage =
+        `${label} vẫn giới hạn số yêu cầu (HTTP 429) dù Tubmedia đã tự nghỉ và thử lại ${RATE_LIMIT_MAX_AUTO_ROUNDS} lần. ` +
+        `Tubmedia đã dừng hẳn để không gửi thêm yêu cầu. Hãy mở video trong trình duyệt bình thường, hoàn tất xác minh nếu ` +
+        `${label} yêu cầu, rồi nhấn Tiếp tục ở danh sách.`;
+      this.logger.warn('queue', 'RATE_LIMIT_STOPPED', stoppedMessage, {
+        jobId: job.id,
+        ...(job.projectId ? { projectId: job.projectId } : {}),
+        metadata: { platform, strikes: outcome.strikes }
+      });
+      return { handled: false, message: stoppedMessage };
+    }
+    const waitingStage = `Đang chờ do giới hạn ${label}`;
+    const resumeAt = outcome.kind === 'cooldown' ? outcome.resumeAt : (this.rateLimits.snapshot(now).find((x) => x.platform === platform)?.resumeAt ?? now);
+    const resumeClock = new Date(resumeAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+    const waitingMessage =
+      `${label} đang giới hạn số yêu cầu (HTTP 429). Tubmedia tạm ngừng bắt đầu video mới của ${label} ở mọi danh sách ` +
+      `(video đang tải dở vẫn chạy tiếp) và sẽ tự tiếp tục lúc ${resumeClock} (${formatAutoResumeEta(resumeAt, now)}), ` +
+      `lúc đầu từng video một rồi tăng dần. Không cần bấm thử lại.`;
+    const current = this.repo.get(job.id);
+    if (current && RUNNING_STATUSES.has(current.status)) this.repo.update(job.id, { status: 'retrying' });
+    this.emitProgress(
+      this.repo.update(
+        job.id,
+        { status: 'pending', errorCode: 'SOURCE_RATE_LIMITED', errorMessage: waitingMessage, speed: null, etaSeconds: null, finishedAt: null },
+        { progressStage: waitingStage, resumeStatus: null }
+      )
+    );
+    if (outcome.kind === 'cooldown') {
+      this.logger.warn('queue', 'RATE_LIMIT_COOLDOWN_STARTED', waitingMessage, {
+        jobId: job.id,
+        ...(job.projectId ? { projectId: job.projectId } : {}),
+        metadata: { platform, strikes: outcome.strikes, waitMs: outcome.resumeAt - now }
+      });
+      this.notifyPlatformRateLimit(platform, label, waitingMessage);
+    }
+    return { handled: true };
+  }
+
+  /** Một thông báo cho mỗi nền tảng (không theo danh sách); tự tắt vì Tubmedia tự tiếp tục được. */
+  private notifyPlatformRateLimit(platform: string, label: string, message: string): void {
+    if (!this.window || this.window.isDestroyed()) return;
+    const notice: AttentionNotice = {
+      id: `rate-limit-${platform}`,
+      severity: 'warning',
+      title: `${label} đang giới hạn yêu cầu — Tubmedia tự chờ rồi tiếp tục`,
+      message,
+      code: 'SOURCE_RATE_LIMITED',
+      steps: [
+        'Không cần làm gì — Tubmedia tự tiếp tục khi hết giờ chờ (đếm ngược ở thanh trên cùng).',
+        'Không nhấn thử lại liên tục; thử lại sớm chỉ kéo dài thời gian bị giới hạn.'
+      ],
+      sticky: false
+    };
+    this.window.webContents.send(IPC.events.attention, notice);
+  }
+
   private async resourcesAllow(
     job: QueueJob,
     profile: ResourceProfile,
@@ -1062,6 +1162,25 @@ export class QueueManager {
         (x) => x.job.type === job.type && x.job.projectId === job.projectId
       ).length;
       if (job.type === 'download') {
+        // Hướng B 429: nền tảng đang nghỉ (hoặc đang tăng dần lại) thì không bắt đầu video mới của nó ở BẤT KỲ danh sách nào.
+        if (this.rateLimits.hasAny()) {
+          const platform = this.downloadPlatformOf(job);
+          if (platform) {
+            const activeOfPlatform = [...this.active.values()].filter(
+              (entry) => entry.job.type === 'download' && this.downloadPlatformOf(entry.job) === platform
+            ).length;
+            const allowed = this.rateLimits.canStart(platform, activeOfPlatform, Date.now());
+            for (const resumed of this.rateLimits.takeResumed()) {
+              this.logger.info(
+                'queue',
+                'RATE_LIMIT_COOLDOWN_ENDED',
+                `Hết giờ chờ giới hạn ${rateLimitPlatformLabel(resumed)} — tự tiếp tục, lúc đầu từng video một rồi tăng dần.`,
+                { metadata: { platform: resumed } }
+              );
+            }
+            if (!allowed) continue;
+          }
+        }
         const lane = queueExecutionLane(job);
         if (lane === 'download-list') {
           if (!independentDownloadProjectCanStart(activeOfProjectType, profile)) continue;
@@ -1108,7 +1227,7 @@ export class QueueManager {
           );
         }
       });
-    this.active.set(job.id, { job, controller, promise, sourceLock });
+    this.active.set(job.id, { job, controller, promise, sourceLock, startedAtMs: Date.now() });
   }
 
   /**
@@ -1628,6 +1747,10 @@ export class QueueManager {
             cookieRetryRequested: false,
             resumeStatus: null
           });
+          if (this.rateLimits.hasAny()) {
+            const platform = this.downloadPlatformOf(job);
+            if (platform) this.rateLimits.recordSuccess(platform);
+          }
           break;
         }
         case 'clip':
@@ -1714,7 +1837,7 @@ export class QueueManager {
       }
       const appError = error as Partial<AppError>;
       const code = appError.code ?? 'UNHANDLED_ERROR';
-      const message = error instanceof Error ? error.message : String(error);
+      let message = error instanceof Error ? error.message : String(error);
       if (code === 'RETRY_WITH_CONFIGURED_COOKIES') {
         const retrying = this.repo.update(job.id, {
           status: 'retrying',
@@ -1759,6 +1882,11 @@ export class QueueManager {
       ) {
         if (job.type === 'download' && job.projectId) {
           this.repeatedFailures.delete(job.projectId);
+        }
+        if (code === 'SOURCE_RATE_LIMITED' && job.type === 'download') {
+          const rateLimited = this.handleSourceRateLimited(job, message);
+          if (rateLimited.handled) return;
+          message = rateLimited.message;
         }
         const cookieBlocking = isCookieBlockingCode(code);
         // Ghi lại cookies lúc bị chặn: chỉ khi cookies THẬT SỰ đổi so với lúc này mới tự chạy lại (mục 3).
@@ -2439,6 +2567,12 @@ export class QueueManager {
     }
     this.clearBlockingNoticeKeys(projectId);
     this.repeatedFailures.delete(projectId);
+    // Hướng B 429: người dùng đã xác minh và bấm Tiếp tục sau khi Tubmedia dừng hẳn → bỏ trạng thái dừng của nền tảng.
+    for (const job of projectJobs) {
+      if (job.type !== 'download' || job.errorCode !== 'SOURCE_RATE_LIMITED') continue;
+      const platform = this.downloadPlatformOf(job);
+      if (platform && this.rateLimits.isStopped(platform)) this.rateLimits.clear(platform);
+    }
     for (const job of projectJobs) {
       if (job.status === 'paused' || job.status === 'interrupted') await this.resume(job.id, false);
     }

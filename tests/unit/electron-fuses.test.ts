@@ -70,7 +70,8 @@ describe('biến môi trường chỉ dành cho phát triển', () => {
       fakeUpdateStatusJson: undefined,
       e2eShutdownHangStep: undefined,
       e2eQueueStartDelayMs: 0,
-      e2eDriveRoot: undefined
+      e2eDriveRoot: undefined,
+      e2eRateLimitWaitMs: undefined
     });
   });
 
@@ -94,7 +95,8 @@ describe('biến môi trường chỉ dành cho phát triển', () => {
       fakeUpdateStatusJson: undefined,
       e2eShutdownHangStep: undefined,
       e2eQueueStartDelayMs: 0,
-      e2eDriveRoot: undefined
+      e2eDriveRoot: undefined,
+      e2eRateLimitWaitMs: undefined
     });
     expect(readDevelopmentEnvironment({ TUBMEDIA_E2E: 'true', ELECTRON_RENDERER_URL: '' }, false)).toEqual({
       rendererUrl: undefined,
@@ -103,13 +105,21 @@ describe('biến môi trường chỉ dành cho phát triển', () => {
       fakeUpdateStatusJson: undefined,
       e2eShutdownHangStep: undefined,
       e2eQueueStartDelayMs: 0,
-      e2eDriveRoot: undefined
+      e2eDriveRoot: undefined,
+      e2eRateLimitWaitMs: undefined
     });
   });
 
   it('P2: gốc ổ đĩa giả cho khu cách ly chỉ có tác dụng khi TUBMEDIA_E2E=1 (bài e2e không bao giờ tạo <ổ thật>\\Tubmedia)', () => {
     expect(readDevelopmentEnvironment({ TUBMEDIA_E2E_DRIVE_ROOT: 'C:\\x' }, false).e2eDriveRoot).toBeUndefined();
     expect(readDevelopmentEnvironment({ TUBMEDIA_E2E: '1', TUBMEDIA_E2E_DRIVE_ROOT: '' }, false).e2eDriveRoot).toBeUndefined();
+  });
+
+  it('Hướng B 429: thời gian nghỉ thay thế chỉ có tác dụng khi TUBMEDIA_E2E=1, kẹp trong 100 ms – 60 s', () => {
+    expect(readDevelopmentEnvironment({ TUBMEDIA_E2E_RATE_LIMIT_WAIT_MS: '2500' }, false).e2eRateLimitWaitMs).toBeUndefined();
+    expect(readDevelopmentEnvironment({ TUBMEDIA_E2E: '1', TUBMEDIA_E2E_RATE_LIMIT_WAIT_MS: '' }, false).e2eRateLimitWaitMs).toBeUndefined();
+    expect(readDevelopmentEnvironment({ TUBMEDIA_E2E: '1', TUBMEDIA_E2E_RATE_LIMIT_WAIT_MS: '5' }, false).e2eRateLimitWaitMs).toBe(100);
+    expect(readDevelopmentEnvironment({ TUBMEDIA_E2E: '1', TUBMEDIA_E2E_RATE_LIMIT_WAIT_MS: '999999' }, false).e2eRateLimitWaitMs).toBe(60_000);
   });
 
   it('cửa sổ chính và tiến trình main chỉ đọc các biến này qua readDevelopmentEnvironment', () => {

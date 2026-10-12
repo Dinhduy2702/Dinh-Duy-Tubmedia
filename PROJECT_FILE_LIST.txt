@@ -62,6 +62,7 @@ FIX_SUMMARY.md
 FIX_UNIT_TEST_GATE_v1.2.0_VI.md
 FIX10_TIMESTAMP_REPAIR_ERROR_DETAIL_v1.2.0_VI.md
 FIX11_RETRY_PATH_PERSISTENCE_DRIVE_ROOT_VI.md
+FIX12_RATE_LIMIT_429_PLATFORM_WAIT_VI.md
 FIX3_RATE_CONTROL_UNIT_TEST_v1.2.0_VI.md
 FIX4_BUNDLED_FFMPEG_PAYLOAD_v1.2.0_VI.md
 FIX5_CHANGELOG_ORDER_v1.2.0_VI.md
@@ -298,6 +299,7 @@ src/main/merge/timeline-service.ts
 src/main/normalize/normalize-engine.ts
 src/main/processes/process-manager.ts
 src/main/projects/project-service.ts
+src/main/queue/platform-rate-limit-gate.ts
 src/main/queue/queue-manager.ts
 src/main/queue/system-load-governor.ts
 src/main/runtime/development-environment.ts
@@ -347,6 +349,7 @@ src/renderer/src/components/NotificationCenter.tsx
 src/renderer/src/components/ProjectQuarantinePanel.tsx
 src/renderer/src/components/quarantine-anchors.ts
 src/renderer/src/components/QuickDownloadPanel.tsx
+src/renderer/src/components/RateLimitWaitBadges.tsx
 src/renderer/src/components/RendererErrorBoundary.tsx
 src/renderer/src/components/StartupResumeDialog.tsx
 src/renderer/src/components/StatCard.tsx
@@ -451,6 +454,7 @@ src/shared/utils/progress-policy.ts
 src/shared/utils/quality-decision.ts
 src/shared/utils/quarantine-policy.ts
 src/shared/utils/queue-lane.ts
+src/shared/utils/rate-limit-backoff.ts
 src/shared/utils/resource-memory.ts
 src/shared/utils/retry.ts
 src/shared/utils/safe-json.ts
@@ -484,6 +488,7 @@ tests/integration/quarantine-service.test.ts
 tests/integration/queue-attempts.test.ts
 tests/integration/queue-audio-issue.test.ts
 tests/integration/queue-load-governor.test.ts
+tests/integration/queue-rate-limit-platform-wait.test.ts
 tests/integration/queue-retry-requeue.test.ts
 tests/integration/queue-startup-hold.test.ts
 tests/integration/queue-startup-session-jobs.test.ts
@@ -584,6 +589,7 @@ tests/unit/notification-spam-lane-count.test.ts
 tests/unit/nvenc-diagnosis.test.ts
 tests/unit/open-path-policy.test.ts
 tests/unit/output-path-containment.test.ts
+tests/unit/platform-rate-limit-gate.test.ts
 tests/unit/preview-frame-command.test.ts
 tests/unit/primary-button-double-click.test.ts
 tests/unit/process-abort-before-spawn.test.ts
@@ -607,6 +613,7 @@ tests/unit/quick-download-state-persist-race.test.ts
 tests/unit/quick-download-sync.test.ts
 tests/unit/quick-download-video-only.test.ts
 tests/unit/quick-download.test.ts
+tests/unit/rate-limit-backoff.test.ts
 tests/unit/release-update-system.test.ts
 tests/unit/resource-memory-r56.test.ts
 tests/unit/retry.test.ts
@@ -623,6 +630,7 @@ tests/unit/shutdown-sequence.test.ts
 tests/unit/smart-merge-pipeline-v120.test.ts
 tests/unit/source-completeness.test.ts
 tests/unit/startup-fast.test.ts
+tests/unit/stats-badge-refresh.test.ts
 tests/unit/status-labels-vi.test.ts
 tests/unit/system-cleanup-estimate-guard.test.ts
 tests/unit/system-cleanup-navigation.test.ts

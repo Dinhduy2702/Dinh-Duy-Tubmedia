@@ -397,7 +397,20 @@ export interface SystemStats {
   encodeFps: number;
   /** VẤN ĐỀ 2 mục 1 (2026-09-22): true khi bộ điều tiết CPU đang tạm hoãn tác vụ mới vì máy đang bận. */
   systemLoadThrottled: boolean;
+  /** Hướng B 429: các nền tảng đang nghỉ / đã dừng / đang tăng dần lại vì HTTP 429 — huy hiệu "Đang chờ do giới hạn …". */
+  rateLimitWaits: RateLimitWaitState[];
   sampledAt: string;
+}
+
+export interface RateLimitWaitState {
+  platform: string;
+  label: string;
+  /** Epoch ms lúc tự tiếp tục; null khi đã dừng hẳn hoặc đang tăng dần lại. */
+  resumeAt: number | null;
+  stopped: boolean;
+  strikes: number;
+  /** Số video tối đa của nền tảng chạy cùng lúc trong lúc tăng dần lại sau khi tự tiếp tục; null = không giới hạn tạm. */
+  rampLimit: number | null;
 }
 
 

@@ -599,6 +599,15 @@ html.light .tubmedia-logo-light {
   white-space: nowrap;
   cursor: help;
 }
+/* Hướng B 429: huy hiệu "Đang chờ do giới hạn {nền tảng}" (dùng chung kiểu "Đang giảm tải"); đã dừng hẳn thì tông lỗi. */
+.topbar-rate-limit {
+  font-variant-numeric: tabular-nums;
+}
+.topbar-rate-limit.is-stopped {
+  border-color: var(--tone-error-border);
+  background: var(--tone-error-bg);
+  color: var(--tone-error-text);
+}
 .topbar-sparkline span:nth-child(1) {
   height: 25%;
   animation-delay: -0.5s;
