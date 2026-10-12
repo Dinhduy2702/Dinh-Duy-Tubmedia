@@ -437,6 +437,7 @@ src/shared/utils/encoder-selection.ts
 src/shared/utils/ffmpeg-progress.ts
 src/shared/utils/filename.ts
 src/shared/utils/hardware-recommendation.ts
+src/shared/utils/history-export.ts
 src/shared/utils/input-parser.ts
 src/shared/utils/job-state-machine.ts
 src/shared/utils/media-info-format.ts
@@ -540,6 +541,7 @@ tests/unit/fix6-diagnostics-ui.test.ts
 tests/unit/gitignore-secrets.test.ts
 tests/unit/hardware-cpu-count.test.ts
 tests/unit/hardware-recommendation.test.ts
+tests/unit/history-export.test.ts
 tests/unit/independent-workflow-accordion-1.3.0.test.ts
 tests/unit/inject-changelog-release-notes.test.ts
 tests/unit/input-parser.test.ts

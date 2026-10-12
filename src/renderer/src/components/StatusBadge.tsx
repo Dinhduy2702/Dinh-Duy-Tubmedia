@@ -25,7 +25,7 @@ function statusIcon(status: string, tone: NoticeTone): React.JSX.Element {
  * Nhãn trạng thái: luôn có BIỂU TƯỢNG + CHỮ, màu theo mức (không dùng mỗi trạng thái một màu).
  * Trạng thái "đang chạy" dùng xanh dương; tạm dừng/đã hủy/bỏ qua là trung tính, không bao giờ đỏ.
  */
-export function StatusBadge({ status, fixed = false }: { status: string; fixed?: boolean }): React.JSX.Element {
+export function StatusBadge({ status, fixed = false, title }: { status: string; fixed?: boolean; title?: string | null }): React.JSX.Element {
   const lower = status.toLowerCase();
   const tone = toneForStatus(lower);
   const label = statusLabel(status);
@@ -35,7 +35,7 @@ export function StatusBadge({ status, fixed = false }: { status: string; fixed?:
       className={`badge status-badge tone-${tone} status-badge-${lower.replace(/[^a-z0-9_-]/g, '-')} ${fixed ? 'status-badge-fixed' : ''}`.trim()}
       data-status={lower}
       data-tone={tone}
-      title={label}
+      title={title || label}
     >
       {statusIcon(lower, tone)}
       <span>{label}</span>

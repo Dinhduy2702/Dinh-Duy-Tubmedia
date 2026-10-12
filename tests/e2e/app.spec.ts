@@ -5221,3 +5221,132 @@ test('Đợt 5 mục 16: quy trình ghép còn dữ liệu bị ẩn khi bớt s
     removeSandbox(sandbox);
   }
 });
+
+/**
+ * Lịch sử công việc (2026-10-12): video lỗi có câu lỗi cụ thể (job.errorMessage — đúng câu trong thông báo lúc lỗi) nhưng bảng
+ * Lịch sử chỉ hiện nhãn "Có lỗi", còn CSV xuất ra không có cột lý do (CSV thật của người dùng: 6 dòng "failed", cột Đầu ra
+ * trống). Tạo một video lỗi THẬT (yt-dlp với trang không có video), mở Lịch sử, xuất CSV thật ra tệp.
+ */
+test('Lịch sử: video lỗi hiện lý do cụ thể trên bảng và CSV có cột "Mã lỗi" / "Chi tiết lỗi"', async () => {
+  test.setTimeout(150_000);
+  const toolsDirectory = resolveToolsDirectoryForTest();
+  test.skip(!toolsDirectory, 'Không tìm thấy yt-dlp/ffmpeg/ffprobe trên máy này để chạy bài kiểm thật.');
+
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-history-error-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+  db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
+  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run(
+    'app',
+    JSON.stringify({
+      theme: 'dark',
+      startWithWindows: false,
+      autoCheckAppUpdates: false,
+      autoCheckToolUpdates: false,
+      ytdlpPath: path.join(toolsDirectory!, 'yt-dlp.exe'),
+      ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+      ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+    }),
+    new Date().toISOString()
+  );
+  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  db.close();
+
+  let server: Server | undefined;
+  try {
+    server = createServer((_request, response) => {
+      response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      response.end('<html><head><title>Tin tuc hom nay</title></head><body><h1>Bai bao</h1><p>Khong co video.</p></body></html>');
+    });
+    const port = await new Promise<number>((resolvePort) => {
+      server!.listen(0, '127.0.0.1', () => resolvePort((server!.address() as { port: number }).port));
+    });
+    const outputFolder = path.join(sandbox, 'ket-qua');
+    const tempFolder = path.join(sandbox, 'tam');
+    for (const folder of [outputFolder, tempFolder]) fs.mkdirSync(folder, { recursive: true });
+
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+
+    interface Job { type: string; status: string; errorCode: string | null; errorMessage: string | null }
+    interface DesktopHistoryApi {
+      tools: { list: () => Promise<Array<{ name: string; available: boolean }>> };
+      workbench: { startDownload: (input: Record<string, unknown>) => Promise<unknown> };
+      queue: { list: () => Promise<Job[]>; startupPrompt: () => Promise<{ count: number }> };
+    }
+    await expect
+      .poll(
+        async () => {
+          const list = await shellWindow!.evaluate(() => (window as unknown as { desktop: DesktopHistoryApi }).desktop.tools.list());
+          return Boolean(list.find((item) => item.name === 'yt-dlp')?.available);
+        },
+        { timeout: 30_000 }
+      )
+      .toBe(true);
+    await shellWindow.evaluate(() => (window as unknown as { desktop: DesktopHistoryApi }).desktop.queue.startupPrompt());
+    await shellWindow.evaluate(
+      (input) => (window as unknown as { desktop: DesktopHistoryApi }).desktop.workbench.startDownload(input),
+      {
+        slot: 'download-1',
+        name: 'Kiem tra lich su loi',
+        linksText: `http://127.0.0.1:${port}/tin-tuc/bai-bao-123.html`,
+        outputFolder,
+        tempFolder,
+        resourceProfileId: 'resource-balanced'
+      }
+    );
+    let job: Job | undefined;
+    await expect
+      .poll(
+        async () => {
+          const jobs = await shellWindow!.evaluate(() => (window as unknown as { desktop: DesktopHistoryApi }).desktop.queue.list());
+          job = jobs.find((item) => item.type === 'download');
+          return job?.status;
+        },
+        { timeout: 90_000 }
+      )
+      .toBe('failed');
+    const reason = job!.errorMessage ?? '';
+    expect(reason, 'tác vụ có câu lỗi cụ thể').toContain('liên kết gốc');
+
+    // Bảng Lịch sử: câu lỗi cụ thể hiện dưới tên video, nhãn trạng thái cho xem đủ câu khi rê chuột.
+    await shellWindow.click('[data-page-id="history"]');
+    const detail = shellWindow.locator('[data-history-error="failed"]').first();
+    await expect(detail).toBeVisible({ timeout: 10_000 });
+    await expect(detail).toContainText('liên kết gốc');
+    await expect(shellWindow.locator('.history-page .status-badge[data-status="failed"]').first()).toHaveAttribute('title', reason);
+
+    // CSV: xuất thật ra tệp (hộp thoại Lưu được trả lời sẵn bằng đường dẫn trong thư mục kiểm thử).
+    const csvPath = path.join(sandbox, 'lich-su.csv');
+    await electronApplication.evaluate(({ dialog }, filePath) => {
+      dialog.showSaveDialog = () => Promise.resolve({ canceled: false, filePath });
+    }, csvPath);
+    await shellWindow.getByRole('button', { name: 'Xuất CSV' }).click();
+    await expect.poll(() => fs.existsSync(csvPath), { timeout: 10_000 }).toBe(true);
+    const csvText = fs.readFileSync(csvPath, 'utf8');
+    const lines = (csvText.charCodeAt(0) === 0xfeff ? csvText.slice(1) : csvText).split('\r\n');
+    expect(lines[0]).toBe('"Thời gian","Dự án","Loại","Trạng thái","Nguồn","Đầu ra","Mã lỗi","Chi tiết lỗi"');
+    const failedRow = lines.find((line) => line.includes('"failed"')) ?? '';
+    expect(failedRow, 'dòng failed có mã lỗi').toContain(`"${job!.errorCode}"`);
+    expect(failedRow, 'dòng failed có câu lỗi cụ thể').toContain('liên kết gốc');
+  } finally {
+    server?.close();
+    await closeElectronApplication();
+    removeSandbox(sandbox);
+  }
+});

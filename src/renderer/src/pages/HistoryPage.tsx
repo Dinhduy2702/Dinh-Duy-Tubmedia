@@ -2,6 +2,7 @@ import { Download, FileJson, Search } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { QueueJob } from '@shared/types/domain';
 import { buildCsv } from '@shared/utils/csv';
+import { historyCsvTable, historyErrorDetail } from '@shared/utils/history-export';
 import { useAppStore } from '../stores/app-store';
 import { StatusBadge } from '../components/StatusBadge';
 import { jobTypeLabel } from '../utils/vi-labels';
@@ -34,7 +35,7 @@ export function HistoryPage(): React.JSX.Element {
       .filter((job) => {
         if (!needle) return true;
         const project = projects.find((item) => item.id === job.projectId)?.name ?? '';
-        return [project, job.type, job.status, text(job, 'url'), text(job, 'displayName'), text(job, 'outputPath')]
+        return [project, job.type, job.status, text(job, 'url'), text(job, 'displayName'), text(job, 'outputPath'), job.errorCode ?? '', job.errorMessage ?? '']
           .join(' ')
           .toLowerCase()
           .includes(needle);
@@ -50,15 +51,12 @@ export function HistoryPage(): React.JSX.Element {
   };
 
   const exportCsv = async (): Promise<void> => {
-    const header = ['Thời gian', 'Dự án', 'Loại', 'Trạng thái', 'Nguồn', 'Đầu ra'];
-    const rows = history.map((job) => [
-      job.finishedAt ?? job.updatedAt,
-      projects.find((item) => item.id === job.projectId)?.name ?? 'Toàn ứng dụng',
-      jobTypeLabel(job.type),
-      job.status,
-      text(job, 'url'),
-      text(job, 'outputPath')
-    ]);
+    // Có cột "Mã lỗi" và "Chi tiết lỗi" (2026-10-12) — trước đây dòng "failed" không nêu vì sao.
+    const [header, ...rows] = historyCsvTable(
+      history,
+      (projectId) => projects.find((item) => item.id === projectId)?.name ?? 'Toàn ứng dụng',
+      jobTypeLabel
+    );
     await saveFile(
       `tubmedia-history-${new Date().toISOString().slice(0, 10)}.csv`,
       buildCsv([header, ...rows])
@@ -87,8 +85,8 @@ export function HistoryPage(): React.JSX.Element {
             <td>{new Date(job.finishedAt ?? job.updatedAt).toLocaleString('vi-VN')}</td>
             <td>{projects.find((item) => item.id === job.projectId)?.name ?? 'Toàn ứng dụng'}</td>
             <td>{jobTypeLabel(job.type)}</td>
-            <td><StatusBadge status={job.status} fixed /></td>
-            <td className="history-path-cell"><b>{text(job, 'displayName') || text(job, 'url') || 'Tác vụ hệ thống'}</b><span title={text(job, 'outputPath')}>{text(job, 'outputPath') || 'Chưa có tệp đầu ra'}</span></td>
+            <td><StatusBadge status={job.status} fixed title={historyErrorDetail(job)} /></td>
+            <td className="history-path-cell"><b>{text(job, 'displayName') || text(job, 'url') || 'Tác vụ hệ thống'}</b><span title={text(job, 'outputPath')}>{text(job, 'outputPath') || 'Chưa có tệp đầu ra'}</span>{historyErrorDetail(job) && <span className="history-error-detail" data-history-error={job.status} title={historyErrorDetail(job) ?? undefined}>{historyErrorDetail(job)}</span>}</td>
           </tr>)}</tbody>
         </table>
         {!history.length && <div className="p-12 text-center text-sm" style={{ color: 'var(--muted)' }}>Không có lịch sử phù hợp với bộ lọc.</div>}

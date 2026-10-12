@@ -6804,6 +6804,15 @@ body {
   color: var(--muted);
   font-size: 0.58rem;
 }
+/* Lịch sử (2026-10-12): lý do lỗi cụ thể của tác vụ lỗi / bị gián đoạn, tối đa 2 dòng (đủ câu khi rê chuột). */
+.history-path-cell .history-error-detail {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--tone-error-text);
+  font-size: 0.62rem;
+  white-space: normal;
+}
 .diagnostics-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
