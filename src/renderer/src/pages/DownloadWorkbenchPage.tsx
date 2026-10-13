@@ -644,7 +644,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
       setSettings(next);
       notify(
         'Đã áp dụng chuẩn đa nền tảng 1080p',
-        'H.264/MP4, 720p–1080p, fallback thông minh, aria2c 16 kết nối và 2 fragment cho mỗi video; mỗi danh sách vẫn chạy độc lập.'
+        'H.264/MP4, 720p–1080p, fallback thông minh và 2 fragment cho mỗi video; mỗi danh sách vẫn chạy độc lập.'
       );
     } catch (error) {
       setError(messageOf(error));

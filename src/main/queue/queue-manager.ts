@@ -25,6 +25,7 @@ import {
   type QueueExecutionLane
 } from '@shared/utils/queue-lane.js';
 import { recommendedConcurrentLists } from '@shared/utils/hardware-recommendation.js';
+import type { DownloadPacingContext } from '@shared/utils/download-pacing.js';
 import type { QueueRepository } from '../database/repositories/queue-repository.js';
 import type { ProjectRepository } from '../database/repositories/project-repository.js';
 import type { ItemRepository } from '../database/repositories/item-repository.js';
@@ -1029,6 +1030,17 @@ export class QueueManager {
   }
 
   /** Nền tảng của tác vụ tải (khóa của detectPlatform), hoặc null nếu không xác định được. */
+  /** Hướng C 429: số video cùng nền tảng đang tải trên toàn ứng dụng (tính cả video này) và số lần nền tảng vừa dính 429. */
+  private downloadPacingContext(job: QueueJob): DownloadPacingContext {
+    const platform = this.downloadPlatformOf(job);
+    if (!platform) return { samePlatformActive: 1, rateLimitStrikes: 0 };
+    let samePlatformActive = 0;
+    for (const entry of this.active.values()) {
+      if (entry.job.type === 'download' && this.downloadPlatformOf(entry.job) === platform) samePlatformActive += 1;
+    }
+    if (!this.active.has(job.id)) samePlatformActive += 1;
+    return { samePlatformActive: Math.max(1, samePlatformActive), rateLimitStrikes: this.rateLimits.strikesOf(platform) };
+  }
   private downloadPlatformOf(job: QueueJob): string | null {
     const url = typeof job.input.url === 'string' ? job.input.url : null;
     if (url) {
@@ -1829,8 +1841,12 @@ export class QueueManager {
           if (malformedYouTubeMessage) {
             throw new InvalidInputError(malformedYouTubeMessage);
           }
-          const result = await this.downloader.run(job, profile, signal, (progress) =>
-            this.updateDownloadProgress(job.id, progress)
+          const result = await this.downloader.run(
+            job,
+            profile,
+            signal,
+            (progress) => this.updateDownloadProgress(job.id, progress),
+            this.downloadPacingContext(job)
           );
           completionStatus = result.skipped ? 'skipped' : 'completed';
           if (result.keptOldVersions?.length) this.notifyKeptOldVersions(job, result.keptOldVersions);

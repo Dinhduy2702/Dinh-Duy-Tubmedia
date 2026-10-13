@@ -66,6 +66,7 @@ FIX12_RATE_LIMIT_429_PLATFORM_WAIT_VI.md
 FIX13_LANE_CONCURRENCY_CAP_VI.md
 FIX14_JOB_START_PACING_VI.md
 FIX15_QUEUE_IPC_COALESCE_VI.md
+FIX16_RATE_LIMIT_429_PACING_VI.md
 FIX3_RATE_CONTROL_UNIT_TEST_v1.2.0_VI.md
 FIX4_BUNDLED_FFMPEG_PAYLOAD_v1.2.0_VI.md
 FIX5_CHANGELOG_ORDER_v1.2.0_VI.md
@@ -439,6 +440,7 @@ src/shared/utils/csv.ts
 src/shared/utils/diagnostic-policy.ts
 src/shared/utils/disk-shortfall-format.ts
 src/shared/utils/download-failure.ts
+src/shared/utils/download-pacing.ts
 src/shared/utils/download-quality.ts
 src/shared/utils/encoder-selection.ts
 src/shared/utils/ffmpeg-progress.ts
@@ -483,6 +485,7 @@ tests/integration/cookie-jar-store.test.ts
 tests/integration/cookie-resume-fingerprint.test.ts
 tests/integration/database.test.ts
 tests/integration/download-existing-file-reuse.test.ts
+tests/integration/download-pacing-args.test.ts
 tests/integration/helpers/queue-harness.ts
 tests/integration/legacy-quarantine-untouched.test.ts
 tests/integration/log-repository-filter.test.ts
@@ -534,6 +537,7 @@ tests/unit/diagnostic-policy.test.ts
 tests/unit/diagnostics-recent-error-cause.test.ts
 tests/unit/disk-full-recovery.test.ts
 tests/unit/disk-shortfall-format.test.ts
+tests/unit/download-pacing.test.ts
 tests/unit/download-performance.test.ts
 tests/unit/download-quality.test.ts
 tests/unit/download-recovery-policy.test.ts

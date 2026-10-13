@@ -53,6 +53,7 @@ let manager: QueueManager;
 let settings: AppSettings;
 let held: Map<string, () => void>;
 let started: QueueJob[];
+let pacingOf: Map<string, unknown>;
 
 const internals = (): Internals => manager as unknown as Internals;
 // Giống bộ lập lịch thật: không bao giờ có hai lượt tick chạy song song (cờ tickRunning). Không có bước này, lượt tick tự
@@ -118,10 +119,12 @@ beforeEach(() => {
   queue = new QueueRepository(database.db);
   held = new Map();
   started = [];
+  pacingOf = new Map();
   settings = { ...defaultAppSettings, maxConcurrentDownloadLists: 2, maxGlobalMergeJobs: 1 };
   const downloader = {
-    run: vi.fn((job: QueueJob, _profile: unknown, _signal: unknown, onProgress: (progress: Record<string, unknown>) => void) => {
+    run: vi.fn((job: QueueJob, _profile: unknown, _signal: unknown, onProgress: (progress: Record<string, unknown>) => void, pacing?: unknown) => {
       started.push(job);
+      pacingOf.set(job.id, pacing);
       onProgress({ percent: 10, speed: null, etaSeconds: null, stage: 'downloading' });
       return new Promise((resolve) =>
         held.set(job.id, () => resolve({ outputPath: join(folder, `${job.id}.mp4`), skipped: false, resultMessage: 'Đã tải.' }))
@@ -266,5 +269,24 @@ describe('Lag bước 2 — bắt đầu dần, tối đa 2 tác vụ mỗi 350 
     await settle();
     expect(started.length, 'cùng cửa sổ — không mở thêm').toBe(2);
     expect(manager.waitingLanes().downloadLists, 'A và B đã giữ lượt, C chờ — dù lượt này đã hết suất').toEqual([c.id]);
+  });
+});
+
+// Hướng C 429 (2026-10-12): bộ tải cần biết đang có bao nhiêu video CÙNG nền tảng tải trên toàn ứng dụng để hạ số kết nối
+// aria2c và nghỉ giữa các yêu cầu. Trước đây hàng đợi không truyền gì.
+describe('Hướng C 429 — hàng đợi báo bộ tải tình trạng nền tảng', () => {
+  it('mỗi video nhận số video cùng nền tảng đang tải (tính cả nó) trên toàn ứng dụng; nền tảng khác đếm riêng', async () => {
+    settings = { ...settings, maxConcurrentDownloadLists: 4 };
+    const [a, b, t] = [makeProject('A'), makeProject('B'), makeProject('T')];
+    addDownloads(a, 2, 'youtube');
+    addDownloads(b, 2, 'youtube');
+    addDownloads(t, 1, 'tiktok');
+    await tickUntilSettled();
+    const youtubeCounts = started
+      .filter((job) => String(job.input.url).includes('youtube.com'))
+      .map((job) => (pacingOf.get(job.id) as { samePlatformActive: number } | undefined)?.samePlatformActive);
+    expect(youtubeCounts, 'video YouTube thứ n bắt đầu khi đã có n video YouTube đang tải').toEqual([1, 2, 3, 4]);
+    const tiktok = started.find((job) => String(job.input.url).includes('tiktok.com'))!;
+    expect(pacingOf.get(tiktok.id)).toEqual({ samePlatformActive: 1, rateLimitStrikes: 0 });
   });
 });

@@ -3,7 +3,7 @@
 // tham chiếu ba gạch chéo chỉ áp dụng cho tệp này, không đổi "lib" chung của tsconfig.node.json
 // (giữ nguyên cho code tiến trình chính không có DOM).
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import { createServer, type Server } from 'node:http';
@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
+import { downloadPacingArgs } from '../../src/shared/utils/download-pacing.js';
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(currentDirectory, '../..');
@@ -5441,7 +5442,8 @@ test('Lag bước 1: tối đa N danh sách tải chạy cùng lúc, mỗi danh 
   ).toBe(0);
   const clipData = fs.readFileSync(clip);
 
-  // Trả video chậm (~4 giây mỗi tệp) để hai danh sách chắc chắn trùng thời gian nếu không có trần.
+  // Trả video chậm (~12 giây mỗi tệp) để hai danh sách chắc chắn trùng thời gian nếu không có trần, và nhãn "Đang chờ lượt"
+  // (đi theo thống kê đẩy mỗi 2 giây) có đủ thời gian hiện ra kể cả khi máy đang bận — với ~4 giây, bài từng đỏ ngẫu nhiên.
   const requests: Array<{ path: string; at: number }> = [];
   const finished: Array<{ path: string; at: number }> = [];
   let server: Server | undefined;
@@ -5465,7 +5467,7 @@ test('Lag bước 1: tối đa N danh sách tải chạy cùng lúc, mỗi danh 
         'Accept-Ranges': 'bytes',
         ...(range ? { 'Content-Range': `bytes ${start}-${end}/${clipData.length}` } : {})
       });
-      const pieces = 20;
+      const pieces = 40;
       const size = Math.ceil(body.length / pieces);
       let index = 0;
       const timer = setInterval(() => {
@@ -5480,7 +5482,7 @@ test('Lag bước 1: tối đa N danh sách tải chạy cùng lúc, mỗi danh 
           response.end();
           finished.push({ path: pathname, at: Date.now() });
         }
-      }, 200);
+      }, 300);
     });
     const port = await new Promise<number>((resolvePort) => {
       server!.listen(0, '127.0.0.1', () => resolvePort((server!.address() as { port: number }).port));
@@ -5782,6 +5784,132 @@ test('Lag bước 2 + 3: 2 danh sách × 4 luồng bắt đầu dần, vẫn ch�
   } finally {
     server?.close();
     await closeElectronApplication();
+    removeSandbox(sandbox);
+  }
+});
+
+/**
+ * Hướng C 429 (2026-10-13): đo bằng yt-dlp + aria2c thật, cờ `--downloader http,https:<aria2c>` bị yt-dlp bỏ qua — app thực tế
+ * tải bằng bộ tải nội bộ của yt-dlp, aria2c không chạy. Hai ô "Dùng aria2c khi khả dụng" / "Kết nối aria2c mỗi video" vì vậy
+ * không có tác dụng mà vẫn hiện như đang điều khiển việc tải. Người dùng chọn giữ thực tế (ít kết nối) và ghi rõ sự thật.
+ */
+test('Cài đặt › Tải danh sách: không còn ô aria2c giả (không có tác dụng), có ghi chú đúng sự thật', async () => {
+  test.setTimeout(90_000);
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-aria2-note-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+  db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
+  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run(
+    'app',
+    JSON.stringify({ theme: 'dark', startWithWindows: false, autoCheckAppUpdates: false, autoCheckToolUpdates: false }),
+    new Date().toISOString()
+  );
+  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  db.close();
+  try {
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+
+    await shellWindow
+      .getByRole('navigation', { name: 'Điều hướng chính' })
+      .getByRole('button', { name: 'Cài đặt', exact: true })
+      .click({ timeout: 20_000 });
+    await shellWindow.locator('.settings-nav').getByRole('button', { name: 'Tải danh sách', exact: true }).click();
+    await expect(shellWindow.getByText('Công cụ và mạng', { exact: true })).toBeVisible({ timeout: 10_000 });
+
+    await expect(shellWindow.getByText('Kết nối aria2c mỗi video'), 'ô không có tác dụng đã được gỡ').toHaveCount(0);
+    await expect(shellWindow.getByText('Dùng aria2c khi khả dụng'), 'ô không có tác dụng đã được gỡ').toHaveCount(0);
+    const note = shellWindow.locator('[data-aria2-status="unused"]');
+    await expect(note).toBeVisible();
+    await expect(note).toContainText('bộ tải có sẵn của yt-dlp');
+    await expect(note).toContainText('không dùng aria2c');
+    // Các câu giới thiệu chế độ tải không còn hứa "aria2c 16 kết nối".
+    await expect(shellWindow.getByText(/aria2c 16 kết nối/)).toHaveCount(0);
+  } finally {
+    await closeElectronApplication();
+    removeSandbox(sandbox);
+  }
+});
+
+/**
+ * Hướng C 429 (2026-10-13): giãn nhịp thật với yt-dlp thật. Chạy tool/yt-dlp.exe với đúng tham số downloadPacingArgs() dựng
+ * cho "nhiều video YouTube cùng tải" và "YouTube vừa dính 429", tải từ máy chủ cục bộ (không gửi yêu cầu nào ra mạng).
+ * Máy chủ đo khoảng cách giữa yêu cầu đọc thông tin và yêu cầu tải dữ liệu: không giãn nhịp thì sát nhau; có giãn nhịp thì
+ * yt-dlp nghỉ đúng khoảng đã đặt rồi mới tải, và vẫn tải xong bình thường.
+ */
+test('Hướng C 429: yt-dlp thật nhận và làm đúng tham số giãn nhịp (nghỉ giữa yêu cầu, nghỉ trước khi tải)', async () => {
+  test.setTimeout(120_000);
+  const toolsDirectory = resolveToolsDirectoryForTest();
+  test.skip(!toolsDirectory, 'Không tìm thấy yt-dlp trên máy này để chạy bài kiểm thật.');
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-pacing-'));
+  const body = Buffer.alloc(600_000, 7);
+  let requests: number[] = [];
+  const server = createServer((request, response) => {
+    requests.push(Date.now());
+    const range = request.headers.range;
+    const start = range ? Number(/bytes=(\d*)-/.exec(range)?.[1] ?? 0) : 0;
+    const chunk = body.subarray(start);
+    response.writeHead(range ? 206 : 200, {
+      'Content-Type': 'video/mp4',
+      'Content-Length': String(chunk.length),
+      'Accept-Ranges': 'bytes',
+      ...(range ? { 'Content-Range': `bytes ${start}-${body.length - 1}/${body.length}` } : {})
+    });
+    response.end(chunk);
+  });
+  try {
+    const port = await new Promise<number>((resolvePort) => {
+      server.listen(0, '127.0.0.1', () => resolvePort((server.address() as { port: number }).port));
+    });
+    // Chạy yt-dlp ở tiến trình con không đồng bộ (spawnSync chặn vòng lặp sự kiện → máy chủ không trả lời được).
+    const runAsync = (name: string, extra: string[]): Promise<{ code: number | null; gapMs: number; output: string }> =>
+      new Promise((resolveRun) => {
+        requests = [];
+        const child = spawn(
+          path.join(toolsDirectory!, 'yt-dlp.exe'),
+          ['--no-config', '--no-playlist', '--newline', '-o', path.join(sandbox, `${name}.%(ext)s`), ...extra, `http://127.0.0.1:${port}/${name}.mp4`],
+          { windowsHide: true }
+        );
+        let output = '';
+        child.stdout.on('data', (chunk: Buffer) => (output += chunk.toString()));
+        child.stderr.on('data', (chunk: Buffer) => (output += chunk.toString()));
+        child.on('close', (code) => resolveRun({ code, gapMs: (requests[1] ?? 0) - (requests[0] ?? 0), output }));
+      });
+
+    const plain = await runAsync('khong-gian', downloadPacingArgs('youtube', { samePlatformActive: 1, rateLimitStrikes: 0 }));
+    expect(plain.code, plain.output).toBe(0);
+    expect(requests, 'đọc thông tin + tải dữ liệu').toHaveLength(2);
+    expect(plain.gapMs, 'một video lẻ: không nghỉ').toBeLessThan(1_000);
+
+    const busy = await runAsync('nhieu-video', downloadPacingArgs('youtube', { samePlatformActive: 6, rateLimitStrikes: 0 }));
+    expect(busy.code, busy.output).toBe(0);
+    expect(busy.output).toMatch(/Sleeping \d+(\.\d+)? seconds/);
+    expect(busy.gapMs, `6 video cùng nền tảng: nghỉ 1–3 s trước khi tải (đo ${busy.gapMs} ms)`).toBeGreaterThanOrEqual(1_000);
+    expect(busy.gapMs).toBeLessThan(4_500);
+    expect(fs.statSync(path.join(sandbox, 'nhieu-video.mp4')).size, 'vẫn tải xong đủ tệp').toBe(body.length);
+
+    const after = await runAsync('sau-429', downloadPacingArgs('youtube', { samePlatformActive: 1, rateLimitStrikes: 1 }));
+    expect(after.code, after.output).toBe(0);
+    expect(after.gapMs, `vừa dính 429: nghỉ 3–8 s trước khi tải (đo ${after.gapMs} ms)`).toBeGreaterThanOrEqual(3_000);
+    expect(after.gapMs).toBeLessThan(9_500);
+    expect(fs.statSync(path.join(sandbox, 'sau-429.mp4')).size).toBe(body.length);
+  } finally {
+    server.close();
     removeSandbox(sandbox);
   }
 });
