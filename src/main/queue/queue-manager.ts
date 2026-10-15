@@ -4,7 +4,7 @@ import { type BrowserWindow } from 'electron';
 import { cpus, freemem, totalmem } from 'node:os';
 import { rm, stat, statfs } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import type { AttentionNotice, JobType, QueueJob, ResourceProfile } from '@shared/types/domain.js';
+import type { AttentionNotice, JobType, LaneWaitState, QueueJob, RateLimitWaitState, ResourceProfile } from '@shared/types/domain.js';
 import { IPC } from '@shared/contracts/channels.js';
 import { retryDelayMs } from '@shared/utils/retry.js';
 import { hasConfiguredCookies, isCookieBlockingCode } from '@shared/utils/cookie-policy.js';
@@ -15,10 +15,17 @@ import {
 } from '../cookies/cookie-fingerprint.js';
 import type { CookieJarStore } from '../cookies/cookie-jar-store.js';
 import {
+  effectiveConcurrentDownloadLists,
   independentDownloadProjectCanStart,
-  mergeSourceDownloadLimit,
-  queueExecutionLane
+  laneSlotAvailable,
+  MAX_JOB_STARTS_PER_WINDOW,
+  platformDownloadCap,
+  queueExecutionLane,
+  recentJobStarts,
+  type QueueExecutionLane
 } from '@shared/utils/queue-lane.js';
+import { recommendedConcurrentLists } from '@shared/utils/hardware-recommendation.js';
+import type { DownloadPacingContext } from '@shared/utils/download-pacing.js';
 import type { QueueRepository } from '../database/repositories/queue-repository.js';
 import type { ProjectRepository } from '../database/repositories/project-repository.js';
 import type { ItemRepository } from '../database/repositories/item-repository.js';
@@ -46,6 +53,9 @@ import {
 } from '@shared/utils/download-failure.js';
 import { effectiveMemoryReserveBytes } from '@shared/utils/resource-memory.js';
 import { toneForErrorCode } from '@shared/utils/notice-tone.js';
+import { detectPlatform } from '@shared/utils/url.js';
+import { RATE_LIMIT_MAX_AUTO_ROUNDS, formatAutoResumeEta, rateLimitPlatformLabel } from '@shared/utils/rate-limit-backoff.js';
+import { PlatformRateLimitGate } from './platform-rate-limit-gate.js';
 
 /** S3: số lượt ghép tự đưa video nguồn bị thiếu đi tải lại trước khi dừng hẳn và báo lỗi. */
 const MAX_MISSING_SOURCE_REQUEUES = 2;
@@ -62,7 +72,11 @@ interface ActiveJob {
   controller: AbortController;
   promise: Promise<void>;
   sourceLock: string | null;
+  /** Hướng B 429: lúc bắt đầu lượt chạy này — video chạy từ trước lần dính 429 gần nhất không tính thêm lần. */
+  startedAtMs: number;
 }
+/** Lag bước 3: khoảng tối thiểu giữa hai lần gửi CẢ danh sách tác vụ sang giao diện. */
+const QUEUE_CHANGED_THROTTLE_MS = 300;
 const TERMINAL_STATUSES = new Set(['completed', 'skipped', 'cancelled', 'failed']);
 const PAUSABLE_STATUSES = new Set([
   'pending',
@@ -196,6 +210,11 @@ export class QueueManager {
   private timer: NodeJS.Timeout | null = null;
   private schedulerRunning = false;
   private tickRunning = false;
+  /** Lag bước 2: mốc các lần bắt đầu tác vụ gần đây (xem MAX_JOB_STARTS_PER_WINDOW). */
+  private jobStartTimes: number[] = [];
+  /** Lag bước 3: lần gửi danh sách tác vụ đang chờ gộp (xem sendQueueChanged). */
+  private queueChangedTimer: NodeJS.Timeout | null = null;
+  private queueChangedPending = false;
   private paused = false;
   private previousCpu = cpus();
   // VẤN ĐỀ 2 mục 1 (2026-09-22): một bộ điều tiết theo hồ sơ tài nguyên (ngưỡng cao lấy từ
@@ -208,6 +227,10 @@ export class QueueManager {
   private readonly keptOldVersionCounts = new Map<string, number>();
   /** P1: theo danh sách — các tác vụ tải đã báo không có tiếng (mã tác vụ → tên video). */
   private readonly audioIssueJobs = new Map<string, Map<string, string>>();
+  /** Hướng B 429: nghỉ theo NỀN TẢNG trên toàn ứng dụng khi dính HTTP 429 (xem PlatformRateLimitGate). */
+  private rateLimits = new PlatformRateLimitGate();
+  private waitingLaneProjects: { downloadLists: string[]; mergeWorkflows: string[] } = { downloadLists: [], mergeWorkflows: [] };
+  private autoListsCache: { at: number; value: number } | null = null;
   private startupReadyResolve: (() => void) | null = null;
   private readonly startupReady = new Promise<void>((resolve) => {
     this.startupReadyResolve = resolve;
@@ -457,6 +480,7 @@ export class QueueManager {
     this.schedulerRunning = false;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    this.cancelQueueChangedSend();
     for (const active of this.active.values()) {
       if (preserveForResume)
         this.repo.update(active.job.id, {
@@ -522,10 +546,37 @@ export class QueueManager {
     this.scheduleTick(0);
   }
   private emit(): void {
-    if (this.window && !this.window.isDestroyed()) {
-      this.window.webContents.send(IPC.events.queueChanged, this.repo.list());
-    }
+    this.sendQueueChanged();
     this.wakeScheduler();
+  }
+  /**
+   * Lag bước 3: gửi CẢ danh sách tác vụ sang giao diện tối đa 1 lần mỗi QUEUE_CHANGED_THROTTLE_MS. Thay đổi đầu tiên sau lúc
+   * yên được gửi ngay; các thay đổi trong 300 ms sau đó gộp vào đúng 1 lần gửi cuối, đọc dữ liệu MỚI NHẤT lúc gửi. Trước đây
+   * 24 video bắt đầu / xong = 24 lần gửi sát nhau (250 tác vụ ≈450 KB mỗi lần), vòng lặp main khựng tới 837 ms. Tiến độ từng
+   * tác vụ vẫn đi riêng qua emitProgress, không bị gộp.
+   */
+  private sendQueueChanged(): void {
+    if (this.queueChangedTimer) {
+      this.queueChangedPending = true;
+      return;
+    }
+    if (!this.window || this.window.isDestroyed()) return;
+    this.window.webContents.send(IPC.events.queueChanged, this.repo.list());
+    this.queueChangedTimer = setTimeout(() => {
+      this.queueChangedTimer = null;
+      if (!this.queueChangedPending) return;
+      this.queueChangedPending = false;
+      try {
+        this.sendQueueChanged();
+      } catch (error) {
+        this.logger.error('queue', 'QUEUE_CHANGED_SEND_FAILED', error instanceof Error ? error.message : String(error));
+      }
+    }, QUEUE_CHANGED_THROTTLE_MS);
+  }
+  private cancelQueueChangedSend(): void {
+    if (this.queueChangedTimer) clearTimeout(this.queueChangedTimer);
+    this.queueChangedTimer = null;
+    this.queueChangedPending = false;
   }
   private emitProgress(job: QueueJob): void {
     if (this.window && !this.window.isDestroyed()) this.window.webContents.send(IPC.events.jobProgress, job);
@@ -542,11 +593,18 @@ export class QueueManager {
     if (type === 'analyze' || type === 'verify') return profile.analyzeWorkers;
     return 1;
   }
-  private dependencyState(job: QueueJob, all: QueueJob[]): 'ready' | 'waiting' | 'failed' {
-    const dependencies = Array.isArray(job.input.dependsOn)
-      ? job.input.dependsOn.filter((x): x is string => typeof x === 'string')
-      : [];
-    const states = dependencies.map((id) => all.find((x) => x.id === id)?.status);
+  private dependencyIds(job: QueueJob): string[] {
+    return Array.isArray(job.input.dependsOn) ? job.input.dependsOn.filter((x): x is string => typeof x === 'string') : [];
+  }
+  /** Trạng thái mọi phụ thuộc của các tác vụ chờ: lấy từ danh sách chưa xong, còn lại (đã xong / đã xóa) tra CSDL theo id. */
+  private dependencyStatuses(pendingJobs: readonly QueueJob[], unfinished: readonly QueueJob[]): Map<string, QueueJob['status']> {
+    const statuses = new Map(unfinished.map((job) => [job.id, job.status] as const));
+    const missing = pendingJobs.flatMap((job) => this.dependencyIds(job)).filter((id) => !statuses.has(id));
+    if (missing.length) for (const [id, status] of this.repo.statusesById(missing)) statuses.set(id, status);
+    return statuses;
+  }
+  private dependencyState(job: QueueJob, statuses: ReadonlyMap<string, QueueJob['status']>): 'ready' | 'waiting' | 'failed' {
+    const states = this.dependencyIds(job).map((id) => statuses.get(id));
     if (states.some((status) => status === undefined || status === 'failed' || status === 'cancelled'))
       return 'failed';
     return states.every((status) => status === 'completed' || status === 'skipped') ? 'ready' : 'waiting';
@@ -933,6 +991,138 @@ export class QueueManager {
     return [...this.loadGovernors.values()].some((governor) => governor.isThrottled());
   }
 
+  /** Lag bước 1: danh sách tải / quy trình ghép đang chờ lượt vì đã đủ số chạy cùng lúc (theo lượt tick gần nhất). */
+  public waitingLanes(): LaneWaitState {
+    return {
+      downloadLists: [...this.waitingLaneProjects.downloadLists],
+      mergeWorkflows: [...this.waitingLaneProjects.mergeWorkflows],
+      downloadListCap: effectiveConcurrentDownloadLists(this.settings.get().maxConcurrentDownloadLists, this.autoConcurrentDownloadLists()),
+      mergeWorkflowCap: Math.max(1, Math.min(4, this.settings.get().maxGlobalMergeJobs))
+    };
+  }
+
+  /** Các danh sách / quy trình đang giữ lượt: có ít nhất một tác vụ đang chạy trong làn đó. */
+  private laneHolders(lane: QueueExecutionLane): Set<string> {
+    const holders = new Set<string>();
+    for (const entry of this.active.values()) {
+      if (entry.job.projectId && queueExecutionLane(entry.job) === lane) holders.add(entry.job.projectId);
+    }
+    return holders;
+  }
+
+  /** Ô "Số danh sách tải chạy cùng lúc" để tự động: khuyến nghị phần cứng (đo lại mỗi phút vì RAM trống thay đổi). */
+  private autoConcurrentDownloadLists(): number {
+    const now = Date.now();
+    if (!this.autoListsCache || now - this.autoListsCache.at > 60_000) {
+      this.autoListsCache = { at: now, value: recommendedConcurrentLists(cpus().length, freemem()) };
+    }
+    return this.autoListsCache.value;
+  }
+
+  /** Hướng B 429: các nền tảng đang nghỉ / đã dừng / đang tăng dần lại — cho huy hiệu "Đang chờ do giới hạn …". */
+  public rateLimitWaits(): RateLimitWaitState[] {
+    return this.rateLimits.snapshot(Date.now());
+  }
+
+  /** Chỉ bài e2e/integration (TUBMEDIA_E2E_RATE_LIMIT_WAIT_MS): rút ngắn thời gian nghỉ của mọi vòng. */
+  public setRateLimitWaitOverrideMs(waitMs: number): void {
+    this.rateLimits = new PlatformRateLimitGate(Math.random, waitMs);
+  }
+
+  /** Nền tảng của tác vụ tải (khóa của detectPlatform), hoặc null nếu không xác định được. */
+  /** Hướng C 429: số video cùng nền tảng đang tải trên toàn ứng dụng (tính cả video này) và số lần nền tảng vừa dính 429. */
+  private downloadPacingContext(job: QueueJob): DownloadPacingContext {
+    const platform = this.downloadPlatformOf(job);
+    if (!platform) return { samePlatformActive: 1, rateLimitStrikes: 0 };
+    let samePlatformActive = 0;
+    for (const entry of this.active.values()) {
+      if (entry.job.type === 'download' && this.downloadPlatformOf(entry.job) === platform) samePlatformActive += 1;
+    }
+    if (!this.active.has(job.id)) samePlatformActive += 1;
+    return { samePlatformActive: Math.max(1, samePlatformActive), rateLimitStrikes: this.rateLimits.strikesOf(platform) };
+  }
+  private downloadPlatformOf(job: QueueJob): string | null {
+    const url = typeof job.input.url === 'string' ? job.input.url : null;
+    if (url) {
+      try {
+        return detectPlatform(url).platform;
+      } catch {
+        // URL hỏng — thử nguồn đã lưu.
+      }
+    }
+    const source = job.sourceId ? this.sources.get(job.sourceId) : null;
+    return source?.platform ?? null;
+  }
+
+  /**
+   * Hướng B 429: video dính HTTP 429. Lần đầu (hoặc lần đầu sau khi tự tiếp tục) thì cả ứng dụng nghỉ với nền tảng đó và
+   * video quay lại chờ; video đang tải dở từ trước cũng dính thì chỉ quay lại chờ. Sau 3 vòng tự tiếp tục vẫn dính thì dừng
+   * hẳn như trước: tạm dừng danh sách, thông báo đứng cố định, chờ người dùng xác minh rồi bấm Tiếp tục.
+   * @returns true nếu đã xử lý xong (video quay lại chờ); false nếu phải dừng hẳn (người gọi tạm dừng như mã chặn khác).
+   */
+  private handleSourceRateLimited(job: QueueJob, message: string): { handled: true } | { handled: false; message: string } {
+    const platform = this.downloadPlatformOf(job);
+    if (!platform) return { handled: false, message };
+    const label = rateLimitPlatformLabel(platform);
+    const now = Date.now();
+    const outcome = this.rateLimits.recordHit(platform, this.active.get(job.id)?.startedAtMs ?? now, now);
+    if (outcome.kind === 'stopped') {
+      const stoppedMessage =
+        `${label} vẫn giới hạn số yêu cầu (HTTP 429) dù Tubmedia đã tự nghỉ và thử lại ${RATE_LIMIT_MAX_AUTO_ROUNDS} lần. ` +
+        `Tubmedia đã dừng hẳn để không gửi thêm yêu cầu. Hãy mở video trong trình duyệt bình thường, hoàn tất xác minh nếu ` +
+        `${label} yêu cầu, rồi nhấn Tiếp tục ở danh sách.`;
+      this.logger.warn('queue', 'RATE_LIMIT_STOPPED', stoppedMessage, {
+        jobId: job.id,
+        ...(job.projectId ? { projectId: job.projectId } : {}),
+        metadata: { platform, strikes: outcome.strikes }
+      });
+      return { handled: false, message: stoppedMessage };
+    }
+    const waitingStage = `Đang chờ do giới hạn ${label}`;
+    const resumeAt = outcome.kind === 'cooldown' ? outcome.resumeAt : (this.rateLimits.snapshot(now).find((x) => x.platform === platform)?.resumeAt ?? now);
+    const resumeClock = new Date(resumeAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+    const waitingMessage =
+      `${label} đang giới hạn số yêu cầu (HTTP 429). Tubmedia tạm ngừng bắt đầu video mới của ${label} ở mọi danh sách ` +
+      `(video đang tải dở vẫn chạy tiếp) và sẽ tự tiếp tục lúc ${resumeClock} (${formatAutoResumeEta(resumeAt, now)}), ` +
+      `lúc đầu từng video một rồi tăng dần. Không cần bấm thử lại.`;
+    const current = this.repo.get(job.id);
+    if (current && RUNNING_STATUSES.has(current.status)) this.repo.update(job.id, { status: 'retrying' });
+    this.emitProgress(
+      this.repo.update(
+        job.id,
+        { status: 'pending', errorCode: 'SOURCE_RATE_LIMITED', errorMessage: waitingMessage, speed: null, etaSeconds: null, finishedAt: null },
+        { progressStage: waitingStage, resumeStatus: null }
+      )
+    );
+    if (outcome.kind === 'cooldown') {
+      this.logger.warn('queue', 'RATE_LIMIT_COOLDOWN_STARTED', waitingMessage, {
+        jobId: job.id,
+        ...(job.projectId ? { projectId: job.projectId } : {}),
+        metadata: { platform, strikes: outcome.strikes, waitMs: outcome.resumeAt - now }
+      });
+      this.notifyPlatformRateLimit(platform, label, waitingMessage);
+    }
+    return { handled: true };
+  }
+
+  /** Một thông báo cho mỗi nền tảng (không theo danh sách); tự tắt vì Tubmedia tự tiếp tục được. */
+  private notifyPlatformRateLimit(platform: string, label: string, message: string): void {
+    if (!this.window || this.window.isDestroyed()) return;
+    const notice: AttentionNotice = {
+      id: `rate-limit-${platform}`,
+      severity: 'warning',
+      title: `${label} đang giới hạn yêu cầu — Tubmedia tự chờ rồi tiếp tục`,
+      message,
+      code: 'SOURCE_RATE_LIMITED',
+      steps: [
+        'Không cần làm gì — Tubmedia tự tiếp tục khi hết giờ chờ (đếm ngược ở thanh trên cùng).',
+        'Không nhấn thử lại liên tục; thử lại sớm chỉ kéo dài thời gian bị giới hạn.'
+      ],
+      sticky: false
+    };
+    this.window.webContents.send(IPC.events.attention, notice);
+  }
+
   private async resourcesAllow(
     job: QueueJob,
     profile: ResourceProfile,
@@ -1005,8 +1195,9 @@ export class QueueManager {
   private async tick(): Promise<void> {
     if (this.paused || !this.canExecute()) return;
     if (await this.guardActiveDiskSpace()) return;
-    let all = this.repo.list();
-    if (await this.recoverDiskFullProjects(all)) all = this.repo.list();
+    // Lag bước 3: chỉ đọc tác vụ chưa xong — tác vụ đã xong chỉ cần tra trạng thái khi là phụ thuộc (dependencyStatuses).
+    let all = this.repo.listUnfinished();
+    if (await this.recoverDiskFullProjects(all)) all = this.repo.listUnfinished();
     const cpuPercent = this.cpuPercent();
     // VẤN ĐỀ 2 mục 1 (2026-09-22): lấy mẫu bộ điều tiết CHO MỌI HỒ SƠ đang có tác vụ hoạt động, MỖI LƯỢT
     // tick — không chỉ khi có tác vụ đang CHỜ được xét (resourcesAllow). Nếu chỉ lấy mẫu lúc xét tác vụ
@@ -1025,8 +1216,10 @@ export class QueueManager {
     }
     const pending: QueueJob[] = [];
     let stateChanged = false;
-    for (const job of all.filter((x) => x.status === 'pending')) {
-      const dependency = this.dependencyState(job, all);
+    const pendingJobs = all.filter((x) => x.status === 'pending');
+    const statuses = this.dependencyStatuses(pendingJobs, all);
+    for (const job of pendingJobs) {
+      const dependency = this.dependencyState(job, statuses);
       if (dependency === 'failed') {
         this.repo.update(job.id, {
           status: 'failed',
@@ -1053,26 +1246,61 @@ export class QueueManager {
         if (next) fairPending.push(next);
       }
     }
+    const waitingDownloadLists: string[] = [];
+    const waitingMergeWorkflows: string[] = [];
+    const downloadListCap = effectiveConcurrentDownloadLists(
+      this.settings.get().maxConcurrentDownloadLists,
+      this.autoConcurrentDownloadLists()
+    );
+    const mergeWorkflowCap = Math.max(1, Math.min(4, this.settings.get().maxGlobalMergeJobs));
+    this.jobStartTimes = recentJobStarts(this.jobStartTimes, Date.now());
+    let startsLeft = MAX_JOB_STARTS_PER_WINDOW - this.jobStartTimes.length;
     for (const job of fairPending) {
       if (!this.schedulerRunning) break;
       if (this.active.has(job.id)) continue;
+      // Lag bước 1: tối đa N danh sách tải / maxGlobalMergeJobs quy trình ghép chạy "full" cùng lúc; cái khác chờ lượt.
+      const executionLane = queueExecutionLane(job);
+      if (job.projectId && (executionLane === 'download-list' || executionLane === 'merge-workflow')) {
+        const cap = executionLane === 'download-list' ? downloadListCap : mergeWorkflowCap;
+        if (!laneSlotAvailable(job.projectId, this.laneHolders(executionLane), cap)) {
+          const waiting = executionLane === 'download-list' ? waitingDownloadLists : waitingMergeWorkflows;
+          if (!waiting.includes(job.projectId)) waiting.push(job.projectId);
+          continue;
+        }
+      }
+      // Lag bước 2: hết suất bắt đầu của cửa sổ 350 ms này thì để lượt sau (vẫn xét làn ở trên để báo đúng danh sách chờ lượt).
+      if (startsLeft <= 0) continue;
       const profile = this.profileFor(job);
       const activeOfType = [...this.active.values()].filter((x) => x.job.type === job.type).length;
       const activeOfProjectType = [...this.active.values()].filter(
         (x) => x.job.type === job.type && x.job.projectId === job.projectId
       ).length;
       if (job.type === 'download') {
-        const lane = queueExecutionLane(job);
-        if (lane === 'download-list') {
-          if (!independentDownloadProjectCanStart(activeOfProjectType, profile)) continue;
-        }
-        if (lane === 'merge-workflow') {
-          const activeInLane = [...this.active.values()].filter(
-            (entry) => entry.job.type === 'download' && queueExecutionLane(entry.job) === lane
+        const platform = this.downloadPlatformOf(job);
+        const activeOfPlatform = (): number =>
+          [...this.active.values()].filter(
+            (entry) => entry.job.type === 'download' && this.downloadPlatformOf(entry.job) === platform
           ).length;
-          const laneLimit = mergeSourceDownloadLimit(this.settings.get(), profile);
-          if (activeOfProjectType >= profile.downloadWorkers || activeInLane >= laneLimit) continue;
+        // Hướng A 429: trần riêng theo nền tảng trên toàn ứng dụng (YouTube 6), cả làn ghép.
+        const platformCap = platformDownloadCap(platform);
+        if (platformCap !== null && activeOfPlatform() >= platformCap) continue;
+        // Hướng B 429: nền tảng đang nghỉ (hoặc đang tăng dần lại) thì không bắt đầu video mới của nó ở BẤT KỲ danh sách nào.
+        if (this.rateLimits.hasAny()) {
+          if (platform) {
+            const allowed = this.rateLimits.canStart(platform, activeOfPlatform(), Date.now());
+            for (const resumed of this.rateLimits.takeResumed()) {
+              this.logger.info(
+                'queue',
+                'RATE_LIMIT_COOLDOWN_ENDED',
+                `Hết giờ chờ giới hạn ${rateLimitPlatformLabel(resumed)} — tự tiếp tục, lúc đầu từng video một rồi tăng dần.`,
+                { metadata: { platform: resumed } }
+              );
+            }
+            if (!allowed) continue;
+          }
         }
+        // Mỗi danh sách / quy trình đang giữ lượt chạy đủ downloadWorkers của hồ sơ (không chia nhỏ luồng).
+        if (!independentDownloadProjectCanStart(activeOfProjectType, profile)) continue;
       } else if (job.type === 'merge') {
         const globalMergeLimit = Math.max(1, Math.min(4, this.settings.get().maxGlobalMergeJobs));
         if (activeOfProjectType >= 1 || activeOfType >= globalMergeLimit) continue;
@@ -1083,7 +1311,10 @@ export class QueueManager {
         continue;
       }
       this.runJob(job, profile); // intentionally detached; state is retained in active map
+      this.jobStartTimes.push(Date.now());
+      startsLeft -= 1;
     }
+    this.waitingLaneProjects = { downloadLists: waitingDownloadLists, mergeWorkflows: waitingMergeWorkflows };
     if (stateChanged) this.emit();
   }
   private runJob(job: QueueJob, profile: ResourceProfile): void {
@@ -1108,7 +1339,7 @@ export class QueueManager {
           );
         }
       });
-    this.active.set(job.id, { job, controller, promise, sourceLock });
+    this.active.set(job.id, { job, controller, promise, sourceLock, startedAtMs: Date.now() });
   }
 
   /**
@@ -1610,8 +1841,12 @@ export class QueueManager {
           if (malformedYouTubeMessage) {
             throw new InvalidInputError(malformedYouTubeMessage);
           }
-          const result = await this.downloader.run(job, profile, signal, (progress) =>
-            this.updateDownloadProgress(job.id, progress)
+          const result = await this.downloader.run(
+            job,
+            profile,
+            signal,
+            (progress) => this.updateDownloadProgress(job.id, progress),
+            this.downloadPacingContext(job)
           );
           completionStatus = result.skipped ? 'skipped' : 'completed';
           if (result.keptOldVersions?.length) this.notifyKeptOldVersions(job, result.keptOldVersions);
@@ -1628,6 +1863,10 @@ export class QueueManager {
             cookieRetryRequested: false,
             resumeStatus: null
           });
+          if (this.rateLimits.hasAny()) {
+            const platform = this.downloadPlatformOf(job);
+            if (platform) this.rateLimits.recordSuccess(platform);
+          }
           break;
         }
         case 'clip':
@@ -1714,7 +1953,7 @@ export class QueueManager {
       }
       const appError = error as Partial<AppError>;
       const code = appError.code ?? 'UNHANDLED_ERROR';
-      const message = error instanceof Error ? error.message : String(error);
+      let message = error instanceof Error ? error.message : String(error);
       if (code === 'RETRY_WITH_CONFIGURED_COOKIES') {
         const retrying = this.repo.update(job.id, {
           status: 'retrying',
@@ -1759,6 +1998,11 @@ export class QueueManager {
       ) {
         if (job.type === 'download' && job.projectId) {
           this.repeatedFailures.delete(job.projectId);
+        }
+        if (code === 'SOURCE_RATE_LIMITED' && job.type === 'download') {
+          const rateLimited = this.handleSourceRateLimited(job, message);
+          if (rateLimited.handled) return;
+          message = rateLimited.message;
         }
         const cookieBlocking = isCookieBlockingCode(code);
         // Ghi lại cookies lúc bị chặn: chỉ khi cookies THẬT SỰ đổi so với lúc này mới tự chạy lại (mục 3).
@@ -2439,6 +2683,12 @@ export class QueueManager {
     }
     this.clearBlockingNoticeKeys(projectId);
     this.repeatedFailures.delete(projectId);
+    // Hướng B 429: người dùng đã xác minh và bấm Tiếp tục sau khi Tubmedia dừng hẳn → bỏ trạng thái dừng của nền tảng.
+    for (const job of projectJobs) {
+      if (job.type !== 'download' || job.errorCode !== 'SOURCE_RATE_LIMITED') continue;
+      const platform = this.downloadPlatformOf(job);
+      if (platform && this.rateLimits.isStopped(platform)) this.rateLimits.clear(platform);
+    }
     for (const job of projectJobs) {
       if (job.status === 'paused' || job.status === 'interrupted') await this.resume(job.id, false);
     }

@@ -45,6 +45,7 @@ export const defaultAppSettings: AppSettings = {
   downloadLaneCount: 2,
   mergeLaneCount: 2,
   maxGlobalMergeJobs: 2,
+  maxConcurrentDownloadLists: 0,
   downloadCompatibilityMode: 'source',
   /* ADAPTIVE_SETTINGS_HOTFIX8_DEFAULT */ downloadEditCopyMode: 'off',
   downloadMinHeight: 0,

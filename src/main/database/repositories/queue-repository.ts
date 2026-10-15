@@ -57,6 +57,31 @@ export class QueueRepository {
       : this.db.prepare('SELECT * FROM queue_jobs ORDER BY priority DESC,created_at').all();
     return (rows as unknown as Row[]).map(map);
   }
+  /**
+   * Lag bước 3: chỉ tác vụ CHƯA XONG (bỏ completed / skipped / cancelled / failed) — cho lượt tick 350 ms, không phải đọc và
+   * phân tích hàng nghìn tác vụ đã xong mỗi lượt. Cùng thứ tự với list().
+   */
+  public listUnfinished(): QueueJob[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM queue_jobs WHERE status NOT IN ('completed','skipped','cancelled','failed') ORDER BY priority DESC,created_at"
+      )
+      .all();
+    return (rows as unknown as Row[]).map(map);
+  }
+  /** Trạng thái của các tác vụ theo id (id không tồn tại thì không có trong kết quả). */
+  public statusesById(ids: readonly string[]): Map<string, QueueJob['status']> {
+    const statuses = new Map<string, QueueJob['status']>();
+    const unique = [...new Set(ids)];
+    for (let index = 0; index < unique.length; index += 500) {
+      const chunk = unique.slice(index, index + 500);
+      const rows = this.db
+        .prepare(`SELECT id,status FROM queue_jobs WHERE id IN (${chunk.map(() => '?').join(',')})`)
+        .all(...chunk) as unknown as Array<{ id: string; status: QueueJob['status'] }>;
+      for (const row of rows) statuses.set(row.id, row.status);
+    }
+    return statuses;
+  }
   public next(types?: JobType[]): QueueJob | null {
     let row: Row | undefined;
     if (types?.length) {

@@ -62,10 +62,16 @@ FIX_SUMMARY.md
 FIX_UNIT_TEST_GATE_v1.2.0_VI.md
 FIX10_TIMESTAMP_REPAIR_ERROR_DETAIL_v1.2.0_VI.md
 FIX11_RETRY_PATH_PERSISTENCE_DRIVE_ROOT_VI.md
+FIX12_RATE_LIMIT_429_PLATFORM_WAIT_VI.md
+FIX13_LANE_CONCURRENCY_CAP_VI.md
+FIX14_JOB_START_PACING_VI.md
+FIX15_QUEUE_IPC_COALESCE_VI.md
+FIX16_RATE_LIMIT_429_PACING_VI.md
 FIX17_DECODE_ERROR_DETAIL_VI.md
 FIX18_NORMALIZE_CACHE_DEEP_VERIFY_VI.md
 FIX19_MANAGED_FFMPEG_TRUST_VI.md
 FIX20_NORMALIZE_AUDIO_ENCODE_FALLBACK_VI.md
+FIX21_AUTO_LIST_CAP_TIERS_VI.md
 FIX3_RATE_CONTROL_UNIT_TEST_v1.2.0_VI.md
 FIX4_BUNDLED_FFMPEG_PAYLOAD_v1.2.0_VI.md
 FIX5_CHANGELOG_ORDER_v1.2.0_VI.md
@@ -302,6 +308,7 @@ src/main/merge/timeline-service.ts
 src/main/normalize/normalize-engine.ts
 src/main/processes/process-manager.ts
 src/main/projects/project-service.ts
+src/main/queue/platform-rate-limit-gate.ts
 src/main/queue/queue-manager.ts
 src/main/queue/system-load-governor.ts
 src/main/runtime/development-environment.ts
@@ -347,10 +354,12 @@ src/renderer/src/components/HoverTip.tsx
 src/renderer/src/components/InfoDisclosure.tsx
 src/renderer/src/components/InfoHint.tsx
 src/renderer/src/components/JobProgressList.tsx
+src/renderer/src/components/LaneWaitNotice.tsx
 src/renderer/src/components/NotificationCenter.tsx
 src/renderer/src/components/ProjectQuarantinePanel.tsx
 src/renderer/src/components/quarantine-anchors.ts
 src/renderer/src/components/QuickDownloadPanel.tsx
+src/renderer/src/components/RateLimitWaitBadges.tsx
 src/renderer/src/components/RendererErrorBoundary.tsx
 src/renderer/src/components/StartupResumeDialog.tsx
 src/renderer/src/components/StatCard.tsx
@@ -436,12 +445,14 @@ src/shared/utils/csv.ts
 src/shared/utils/diagnostic-policy.ts
 src/shared/utils/disk-shortfall-format.ts
 src/shared/utils/download-failure.ts
+src/shared/utils/download-pacing.ts
 src/shared/utils/download-quality.ts
 src/shared/utils/encoder-selection.ts
 src/shared/utils/ffmpeg-decode-failure.ts
 src/shared/utils/ffmpeg-progress.ts
 src/shared/utils/filename.ts
 src/shared/utils/hardware-recommendation.ts
+src/shared/utils/history-export.ts
 src/shared/utils/input-parser.ts
 src/shared/utils/job-state-machine.ts
 src/shared/utils/media-info-format.ts
@@ -456,6 +467,7 @@ src/shared/utils/progress-policy.ts
 src/shared/utils/quality-decision.ts
 src/shared/utils/quarantine-policy.ts
 src/shared/utils/queue-lane.ts
+src/shared/utils/rate-limit-backoff.ts
 src/shared/utils/resource-memory.ts
 src/shared/utils/retry.ts
 src/shared/utils/safe-json.ts
@@ -480,6 +492,7 @@ tests/integration/cookie-jar-store.test.ts
 tests/integration/cookie-resume-fingerprint.test.ts
 tests/integration/database.test.ts
 tests/integration/download-existing-file-reuse.test.ts
+tests/integration/download-pacing-args.test.ts
 tests/integration/helpers/queue-harness.ts
 tests/integration/helpers/real-ffmpeg.ts
 tests/integration/legacy-quarantine-untouched.test.ts
@@ -491,7 +504,10 @@ tests/integration/normalize-cache-corrupt-audio.test.ts
 tests/integration/quarantine-service.test.ts
 tests/integration/queue-attempts.test.ts
 tests/integration/queue-audio-issue.test.ts
+tests/integration/queue-ipc-coalesce.test.ts
+tests/integration/queue-list-concurrency.test.ts
 tests/integration/queue-load-governor.test.ts
+tests/integration/queue-rate-limit-platform-wait.test.ts
 tests/integration/queue-retry-requeue.test.ts
 tests/integration/queue-startup-hold.test.ts
 tests/integration/queue-startup-session-jobs.test.ts
@@ -532,6 +548,7 @@ tests/unit/diagnostic-policy.test.ts
 tests/unit/diagnostics-recent-error-cause.test.ts
 tests/unit/disk-full-recovery.test.ts
 tests/unit/disk-shortfall-format.test.ts
+tests/unit/download-pacing.test.ts
 tests/unit/download-performance.test.ts
 tests/unit/download-quality.test.ts
 tests/unit/download-recovery-policy.test.ts
@@ -550,6 +567,7 @@ tests/unit/fix6-diagnostics-ui.test.ts
 tests/unit/gitignore-secrets.test.ts
 tests/unit/hardware-cpu-count.test.ts
 tests/unit/hardware-recommendation.test.ts
+tests/unit/history-export.test.ts
 tests/unit/independent-workflow-accordion-1.3.0.test.ts
 tests/unit/inject-changelog-release-notes.test.ts
 tests/unit/input-parser.test.ts
@@ -595,6 +613,7 @@ tests/unit/notification-spam-lane-count.test.ts
 tests/unit/nvenc-diagnosis.test.ts
 tests/unit/open-path-policy.test.ts
 tests/unit/output-path-containment.test.ts
+tests/unit/platform-rate-limit-gate.test.ts
 tests/unit/preview-frame-command.test.ts
 tests/unit/primary-button-double-click.test.ts
 tests/unit/process-abort-before-spawn.test.ts
@@ -618,6 +637,7 @@ tests/unit/quick-download-state-persist-race.test.ts
 tests/unit/quick-download-sync.test.ts
 tests/unit/quick-download-video-only.test.ts
 tests/unit/quick-download.test.ts
+tests/unit/rate-limit-backoff.test.ts
 tests/unit/release-update-system.test.ts
 tests/unit/resource-memory-r56.test.ts
 tests/unit/retry.test.ts
@@ -634,6 +654,7 @@ tests/unit/shutdown-sequence.test.ts
 tests/unit/smart-merge-pipeline-v120.test.ts
 tests/unit/source-completeness.test.ts
 tests/unit/startup-fast.test.ts
+tests/unit/stats-badge-refresh.test.ts
 tests/unit/status-labels-vi.test.ts
 tests/unit/system-cleanup-estimate-guard.test.ts
 tests/unit/system-cleanup-navigation.test.ts

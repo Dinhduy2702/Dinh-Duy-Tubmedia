@@ -57,6 +57,7 @@ import { buildSafeYtDlpArguments } from './ytdlp-arguments.js';
 import { buildCookieArguments } from './ytdlp-cookie-arguments.js';
 import { withLeasedCookieFile, type CookieJarStore, type CookieRunOutcome } from '../cookies/cookie-jar-store.js';
 import { acceptPathInside } from '../files/path-containment.js';
+import { downloadPacingArgs, type DownloadPacingContext } from '@shared/utils/download-pacing.js';
 
 export interface DownloadProgress {
   percent: number;
@@ -784,7 +785,8 @@ export class DownloadEngine {
     job: QueueJob,
     resource: ResourceProfile,
     signal: AbortSignal,
-    onProgress: (progress: DownloadProgress) => void
+    onProgress: (progress: DownloadProgress) => void,
+    pacing?: DownloadPacingContext
   ): Promise<DownloadResult> {
     if (!job.sourceId || !job.projectId) {
       throw new DownloadFailedError('Tác vụ tải thiếu dữ liệu nguồn hoặc dự án.');
@@ -1181,6 +1183,17 @@ export class DownloadEngine {
     }
     if (appSettings.proxy) args.push('--proxy', appSettings.proxy);
     if (appSettings.rateLimit) args.push('--limit-rate', appSettings.rateLimit);
+    // Hướng C 429: nhiều video cùng nền tảng / nền tảng vừa dính 429 → yt-dlp nghỉ giữa các yêu cầu và trước mỗi lần tải.
+    // Link tệp trực tiếp giữ nguyên như cũ.
+    const pacingArgs = downloadPacingArgs(source.platform, pacing);
+    if (pacingArgs.length) {
+      args.push(...pacingArgs);
+      this.logger.info('download', 'DOWNLOAD_PACING_APPLIED', 'Giãn nhịp tải với nền tảng để tránh bị giới hạn (HTTP 429).', {
+        jobId: job.id,
+        projectId: project.id,
+        metadata: { platform: source.platform, ...pacing, args: pacingArgs.join(' ') }
+      });
+    }
 
     const aria = this.tools.get('aria2c');
     if (source.platform === 'google-drive' && appSettings.useAria2c) {
@@ -1194,6 +1207,9 @@ export class DownloadEngine {
         }
       );
     }
+    // Ghi chú (2026-10-13, đo bằng yt-dlp 2026.08.19 + aria2c 1.37.0 thật, http và https): yt-dlp KHÔNG nhận khóa giao thức
+    // "https" nên cả cụm `http,https:<aria2c>` bị bỏ qua — app thực tế tải bằng bộ tải nội bộ của yt-dlp, aria2c không chạy.
+    // Người dùng chọn giữ đúng thực tế này (ít kết nối, đỡ dính 429); ô cài đặt aria2c đã được ghi rõ là hiện không dùng.
     if (
       appSettings.useAria2c &&
       source.platform !== 'google-drive' &&
