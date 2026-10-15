@@ -1,6 +1,6 @@
 import type { BrowserWindow } from 'electron';
 import { constants, existsSync } from 'node:fs';
-import { access, mkdir, readdir, stat } from 'node:fs/promises';
+import { access, mkdir, readdir, readFile, stat } from 'node:fs/promises';
 import { dirname, join, parse } from 'node:path';
 import type { AppSettings, ToolStatus } from '@shared/types/domain.js';
 import type { ProcessManager } from '../processes/process-manager.js';
@@ -13,6 +13,9 @@ export const TOOL_NAMES = ['yt-dlp', 'ffmpeg', 'ffprobe', 'ffplay', 'aria2c'] as
 export type ToolName = (typeof TOOL_NAMES)[number];
 export const REQUIRED_TOOL_NAMES = ['yt-dlp', 'ffmpeg', 'ffprobe'] as const satisfies readonly ToolName[];
 export const OPTIONAL_TOOL_NAMES = ['ffplay', 'aria2c'] as const satisfies readonly ToolName[];
+/** Tên tệp metadata trình cập nhật ghi trong thư mục công cụ (tool-update-service). */
+export const MANAGED_TOOL_METADATA_FILE = '.vdmsp-tool-metadata.json';
+const FFMPEG_SUITE_TOOLS: ReadonlySet<ToolName> = new Set<ToolName>(['ffmpeg', 'ffprobe', 'ffplay']);
 
 const versionArgs: Record<ToolName, string[]> = {
   'yt-dlp': ['--version'],
@@ -286,6 +289,17 @@ export class ToolManager {
     return unique;
   }
 
+  /** Trình cập nhật ghi mục "ffmpeg-suite" vào metadata sau khi cài xong bộ ffmpeg (tool-update-service). */
+  private async managedFfmpegSuiteInstalledByUpdater(): Promise<boolean> {
+    try {
+      const raw = await readFile(join(this.userDataPath, 'tools', 'current', MANAGED_TOOL_METADATA_FILE), 'utf8');
+      const parsed = JSON.parse(raw) as { packages?: Record<string, unknown> } | null;
+      return Boolean(parsed?.packages && typeof parsed.packages === 'object' && parsed.packages['ffmpeg-suite']);
+    } catch {
+      return false;
+    }
+  }
+
   private async resolveCandidates(name: ToolName): Promise<Array<{ path: string; source: ToolStatus['source'] }>> {
     const executable = this.executableName(name);
     const configured = this.configuredPath(name);
@@ -312,11 +326,18 @@ export class ToolManager {
     candidates.push({ path: join(executableFolder, 'tools', executable), source: 'local' });
 
     // Updates for an installed application are stored here so they do not require admin rights.
-    candidates.push({ path: join(this.userDataPath, 'tools', 'current', executable), source: 'managed' });
+    // Bộ ffmpeg ở đây chỉ được xếp TRƯỚC bản đi kèm bộ cài khi chính trình cập nhật của app đã cài nó (có mục
+    // "ffmpeg-suite" trong .vdmsp-tool-metadata.json). Vụ khách 2026-10-15: ffmpeg 8.0 gyan.dev chép tay vào đây từ
+    // 25/07 (không có metadata), bộ mã hóa AAC của nó tạo gói tiếng hỏng; cài đè 1.6.3 không đụng userData nên app cứ
+    // dùng bản đó thay cho ffmpeg mới đi kèm bộ cài. Bản không rõ nguồn vẫn được giữ làm dự phòng sau bản đi kèm.
+    const managed = { path: join(this.userDataPath, 'tools', 'current', executable), source: 'managed' as const };
+    const managedTrusted = !FFMPEG_SUITE_TOOLS.has(name) || await this.managedFfmpegSuiteInstalledByUpdater();
+    if (managedTrusted) candidates.push(managed);
 
     // Installer-bundled tools. Support both singular "tool" and legacy "tools" directories.
     candidates.push({ path: join(this.resourcesPath, 'tool', executable), source: 'bundled' });
     candidates.push({ path: join(this.resourcesPath, 'tools', executable), source: 'bundled' });
+    if (!managedTrusted) candidates.push(managed);
 
     // Common Windows package-manager shims. PATH is still checked last, but
     // explicit paths make discovery reliable when Electron inherited an old
