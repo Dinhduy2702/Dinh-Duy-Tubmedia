@@ -4,6 +4,12 @@ import type { ProcessPriority } from '@shared/types/domain.js';
 import { ProcessCancelledError, ProcessSpawnError, ProcessTimeoutError } from '@shared/errors/app-errors.js';
 import type { Logger } from '../logging/logger.js';
 import { toSignedExitCode } from '@shared/utils/nvenc-diagnosis.js';
+import {
+  defaultYtDlpRuntimeTemp,
+  isYtDlpExecutable,
+  type YtDlpRuntimeAllocation,
+  type YtDlpRuntimeTemp
+} from './ytdlp-runtime-temp.js';
 
 export interface ProcessRunOptions {
   jobId: string;
@@ -206,7 +212,10 @@ function lineConsumer(stream: NodeJS.ReadableStream, callback: (line: string) =>
 }
 export class ProcessManager {
   private readonly active = new Map<string, Managed>();
-  public constructor(private readonly logger: Logger) {}
+  public constructor(
+    private readonly logger: Logger,
+    private readonly ytDlpRuntimeTemp: YtDlpRuntimeTemp = defaultYtDlpRuntimeTemp
+  ) {}
   public count(): number {
     return this.active.size;
   }
@@ -221,9 +230,14 @@ export class ProcessManager {
     const startedAt = Date.now();
     const stdout = new RingLines();
     const stderr = new RingLines();
+    // yt-dlp (PyInstaller một tệp) bị taskkill /F thì để sót %TEMP%\_MEIxxxx — cho mỗi tiến trình một thư mục tạm riêng,
+    // xóa khi tiến trình kết thúc (xem ytdlp-runtime-temp.ts).
+    const runtimeTemp: YtDlpRuntimeAllocation | null = isYtDlpExecutable(options.executablePath)
+      ? await this.ytDlpRuntimeTemp.allocate().catch(() => null)
+      : null;
     const child = spawn(options.executablePath, options.args, {
       cwd: options.cwd,
-      env: processEnvironmentFor(options.tool, options.env),
+      env: processEnvironmentFor(options.tool, { ...(runtimeTemp?.env ?? {}), ...options.env }),
       shell: false,
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe']
@@ -346,6 +360,7 @@ export class ProcessManager {
       if (timer) clearTimeout(timer);
       options.signal?.removeEventListener('abort', abort);
       this.active.delete(id);
+      if (runtimeTemp) void runtimeTemp.release();
     }
     await Promise.allSettled([outPromise, errPromise]);
     const result = {

@@ -34,6 +34,7 @@ import { WorkbenchService } from '../workbench/workbench-service.js';
 import { SenderValidator } from '../security/sender-validator.js';
 import { CookieService } from '../cookies/cookie-service.js';
 import { cleanupTemporaryArtifacts } from '../files/temporary-cleanup.js';
+import { defaultYtDlpRuntimeTemp } from '../processes/ytdlp-runtime-temp.js';
 import { buildCleanupProtection } from '../files/cleanup-protection.js';
 import { QuickDownloadService } from '../download/quick-download-service.js';
 import { PreviewFrameService } from '../download/preview-frame-service.js';
@@ -206,6 +207,15 @@ export class AppContext {
         `Không thể khôi phục trạng thái Tải nhanh: ${error instanceof Error ? error.message : String(error)}`
       );
     });
+    // Thư mục tạm riêng của yt-dlp sót lại khi phiên trước bị tắt đột ngột (xem ytdlp-runtime-temp.ts).
+    void defaultYtDlpRuntimeTemp
+      .sweepUnused()
+      .then((removed) => {
+        if (removed > 0) {
+          this.logger.info('cleanup', 'YTDLP_RUNTIME_TEMP_CLEANED', `Đã dọn ${removed} thư mục tạm yt-dlp còn sót từ phiên trước.`);
+        }
+      })
+      .catch(() => undefined);
     const logRetentionDays = this.settings.get().logRetentionDays;
     this.logRepo.prune(logRetentionDays);
     this.logger.pruneFiles(logRetentionDays);

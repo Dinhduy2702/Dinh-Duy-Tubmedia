@@ -72,6 +72,7 @@ FIX18_NORMALIZE_CACHE_DEEP_VERIFY_VI.md
 FIX19_MANAGED_FFMPEG_TRUST_VI.md
 FIX20_NORMALIZE_AUDIO_ENCODE_FALLBACK_VI.md
 FIX21_AUTO_LIST_CAP_TIERS_VI.md
+FIX22_YTDLP_MEI_TEMP_LEAK_VI.md
 FIX3_RATE_CONTROL_UNIT_TEST_v1.2.0_VI.md
 FIX4_BUNDLED_FFMPEG_PAYLOAD_v1.2.0_VI.md
 FIX5_CHANGELOG_ORDER_v1.2.0_VI.md
@@ -307,6 +308,7 @@ src/main/merge/merge-engine.ts
 src/main/merge/timeline-service.ts
 src/main/normalize/normalize-engine.ts
 src/main/processes/process-manager.ts
+src/main/processes/ytdlp-runtime-temp.ts
 src/main/projects/project-service.ts
 src/main/queue/platform-rate-limit-gate.ts
 src/main/queue/queue-manager.ts
@@ -518,6 +520,7 @@ tests/integration/settings-rollback-compat.test.ts
 tests/integration/system-cleanup-service.test.ts
 tests/integration/tray-minimize-hint.test.ts
 tests/integration/visual-verify-decode-detail.test.ts
+tests/integration/ytdlp-mei-temp-cleanup.test.ts
 tests/unit/active-download-workers-label.test.ts
 tests/unit/app-update-version.test.ts
 tests/unit/apply-temp-folder.test.ts
@@ -703,6 +706,7 @@ tests/unit/youtube-url-validation-r34.test.ts
 tests/unit/ytdlp-arguments.test.ts
 tests/unit/ytdlp-cookie-arguments.test.ts
 tests/unit/ytdlp-progress.test.ts
+tests/unit/ytdlp-runtime-temp.test.ts
 TOOL_UPDATE.md
 tool/.vdmsp-tool-metadata.json
 tool/README_TOOL_VI.txt
