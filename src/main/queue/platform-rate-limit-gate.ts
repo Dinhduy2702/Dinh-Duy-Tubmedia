@@ -89,6 +89,11 @@ export class PlatformRateLimitGate {
     if (state.rampLimit > RATE_LIMIT_RAMP_CLEAR_AT) this.states.delete(platform);
   }
 
+  /** Số lần dính 429 liên tiếp gần đây của nền tảng (0 = không, hoặc đã tải lại ổn định) — hướng C giãn cách theo số này. */
+  public strikesOf(platform: string): number {
+    return this.states.get(platform)?.strikes ?? 0;
+  }
+
   public isStopped(platform: string): boolean {
     return this.states.get(platform)?.stopped === true;
   }

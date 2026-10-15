@@ -50,6 +50,7 @@ let notices: AttentionNotice[];
 let behaviors: Map<string, Behavior>;
 let held: Map<string, { resolve: () => void; reject: (error: unknown) => void }>;
 let started: string[];
+let pacingByUrl: Map<string, unknown>;
 let logger: { info: ReturnType<typeof vi.fn>; warn: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn>; debug: ReturnType<typeof vi.fn> };
 
 const internals = (): Internals => manager as unknown as Internals;
@@ -114,6 +115,7 @@ beforeEach(() => {
   behaviors = new Map();
   held = new Map();
   started = [];
+  pacingByUrl = new Map();
   logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
   const settings = {
     // Cố định số danh sách chạy cùng lúc (không phụ thuộc phần cứng máy chạy test) — bài này kiểm cổng 429, không kiểm trần danh sách.
@@ -121,9 +123,10 @@ beforeEach(() => {
     profiles: () => ({ qualities: builtInQualityProfiles, resources: [resource] })
   };
   const downloader = {
-    run: vi.fn((job: QueueJob, _profile: unknown, _signal: unknown, onProgress: (progress: Record<string, unknown>) => void) => {
+    run: vi.fn((job: QueueJob, _profile: unknown, _signal: unknown, onProgress: (progress: Record<string, unknown>) => void, pacing?: unknown) => {
       const url = urlOf(job);
       started.push(url);
+      pacingByUrl.set(url, pacing);
       onProgress({ percent: 10, speed: null, etaSeconds: null, stage: 'downloading' });
       const result = { outputPath: join(folder, 'video.mp4'), skipped: false, resultMessage: 'Đã tải và kiểm tra hoàn tất.' };
       const behavior = behaviors.get(url) ?? 'ok';
@@ -268,5 +271,20 @@ describe('Hướng B — dính 429 thì cả ứng dụng nghỉ với NỀN T�
     await idle();
     expect(started).toEqual([urlOf(job)]);
     expect(queue.get(job.id)?.status).toBe('completed');
+  });
+
+  it('hướng C: video tải lại sau khi nền tảng vừa dính 429 được báo số lần dính để bộ tải giãn cách mạnh hơn', async () => {
+    manager.setRateLimitWaitOverrideMs(60);
+    const list = makeProject('Danh sach');
+    const job = youtube(list, 'rate-limited');
+    await tick();
+    await idle();
+    expect(pacingByUrl.get(urlOf(job)), 'lần đầu: chưa dính lần nào').toEqual({ samePlatformActive: 1, rateLimitStrikes: 0 });
+    behaviors.set(urlOf(job), 'ok');
+    await sleep(90);
+    await tick();
+    await idle();
+    expect(queue.get(job.id)?.status).toBe('completed');
+    expect(pacingByUrl.get(urlOf(job)), 'lần tự tiếp tục: đã dính 1 lần').toEqual({ samePlatformActive: 1, rateLimitStrikes: 1 });
   });
 });
