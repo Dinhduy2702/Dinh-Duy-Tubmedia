@@ -5441,7 +5441,8 @@ test('Lag bước 1: tối đa N danh sách tải chạy cùng lúc, mỗi danh 
   ).toBe(0);
   const clipData = fs.readFileSync(clip);
 
-  // Trả video chậm (~4 giây mỗi tệp) để hai danh sách chắc chắn trùng thời gian nếu không có trần.
+  // Trả video chậm (~12 giây mỗi tệp) để hai danh sách chắc chắn trùng thời gian nếu không có trần, và nhãn "Đang chờ lượt"
+  // (đi theo thống kê đẩy mỗi 2 giây) có đủ thời gian hiện ra kể cả khi máy đang bận — với ~4 giây, bài từng đỏ ngẫu nhiên.
   const requests: Array<{ path: string; at: number }> = [];
   const finished: Array<{ path: string; at: number }> = [];
   let server: Server | undefined;
@@ -5465,7 +5466,7 @@ test('Lag bước 1: tối đa N danh sách tải chạy cùng lúc, mỗi danh 
         'Accept-Ranges': 'bytes',
         ...(range ? { 'Content-Range': `bytes ${start}-${end}/${clipData.length}` } : {})
       });
-      const pieces = 20;
+      const pieces = 40;
       const size = Math.ceil(body.length / pieces);
       let index = 0;
       const timer = setInterval(() => {
@@ -5480,7 +5481,7 @@ test('Lag bước 1: tối đa N danh sách tải chạy cùng lúc, mỗi danh 
           response.end();
           finished.push({ path: pathname, at: Date.now() });
         }
-      }, 200);
+      }, 300);
     });
     const port = await new Promise<number>((resolvePort) => {
       server!.listen(0, '127.0.0.1', () => resolvePort((server!.address() as { port: number }).port));

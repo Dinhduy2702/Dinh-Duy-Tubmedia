@@ -47,11 +47,39 @@ describe('trần số danh sách / quy trình chạy cùng lúc', () => {
     expect(effectiveConcurrentDownloadLists(-3, 2)).toBe(2);
   });
 
-  it('tự động theo máy khớp khuyến nghị phần cứng: ≤8 lõi hoặc RAM trống ≤16 GB → 1, mạnh hơn → 2', () => {
-    expect(recommendedConcurrentLists(8, 64 * GB)).toBe(1);
-    expect(recommendedConcurrentLists(16, 12 * GB)).toBe(1);
-    expect(recommendedConcurrentLists(16, 24 * GB)).toBe(2);
-    expect(recommendedConcurrentLists(72, 100 * GB)).toBe(2);
+  // 2026-10-15 (người dùng duyệt): nhiều mức thay cho 2 mức — mức = min(mức theo lõi CPU, mức theo RAM trống). Lõi:
+  // ≤4→1, ≤8→2, ≤12→3, ≤16→4, ≤24→5, >24→6. RAM trống: ≤8→1, ≤16→2, ≤24→3, ≤32→4, ≤48→5, >48→6 GB.
+  it('tự động theo máy — mỗi mức theo lõi CPU (RAM trống dư)', () => {
+    expect(recommendedConcurrentLists(2, 128 * GB)).toBe(1);
+    expect(recommendedConcurrentLists(4, 128 * GB)).toBe(1);
+    expect(recommendedConcurrentLists(6, 128 * GB)).toBe(2);
+    expect(recommendedConcurrentLists(8, 128 * GB)).toBe(2);
+    expect(recommendedConcurrentLists(12, 128 * GB)).toBe(3);
+    expect(recommendedConcurrentLists(16, 128 * GB)).toBe(4);
+    expect(recommendedConcurrentLists(24, 128 * GB)).toBe(5);
+    expect(recommendedConcurrentLists(32, 128 * GB)).toBe(6);
+  });
+
+  it('tự động theo máy — mỗi mức theo RAM trống (lõi dư)', () => {
+    expect(recommendedConcurrentLists(64, 4 * GB)).toBe(1);
+    expect(recommendedConcurrentLists(64, 8 * GB)).toBe(1);
+    expect(recommendedConcurrentLists(64, 12 * GB)).toBe(2);
+    expect(recommendedConcurrentLists(64, 16 * GB)).toBe(2);
+    expect(recommendedConcurrentLists(64, 20 * GB)).toBe(3);
+    expect(recommendedConcurrentLists(64, 32 * GB)).toBe(4);
+    expect(recommendedConcurrentLists(64, 40 * GB)).toBe(5);
+    expect(recommendedConcurrentLists(64, 64 * GB)).toBe(6);
+  });
+
+  it('tự động theo máy — máy tiêu biểu: yếu 1–2, trung bình 3–4, rất mạnh 6; không bao giờ ngoài 1..6', () => {
+    expect(recommendedConcurrentLists(4, 6 * GB)).toBe(1);
+    expect(recommendedConcurrentLists(8, 14 * GB)).toBe(2);
+    expect(recommendedConcurrentLists(12, 22 * GB)).toBe(3);
+    expect(recommendedConcurrentLists(16, 30 * GB)).toBe(4);
+    expect(recommendedConcurrentLists(36, 82 * GB)).toBe(6);
+    expect(recommendedConcurrentLists(36, 10 * GB)).toBe(2);
+    expect(recommendedConcurrentLists(0, 0)).toBe(1);
+    expect(recommendedConcurrentLists(1024, 4096 * GB)).toBe(6);
   });
 });
 
