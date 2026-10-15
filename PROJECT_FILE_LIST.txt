@@ -62,6 +62,7 @@ FIX_SUMMARY.md
 FIX_UNIT_TEST_GATE_v1.2.0_VI.md
 FIX10_TIMESTAMP_REPAIR_ERROR_DETAIL_v1.2.0_VI.md
 FIX11_RETRY_PATH_PERSISTENCE_DRIVE_ROOT_VI.md
+FIX17_DECODE_ERROR_DETAIL_VI.md
 FIX3_RATE_CONTROL_UNIT_TEST_v1.2.0_VI.md
 FIX4_BUNDLED_FFMPEG_PAYLOAD_v1.2.0_VI.md
 FIX5_CHANGELOG_ORDER_v1.2.0_VI.md
@@ -434,6 +435,7 @@ src/shared/utils/disk-shortfall-format.ts
 src/shared/utils/download-failure.ts
 src/shared/utils/download-quality.ts
 src/shared/utils/encoder-selection.ts
+src/shared/utils/ffmpeg-decode-failure.ts
 src/shared/utils/ffmpeg-progress.ts
 src/shared/utils/filename.ts
 src/shared/utils/hardware-recommendation.ts
@@ -476,6 +478,7 @@ tests/integration/cookie-resume-fingerprint.test.ts
 tests/integration/database.test.ts
 tests/integration/download-existing-file-reuse.test.ts
 tests/integration/helpers/queue-harness.ts
+tests/integration/helpers/real-ffmpeg.ts
 tests/integration/legacy-quarantine-untouched.test.ts
 tests/integration/log-repository-filter.test.ts
 tests/integration/merge-missing-source-requeue.test.ts
@@ -493,6 +496,7 @@ tests/integration/settings-restore-policy.test.ts
 tests/integration/settings-rollback-compat.test.ts
 tests/integration/system-cleanup-service.test.ts
 tests/integration/tray-minimize-hint.test.ts
+tests/integration/visual-verify-decode-detail.test.ts
 tests/unit/active-download-workers-label.test.ts
 tests/unit/app-update-version.test.ts
 tests/unit/apply-temp-folder.test.ts
@@ -531,6 +535,7 @@ tests/unit/editor-workflows-1.3.0.test.ts
 tests/unit/electron-fuses.test.ts
 tests/unit/encoder-selection.test.ts
 tests/unit/existing-download.test.ts
+tests/unit/ffmpeg-decode-failure.test.ts
 tests/unit/ffmpeg-progress.test.ts
 tests/unit/file-verifier-audio-only.test.ts
 tests/unit/filename.test.ts

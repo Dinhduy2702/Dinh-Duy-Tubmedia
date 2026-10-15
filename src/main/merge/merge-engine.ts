@@ -16,6 +16,7 @@ import type {
   TimelineRow
 } from '@shared/types/domain.js';
 import { compareForConcat } from '@shared/utils/concat-compatibility.js';
+import { blockedOutputProblemLabel } from '@shared/utils/ffmpeg-decode-failure.js';
 import { matchNormalizationTarget } from '@shared/utils/normalization-match.js';
 import { sanitizeFilename } from '@shared/utils/filename.js';
 import { chooseMergeTarget, validateMergeOutputSize } from '@shared/utils/merge-target.js';
@@ -1539,7 +1540,9 @@ export class MergeEngine {
       const quarantineReason = integrity.reasons.join('; ') || userReason;
       const quarantined = await this.quarantine.move(pending, quarantineReason, { jobId: job.id, projectId: job.projectId });
       throw new MergeFailedError(
-        'Tubmedia đã CHẶN thành phẩm vì phát hiện lỗi hình ảnh tại khoảng ' +
+        'Tubmedia đã CHẶN thành phẩm vì phát hiện ' +
+          blockedOutputProblemLabel(firstIssue) +
+          ' tại khoảng ' +
           mergeClock(issueTime) +
           '. ' +
           userReason +

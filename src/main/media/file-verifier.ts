@@ -3,6 +3,7 @@ import { access, stat } from 'node:fs/promises';
 import type { VerificationLevel } from '@shared/types/domain.js';
 import { VerificationFailedError } from '@shared/errors/app-errors.js';
 import { parseVolumeDetect, type AudioLevel } from '@shared/utils/audio-presence.js';
+import { describeFfmpegDecodeFailure, type DecodeFailureStream } from '@shared/utils/ffmpeg-decode-failure.js';
 import type { MediaAnalyzer } from './media-analyzer.js';
 import type { ProcessManager } from '../processes/process-manager.js';
 import type { ToolManager } from '../tools/tool-manager.js';
@@ -25,6 +26,9 @@ export interface VisualIntegrityIssue {
   endSeconds: number | null;
   durationSeconds: number | null;
   message: string;
+  /** Chỉ với type 'decode': luồng ffmpeg báo lỗi (null = không nhận ra) và nguyên văn câu lỗi của ffmpeg — để log chẩn đoán được. */
+  stream?: DecodeFailureStream | null;
+  ffmpegError?: string;
 }
 
 export interface VisualIntegrityResult {
@@ -541,13 +545,19 @@ export class FileVerifier {
     }
 
     if (result.code !== 0) {
-      const message = 'Lỗi giải mã hình ảnh khi hậu kiểm toàn bộ thành phẩm, gần ' + visualClock(lastProcessedSeconds) + '.';
+      // Lệnh giải mã cả luồng tiếng (khi có) — lỗi ở tiếng cũng làm ffmpeg dừng, nên phải nói đúng luồng nào hỏng.
+      const failure = describeFfmpegDecodeFailure(result.stderrTail);
+      const streamLabel = failure.stream === 'audio' ? 'âm thanh' : 'hình ảnh';
+      const message =
+        'Lỗi giải mã ' + streamLabel + ' khi hậu kiểm toàn bộ thành phẩm, gần ' + visualClock(lastProcessedSeconds) + '.';
       issues.unshift({
         type: 'decode',
         startSeconds: lastProcessedSeconds,
         endSeconds: null,
         durationSeconds: null,
-        message
+        message,
+        stream: failure.stream,
+        ffmpegError: failure.detail || ('ffmpeg thoát với mã ' + result.code + ', không có câu lỗi.')
       });
       reasons.push(message);
     }
