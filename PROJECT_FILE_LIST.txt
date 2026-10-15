@@ -63,6 +63,7 @@ FIX_UNIT_TEST_GATE_v1.2.0_VI.md
 FIX10_TIMESTAMP_REPAIR_ERROR_DETAIL_v1.2.0_VI.md
 FIX11_RETRY_PATH_PERSISTENCE_DRIVE_ROOT_VI.md
 FIX17_DECODE_ERROR_DETAIL_VI.md
+FIX18_NORMALIZE_CACHE_DEEP_VERIFY_VI.md
 FIX3_RATE_CONTROL_UNIT_TEST_v1.2.0_VI.md
 FIX4_BUNDLED_FFMPEG_PAYLOAD_v1.2.0_VI.md
 FIX5_CHANGELOG_ORDER_v1.2.0_VI.md
@@ -483,6 +484,7 @@ tests/integration/legacy-quarantine-untouched.test.ts
 tests/integration/log-repository-filter.test.ts
 tests/integration/merge-missing-source-requeue.test.ts
 tests/integration/migration-attempts-reset.test.ts
+tests/integration/normalize-cache-corrupt-audio.test.ts
 tests/integration/quarantine-service.test.ts
 tests/integration/queue-attempts.test.ts
 tests/integration/queue-audio-issue.test.ts

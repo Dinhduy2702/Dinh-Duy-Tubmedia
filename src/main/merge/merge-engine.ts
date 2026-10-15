@@ -1115,7 +1115,9 @@ export class MergeEngine {
 
     // TUBMEDIA CORE RESILIENCE R35: any source that bypassed transcoding must
     // prove it can be decoded end-to-end before concat. Transcoded inputs are
-    // already protected by FFmpeg -xerror/-err_detect explode in NormalizeEngine.
+    // already protected by FFmpeg -xerror/-err_detect explode in NormalizeEngine,
+    // and a reused normalize/remux CACHE file is fully decoded (video + audio)
+    // there before reuse (vụ khách 2026-10-15: bản đệm hỏng tiếng từng lọt qua).
     const passthroughIndexes = prepared
       .map((item, index) => (item.path === inputs[index]?.path ? index : -1))
       .filter((index) => index >= 0);
