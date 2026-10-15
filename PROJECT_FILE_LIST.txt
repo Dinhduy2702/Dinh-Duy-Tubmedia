@@ -67,6 +67,10 @@ FIX13_LANE_CONCURRENCY_CAP_VI.md
 FIX14_JOB_START_PACING_VI.md
 FIX15_QUEUE_IPC_COALESCE_VI.md
 FIX16_RATE_LIMIT_429_PACING_VI.md
+FIX17_DECODE_ERROR_DETAIL_VI.md
+FIX18_NORMALIZE_CACHE_DEEP_VERIFY_VI.md
+FIX19_MANAGED_FFMPEG_TRUST_VI.md
+FIX20_NORMALIZE_AUDIO_ENCODE_FALLBACK_VI.md
 FIX21_AUTO_LIST_CAP_TIERS_VI.md
 FIX3_RATE_CONTROL_UNIT_TEST_v1.2.0_VI.md
 FIX4_BUNDLED_FFMPEG_PAYLOAD_v1.2.0_VI.md
@@ -444,6 +448,7 @@ src/shared/utils/download-failure.ts
 src/shared/utils/download-pacing.ts
 src/shared/utils/download-quality.ts
 src/shared/utils/encoder-selection.ts
+src/shared/utils/ffmpeg-decode-failure.ts
 src/shared/utils/ffmpeg-progress.ts
 src/shared/utils/filename.ts
 src/shared/utils/hardware-recommendation.ts
@@ -489,10 +494,13 @@ tests/integration/database.test.ts
 tests/integration/download-existing-file-reuse.test.ts
 tests/integration/download-pacing-args.test.ts
 tests/integration/helpers/queue-harness.ts
+tests/integration/helpers/real-ffmpeg.ts
 tests/integration/legacy-quarantine-untouched.test.ts
 tests/integration/log-repository-filter.test.ts
 tests/integration/merge-missing-source-requeue.test.ts
 tests/integration/migration-attempts-reset.test.ts
+tests/integration/normalize-audio-encoder-fallback.test.ts
+tests/integration/normalize-cache-corrupt-audio.test.ts
 tests/integration/quarantine-service.test.ts
 tests/integration/queue-attempts.test.ts
 tests/integration/queue-audio-issue.test.ts
@@ -509,6 +517,7 @@ tests/integration/settings-restore-policy.test.ts
 tests/integration/settings-rollback-compat.test.ts
 tests/integration/system-cleanup-service.test.ts
 tests/integration/tray-minimize-hint.test.ts
+tests/integration/visual-verify-decode-detail.test.ts
 tests/unit/active-download-workers-label.test.ts
 tests/unit/app-update-version.test.ts
 tests/unit/apply-temp-folder.test.ts
@@ -548,6 +557,7 @@ tests/unit/editor-workflows-1.3.0.test.ts
 tests/unit/electron-fuses.test.ts
 tests/unit/encoder-selection.test.ts
 tests/unit/existing-download.test.ts
+tests/unit/ffmpeg-decode-failure.test.ts
 tests/unit/ffmpeg-progress.test.ts
 tests/unit/file-verifier-audio-only.test.ts
 tests/unit/filename.test.ts
@@ -591,6 +601,7 @@ tests/unit/muc4-free-ram-recommendation.test.ts
 tests/unit/network-recovery-wiring-r54.test.ts
 tests/unit/non-conflicting-path.test.ts
 tests/unit/normalization-match.test.ts
+tests/unit/normalize-audio-encode-fallback.test.ts
 tests/unit/normalize-engine-stream-copy.test.ts
 tests/unit/notice-components.test.ts
 tests/unit/notice-display-policy.test.ts
@@ -663,8 +674,10 @@ tests/unit/tool-bootstrap-release.test.ts
 tests/unit/tool-capabilities.test.ts
 tests/unit/tool-manager-configured-path.test.ts
 tests/unit/tool-manager-cwd.test.ts
+tests/unit/tool-manager-managed-ffmpeg-trust.test.ts
 tests/unit/tool-manager-nvenc-issue.test.ts
 tests/unit/tool-manager-source-root.test.ts
+tests/unit/tool-update-managed-metadata-order.test.ts
 tests/unit/tool-update-rate-limit.test.ts
 tests/unit/tooltip-placement.test.ts
 tests/unit/typography-system.test.ts

@@ -718,6 +718,8 @@ export class ToolUpdateService {
       const backupFolder = join(targetFolder, '.backups', `${packageName}-${Date.now()}`);
       await mkdir(backupFolder, { recursive: true });
       const installed: string[] = [];
+      let previousMetadata: string | null = null;
+      let metadataWritten = false;
 
       try {
         for (const [executableName, candidate] of candidates) {
@@ -743,6 +745,19 @@ export class ToolUpdateService {
           }
         }
 
+        // Ghi metadata TRƯỚC bước kiểm: ToolManager chỉ xếp bộ ffmpeg trong tools\current trước bản đi kèm bộ cài khi
+        // metadata có "ffmpeg-suite" (vụ khách 2026-10-15) — ghi sau thì bước kiểm dưới đây chọn nhầm bản đi kèm bộ cài.
+        previousMetadata = await readFile(this.metadataPath(targetFolder), 'utf8').catch(() => null);
+        const metadata = await this.readMetadata(targetFolder);
+        metadata.packages[packageName] = {
+          releaseId: source.release.id,
+          version: source.version,
+          installedAt: new Date().toISOString(),
+          sourceUrl: source.asset.browser_download_url
+        };
+        await this.writeMetadata(targetFolder, metadata);
+        metadataWritten = true;
+
         const validationTools =
           requiredOnly && packageName === 'ffmpeg-suite'
             ? (['ffmpeg', 'ffprobe'] as ToolName[])
@@ -752,17 +767,12 @@ export class ToolUpdateService {
         if (broken.length > 0) {
           throw new UpdateFailedError(`Kiểm tra sau cập nhật thất bại: ${broken.join(', ')}.`);
         }
-
-        const metadata = await this.readMetadata(targetFolder);
-        metadata.packages[packageName] = {
-          releaseId: source.release.id,
-          version: source.version,
-          installedAt: new Date().toISOString(),
-          sourceUrl: source.asset.browser_download_url
-        };
-        await this.writeMetadata(targetFolder, metadata);
         this.logger.info('update', 'TOOL_UPDATED', `${packageName} đã cập nhật vào ${targetFolder}.`);
       } catch (error) {
+        if (metadataWritten) {
+          if (previousMetadata === null) await rm(this.metadataPath(targetFolder), { force: true });
+          else await writeFile(this.metadataPath(targetFolder), previousMetadata, 'utf8');
+        }
         for (const executableName of installed) {
           const destination = join(targetFolder, executableName);
           const backup = join(backupFolder, executableName);

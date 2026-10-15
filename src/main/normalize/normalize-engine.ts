@@ -136,7 +136,7 @@ export class NormalizeEngine {
     const final = join(outputFolder, `${safe}.${key}.remux.mp4`);
     const pending = `${final}.pending.mp4`;
 
-    if (await this.validRemuxCache(final, source, job.id)) {
+    if (await this.validRemuxCache(final, source, job, signal)) {
       this.logger.info('normalize', 'REMUX_CACHE_HIT', 'Đã dùng lại tệp remux tương thích trong bộ nhớ đệm.', {
         ...(job.projectId ? { projectId: job.projectId } : {}),
         jobId: job.id,
@@ -259,7 +259,7 @@ export class NormalizeEngine {
     );
     const pending = `${final}.pending.mp4`;
 
-    if (await this.validNormalizeCache(final, target, job.id)) {
+    if (await this.validNormalizeCache(final, target, job, signal)) {
       this.logger.info('normalize', 'NORMALIZE_CACHE_HIT', 'Đã dùng lại video chuẩn hóa hợp lệ trong bộ nhớ đệm.', {
         ...(job.projectId ? { projectId: job.projectId } : {}),
         jobId: job.id,
@@ -500,10 +500,95 @@ export class NormalizeEngine {
       throw new ProcessingFailedError(`Tệp chuẩn hóa bị lỗi và đã chuyển vào khu cách ly: ${quarantined}`);
     }
 
+    // Tiếng vừa mã hóa lại phải giải mã được TOÀN BỘ (rẻ). Vụ khách 2026-10-15: bộ mã hóa AAC của ffmpeg 8.0 (gyan.dev)
+    // tạo một gói hỏng giữa NA361 ở 256k/48 kHz — kiểm 3 khung hình không thấy, hậu kiểm thành phẩm mới chặn.
+    if (target.audioCodec && !audioCopy && !addSilentAudio) {
+      await this.repairCorruptAudioEncode(job, input, pending, target, resource, signal, profile, ffmpeg.version);
+    }
+
     await rm(final, { force: true });
     await rename(pending, final);
     onProgress(100);
     return final;
+  }
+
+  /**
+   * Luồng tiếng của tệp vừa chuẩn hóa không giải mã được → mã hóa lại CHỈ phần tiếng từ nguồn bằng bộ mã hóa AAC dự phòng
+   * (-aac_coder fast), giữ nguyên phần hình đã mã hóa. Vẫn hỏng → cách ly và báo lỗi nêu rõ phiên bản ffmpeg.
+   */
+  private async repairCorruptAudioEncode(
+    job: QueueJob,
+    input: string,
+    pending: string,
+    target: NormalizeTarget,
+    resource: ResourceProfile,
+    signal: AbortSignal,
+    profile: QualityProfile | undefined,
+    ffmpegVersion: string | null
+  ): Promise<void> {
+    const options = { jobId: job.id, projectId: job.projectId, signal };
+    const failure = await this.verifier.decodeStreamFailure(pending, 'audio', options);
+    if (!failure) return;
+    if (signal.aborted) throw signal.reason instanceof Error ? signal.reason : new Error('Đã dừng khi đang kiểm tiếng.');
+
+    const context = { ...(job.projectId ? { projectId: job.projectId } : {}), jobId: job.id };
+    this.logger.warn(
+      'normalize',
+      'NORMALIZE_AUDIO_ENCODE_CORRUPT',
+      'Bộ mã hóa AAC của ffmpeg tạo luồng tiếng hỏng — đang mã hóa lại phần tiếng bằng cách dự phòng.',
+      { ...context, metadata: { input, ffmpegVersion, ffmpegError: failure } }
+    );
+
+    const ffmpeg = this.tools.get('ffmpeg');
+    const repaired = `${pending}.audio-fallback.mp4`;
+    await rm(repaired, { force: true });
+    const result = await this.processes.run({
+      jobId: job.id,
+      projectId: job.projectId,
+      tool: 'ffmpeg',
+      executablePath: ffmpeg.executablePath!,
+      args: [
+        '-hide_banner', '-nostdin', '-y', '-xerror', '-err_detect', 'explode',
+        '-i', pending,
+        '-i', input,
+        '-map', '0:v:0',
+        '-map', '1:a:0',
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        '-aac_coder', 'fast',
+        '-b:a', profile?.audioMode === 'aac_320' ? '320k' : '256k',
+        '-ar', String(target.sampleRate ?? 48000),
+        '-ac', String(target.channels ?? 2),
+        '-map_metadata', '-1',
+        '-avoid_negative_ts', 'make_zero',
+        '-movflags', '+faststart',
+        '-video_track_timescale', '90000',
+        '-nostats',
+        repaired
+      ],
+      priority: resource.processPriority,
+      signal,
+      timeoutMs: 12 * 60 * 60 * 1000
+    });
+
+    const stillBroken =
+      result.code !== 0
+        ? result.stderrTail || 'Mã hóa lại phần tiếng thất bại.'
+        : await this.verifier.decodeStreamFailure(repaired, 'audio', options);
+    if (stillBroken) {
+      await rm(repaired, { force: true }).catch(() => undefined);
+      const quarantined = await this.quarantine.move(pending, failure, { jobId: job.id, projectId: job.projectId });
+      throw new ProcessingFailedError(
+        `ffmpeg ${ffmpegVersion ?? ''} tạo luồng tiếng hỏng khi chuẩn hóa và mã hóa lại cũng không sửa được ` +
+          `(${stillBroken.slice(0, 300)}). Tệp lỗi đã chuyển vào khu cách ly: ${quarantined}`
+      );
+    }
+    await rm(pending, { force: true });
+    await rename(repaired, pending);
+    this.logger.info('normalize', 'NORMALIZE_AUDIO_ENCODE_REPAIRED', 'Đã mã hóa lại phần tiếng; luồng tiếng giải mã sạch.', {
+      ...context,
+      metadata: { input, ffmpegVersion }
+    });
   }
 
   private async cacheKey(input: string, payload: Record<string, unknown>): Promise<string> {
@@ -520,49 +605,101 @@ export class NormalizeEngine {
       .slice(0, 16);
   }
 
+  /**
+   * Bản đệm chỉ được dùng lại sau khi GIẢI MÃ TOÀN BỘ hình + tiếng (mức deep). Trước đây chỉ thử 3 khung hình (standard,
+   * không giải mã tiếng): vụ khách 2026-10-15 có bản đệm hỏng một gói AAC ở giữa, được coi là hợp lệ và dùng lại ở MỌI
+   * lần ghép — lần nào hậu kiểm cũng chặn ở cùng chỗ. Bản đệm không qua được thì xóa để làm lại từ nguồn.
+   * Bản đệm không đi qua bước "kiểm tra toàn bộ nguồn stream-copy" của MergeEngine nên phải tự kiểm ở đây.
+   */
   private async validNormalizeCache(
     path: string,
     target: NormalizeTarget,
-    jobId: string
+    job: QueueJob,
+    signal: AbortSignal
   ): Promise<boolean> {
     try {
       await access(path, constants.R_OK);
-      /* TUBMEDIA VERIFIED CACHE REUSE R35 */
-      const cacheCheck = await this.verifier.verify(path, 'standard', undefined, {
-        jobId,
-        expectedStreams: { video: true, audio: target.audioCodec !== null }
-      });
-      if (!cacheCheck.ok) throw new Error(cacheCheck.reasons.join('; '));
-      const info = await this.analyzer.analyze(path, jobId);
-      const match = matchNormalizationTarget(info, target);
-      return match.videoMatches && match.audioMatches && info.timeBase === '1/90000';
     } catch {
-      await rm(path, { force: true }).catch(() => undefined);
+      return false;
+    }
+    try {
+      /* TUBMEDIA VERIFIED CACHE REUSE R35 */
+      const info = await this.analyzer.analyze(path, job.id);
+      const match = matchNormalizationTarget(info, target);
+      if (!(match.videoMatches && match.audioMatches && info.timeBase === '1/90000')) {
+        throw new Error('Bản đệm không còn khớp thông số chuẩn hóa.');
+      }
+      await this.assertCacheDecodes(path, info.duration, target.audioCodec !== null, job, signal);
+      return true;
+    } catch (error) {
+      await this.rejectCache('NORMALIZE_CACHE_REJECTED', path, error, job, signal);
       return false;
     }
   }
 
-  private async validRemuxCache(path: string, source: MediaInfo, jobId: string): Promise<boolean> {
+  private async validRemuxCache(
+    path: string,
+    source: MediaInfo,
+    job: QueueJob,
+    signal: AbortSignal
+  ): Promise<boolean> {
     try {
       await access(path, constants.R_OK);
+    } catch {
+      return false;
+    }
+    try {
       /* TUBMEDIA VERIFIED CACHE REUSE R35 */
-      const cacheCheck = await this.verifier.verify(path, 'standard', source.duration, {
-        jobId,
-        expectedStreams: { video: true, audio: source.audioCodec !== null }
-      });
-      if (!cacheCheck.ok) throw new Error(cacheCheck.reasons.join('; '));
-      const info = await this.analyzer.analyze(path, jobId);
-      return (
+      const info = await this.analyzer.analyze(path, job.id);
+      const matches =
         Math.abs(info.duration - source.duration) <= Math.max(1.5, source.duration * 0.01) &&
         info.videoCodec === source.videoCodec &&
         info.width === source.width &&
         info.height === source.height &&
         info.audioCodec === source.audioCodec &&
-        info.timeBase === '1/90000'
-      );
-    } catch {
-      await rm(path, { force: true }).catch(() => undefined);
+        info.timeBase === '1/90000';
+      if (!matches) throw new Error('Bản đệm remux không còn khớp với nguồn.');
+      await this.assertCacheDecodes(path, source.duration, source.audioCodec !== null, job, signal);
+      return true;
+    } catch (error) {
+      await this.rejectCache('REMUX_CACHE_REJECTED', path, error, job, signal);
       return false;
     }
+  }
+
+  private async assertCacheDecodes(
+    path: string,
+    duration: number,
+    audio: boolean,
+    job: QueueJob,
+    signal: AbortSignal
+  ): Promise<void> {
+    const check = await this.verifier.verify(path, 'deep', duration, {
+      jobId: job.id + '-cache-check',
+      projectId: job.projectId,
+      signal,
+      expectedStreams: { video: true, audio }
+    });
+    if (!check.ok) throw new Error(check.reasons.join('; '));
+  }
+
+  private async rejectCache(
+    eventCode: 'NORMALIZE_CACHE_REJECTED' | 'REMUX_CACHE_REJECTED',
+    path: string,
+    error: unknown,
+    job: QueueJob,
+    signal: AbortSignal
+  ): Promise<void> {
+    // Tạm dừng/hủy giữa lúc kiểm: bản đệm chưa bị chứng minh là hỏng → giữ lại, để lần sau kiểm tiếp.
+    if (signal.aborted) throw signal.reason instanceof Error ? signal.reason : new Error('Đã dừng khi đang kiểm bản đệm.');
+    this.logger.warn('normalize', eventCode, 'Bản đệm không qua kiểm tra giải mã toàn bộ — xóa và làm lại từ nguồn.', {
+      ...(job.projectId ? { projectId: job.projectId } : {}),
+      jobId: job.id,
+      metadata: {
+        cached: path,
+        reason: (error instanceof Error ? error.message : String(error)).slice(0, 1_500)
+      }
+    });
+    await rm(path, { force: true }).catch(() => undefined);
   }
 }
