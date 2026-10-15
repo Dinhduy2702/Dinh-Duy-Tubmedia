@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   planForListCount,
+  recommendConcurrentListsForHardware,
   recommendDownloadConcurrency
 } from '../../src/shared/utils/hardware-recommendation.js';
 import type { HardwareProfile } from '../../src/shared/types/domain.js';
@@ -23,9 +24,19 @@ function hardware(logicalCpuCount: number, ramGb: number): HardwareProfile {
 }
 
 describe('recommendDownloadConcurrency', () => {
+  // Ô "Tự động theo máy (N)" ở Cài đặt hiện recommendedConcurrentLists của bảng này — phải trùng số hàng đợi thật sự dùng.
+  it('số danh sách khuyến nghị trùng mức tự động của hàng đợi ở mọi cấu hình', () => {
+    for (const [cores, ram] of [[2, 4], [4, 8], [8, 16], [12, 24], [16, 32], [24, 48], [36, 102], [72, 128], [72, 12]] as const) {
+      const profile = hardware(cores, ram);
+      expect(recommendDownloadConcurrency(profile).recommendedConcurrentLists, `${cores} lõi / ${ram} GB`).toBe(
+        recommendConcurrentListsForHardware(profile)
+      );
+    }
+  });
+
   it('keeps low-end machines conservative', () => {
     expect(recommendDownloadConcurrency(hardware(8, 16))).toMatchObject({
-      recommendedConcurrentLists: 1,
+      recommendedConcurrentLists: 2,
       recommendedPerListWorkers: 1,
       recommendedGlobalWorkers: 2,
       recommendedConcurrentFragments: 1
@@ -35,7 +46,7 @@ describe('recommendDownloadConcurrency', () => {
   it('recommends two active lists for a strong workstation', () => {
     const recommendation = recommendDownloadConcurrency(hardware(72, 128));
     expect(recommendation).toMatchObject({
-      recommendedConcurrentLists: 2,
+      recommendedConcurrentLists: 6,
       recommendedPerListWorkers: 2,
       recommendedSingleListWorkers: 4,
       recommendedGlobalWorkers: 4,

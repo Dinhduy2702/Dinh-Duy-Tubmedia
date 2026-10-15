@@ -61,6 +61,7 @@ import { ToolReadinessPanel } from '../components/ToolReadinessPanel';
 import { FolderField } from '../components/FolderField';
 import { StatusBadge } from '../components/StatusBadge';
 import { AudioIssueSummary } from '../components/AudioIssueNotice';
+import { LaneWaitNotice } from '../components/LaneWaitNotice';
 import { CompactLogRow } from '../components/CompactLogRow';
 import { EmptyState } from '../components/ui/EmptyState';
 import { useAppStore } from '../stores/app-store';
@@ -1760,6 +1761,7 @@ function MergeLaneCard({
             <span>{progress.toFixed(1)}% toàn quy trình</span>
             <span>{progressDetail}</span>
           </div>
+          <LaneWaitNotice projectId={jobs.find((job) => job.projectId)?.projectId} kind="merge" />
           <AudioIssueSummary jobs={jobs} />
         </div>
         <details className="workflow-detail-disclosure" open={form.timelineOnly}>

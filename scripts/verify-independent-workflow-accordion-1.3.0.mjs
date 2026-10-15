@@ -14,15 +14,15 @@ const files = {
 
 const checks = [
   ['per-project download helper exists', files.lane.includes('independentDownloadProjectCanStart')],
+  // Lag bước 1 (2026-10-12): mỗi danh sách đang chạy vẫn dùng đủ luồng của hồ sơ; có trần SỐ danh sách / quy trình chạy cùng lúc.
   [
-    'download-list uses independent project capacity',
-    files.manager.includes("if (lane === 'download-list')") &&
-      files.manager.includes('independentDownloadProjectCanStart(activeOfProjectType, profile)')
+    'running lists keep their full project capacity',
+    files.manager.includes('independentDownloadProjectCanStart(activeOfProjectType, profile)')
   ],
   [
-    'merge workflow still has a bounded shared lane',
-    files.manager.includes("if (lane === 'merge-workflow')") &&
-      files.manager.includes('mergeSourceDownloadLimit')
+    'download lists and merge workflows have their own concurrent-lane caps',
+    files.lane.includes('export function laneSlotAvailable') &&
+      files.manager.includes("executionLane === 'download-list' ? downloadListCap : mergeWorkflowCap")
   ],
   [
     'workbench explains independent parallel lists',

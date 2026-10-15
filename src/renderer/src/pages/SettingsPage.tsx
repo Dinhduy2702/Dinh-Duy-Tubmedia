@@ -204,6 +204,8 @@ function Performance({ settings, patch, resources, setError }: { settings: AppSe
 }
 
 function DownloadSettings({ settings, patch, setError }: { settings: AppSettings; patch: Patch; setError: (error: string | null) => void }): React.JSX.Element {
+  const hardware = useAppStore((state) => state.hardware);
+  const concurrency = hardware ? recommendDownloadConcurrency(hardware) : null;
   const [cookieDialogOpen, setCookieDialogOpen] = useState(false);
   const chooseCookies = async (): Promise<void> => {
     try {
@@ -373,7 +375,8 @@ function DownloadSettings({ settings, patch, setError }: { settings: AppSettings
       <Text label="Giới hạn tốc độ" value={settings.rateLimit} onChange={(value) => patch('rateLimit', value)} placeholder="Ví dụ 20M"/>
       <Toggle label="Dùng aria2c khi khả dụng" checked={settings.useAria2c} onChange={(value) => patch('useAria2c', value)}/>
       <NumberField label="Kết nối aria2c mỗi video" value={settings.aria2Connections} min={1} max={32} onChange={(value) => patch('aria2Connections', value)}/>
-      <NumberField label="Tổng video tải đồng thời toàn ứng dụng" value={settings.maxGlobalDownloadWorkers} min={1} max={16} onChange={(value) => patch('maxGlobalDownloadWorkers', value)}/>
+      {/* Lag bước 1 (2026-10-12): thay ô chết "Tổng video tải đồng thời toàn ứng dụng" (không còn được hàng đợi đọc từ 1.3.0). Đây là trần SỐ DANH SÁCH chạy cùng lúc; mỗi danh sách vẫn dùng đủ luồng theo hồ sơ. */}
+      <Select label="Số danh sách tải chạy cùng lúc (mỗi danh sách vẫn đủ luồng theo hồ sơ)" value={String(settings.maxConcurrentDownloadLists)} onChange={(value) => patch('maxConcurrentDownloadLists', Number(value) as AppSettings['maxConcurrentDownloadLists'])} options={[["0", `Tự động theo máy${concurrency ? ` (${concurrency.recommendedConcurrentLists})` : ''}`],["1","1 danh sách"],["2","2 danh sách"],["3","3 danh sách"],["4","4 danh sách"],["5","5 danh sách"],["6","6 danh sách"]]}/>
       <NumberField label="Fragment đồng thời mỗi video" value={settings.downloadConcurrentFragments} min={1} max={8} onChange={(value) => patch('downloadConcurrentFragments', value)}/>
     </Grid>
 

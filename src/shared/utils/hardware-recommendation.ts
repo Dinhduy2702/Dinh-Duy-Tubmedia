@@ -18,9 +18,46 @@ function plan(
   return { listCount, workersPerList, globalWorkers, fullVerificationWorkers, note };
 }
 
+type ListCount = 1 | 2 | 3 | 4 | 5 | 6;
+
+/** Mức theo số lõi logic: ≤4 → 1, ≤8 → 2, ≤12 → 3, ≤16 → 4, ≤24 → 5, nhiều hơn → 6. */
+const CPU_LIST_TIERS: ReadonlyArray<readonly [maxLogicalCpus: number, lists: ListCount]> = [
+  [4, 1], [8, 2], [12, 3], [16, 4], [24, 5]
+];
+/** Mức theo RAM CÒN TRỐNG (GB): ≤8 → 1, ≤16 → 2, ≤24 → 3, ≤32 → 4, ≤48 → 5, nhiều hơn → 6. */
+const FREE_RAM_LIST_TIERS: ReadonlyArray<readonly [maxFreeGb: number, lists: ListCount]> = [
+  [8, 1], [16, 2], [24, 3], [32, 4], [48, 5]
+];
+
+function tierOf(value: number, tiers: ReadonlyArray<readonly [number, ListCount]>): ListCount {
+  for (const [limit, lists] of tiers) if (value <= limit) return lists;
+  return 6;
+}
+
+/**
+ * Số danh sách tải chạy cùng lúc theo máy — dùng chung cho ô "Số danh sách tải chạy cùng lúc" khi để tự động (hàng đợi đo
+ * lại lõi + RAM trống mỗi phút) và cho số "khuyến nghị" ở Cài đặt. Lấy mức NHỎ HƠN giữa mức theo lõi CPU và mức theo RAM
+ * trống. 2026-10-15 (người dùng duyệt): nhiều mức thay cho 2 mức cũ (≤8 lõi/≤16 GB → 1, còn lại 2), vì trần 2 làm máy
+ * mạnh (36 lõi/82 GB) tải chậm gần gấp đôi. Không đổi trần riêng YouTube 6 video toàn app, cổng chờ 429 hay giãn nhịp —
+ * thêm danh sách không làm tăng số video YouTube chạy song song.
+ */
+export function recommendedConcurrentLists(logicalCpuCount: number, freeMemoryBytes: number): ListCount {
+  const cpuTier = tierOf(Math.max(1, Number.isFinite(logicalCpuCount) ? logicalCpuCount : 1), CPU_LIST_TIERS);
+  const ramTier = tierOf(Math.max(0, Number.isFinite(freeMemoryBytes) ? gib(freeMemoryBytes) : 0), FREE_RAM_LIST_TIERS);
+  return Math.min(cpuTier, ramTier) as ListCount;
+}
+
+export function recommendConcurrentListsForHardware(hardware: HardwareProfile): ListCount {
+  return recommendedConcurrentLists(hardware.logicalCpuCount, hardware.freeMemoryBytes);
+}
+
 export function recommendDownloadConcurrency(
   hardware: HardwareProfile
 ): DownloadConcurrencyRecommendation {
+  return { ...recommendWorkerConcurrency(hardware), recommendedConcurrentLists: recommendConcurrentListsForHardware(hardware) };
+}
+
+function recommendWorkerConcurrency(hardware: HardwareProfile): DownloadConcurrencyRecommendation {
   const logical = Math.max(1, hardware.logicalCpuCount);
   // VẤN ĐỀ 2 mục 4 (2026-09-22): dùng RAM CÒN TRỐNG tại thời điểm đề xuất, không dùng RAM tổng máy —
   // máy 32GB nhưng đang dùng 28GB cho việc khác (VD đang edit video) không nên được đề xuất như máy
@@ -38,7 +75,7 @@ export function recommendDownloadConcurrency(
       maximumSafeGlobalWorkers: 3,
       recommendedConcurrentFragments: 1,
       recommendedAria2Connections: 4,
-      summary: 'Máy cấu hình thấp: nên chạy một danh sách, tối đa hai video tải cùng lúc.',
+      summary: 'Máy cấu hình thấp: tối đa hai video tải cùng lúc.',
       warnings: [
         'Khi bật kiểm tra toàn bộ video, chỉ nên dùng một worker.',
         'Đặt thư mục tạm trên SSD nếu máy có SSD.'
@@ -63,7 +100,7 @@ export function recommendDownloadConcurrency(
       maximumSafeGlobalWorkers: 4,
       recommendedConcurrentFragments: 2,
       recommendedAria2Connections: 4,
-      summary: 'Máy phổ thông: nên chạy một hoặc hai danh sách, giới hạn tổng ba video.',
+      summary: 'Máy phổ thông: giới hạn tổng ba video.',
       warnings: [
         'Nếu ổ đĩa đạt 100% Active Time, giảm tổng worker xuống 2.',
         'Khi bật kiểm tra toàn bộ video, giới hạn hai worker tổng.'
@@ -93,7 +130,7 @@ export function recommendDownloadConcurrency(
       maximumSafeGlobalWorkers: 8,
       recommendedConcurrentFragments: 2,
       recommendedAria2Connections: 6,
-      summary: 'Workstation mạnh: tối ưu nhất là hai danh sách, hai worker mỗi danh sách; bốn danh sách vẫn chạy được với một worker mỗi danh sách.',
+      summary: 'Workstation mạnh: hai worker mỗi danh sách là cân bằng nhất; nhiều danh sách hơn thì một worker mỗi danh sách.',
       warnings: [
         storageWarning,
         'Khi bật kiểm tra toàn bộ video, nên giới hạn 2–3 worker tổng vì FFmpeg phải đọc/giải mã toàn bộ file.',
@@ -118,7 +155,7 @@ export function recommendDownloadConcurrency(
     maximumSafeGlobalWorkers: 6,
     recommendedConcurrentFragments: 2,
     recommendedAria2Connections: 6,
-    summary: 'Máy khá: tối ưu nhất là một hoặc hai danh sách; ba đến bốn danh sách nên dùng một worker mỗi list.',
+    summary: 'Máy khá: từ ba danh sách trở lên nên dùng một worker mỗi danh sách.',
     warnings: [
       'Theo dõi Disk và Network trong Task Manager trước khi tăng worker.',
       'Khi bật kiểm tra toàn bộ video, giảm tổng worker xuống khoảng 2–3.'
