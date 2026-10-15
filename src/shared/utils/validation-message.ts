@@ -7,6 +7,7 @@
 const FIELD_LABELS: Record<string, string> = {
   aria2Connections: 'Kết nối aria2c mỗi video',
   maxGlobalDownloadWorkers: 'Tổng video tải đồng thời toàn ứng dụng',
+  maxConcurrentDownloadLists: 'Số danh sách tải chạy cùng lúc',
   downloadConcurrentFragments: 'Fragment đồng thời mỗi video',
   progressRefreshMs: 'Chu kỳ làm mới tiến độ',
   sourceCacheDays: 'Số ngày giữ nguồn',

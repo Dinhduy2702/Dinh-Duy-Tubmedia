@@ -16,6 +16,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useAppStore } from '../stores/app-store';
 import { useIsLightTheme } from '../hooks/use-is-light-theme';
 import { createUiEventId } from '../utils/ui-id';
+import { RateLimitWaitBadges } from '../components/RateLimitWaitBadges';
 import { compareAppVersions, isNewerAppVersion } from '../../../shared/app-version';
 
 const pct = (value: number | undefined): string => `${Math.round(value ?? 0)}%`;
@@ -174,6 +175,7 @@ export function Topbar(): React.JSX.Element {
               Đang giảm tải
             </span>
           )}
+          <RateLimitWaitBadges />
         </div>
         <div className="topbar-job-pill">
           <span className={queueSummary.activeJobs > 0 ? 'pulse-dot' : ''} />

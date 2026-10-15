@@ -91,6 +91,9 @@ export const appSettingsSchema = z
       z.literal(6)
     ]),
     maxGlobalMergeJobs: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
+    maxConcurrentDownloadLists: z
+      .union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5), z.literal(6)])
+      .default(0),
     downloadCompatibilityMode: z.enum(['source', 'capcut_sdr_1080p', 'capcut_sdr_2k']),
     // ADAPTIVE_SETTINGS_HOTFIX8_SCHEMA
     downloadEditCopyMode: z.enum(['off', 'capcut_sdr_1080p', 'capcut_sdr_2k']).default('off'),

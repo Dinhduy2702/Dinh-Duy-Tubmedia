@@ -43,6 +43,7 @@ import { ToolReadinessPanel } from '../components/ToolReadinessPanel';
 import { FolderField } from '../components/FolderField';
 import { StatusBadge } from '../components/StatusBadge';
 import { AudioIssueSummary } from '../components/AudioIssueNotice';
+import { LaneWaitNotice } from '../components/LaneWaitNotice';
 import { CompactLogRow } from '../components/CompactLogRow';
 import { useAppStore } from '../stores/app-store';
 import { useLaneLogs } from '../hooks/use-lane-logs';
@@ -382,7 +383,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
       await Promise.all([refreshJobs(), refreshProjects()]);
       notify(
         `${laneTitle(slot)} đã bắt đầu`,
-        `${profile.downloadWorkers} video tối đa trong danh sách này; danh sách bắt đầu độc lập và chạy song song, không phải chờ danh sách khác.`
+        `${profile.downloadWorkers} video tối đa trong danh sách này; danh sách bắt đầu độc lập và chạy song song; nếu đã đủ số danh sách chạy cùng lúc (Cài đặt) thì danh sách này chờ lượt rồi tự bắt đầu.`
       );
     } catch (error) {
       setError(messageOf(error));
@@ -643,7 +644,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
       setSettings(next);
       notify(
         'Đã áp dụng chuẩn đa nền tảng 1080p',
-        'H.264/MP4, 720p–1080p, fallback thông minh, aria2c 16 kết nối và 2 fragment cho mỗi video; mỗi danh sách vẫn chạy độc lập.'
+        'H.264/MP4, 720p–1080p, fallback thông minh và 2 fragment cho mỗi video; mỗi danh sách vẫn chạy độc lập.'
       );
     } catch (error) {
       setError(messageOf(error));
@@ -1190,6 +1191,7 @@ function LaneCard({
             <span>{progress.toFixed(1)}% toàn danh sách</span>
             <span>{progressDetail}</span>
           </div>
+          <LaneWaitNotice projectId={jobs.find((job) => job.projectId)?.projectId} kind="download" />
           <AudioIssueSummary jobs={jobs} />
         </div>
         <div className="lane-primary-actions">

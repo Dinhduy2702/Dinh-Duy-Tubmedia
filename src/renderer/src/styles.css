@@ -228,3 +228,19 @@ body{
 .audio-issue-summary{display:flex;align-items:center;gap:.4rem;margin-top:.45rem;border:1px solid var(--tone-warning-border);border-radius:9px;background:var(--tone-warning-bg);padding:.35rem .55rem;color:var(--tone-warning-text);font-size:.72rem;font-weight:700}
 .audio-issue-summary>svg{flex:none;color:var(--tone-warning-icon)}
 .audio-issue-tip{display:inline-flex;align-items:center;justify-content:center;margin-left:auto;cursor:help;color:var(--tone-warning-icon)}
+
+/* Lag bước 1 (2026-10-12): danh sách / quy trình đang chờ lượt vì đã đủ số chạy cùng lúc. */
+.lane-wait-notice {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
+  border: 1px solid var(--tone-info-border, var(--border));
+  border-radius: 0.6rem;
+  background: var(--tone-info-bg, var(--panel2));
+  padding: 0.3rem 0.55rem;
+  color: var(--tone-info-text, var(--text));
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: help;
+}

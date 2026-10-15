@@ -17,6 +17,9 @@ export interface DevelopmentEnvironment {
   /** P2 (2026-10-10): gốc "ổ đĩa" giả cho khu cách ly (<gốc>\Tubmedia\quarantine) — bài e2e cần một lượt cách ly thật mà không
    * bao giờ tạo <ổ thật>\Tubmedia. Chỉ có tác dụng khi e2e=true và chạy từ mã nguồn. */
   e2eDriveRoot: string | undefined;
+  /** Hướng B 429 (2026-10-12): thời gian nghỉ thay thế (ms, 100 ms – 60 s) cho mọi vòng chờ giới hạn nền tảng, để bài e2e
+   * thấy cả lúc nghỉ lẫn lúc tự tiếp tục mà không chờ 2 phút thật. Chỉ có tác dụng khi e2e=true và chạy từ mã nguồn. */
+  e2eRateLimitWaitMs: number | undefined;
 }
 
 /**
@@ -36,10 +39,12 @@ export function readDevelopmentEnvironment(
       fakeUpdateStatusJson: undefined,
       e2eShutdownHangStep: undefined,
       e2eQueueStartDelayMs: 0,
-      e2eDriveRoot: undefined
+      e2eDriveRoot: undefined,
+      e2eRateLimitWaitMs: undefined
     };
   }
   const queueStartDelay = Number(env.TUBMEDIA_E2E_QUEUE_START_DELAY_MS);
+  const rateLimitWait = Number(env.TUBMEDIA_E2E_RATE_LIMIT_WAIT_MS);
   return {
     rendererUrl: env.ELECTRON_RENDERER_URL || undefined,
     e2e: env.TUBMEDIA_E2E === '1',
@@ -49,6 +54,10 @@ export function readDevelopmentEnvironment(
       env.TUBMEDIA_E2E === '1' ? env.TUBMEDIA_E2E_SHUTDOWN_HANG_STEP || undefined : undefined,
     e2eQueueStartDelayMs:
       env.TUBMEDIA_E2E === '1' && Number.isFinite(queueStartDelay) ? Math.min(Math.max(0, Math.trunc(queueStartDelay)), 60_000) : 0,
-    e2eDriveRoot: env.TUBMEDIA_E2E === '1' ? env.TUBMEDIA_E2E_DRIVE_ROOT || undefined : undefined
+    e2eDriveRoot: env.TUBMEDIA_E2E === '1' ? env.TUBMEDIA_E2E_DRIVE_ROOT || undefined : undefined,
+    e2eRateLimitWaitMs:
+      env.TUBMEDIA_E2E === '1' && env.TUBMEDIA_E2E_RATE_LIMIT_WAIT_MS && Number.isFinite(rateLimitWait)
+        ? Math.min(Math.max(100, Math.trunc(rateLimitWait)), 60_000)
+        : undefined
   };
 }
