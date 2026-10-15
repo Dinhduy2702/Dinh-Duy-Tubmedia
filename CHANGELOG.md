@@ -1,3 +1,41 @@
+# Tubmedia 1.7.0
+
+- Số danh sách tải chạy cùng lúc giờ được tự chọn theo đúng sức máy của bạn (6 mức), thay vì để mọi danh sách chạy dồn một
+  lúc như trước:
+  - Khi để "Tự động theo máy" (mặc định), Tubmedia xem số lõi CPU và RAM còn trống, rồi chọn từ 1 đến 6 danh sách: máy yếu
+    chạy 1–2 danh sách cho mượt, máy trung bình 3–4, máy mạnh tới 6. RAM trống được đo lại mỗi phút: khi máy đang bận
+    việc khác, danh sách mới sẽ chờ thay vì làm máy chậm thêm.
+  - Máy mạnh vẫn tải nhanh như trước, nhưng ứng dụng mượt hơn hẳn khi chạy nhiều danh sách. Số đang dùng hiện ngay trong
+    Cài đặt › Tải danh sách, ở dòng "Tự động theo máy (N)". Vẫn có thể tự chọn 1–6 danh sách.
+  - Danh sách vượt quá số đó sẽ hiện "Đang chờ lượt" và tự chạy tiếp ngay khi có chỗ trống, không cần bấm gì.
+- Chạy nhiều danh sách cùng lúc không còn làm ứng dụng giật, đứng hình:
+  - Mỗi danh sách vẫn tải đủ số video cùng lúc theo hồ sơ, nhưng các video được bắt đầu dần dần thay vì mở tất cả trong
+    cùng một lúc.
+  - Thêm, sửa tên, tạm dừng, tiếp tục hay xoá video trong lúc đang tải đều phản hồi ngay.
+- YouTube báo "quá nhiều yêu cầu" (lỗi 429) giờ được xử lý tự động, không còn treo chờ bạn bấm tay:
+  - Khi một video dính giới hạn, cả ứng dụng tạm nghỉ với riêng YouTube (danh sách TikTok, Facebook… vẫn tải bình thường).
+    Thanh trên cùng hiện "Đang chờ do giới hạn YouTube" kèm đồng hồ đếm ngược.
+  - Hết giờ nghỉ, Tubmedia tự tải tiếp: thử trước một video rồi tăng dần. Nếu vẫn bị chặn thì nghỉ lâu hơn (khoảng 2, 5
+    rồi 15 phút); sau ba lần mới dừng hẳn và báo cho bạn.
+  - Để ít bị chặn hơn ngay từ đầu: tối đa 6 video YouTube tải cùng lúc trên toàn ứng dụng, và khi nhiều video cùng nguồn
+    đang tải (hoặc nguồn vừa báo giới hạn), Tubmedia giãn nhịp giữa các lần gửi yêu cầu.
+  - Cài đặt › Tải danh sách bỏ ô "Dùng aria2c" và "Kết nối aria2c mỗi video" vì hai ô này thực ra không có tác dụng. Thay vào
+    đó là một ghi chú nói rõ: video được tải bằng bộ tải có sẵn của yt-dlp.
+- Lịch sử công việc ghi rõ lý do video bị lỗi:
+  - Bảng Lịch sử hiện câu lỗi cụ thể ngay trên dòng của video lỗi, không chỉ nhãn "Có lỗi"; rê chuột vào nhãn trạng thái để
+    xem đầy đủ.
+  - Tệp CSV xuất ra có thêm cột "Mã lỗi" và "Chi tiết lỗi".
+- Ghép video không còn bị chặn nhầm vì lỗi âm thanh của công cụ FFmpeg cũ:
+  - Máy từng tự chép một bản FFmpeg khác vào thư mục công cụ của Tubmedia (ví dụ FFmpeg 8.0 tải từ gyan.dev) sẽ được
+    chuyển sang dùng FFmpeg đi kèm bộ cài. Bản FFmpeg 8.0 đó có lỗi làm hỏng âm thanh của một số video khi ghép. Cài đè bản
+    mới là đủ, không phải làm gì thêm.
+  - Sau khi chuẩn hoá từng video, Tubmedia kiểm toàn bộ phần âm thanh (khoảng 1 giây cho một video 8 phút). Nếu phát hiện
+    hỏng, Tubmedia tự mã hoá lại riêng phần âm thanh rồi ghép tiếp, thay vì chặn cả thành phẩm.
+  - Bản chuẩn hoá lưu sẵn để dùng lại được kiểm tra đầy đủ cả hình và tiếng trước khi dùng. Bản hỏng sẽ tự được làm lại từ
+    video gốc, không còn bị dùng lại ở mọi lần ghép.
+  - Thông báo chặn thành phẩm nói đúng lỗi nằm ở âm thanh hay hình ảnh, và nhật ký ghi lại nguyên văn câu báo lỗi để bên
+    hỗ trợ tra cứu nhanh.
+
 # Tubmedia 1.6.3
 
 - Ghép theo Timeline không còn lỗi "ENOENT" vì mất tệp nguồn giữa chừng khi nhiều danh sách dùng chung một thư mục nguồn:
