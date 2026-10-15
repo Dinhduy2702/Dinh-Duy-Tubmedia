@@ -154,6 +154,7 @@ describe('NormalizeEngine stream-copy command', () => {
       }
     } as unknown as ProcessManager;
     const verifier = {
+      decodeStreamFailure: () => Promise.resolve(null),
       verify: (path: string) => Promise.resolve({
         ok: true,
         path,
@@ -215,6 +216,7 @@ describe('NormalizeEngine stream-copy command', () => {
       }
     } as unknown as ProcessManager;
     const verifier = {
+      decodeStreamFailure: () => Promise.resolve(null),
       verify: (path: string) => Promise.resolve({
         ok: true,
         path,
@@ -276,6 +278,7 @@ describe('NormalizeEngine stream-copy command', () => {
       }
     } as unknown as ProcessManager;
     const verifier = {
+      decodeStreamFailure: () => Promise.resolve(null),
       verify: (path: string) => Promise.resolve({
         ok: true,
         path,
@@ -340,6 +343,7 @@ describe('NormalizeEngine stream-copy command', () => {
       }
     } as unknown as ProcessManager;
     const verifier = {
+      decodeStreamFailure: () => Promise.resolve(null),
       verify: (path: string) => Promise.resolve({
         ok: true,
         path,

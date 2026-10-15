@@ -500,10 +500,95 @@ export class NormalizeEngine {
       throw new ProcessingFailedError(`Tệp chuẩn hóa bị lỗi và đã chuyển vào khu cách ly: ${quarantined}`);
     }
 
+    // Tiếng vừa mã hóa lại phải giải mã được TOÀN BỘ (rẻ). Vụ khách 2026-10-15: bộ mã hóa AAC của ffmpeg 8.0 (gyan.dev)
+    // tạo một gói hỏng giữa NA361 ở 256k/48 kHz — kiểm 3 khung hình không thấy, hậu kiểm thành phẩm mới chặn.
+    if (target.audioCodec && !audioCopy && !addSilentAudio) {
+      await this.repairCorruptAudioEncode(job, input, pending, target, resource, signal, profile, ffmpeg.version);
+    }
+
     await rm(final, { force: true });
     await rename(pending, final);
     onProgress(100);
     return final;
+  }
+
+  /**
+   * Luồng tiếng của tệp vừa chuẩn hóa không giải mã được → mã hóa lại CHỈ phần tiếng từ nguồn bằng bộ mã hóa AAC dự phòng
+   * (-aac_coder fast), giữ nguyên phần hình đã mã hóa. Vẫn hỏng → cách ly và báo lỗi nêu rõ phiên bản ffmpeg.
+   */
+  private async repairCorruptAudioEncode(
+    job: QueueJob,
+    input: string,
+    pending: string,
+    target: NormalizeTarget,
+    resource: ResourceProfile,
+    signal: AbortSignal,
+    profile: QualityProfile | undefined,
+    ffmpegVersion: string | null
+  ): Promise<void> {
+    const options = { jobId: job.id, projectId: job.projectId, signal };
+    const failure = await this.verifier.decodeStreamFailure(pending, 'audio', options);
+    if (!failure) return;
+    if (signal.aborted) throw signal.reason instanceof Error ? signal.reason : new Error('Đã dừng khi đang kiểm tiếng.');
+
+    const context = { ...(job.projectId ? { projectId: job.projectId } : {}), jobId: job.id };
+    this.logger.warn(
+      'normalize',
+      'NORMALIZE_AUDIO_ENCODE_CORRUPT',
+      'Bộ mã hóa AAC của ffmpeg tạo luồng tiếng hỏng — đang mã hóa lại phần tiếng bằng cách dự phòng.',
+      { ...context, metadata: { input, ffmpegVersion, ffmpegError: failure } }
+    );
+
+    const ffmpeg = this.tools.get('ffmpeg');
+    const repaired = `${pending}.audio-fallback.mp4`;
+    await rm(repaired, { force: true });
+    const result = await this.processes.run({
+      jobId: job.id,
+      projectId: job.projectId,
+      tool: 'ffmpeg',
+      executablePath: ffmpeg.executablePath!,
+      args: [
+        '-hide_banner', '-nostdin', '-y', '-xerror', '-err_detect', 'explode',
+        '-i', pending,
+        '-i', input,
+        '-map', '0:v:0',
+        '-map', '1:a:0',
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        '-aac_coder', 'fast',
+        '-b:a', profile?.audioMode === 'aac_320' ? '320k' : '256k',
+        '-ar', String(target.sampleRate ?? 48000),
+        '-ac', String(target.channels ?? 2),
+        '-map_metadata', '-1',
+        '-avoid_negative_ts', 'make_zero',
+        '-movflags', '+faststart',
+        '-video_track_timescale', '90000',
+        '-nostats',
+        repaired
+      ],
+      priority: resource.processPriority,
+      signal,
+      timeoutMs: 12 * 60 * 60 * 1000
+    });
+
+    const stillBroken =
+      result.code !== 0
+        ? result.stderrTail || 'Mã hóa lại phần tiếng thất bại.'
+        : await this.verifier.decodeStreamFailure(repaired, 'audio', options);
+    if (stillBroken) {
+      await rm(repaired, { force: true }).catch(() => undefined);
+      const quarantined = await this.quarantine.move(pending, failure, { jobId: job.id, projectId: job.projectId });
+      throw new ProcessingFailedError(
+        `ffmpeg ${ffmpegVersion ?? ''} tạo luồng tiếng hỏng khi chuẩn hóa và mã hóa lại cũng không sửa được ` +
+          `(${stillBroken.slice(0, 300)}). Tệp lỗi đã chuyển vào khu cách ly: ${quarantined}`
+      );
+    }
+    await rm(pending, { force: true });
+    await rename(repaired, pending);
+    this.logger.info('normalize', 'NORMALIZE_AUDIO_ENCODE_REPAIRED', 'Đã mã hóa lại phần tiếng; luồng tiếng giải mã sạch.', {
+      ...context,
+      metadata: { input, ffmpegVersion }
+    });
   }
 
   private async cacheKey(input: string, payload: Record<string, unknown>): Promise<string> {

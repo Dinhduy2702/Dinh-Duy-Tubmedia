@@ -420,6 +420,37 @@ export class FileVerifier {
       : maxFreezeDuration >= minimumComparableDuration;
   }
 
+  /**
+   * Giải mã TOÀN BỘ một luồng (nhanh với luồng tiếng). null = sạch; ngược lại trả câu lỗi gốc của ffmpeg. Thiếu ffmpeg →
+   * null (không đoán). Dùng sau khi chuẩn hóa: vụ khách 2026-10-15 — bộ mã hóa AAC của ffmpeg 8.0 tạo gói tiếng hỏng mà
+   * kiểm 3 khung hình không thấy.
+   */
+  public async decodeStreamFailure(
+    path: string,
+    stream: 'audio' | 'video',
+    options: VerificationOptions = {}
+  ): Promise<string | null> {
+    const ffmpeg = this.tools.get('ffmpeg');
+    if (!ffmpeg.available || !ffmpeg.executablePath) return null;
+    const result = await this.processes.run({
+      jobId: (options.jobId ?? 'decode-check') + '-' + stream + '-decode',
+      ...(options.projectId ? { projectId: options.projectId } : {}),
+      tool: 'ffmpeg',
+      executablePath: ffmpeg.executablePath,
+      args: [
+        '-hide_banner', '-nostdin', '-v', 'error', '-xerror', '-err_detect', 'explode',
+        '-i', path,
+        '-map', stream === 'audio' ? '0:a:0' : '0:v:0',
+        '-f', 'null', '-'
+      ],
+      timeoutMs: 12 * 60 * 60 * 1000,
+      priority: 'below_normal',
+      ...(options.signal ? { signal: options.signal } : {})
+    });
+    if (result.code === 0 && !result.stderrTail.trim()) return null;
+    return describeFfmpegDecodeFailure(result.stderrTail).detail || ('ffmpeg thoát với mã ' + result.code + '.');
+  }
+
   public async verifyVisualIntegrity(
     path: string,
     expectedDuration: number,
