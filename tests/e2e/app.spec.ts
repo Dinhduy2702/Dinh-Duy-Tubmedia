@@ -5542,11 +5542,15 @@ test('Lag bước 1: tối đa N danh sách tải chạy cùng lúc, mỗi danh 
       );
     await startList('download-1', 'danh-sach-1', ['mot-a.mp4', 'mot-b.mp4']);
     await startList('download-2', 'danh-sach-2', ['hai.mp4']);
-    // Thẻ danh sách nạp dữ liệu khi trang được mở và hiện từng thẻ một (theo tab) — rời trang rồi mở lại SAU khi đã bắt
-    // đầu tải (trang có thể đang mở sẵn từ đầu), rồi chọn thẻ 2.
-    await shellWindow.click('[data-page-id="activity"]');
+    // Bài bắt đầu tải bằng IPC (không qua giao diện) nên trang Tải danh sách chỉ thấy hai danh sách khi nạp dữ liệu SAU đó.
+    // Rời trang rồi mở lại là không đủ: trang đã mở và nạp xong từ trước thì giữ dữ liệu cũ — đo 2026-10-15, lượt đỏ có tab
+    // vẫn "Danh sách tải 1 · Sẵn sàng" suốt 15 s trong khi hàng đợi đã đúng. Nạp lại cửa sổ rồi chờ tab đúng tên.
+    await shellWindow.reload();
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
     await shellWindow.click('[data-page-id="download-workbench"]');
-    await shellWindow.getByRole('navigation', { name: 'Danh sách tải' }).locator('.workflow-tab').nth(1).click();
+    const listTabs = shellWindow.getByRole('navigation', { name: 'Danh sách tải' }).locator('.workflow-tab');
+    await expect(listTabs.nth(1)).toContainText('danh-sach-2', { timeout: 15_000 });
+    await listTabs.nth(1).click();
 
     // Danh sách 1 chạy đủ 2 luồng cùng lúc; danh sách 2 chờ lượt, có nhãn trên thẻ.
     await expect.poll(() => requests.filter((item) => item.path.includes('/mot-')).length, { timeout: 60_000 }).toBeGreaterThanOrEqual(2);
