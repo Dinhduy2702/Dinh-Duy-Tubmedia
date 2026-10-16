@@ -20,7 +20,7 @@ import type { ToolManager } from '../tools/tool-manager.js';
 import type { SettingsService } from '../settings/settings-service.js';
 import type { Logger } from '../logging/logger.js';
 import type { MediaSourceRepository } from '../database/repositories/media-source-repository.js';
-import { ToolHealthCheckError } from '@shared/errors/app-errors.js';
+import { InvalidInputError, ToolHealthCheckError } from '@shared/errors/app-errors.js';
 import { REQUIRED_TOOL_NAMES } from '../tools/tool-manager.js';
 import { sanitizeFilename } from '@shared/utils/filename.js';
 import { sizeFiles, sizePaths } from '../storage/workbench-storage.js';
@@ -67,6 +67,23 @@ const LEGACY_CODES: Partial<Record<WorkbenchSlot, string>> = {
   'download-2': '__WORKBENCH_DOWNLOAD_B__',
   'merge-1': '__WORKBENCH_DOWNLOAD_MERGE__'
 };
+
+/**
+ * Trạng thái tác vụ khiến ô nhập của danh sách / quy trình bị khóa — khớp đúng quy tắc của giao diện
+ * (DownloadWorkbenchPage / DownloadMergePage: workflowState "running" hoặc "paused").
+ */
+const DRAFT_LOCKING_JOB_STATUSES: ReadonlySet<string> = new Set([
+  'pending',
+  'analyzing',
+  'downloading',
+  'retrying',
+  'normalizing',
+  'processing',
+  'verifying',
+  'merging',
+  'paused',
+  'interrupted'
+]);
 
 function laneNumber(slot: DownloadLaneId | MergeLaneId): number {
   return Number(slot.slice(slot.lastIndexOf('-') + 1));
@@ -242,9 +259,37 @@ export class WorkbenchService {
     return existing ? this.projects.update(existing.id, common) : this.projects.create(common);
   }
 
+  /**
+   * Bản nháp ghi đè thư mục nguồn/tạm/thành phẩm và thay toàn bộ link của danh sách. Đang còn tác vụ chưa xong mà ghi đè thì
+   * các video đã xếp hàng đọc nhầm thư mục mới (tự kiểm PR #4, 2026-10-15: thư mục rỗng → "ENOENT mkdir ''"). Giao diện đã
+   * khóa ô nhập lúc đó; phía main chặn thêm để không lối nào khác ghi đè được.
+   *
+   * Trả true khi danh sách đang bận nhưng bản nháp KHÔNG đổi gì — lượt tự lưu (trễ 800 ms) có thể bắn ngay sau khi người dùng
+   * bấm Tải với đúng giá trị nút Tải vừa lưu: bỏ qua, không báo lỗi, không ghi gì. Bản nháp muốn đổi thật → báo lỗi.
+   */
+  private lockedDraftUnchanged(project: Project | null, unchanged: (current: Project) => boolean): boolean {
+    if (!project) return false;
+    if (!this.queue.list(project.id).some((job) => DRAFT_LOCKING_JOB_STATUSES.has(job.status))) return false;
+    if (unchanged(project)) return true;
+    throw new InvalidInputError(
+      'Danh sách này đang tải hoặc đang tạm dừng (còn video chưa xong) nên chưa lưu được thay đổi. Hãy chờ tải xong, ' +
+        'hoặc hủy các video còn lại, rồi sửa lại.'
+    );
+  }
+
   public saveDownloadDraft(value: DownloadLaneDraftInput): WorkbenchSlotState {
     const existing = this.getProject(value.slot);
     const number = laneNumber(value.slot);
+    const lockedUnchanged = this.lockedDraftUnchanged(
+      existing,
+      (current) =>
+        current.name === (value.name.trim() || `Danh sách tải ${number}`) &&
+        current.outputFolder === value.outputFolder &&
+        current.sourceFolder === value.outputFolder &&
+        // Nút Tải lưu thư mục tạm mặc định "_yt_tmp" bên trong thư mục lưu khi ô để trống.
+        (current.tempFolder === value.tempFolder || current.tempFolder === join(value.outputFolder, '_yt_tmp'))
+    );
+    if (lockedUnchanged) return this.slotState(value.slot);
     const availableProfiles = this.settings.profiles().resources;
     const base = availableProfiles.find((profile) => profile.id === value.resourceProfileId) ?? availableProfiles[0];
     if (!base) throw new Error('Không có cấu hình tài nguyên để lưu danh sách tải.');
@@ -278,6 +323,15 @@ export class WorkbenchService {
   public saveMergeDraft(value: DownloadMergeInput): WorkbenchSlotState {
     const existing = this.getProject(value.slot);
     const number = laneNumber(value.slot);
+    const lockedUnchanged = this.lockedDraftUnchanged(
+      existing,
+      (current) =>
+        current.name === (value.finalFileName.trim() || `Thành phẩm ${number}`) &&
+        current.sourceFolder === value.sourceFolder &&
+        current.tempFolder === value.tempFolder &&
+        current.outputFolder === value.outputFolder
+    );
+    if (lockedUnchanged) return this.slotState(value.slot);
     const draft = {
       name: value.finalFileName.trim() || `Thành phẩm ${number}`,
       code: SLOT_CODES[value.slot],
