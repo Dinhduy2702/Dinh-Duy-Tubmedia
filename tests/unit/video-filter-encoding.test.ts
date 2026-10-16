@@ -6,7 +6,8 @@ const source = readFileSync(join(process.cwd(), 'src/main/media/video-link-filte
 
 describe('lọc video theo link: mã hóa văn bản của yt-dlp', () => {
   it('ép UTF-8 cho yt-dlp giống ProcessManager để tiêu đề tiếng Việt không bị hỏng', () => {
-    expect(source).toContain("env: processEnvironmentFor('yt-dlp')");
+    // 2026-10-15: kèm thư mục tạm riêng (TMP/TEMP) để không sót _MEI — processEnvironmentFor('yt-dlp', …) vẫn ép UTF-8.
+    expect(source).toContain("env: processEnvironmentFor('yt-dlp', runtimeTemp?.env)");
   });
 
   it('giải mã theo StringDecoder để ký tự đa byte không bị cắt ở ranh giới chunk', () => {

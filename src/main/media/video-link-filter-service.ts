@@ -7,6 +7,7 @@ import { basename, dirname, extname, join, relative, resolve, sep } from 'node:p
 import type { Logger } from '../logging/logger.js';
 import type { ToolManager } from '../tools/tool-manager.js';
 import { processEnvironmentFor } from '../processes/process-manager.js';
+import { defaultYtDlpRuntimeTemp } from '../processes/ytdlp-runtime-temp.js';
 import type {
   VideoLinkFilterLink,
   VideoLinkFilterMove,
@@ -283,18 +284,24 @@ export class VideoLinkFilterService {
     }
   }
 
-  private runYtDlp(
+  private async runYtDlp(
     executablePath: string,
     args: string[]
   ): Promise<{ code: number; stdout: string; stderr: string }> {
+    // Thư mục tạm riêng: bị kill (quá giờ / quá nhiều dữ liệu) thì không để sót %TEMP%\_MEIxxxx (xem ytdlp-runtime-temp.ts).
+    const runtimeTemp = await defaultYtDlpRuntimeTemp.allocate().catch(() => null);
     return new Promise((resolvePromise, reject) => {
       const child = spawn(executablePath, args, {
         windowsHide: true,
         // yt-dlp.exe (PyInstaller) ghi tiêu đề qua pipe bằng code page của Windows nếu không ép UTF-8,
         // làm hỏng tiếng Việt và khiến chế độ khớp theo tiêu đề không tìm thấy video.
-        env: processEnvironmentFor('yt-dlp'),
+        env: processEnvironmentFor('yt-dlp', runtimeTemp?.env),
         stdio: ['ignore', 'pipe', 'pipe']
       });
+      // Xóa khi tiến trình THỰC SỰ đóng (không phải lúc trả kết quả — kill rồi trả ngay thì tiến trình còn chạy thêm).
+      const releaseRuntimeTemp = (): void => void runtimeTemp?.release();
+      child.once('close', releaseRuntimeTemp);
+      child.once('error', releaseRuntimeTemp);
       let stdout = '';
       let stderr = '';
       let outputBytes = 0;
