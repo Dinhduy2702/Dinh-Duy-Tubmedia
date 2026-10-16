@@ -26,3 +26,14 @@ lặp đúng bài này: lần nào cũng xong trong 19–28 ms, không lần nà
   yt-dlp/ffmpeg/ffprobe/crashpad/MsMpEng đang chạy + tệp còn sót) vào `electron-shell-runtime.log`, console và chú thích
   của bài — lần sau trên CI biết chính xác thứ gì giữ khóa.
 - Test: `tests/unit/e2e-sandbox-cleanup.test.ts` (đỏ với bản cũ: báo EPERM sau 22 ms).
+
+## Thêm: bài "phát hiện bản cập nhật hiện thông báo rõ ràng" chập chờn trên máy chậm
+
+Khi chạy lại toàn bộ e2e trên 2 nhân để tái hiện, bài này trượt 1 lần ("element is not stable" → "detached" lúc bấm
+"Cập nhật ngay"). Đo bằng bộ quan sát DOM: thông báo hiện ngay khi trang tải xong, TRƯỚC lúc bài kiểm thấy thanh bên; bài
+kiểm lại chờ cứng 6 giây tính từ lúc nó nhìn thấy thông báo, nên dưới tải (2 nhân + 2 tiến trình đốt CPU) thông báo tự tắt
+đúng hạn 12 giây giữa lúc chờ (1/12 lượt). App đúng; bài kiểm đo sai mốc.
+
+Sửa: đọc `--attention-duration` (AttentionCenter đặt bằng đúng giá trị của hẹn giờ tự tắt) và đòi ≥ 12 000 ms, rồi bấm ngay.
+Kiểm đỏ: tạm cho thông báo cập nhật dùng thời lượng mức "info" như lỗi cũ → bài báo 4800 < 12000. Sau sửa: 11/12 lượt qua
+dưới tải; lượt còn lại trượt ở bước chờ app khởi động 30 giây do tải ép thêm, trước phần kiểm thông báo.

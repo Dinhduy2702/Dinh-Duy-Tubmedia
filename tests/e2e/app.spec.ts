@@ -2955,9 +2955,15 @@ test('Sửa lỗi sau phát hành 2026-09-25: phát hiện bản cập nhật hi
     await expect(actionButton, 'phải có nút hành động ngay trên thông báo').toBeVisible();
 
     // Đúng trọng tâm lỗi: KHÔNG được tự tắt trong vài giây đầu (trước đây chỉ 4,8s cho mức "info").
-    // Chờ THẬT 6 giây (không giả lập đồng hồ) rồi xác nhận thông báo vẫn còn — vượt quá mốc cũ.
-    await shellWindow.waitForTimeout(6_000);
-    await expect(attention, 'thông báo không được tự tắt trước ít nhất 12 giây (cảnh báo cần hành động)').toBeVisible();
+    // Đọc đúng thời lượng mà hẹn giờ tự tắt của thông báo đang dùng (AttentionCenter đặt --attention-duration bằng chính
+    // giá trị đó). Trước đây bài này chờ cứng 6 giây tính từ lúc BÀI KIỂM nhìn thấy thông báo — nhưng thông báo hiện ngay
+    // khi trang tải xong, trước cả lúc thanh bên sẵn sàng; máy bận (2 nhân) thì nó đã hiện hơn 6 giây trước khi bài kiểm
+    // thấy, tự tắt đúng hạn 12 giây giữa lúc chờ và bài trượt dù app đúng (đo 2026-10-16: 1/12 lượt dưới tải).
+    const autoCloseMs = await attention.evaluate((element) =>
+      Number.parseFloat(getComputedStyle(element).getPropertyValue('--attention-duration'))
+    );
+    expect(autoCloseMs, 'thông báo không được tự tắt trước ít nhất 12 giây (cảnh báo cần hành động)').toBeGreaterThanOrEqual(12_000);
+    await expect(attention).toBeVisible();
 
     // Bấm nút phải dẫn thẳng tới trang Cập nhật, không cần người dùng tự tìm.
     await actionButton.click();
