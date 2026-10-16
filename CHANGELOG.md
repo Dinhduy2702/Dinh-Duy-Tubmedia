@@ -42,6 +42,12 @@
   video bị tạm dừng, huỷ hoặc ứng dụng bị đóng giữa chừng. Trước đây các thư mục này tích dần, có máy lên tới hàng chục GB,
   làm đầy ổ C. Thư mục tạm của công cụ tải giờ được dọn ngay khi xong việc, và phần còn sót được dọn ở lần mở ứng dụng kế
   tiếp. Các thư mục cũ đã tích từ bản trước có thể dọn bằng Tubmedia → Dọn dẹp máy, mục "Tệp tạm của người dùng".
+- Khi một danh sách tải hoặc quy trình ghép đang chạy, đang tạm dừng hay còn dở dang, Tubmedia không cho đổi tên, thư mục
+  lưu hay danh sách link của nó cho tới khi xong, tránh việc các video đang chờ bị lưu sai chỗ hoặc lỗi giữa chừng. Muốn sửa
+  thì chờ tải xong, hoặc huỷ các video còn lại trước.
+- Hai quy trình ghép dùng chung một video nguồn không còn làm hỏng nhau: trước đây khi một quy trình đang ghép mà quy trình
+  kia cần làm lại bản chuẩn hoá của cùng video, quy trình sau có thể báo lỗi "tệp đang bị khoá" và dừng. Giờ mỗi quy trình
+  dùng tệp tạm riêng và cả hai đều ghép xong.
 
 # Tubmedia 1.6.3
 
