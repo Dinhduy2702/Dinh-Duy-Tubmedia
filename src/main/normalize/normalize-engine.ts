@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { access, rename, rm, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { basename, extname, join } from 'node:path';
@@ -53,6 +53,14 @@ function safeNvencPreset(value: string | undefined): string {
 
 function normalizedExtension(path: string): string {
   return extname(path).toLocaleLowerCase('en-US');
+}
+
+/**
+ * Tệp tạm riêng cho MỖI lần làm bản đệm (hai quy trình dùng chung một nguồn trước đây cùng ghi vào "<bản đệm>.pending.mp4").
+ * Giữ đuôi ".pending.mp4" để bộ dọn rác vẫn nhận ra.
+ */
+function cachePendingPath(final: string): string {
+  return final + '.' + randomUUID().slice(0, 8) + '.pending.mp4';
 }
 
 export class NormalizeEngine {
@@ -134,7 +142,7 @@ export class NormalizeEngine {
     });
     const safe = sanitizeFilename(basename(input).replace(/\.[^.]+$/, ''));
     const final = join(outputFolder, `${safe}.${key}.remux.mp4`);
-    const pending = `${final}.pending.mp4`;
+    const pending = cachePendingPath(final);
 
     if (await this.validRemuxCache(final, source, job, signal)) {
       this.logger.info('normalize', 'REMUX_CACHE_HIT', 'Đã dùng lại tệp remux tương thích trong bộ nhớ đệm.', {
@@ -201,10 +209,9 @@ export class NormalizeEngine {
       throw new ProcessingFailedError(`Tệp remux bị lỗi, đã chuyển vào khu cách ly: ${quarantined}`);
     }
 
-    await rm(final, { force: true });
-    await rename(pending, final);
+    const committed = await this.commitCacheFile(pending, final, job);
     onProgress(100);
-    return final;
+    return committed;
   }
 
   public async normalizeToTarget(
@@ -257,7 +264,7 @@ export class NormalizeEngine {
       outputFolder,
       `${safe}.${cacheKey}.normalized-${target.width}x${target.height}-${Math.round(target.fps * 100) / 100}fps.mp4`
     );
-    const pending = `${final}.pending.mp4`;
+    const pending = cachePendingPath(final);
 
     if (await this.validNormalizeCache(final, target, job, signal)) {
       this.logger.info('normalize', 'NORMALIZE_CACHE_HIT', 'Đã dùng lại video chuẩn hóa hợp lệ trong bộ nhớ đệm.', {
@@ -506,10 +513,9 @@ export class NormalizeEngine {
       await this.repairCorruptAudioEncode(job, input, pending, target, resource, signal, profile, ffmpeg.version);
     }
 
-    await rm(final, { force: true });
-    await rename(pending, final);
+    const committed = await this.commitCacheFile(pending, final, job);
     onProgress(100);
-    return final;
+    return committed;
   }
 
   /**
@@ -589,6 +595,28 @@ export class NormalizeEngine {
       ...context,
       metadata: { input, ffmpegVersion }
     });
+  }
+
+  /**
+   * Chốt tệp vừa làm thành bản đệm. Hai quy trình dùng chung một nguồn có thể cùng làm lại một bản đệm: trước đây chốt bằng
+   * rm(bản đệm) + rename — bản đệm đang bị quy trình kia mở (đang ghép) thì Windows từ chối xóa (EBUSY) → quy trình này hỏng.
+   * Giờ ghi đè thẳng; không ghi đè được (đang bị mở) thì dùng tệp vừa làm dưới tên riêng cho quy trình này, KHÔNG dùng bản
+   * đệm cũ (có thể chính là bản vừa bị loại vì không qua kiểm tra).
+   */
+  private async commitCacheFile(pending: string, final: string, job: QueueJob): Promise<string> {
+    try {
+      await rename(pending, final);
+      return final;
+    } catch (error) {
+      const own = final.replace(/\.mp4$/i, '') + '.' + randomUUID().slice(0, 8) + '.mp4';
+      await rename(pending, own);
+      this.logger.warn('normalize', 'NORMALIZE_CACHE_IN_USE', 'Bản đệm đang được quy trình khác dùng — quy trình này dùng bản vừa làm dưới tên riêng.', {
+        ...(job.projectId ? { projectId: job.projectId } : {}),
+        jobId: job.id,
+        metadata: { cached: final, used: own, error: error instanceof Error ? error.message : String(error) }
+      });
+      return own;
+    }
   }
 
   private async cacheKey(input: string, payload: Record<string, unknown>): Promise<string> {

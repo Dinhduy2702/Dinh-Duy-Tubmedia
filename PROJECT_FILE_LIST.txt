@@ -74,6 +74,7 @@ FIX20_NORMALIZE_AUDIO_ENCODE_FALLBACK_VI.md
 FIX21_AUTO_LIST_CAP_TIERS_VI.md
 FIX22_YTDLP_MEI_TEMP_LEAK_VI.md
 FIX23_YTDLP_KILLED_NOT_UNAVAILABLE_VI.md
+FIX25_CACHE_PENDING_PER_JOB_VI.md
 FIX3_RATE_CONTROL_UNIT_TEST_v1.2.0_VI.md
 FIX4_BUNDLED_FFMPEG_PAYLOAD_v1.2.0_VI.md
 FIX5_CHANGELOG_ORDER_v1.2.0_VI.md
@@ -503,6 +504,7 @@ tests/integration/log-repository-filter.test.ts
 tests/integration/merge-missing-source-requeue.test.ts
 tests/integration/migration-attempts-reset.test.ts
 tests/integration/normalize-audio-encoder-fallback.test.ts
+tests/integration/normalize-cache-commit-locked.test.ts
 tests/integration/normalize-cache-corrupt-audio.test.ts
 tests/integration/quarantine-service.test.ts
 tests/integration/queue-attempts.test.ts
@@ -607,6 +609,7 @@ tests/unit/network-recovery-wiring-r54.test.ts
 tests/unit/non-conflicting-path.test.ts
 tests/unit/normalization-match.test.ts
 tests/unit/normalize-audio-encode-fallback.test.ts
+tests/unit/normalize-cache-pending-per-job.test.ts
 tests/unit/normalize-engine-stream-copy.test.ts
 tests/unit/notice-components.test.ts
 tests/unit/notice-display-policy.test.ts
