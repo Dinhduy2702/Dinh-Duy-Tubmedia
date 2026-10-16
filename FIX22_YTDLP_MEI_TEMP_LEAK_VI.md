@@ -47,6 +47,8 @@ mọi video với `DISK_FULL`. Người dùng thật cũng tích dần như vậ
 - Bài integration "dọn thư mục không còn ai dùng" từng đỏ ~1/3 lượt: nó gọi `sweepUnused(0)` (bỏ ngưỡng tuổi) ngay khi
   `_MEI` vừa xuất hiện — lúc yt-dlp còn GIẢI NÉN, chưa nạp DLL, thư mục chưa bị khóa nên đổi tên được và bị xóa nhầm.
 - Ở app thật khoảng này do ngưỡng tuổi tối thiểu 1 phút che (giải nén chỉ vài giây; sau đó thư mục bị khóa suốt lúc
-  yt-dlp chạy — đo `EPERM` sau 4 s). Sửa bài: chỉ dọn sau khi yt-dlp đã gửi yêu cầu tới máy chủ (đã chạy thật); thêm bài
-  dọn với ngưỡng MẶC ĐỊNH ngay lúc yt-dlp vừa khởi động → thư mục của nó còn nguyên. Ghi rõ lý do ngưỡng trong mã.
+  yt-dlp chạy — đo `EPERM` sau 4 s). Sửa bài: chỉ dọn sau khi yt-dlp đã gửi yêu cầu tới máy chủ (đã chạy thật). Ngưỡng
+  tuổi (giữ thư mục vừa cấp) đã có unit test riêng; một bài integration thêm cho ngưỡng mặc định với yt-dlp thật bị bỏ vì
+  đỏ chập chờn khi cả bộ integration chạy song song (quá 60 s, ~1/4 lượt) mà không kiểm thêm điều gì. Ghi rõ lý do ngưỡng
+  trong mã.
 - Chạy riêng 10/10 xanh; 2 lõi (`start /affinity 3`) 6/6 xanh.

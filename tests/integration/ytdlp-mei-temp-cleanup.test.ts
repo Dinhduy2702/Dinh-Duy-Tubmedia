@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -90,7 +90,7 @@ describe.skipIf(!existsSync(ytDlp) || process.platform !== 'win32')('yt-dlp khô
     try {
       // Chờ tới khi yt-dlp THỰC SỰ chạy (đã gửi yêu cầu tới máy chủ) — trong lúc còn giải nén, thư mục _MEI chưa bị khóa
       // (đo 2026-10-16: dọn ngay khi _MEI vừa xuất hiện thì đổi tên được, ~1/3 lượt). Khoảng giải nén do ngưỡng tuổi tối thiểu
-      // (1 phút) che ở app thật — xem bài dưới.
+      // (1 phút) che ở app thật — kiểm ở unit test ytdlp-runtime-temp (giữ thư mục vừa cấp chưa đủ tuổi).
       expect(await waitFor(() => Promise.resolve(requests > 0), 30_000), 'yt-dlp phải gửi được yêu cầu').toBe(true);
       const live = (await meiFolders(root)).find((name) => !name.includes('_MEI999'))!;
 
@@ -105,44 +105,6 @@ describe.skipIf(!existsSync(ytDlp) || process.platform !== 'win32')('yt-dlp khô
       await running.catch(() => undefined);
       server.close();
     }
-    expect(await waitFor(async () => (await entries(root)).length === 0, 10_000)).toBe(true);
-  }, 60_000);
-
-  it('ngưỡng tuổi mặc định: dọn ngay lúc yt-dlp vừa khởi động (còn giải nén) KHÔNG đụng thư mục của nó', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'tubmedia-mei-test-'));
-    folders.push(root);
-    const runtime = new YtDlpRuntimeTemp(root);
-    const leftover = await runtime.allocate();
-    await mkdir(join(leftover.dir, '_MEI999'), { recursive: true });
-    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
-    await utimes(leftover.dir, tenMinutesAgo, tenMinutesAgo);
-    const server = createServer(() => undefined);
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const port = (server.address() as { port: number }).port;
-    const processes = new ProcessManager(silentLogger, runtime);
-    const controller = new AbortController();
-    const running = processes.run({
-      jobId: 'mei-starting',
-      tool: 'yt-dlp',
-      executablePath: ytDlp,
-      args: ['--socket-timeout', '60', `http://127.0.0.1:${port}/x.mp4`],
-      signal: controller.signal
-    });
-    try {
-      expect(await waitFor(async () => (await meiFolders(root)).some((name) => !name.includes('_MEI999')), 15_000)).toBe(true);
-      const live = (await meiFolders(root)).find((name) => !name.includes('_MEI999'))!;
-
-      const removed = await runtime.sweepUnused();
-
-      expect(removed).toBe(1);
-      expect(existsSync(leftover.dir)).toBe(false);
-      expect(existsSync(join(root, live)), 'thư mục của yt-dlp vừa khởi động phải còn nguyên').toBe(true);
-    } finally {
-      controller.abort();
-      await running.catch(() => undefined);
-      server.close();
-    }
-    // yt-dlp vừa bị hủy nhả thư mục chậm vài trăm ms — chờ app tự xóa xong rồi mới dọn thư mục thử.
     expect(await waitFor(async () => (await entries(root)).length === 0, 10_000)).toBe(true);
   }, 60_000);
 
