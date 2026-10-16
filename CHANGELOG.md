@@ -35,6 +35,13 @@
     video gốc, không còn bị dùng lại ở mọi lần ghép.
   - Thông báo chặn thành phẩm nói đúng lỗi nằm ở âm thanh hay hình ảnh, và nhật ký ghi lại nguyên văn câu báo lỗi để bên
     hỗ trợ tra cứu nhanh.
+- Video đang tải mà bị dừng ngang (tắt máy đột ngột, tắt ứng dụng bằng Task Manager, hoặc phần mềm diệt virus chặn công cụ
+  tải) không còn bị báo nhầm là "Video không khả dụng" và bỏ luôn. Tubmedia nhận ra đó là lần tải bị gián đoạn: video được
+  giữ lại ở trạng thái dở dang và tự tải lại. Những lỗi khác chưa rõ nguyên nhân giờ được ghi đúng là "lỗi không xác định".
+- Tubmedia không còn để lại các thư mục tạm "_MEI…" (mỗi thư mục khoảng 20 MB) trong thư mục Temp của Windows mỗi khi một
+  video bị tạm dừng, huỷ hoặc ứng dụng bị đóng giữa chừng. Trước đây các thư mục này tích dần, có máy lên tới hàng chục GB,
+  làm đầy ổ C. Thư mục tạm của công cụ tải giờ được dọn ngay khi xong việc, và phần còn sót được dọn ở lần mở ứng dụng kế
+  tiếp. Các thư mục cũ đã tích từ bản trước có thể dọn bằng Tubmedia → Dọn dẹp máy, mục "Tệp tạm của người dùng".
 
 # Tubmedia 1.6.3
 
