@@ -13,6 +13,7 @@ export type YtDlpFailureSubtype =
   | 'fragment'
   | 'extractor'
   | 'network'
+  | 'interrupted'
   | 'unknown';
 
 export interface YtDlpFailureDetail {
@@ -40,6 +41,7 @@ const ALL_FAILURE_SUBTYPES: ReadonlySet<YtDlpFailureSubtype> = new Set([
   'fragment',
   'extractor',
   'network',
+  'interrupted',
   'unknown'
 ]);
 
@@ -93,6 +95,9 @@ export function exhaustedDownloadFailureMessage(
   if (subtype === 'extractor') {
     return `Nền tảng chưa cung cấp dữ liệu video ổn định ${attemptLabel}. Tubmedia đã dừng riêng video này; dữ liệu tải dở vẫn được giữ an toàn.`;
   }
+  if (subtype === 'interrupted') {
+    return `Tiến trình tải vẫn bị dừng đột ngột ${attemptLabel} mà không có thông báo lỗi nào (ứng dụng, máy hoặc một phần mềm khác dừng nó). Tubmedia đã dừng riêng video này; dữ liệu tải dở vẫn được giữ để thử lại.`;
+  }
   if (subtype === 'network') {
     return `Kết nối tới máy chủ video vẫn không ổn định ${attemptLabel}. Tubmedia đã dừng riêng video này và giữ dữ liệu tải dở để thử lại sau.`;
   }
@@ -111,6 +116,7 @@ const YTDLP_FAILURE_CAUSES: Record<YtDlpFailureSubtype, string> = {
   fragment: 'một phần dữ liệu video bị gián đoạn',
   extractor: 'nền tảng chưa trả dữ liệu video ổn định',
   network: 'kết nối mạng hoặc máy chủ video không ổn định',
+  interrupted: 'tiến trình tải bị dừng đột ngột, không có thông báo lỗi (ứng dụng hoặc máy bị tắt ngang, phần mềm khác dừng tiến trình)',
   unknown: 'chưa xác định — xem chi tiết kỹ thuật trong Nhật ký'
 };
 
@@ -151,6 +157,9 @@ export function isExplicitlyRemovedYoutubeSource(text: string): boolean {
     'this video is no longer available because the account'
   ]);
 }
+
+/** Dòng "ERROR: …" (có thể kèm tiền tố "[extractor] ") hoặc Traceback của Python — dấu hiệu yt-dlp TỰ báo lỗi. */
+const YTDLP_ERROR_MARKER = /(?:^|\n)\s*(?:\[[^\]\n]*\]\s*)?ERROR:|Traceback \(most recent call last\)/i;
 
 export function classifyYtDlpFailure(text: string): YtDlpFailureDetail {
   const lower = text.toLowerCase();
@@ -295,6 +304,13 @@ export function classifyYtDlpFailure(text: string): YtDlpFailureDetail {
     ])
   ) {
     return { category: 'retryable', subtype: 'network', httpStatus: null, retryable: true };
+  }
+
+  // yt-dlp luôn in câu "ERROR: …" khi tự thất bại (Python sập thì có Traceback). Không có câu nào → tiến trình bị dừng ngang
+  // từ bên ngoài (taskkill, tắt máy, phần mềm khác): thử lại được. 2026-10-16: trước đây rơi xuống "không khả dụng", không
+  // thử lại — bài e2e Khởi động đỏ chập chờn trên CI (taskkill /T /F giết yt-dlp trước tiến trình chính vài ms).
+  if (!YTDLP_ERROR_MARKER.test(text)) {
+    return { category: 'retryable', subtype: 'interrupted', httpStatus: null, retryable: true };
   }
 
   return { category: 'non_retryable', subtype: 'unknown', httpStatus: null, retryable: false };
