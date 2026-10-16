@@ -5366,6 +5366,14 @@ test('Hướng B 429: dính giới hạn thì cả app nghỉ với nguồn đó
     shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
     await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
     await expectSeededSettingsKept(shellWindow, seededSettings);
+    // Cửa sổ hẹp (≤ 1180 px: màn 1024 px, hoặc ghép nửa màn hình 1920 px) — lượt Publish #35 (máy CI 1024×768) phát hiện huy
+    // hiệu đếm ngược 429 nằm trong thẻ CPU, mà thẻ CPU bị ẩn khi cửa sổ ≤ 1180 px → người dùng không thấy đếm ngược.
+    await electronApplication.evaluate(({ BrowserWindow }) => {
+      const mainWindow = BrowserWindow.getAllWindows()[0];
+      mainWindow?.unmaximize();
+      mainWindow?.setContentSize(1100, 700);
+    });
+    await expect.poll(() => shellWindow!.evaluate(() => window.innerWidth)).toBeLessThanOrEqual(1100);
 
     interface Job { id: string; projectId: string | null; type: string; status: string; attempts: number; errorCode: string | null; errorMessage: string | null; input: Record<string, unknown> }
     interface Desktop429Api {

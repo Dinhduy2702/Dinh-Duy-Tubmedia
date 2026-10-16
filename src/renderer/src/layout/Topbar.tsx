@@ -167,6 +167,10 @@ export function Topbar(): React.JSX.Element {
             <span />
             <span />
           </i>
+        </div>
+        {/* Huy hiệu trạng thái để NGOÀI thẻ CPU: thẻ CPU bị ẩn khi cửa sổ ≤ 1180 px (màn 1024 px, ghép nửa màn hình), từng làm
+            mất luôn đếm ngược 429 và "Đang giảm tải" — người dùng không biết app đang tự nghỉ (phát hiện ở lượt Publish #35). */}
+        <div className="topbar-status-badges">
           {systemLoadThrottled && (
             <span
               className="topbar-load-throttled"

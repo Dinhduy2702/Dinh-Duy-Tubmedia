@@ -599,6 +599,21 @@ html.light .tubmedia-logo-light {
   white-space: nowrap;
   cursor: help;
 }
+/* Khối huy hiệu trạng thái cạnh thẻ CPU — vẫn hiện khi thẻ CPU bị ẩn ở cửa sổ hẹp; không có huy hiệu thì không chiếm chỗ. */
+.topbar-status-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-content: center;
+  gap: 0.3rem;
+  min-width: 0;
+}
+.topbar-status-badges:empty {
+  display: none;
+}
+.topbar-status-badges .topbar-load-throttled {
+  margin-left: 0;
+}
 /* Hướng B 429: huy hiệu "Đang chờ do giới hạn {nền tảng}" (dùng chung kiểu "Đang giảm tải"); đã dừng hẳn thì tông lỗi. */
 .topbar-rate-limit {
   font-variant-numeric: tabular-nums;
