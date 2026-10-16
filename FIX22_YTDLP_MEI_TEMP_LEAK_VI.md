@@ -41,3 +41,12 @@ mọi video với `DISK_FULL`. Người dùng thật cũng tích dần như vậ
 - Lượt `npm run check` sau khi thêm `sweepUnused`: %TEMP% chung vẫn 165 → 165; thư mục riêng 24 thư mục (514 MB) → 1
   (24 MB, của bài e2e cuối cùng đóng app khi yt-dlp đang chạy — dọn ở lần mở app kế tiếp). Unit 1342, integration 178 + 1
   bỏ qua, e2e 48/48.
+
+## Bổ sung 2026-10-16: khoảng giải nén
+
+- Bài integration "dọn thư mục không còn ai dùng" từng đỏ ~1/3 lượt: nó gọi `sweepUnused(0)` (bỏ ngưỡng tuổi) ngay khi
+  `_MEI` vừa xuất hiện — lúc yt-dlp còn GIẢI NÉN, chưa nạp DLL, thư mục chưa bị khóa nên đổi tên được và bị xóa nhầm.
+- Ở app thật khoảng này do ngưỡng tuổi tối thiểu 1 phút che (giải nén chỉ vài giây; sau đó thư mục bị khóa suốt lúc
+  yt-dlp chạy — đo `EPERM` sau 4 s). Sửa bài: chỉ dọn sau khi yt-dlp đã gửi yêu cầu tới máy chủ (đã chạy thật); thêm bài
+  dọn với ngưỡng MẶC ĐỊNH ngay lúc yt-dlp vừa khởi động → thư mục của nó còn nguyên. Ghi rõ lý do ngưỡng trong mã.
+- Chạy riêng 10/10 xanh; 2 lõi (`start /affinity 3`) 6/6 xanh.
