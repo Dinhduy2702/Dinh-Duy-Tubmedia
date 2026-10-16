@@ -12,6 +12,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { downloadPacingArgs } from '../../src/shared/utils/download-pacing.js';
+import { removeSandbox as removeSandboxWithRetry } from './helpers/sandbox-cleanup.js';
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(currentDirectory, '../..');
@@ -99,12 +100,47 @@ async function closeElectronApplication(): Promise<void> {
 }
 
 /**
- * Xóa thư mục tạm của một bài kiểm sau khi đã đóng app. Ngay sau khi giết cây tiến trình Electron, Windows có lúc chưa nhả
- * khóa tệp (máy CI chậm: EPERM ở run 37748960748 khi phát hành 1.6.1) — fs.rmSync tự thử lại khi gặp
- * EPERM/EBUSY/ENOTEMPTY/EMFILE/ENFILE thay vì đánh rớt cả bài kiểm (và mọi bài phía sau, vì bộ chạy nối tiếp) chỉ vì dọn dẹp.
+ * Xóa thư mục tạm của một bài kiểm sau khi đã đóng app — thử lại tới hết hạn chờ (xem helpers/sandbox-cleanup.ts: trên
+ * Node 24 fs.rmSync bỏ qua maxRetries khi gặp EPERM, nên bản cũ chưa từng thử lại). Quá hạn vẫn không xóa được thì KHÔNG
+ * đánh rớt bài (bộ chạy nối tiếp: một thư mục tạm sót lại từng làm mọi bài phía sau "did not run" và chặn phát hành 1.6.1,
+ * 1.7.0) mà ghi chẩn đoán — tiến trình còn sống + tệp còn sót — vào nhật ký và chú thích của bài để biết thứ gì giữ khóa.
  */
-function removeSandbox(directory: string): void {
-  fs.rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+async function removeSandbox(directory: string): Promise<void> {
+  const result = await removeSandboxWithRetry(directory);
+  if (result.waitedMs >= 1_000 || !result.removed) {
+    appendRuntimeLog(
+      `Sandbox cleanup ${result.removed ? 'succeeded' : 'FAILED'} after ${result.waitedMs}ms (${result.attempts} attempts): ${directory}`
+    );
+  }
+  if (result.removed) return;
+  let processes = '';
+  try {
+    processes = execFileSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-Command',
+        "Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'electron|yt-dlp|ffmpeg|ffprobe|crashpad|MsMpEng' } | ForEach-Object { '{0} parent={1} {2} {3}' -f $_.ProcessId, $_.ParentProcessId, $_.Name, $_.CommandLine }"
+      ],
+      { encoding: 'utf8', windowsHide: true, timeout: 20_000 }
+    );
+  } catch (error) {
+    processes = `(không liệt kê được tiến trình: ${(error as Error).message})`;
+  }
+  const diagnostic = [
+    `Không xóa được thư mục tạm của bài kiểm sau ${result.waitedMs}ms: ${result.error ?? ''}`,
+    'Còn sót:',
+    ...(result.remaining ?? []),
+    'Tiến trình liên quan đang chạy:',
+    processes.trim()
+  ].join('\n');
+  appendRuntimeLog(diagnostic);
+  console.warn(diagnostic);
+  try {
+    test.info().annotations.push({ type: 'warning', description: diagnostic });
+  } catch {
+    // Gọi ngoài một bài kiểm (không có test.info()) — đã ghi nhật ký ở trên.
+  }
 }
 
 test.describe.configure({
@@ -139,7 +175,14 @@ test('opens the Download video Tubmedia desktop shell', async () => {
   // thư mục mặc định %APPDATA%\video-download-merge-studio-pro — chính là dữ liệu THẬT của người dùng (CSDL,
   // hàng đợi, cookies). Mọi lần chạy e2e đều phải dùng thư mục tạm riêng như các bài kiểm còn lại.
   const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-shell-'));
-  process.once('exit', () => removeSandbox(sandbox));
+  // Lúc tiến trình thoát không chờ bất đồng bộ được → xóa một lần, sót lại (đang bị khóa) thì thôi.
+  process.once('exit', () => {
+    try {
+      fs.rmSync(sandbox, { recursive: true, force: true });
+    } catch {
+      // Thư mục tạm của hệ điều hành — để lại cũng không ảnh hưởng kết quả kiểm.
+    }
+  });
 
   electronApplication = await electron.launch({
     args: [mainEntry],
@@ -303,7 +346,7 @@ test('không bắn thông báo nổi khi sửa danh sách link hoặc đổi s�
     await noFloatingNotice();
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -483,7 +526,7 @@ test('Giai đoạn 3: trích khung hình xem trước thật từ một đoạn 
   } finally {
     server?.close();
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -658,7 +701,7 @@ test('Sửa lỗi 2026-09-23 — tải xong 1 video qua Tải nhanh không làm 
   } finally {
     server?.close();
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -849,7 +892,7 @@ test('Giai đoạn 6 mục 2: cắt tệp có sẵn trên máy (không qua tải
     expect(cancelledStatus?.phase, 'hủy giữa chừng phải báo đúng "cancelled", không phải "failed"').toBe('cancelled');
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -1037,7 +1080,7 @@ test('Giai đoạn 6 mục 3: đổi tỉ lệ khung hình khi cắt tệp có s
     expect(originalCut.outputPath, 'không có hậu tố tỉ lệ khi giữ nguyên').not.toMatch(/\[\d+x\d+\]/);
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -1153,7 +1196,7 @@ test('Giai đoạn 6 mục 6: xem thông tin tệp — media:analyze trả đún
     ).rejects.toThrow(/không tìm thấy tệp/i);
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -1229,7 +1272,7 @@ test('Giai đoạn 6 mục 7: mẫu đặt tên tệp Tải nhanh — lưu/đọ
     expect(afterRejected.quickDownloadFilenameTemplate).toBe('{channel} - {title} ({date})');
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -1529,7 +1572,7 @@ test('B1: ghép video tự động tiếp tục đúng sau khi app bị đóng �
   } finally {
     server?.close();
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -1736,7 +1779,7 @@ test('B2: hai video cùng tiêu đề khác link đều được tải đầy đ
   } finally {
     server?.close();
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -1922,7 +1965,7 @@ test('S1 + S2: danh sách thứ hai cùng thư mục, cùng link dùng lại t�
   } finally {
     server?.close();
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -2112,7 +2155,7 @@ test('S3: ghép thấy tệp nguồn bị thiếu thì tự tải lại video đ
     openGate();
     server?.close();
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -2298,7 +2341,7 @@ test('P1: video không có tiếng hoặc im lặng từ nguồn được đo th
   } finally {
     server?.close();
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -2482,7 +2525,7 @@ test('P2: định dạng có tiếng mà tệp tải về mất luồng tiếng 
     clearInterval(watcher);
     server?.close();
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -2653,7 +2696,7 @@ test('P3: chế độ nguồn cao nhất không để tiếng Opus trong MP4 —
   } finally {
     server?.close();
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -2742,7 +2785,7 @@ test('A1: giới hạn quy trình song song đã tăng đúng từ 4 lên 6 (IPC
     expect(await addMergeButton.isDisabled(), 'nút "Thêm quy trình" phải bị khóa khi đã đạt đúng 6').toBe(true);
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -2844,7 +2887,7 @@ test('A2: 3 đề xuất tinh gọn giao diện đã duyệt hoạt động đú
     ).toBeGreaterThan(0);
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -2925,7 +2968,7 @@ test('Sửa lỗi sau phát hành 2026-09-25: phát hiện bản cập nhật hi
     expect(onUpdatesPage, 'bấm nút phải đi thẳng tới trang Cập nhật').toBe(true);
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -3064,7 +3107,7 @@ test('Sự cố 2026-09-25: chọn đúng hồ sơ Chrome thật khi lấy cooki
     expect(status.browserProfile).toBe('Profile 2');
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -3222,7 +3265,7 @@ test('C1: gợi ý điểm cắt tự động tìm đúng khoảng lặng/đổi
     expect(endTimeValue, 'ô Mốc kết thúc phải được điền đúng theo đoạn gợi ý đầu tiên').toBe('00:00:03');
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -3338,7 +3381,7 @@ test('Mục 5: nhắc khu cách ly khi mở app và trang xem khu cách ly của
     expect(fs.existsSync(kept), 'không có gì bị xóa khi chỉ xem/chọn').toBe(true);
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -3394,7 +3437,7 @@ test('Đợt 3: trang Nhật ký hiện lịch sử ngay khi mở', async () => 
       .toBe(300);
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -3531,7 +3574,7 @@ test('Cảnh báo thư mục tạm dùng chung: không có banner đầu trang, 
     expect(fs.existsSync('C:\\Users\\TubmediaE2E'), 'không tạo thư mục thật nào ở đường dẫn giả').toBe(false);
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -3581,7 +3624,7 @@ test('Thoát an toàn: một bước dọn dẹp bị treo vẫn thoát hẳn tr
     expect(trail).toContain('THOÁT XONG');
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -3714,7 +3757,7 @@ test('Phần B thông báo: thay thông báo trùng, đã tắt thì không hi�
     await expect(shellWindow!.locator('.diagnostic-dock')).toHaveCount(0);
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -3823,7 +3866,7 @@ test('Phần A giao diện: không còn chữ dài cố định, ⓘ hiện đ�
     expect((await hint.getAttribute('aria-label'))?.length ?? 0).toBeGreaterThan(20);
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -3951,7 +3994,7 @@ test('Phần C: áp dụng thư mục tạm cho tất cả danh sách — xác n
     await expect(shellWindow!.locator('.compact-config-temp input').first()).not.toHaveValue(sharedTemp);
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -4019,7 +4062,7 @@ test('Đợt 3 mục 7: lọc nhật ký theo mức ở CSDL — đủ lỗi cũ
     expect(await shellWindow!.locator('.logs-data-table tbody tr', { hasText: 'Gỡ lỗi số' }).count()).toBe(0);
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -4083,7 +4126,7 @@ test('Đợt 3 mục 8: lỗi cũ nạp từ lịch sử không bật lại thô
     await expect(shellWindow!.locator('.diagnostic-dock')).toHaveCount(0);
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -4187,7 +4230,7 @@ test('Đợt 3 mục 9: xóa nhật ký hỏi xác nhận — trang Nhật ký, 
     await expect.poll(async () => countLogs(), { timeout: 10_000 }).toBe(0);
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -4274,7 +4317,7 @@ test('Khám phá #12: Nhật ký riêng của danh sách đọc lịch sử ngay
     }
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -4344,7 +4387,7 @@ test('Đợt 4 mục 15: không chạy công cụ đặt sẵn trong thư mục 
     expect(path.resolve(usedFfmpeg!).toLowerCase().startsWith(path.resolve(strangeCwd).toLowerCase())).toBe(false);
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -4412,7 +4455,7 @@ test('Phát hiện phụ Đợt 5: bản chạy từ mã nguồn dùng yt-dlp tr
     );
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -4516,7 +4559,7 @@ test('Ô chú thích ⓘ/⚠: tự chọn phía, nằm gọn trong cửa sổ, k
     expect(checked, 'đã kiểm đủ các icon').toBeGreaterThan(20);
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -4606,7 +4649,7 @@ test('Đợt 5 mục 10: nhãn Sáng/Tối ở thanh trên luôn khớp giao di�
     expect(await worstLag(), 'nhãn Sáng/Tối lệch giao diện đang hiện (ms)').toBeLessThan(150);
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -4639,7 +4682,7 @@ test('Đợt 5 huy hiệu idle: thẻ chưa có tác vụ ghi tiếng Việt', a
     }
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -4679,7 +4722,7 @@ test('Đợt 5 mã commit: Giới thiệu và Chẩn đoán hiện mã commit c�
     await expect(build).toContainText(/v\d+\.\d+\.\d+/);
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -4806,7 +4849,7 @@ test('Đợt 5 mục 19: link không phải trang video báo đúng "link không
   } finally {
     server?.close();
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -4863,7 +4906,7 @@ test('Đợt 5 mục 14: Chẩn đoán "Lỗi gần nhất" nêu đúng nguyên 
     await expect(list).not.toContainText('Không thể hoàn tất thao tác');
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -5007,7 +5050,7 @@ test('Khởi động: tác vụ tạo ngay khi vừa mở app không bị giữ 
     server?.closeAllConnections();
     server?.close();
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -5115,7 +5158,7 @@ test('Đợt 5 mục 13: Xem trước & Cắt liệt kê các video tải xong g
     await shellWindow.screenshot({ path: path.join(projectRoot, 'test-results', 'dot5-muc13-chon-video.png') });
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -5219,7 +5262,7 @@ test('Đợt 5 mục 16: quy trình ghép còn dữ liệu bị ẩn khi bớt s
     await expect(shellWindow!.getByRole('dialog')).toHaveCount(0);
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -5397,7 +5440,7 @@ test('Hướng B 429: dính giới hạn thì cả app nghỉ với nguồn đó
   } finally {
     server?.close();
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -5581,7 +5624,7 @@ test('Lag bước 1: tối đa N danh sách tải chạy cùng lúc, mỗi danh 
   } finally {
     server?.close();
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -5788,7 +5831,7 @@ test('Lag bước 2 + 3: 2 danh sách × 4 luồng bắt đầu dần, vẫn ch�
   } finally {
     server?.close();
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -5846,7 +5889,7 @@ test('Cài đặt › Tải danh sách: không còn ô aria2c giả (không có 
     await expect(shellWindow.getByText(/aria2c 16 kết nối/)).toHaveCount(0);
   } finally {
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -5914,7 +5957,7 @@ test('Hướng C 429: yt-dlp thật nhận và làm đúng tham số giãn nhị
     expect(fs.statSync(path.join(sandbox, 'sau-429.mp4')).size).toBe(body.length);
   } finally {
     server.close();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });
 
@@ -6043,6 +6086,6 @@ test('Lịch sử: video lỗi hiện lý do cụ thể trên bảng và CSV có
   } finally {
     server?.close();
     await closeElectronApplication();
-    removeSandbox(sandbox);
+    await removeSandbox(sandbox);
   }
 });

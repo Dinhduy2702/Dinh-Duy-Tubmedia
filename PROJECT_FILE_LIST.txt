@@ -76,6 +76,7 @@ FIX22_YTDLP_MEI_TEMP_LEAK_VI.md
 FIX23_YTDLP_KILLED_NOT_UNAVAILABLE_VI.md
 FIX24_DRAFT_GUARD_BUSY_SLOT_VI.md
 FIX25_CACHE_PENDING_PER_JOB_VI.md
+FIX26_E2E_SANDBOX_CLEANUP_VI.md
 FIX3_RATE_CONTROL_UNIT_TEST_v1.2.0_VI.md
 FIX4_BUNDLED_FFMPEG_PAYLOAD_v1.2.0_VI.md
 FIX5_CHANGELOG_ORDER_v1.2.0_VI.md
@@ -491,6 +492,7 @@ src/shared/utils/youtube-url-validation.ts
 src/shared/video-link-filter.ts
 TEST_RESULTS.md
 tests/e2e/app.spec.ts
+tests/e2e/helpers/sandbox-cleanup.ts
 tests/integration/auto-resource-profile-duplicates.test.ts
 tests/integration/cookie-jar-stale-cleanup.test.ts
 tests/integration/cookie-jar-store.test.ts
@@ -562,6 +564,7 @@ tests/unit/download-performance.test.ts
 tests/unit/download-quality.test.ts
 tests/unit/download-recovery-policy.test.ts
 tests/unit/download-recovery-r49.test.ts
+tests/unit/e2e-sandbox-cleanup.test.ts
 tests/unit/editor-workflows-1.3.0.test.ts
 tests/unit/electron-fuses.test.ts
 tests/unit/encoder-selection.test.ts
