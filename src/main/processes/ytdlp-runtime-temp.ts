@@ -14,8 +14,9 @@ import { basename, join } from 'node:path';
  */
 export const YTDLP_RUNTIME_TEMP_FOLDER = 'tubmedia-ytdlp-runtime';
 /**
- * Thư mục mới cấp chưa đủ tuổi này thì không dọn: giữa lúc tạo thư mục và lúc yt-dlp kịp nạp DLL vào đó (vài ms) nó chưa bị
- * khóa, đổi tên sẽ thành công nhầm.
+ * Thư mục mới cấp chưa đủ tuổi này thì không dọn: từ lúc tạo thư mục, qua lúc yt-dlp GIẢI NÉN vào _MEI (vài trăm ms tới vài
+ * giây trên máy chậm), tới khi nó nạp xong DLL, thư mục chưa bị khóa — đổi tên sẽ thành công nhầm và xóa mất tệp của một
+ * yt-dlp đang khởi động (đo 2026-10-16: dọn ngay khi _MEI vừa xuất hiện thì đổi tên được ~1/3 lượt).
  */
 export const YTDLP_RUNTIME_MIN_AGE_MS = 60_000;
 /** Dọn thêm sau mỗi lần một yt-dlp kết thúc, tối đa một lần mỗi khoảng này. */
