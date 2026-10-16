@@ -1515,7 +1515,9 @@ export class DownloadEngine {
           throw new DownloadFailedError(
             failure.subtype === 'http_403'
               ? 'Máy chủ video tạm thời từ chối yêu cầu (HTTP 403).'
-              : failure.subtype === 'fragment'
+              : failure.subtype === 'interrupted'
+                ? 'Tiến trình tải bị dừng đột ngột mà không có thông báo lỗi nào (ứng dụng, máy hoặc một phần mềm khác dừng nó). Tubmedia sẽ thử tải lại video này.'
+                : failure.subtype === 'fragment'
                 ? 'Một phần dữ liệu video bị gián đoạn.'
                 : 'Kết nối mạng hoặc máy chủ video đang không ổn định.',
             true,
@@ -1528,7 +1530,9 @@ export class DownloadEngine {
         }
 
         throw new DownloadFailedError(
-          'Video không khả dụng hoặc nền tảng đang từ chối truy cập (video riêng tư, bị chặn theo vùng hoặc không còn định dạng phù hợp). Mở Nhật ký riêng của danh sách để xem loại lỗi đã được phân loại.',
+          failure.subtype === 'unavailable'
+            ? 'Video không khả dụng hoặc nền tảng đang từ chối truy cập (video riêng tư, bị chặn theo vùng hoặc không còn định dạng phù hợp). Mở Nhật ký riêng của danh sách để xem loại lỗi đã được phân loại.'
+            : 'Không tải được video này vì một lỗi không xác định do công cụ tải (yt-dlp) báo về. Mở Nhật ký riêng của danh sách để xem chi tiết kỹ thuật; nếu lỗi lặp lại, hãy gửi gói chẩn đoán cho bên hỗ trợ.',
           false,
           failureDetails
         );
