@@ -300,6 +300,11 @@ export const systemCleanupRunSchema = z
     runId: idSchema
   })
   .strict();
+export const errorReportRunSchema = z
+  .object({
+    runId: idSchema
+  })
+  .strict();
 export const systemCleanupQuarantineRestoreSchema = z
   .object({
     ids: z.array(idSchema).min(1).max(500)

@@ -99,6 +99,13 @@ export const IPC = {
     openFolder: 'logs:open-folder',
     clear: 'logs:clear'
   },
+  /** "Xuất báo cáo lỗi" của một tác vụ lỗi (2026-10-20). */
+  errorReport: {
+    start: 'error-report:start',
+    status: 'error-report:status',
+    cancel: 'error-report:cancel',
+    reveal: 'error-report:reveal'
+  },
   backups: {
     create: 'backups:create',
     restore: 'backups:restore',

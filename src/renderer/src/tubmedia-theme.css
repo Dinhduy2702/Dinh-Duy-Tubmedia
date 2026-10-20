@@ -6837,6 +6837,26 @@ body {
   font-size: 0.62rem;
   white-space: normal;
 }
+/* "Xuất báo cáo lỗi" (2026-10-20) trên dòng lỗi / bị gián đoạn. */
+.history-path-cell .history-error-report {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.15rem;
+  overflow: visible;
+  color: var(--muted);
+  font-size: 0.62rem;
+  white-space: normal;
+}
+.history-path-cell .history-error-report .btn {
+  min-height: 0;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.62rem;
+}
+.history-path-cell .history-error-report .history-error-report-note {
+  color: var(--tone-error-text);
+}
 .diagnostics-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

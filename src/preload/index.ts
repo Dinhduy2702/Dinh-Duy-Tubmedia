@@ -109,6 +109,12 @@ const api: DesktopApi = {
     openFolder: () => invoke(IPC.logs.openFolder),
     clear: (projectId) => invoke(IPC.logs.clear, projectId ? { projectId } : {})
   },
+  errorReport: {
+    start: (jobId) => invoke(IPC.errorReport.start, { jobId }),
+    status: (runId) => invoke(IPC.errorReport.status, { runId }),
+    cancel: (runId) => invoke(IPC.errorReport.cancel, { runId }),
+    reveal: (runId) => invoke(IPC.errorReport.reveal, { runId })
+  },
   backups: {
     create: (projectId, includeMedia = false) => invoke(IPC.backups.create, { projectId, includeMedia }),
     preview: (path) => invoke(IPC.backups.preview, { path }),

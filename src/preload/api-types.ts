@@ -35,6 +35,7 @@ import type {
   SystemCleanupStatus
 } from '@shared/system-cleanup.js';
 import type { QuickDownloadRequest, QuickDownloadStatus } from '@shared/quick-download.js';
+import type { ErrorReportStatus } from '@shared/types/error-report.js';
 import type { VideoLinkFilterRequest, VideoLinkFilterResult } from '@shared/video-link-filter.js';
 import type { CutSuggestion, LocalCutAspectRatio, LocalCutRequest, LocalCutStatus } from '@shared/local-cut.js';
 export interface DesktopApi {
@@ -176,6 +177,14 @@ export interface DesktopApi {
     exportDiagnostics(): Promise<string | null>;
     openFolder(): Promise<string>;
     clear(projectId?: string): Promise<{ removed: number }>;
+  };
+  errorReport: {
+    /** Hỏi nơi lưu .zip rồi chạy nền; null nếu người dùng đóng hộp thoại. */
+    start(jobId: string): Promise<ErrorReportStatus | null>;
+    status(runId: string): Promise<ErrorReportStatus | null>;
+    cancel(runId: string): Promise<ErrorReportStatus | null>;
+    /** Mở thư mục chứa tệp .zip vừa xuất (chỉ tệp của lượt đã xong). */
+    reveal(runId: string): Promise<void>;
   };
   backups: {
     create(projectId?: string, includeMedia?: boolean): Promise<string>;
