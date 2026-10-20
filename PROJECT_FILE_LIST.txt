@@ -78,6 +78,7 @@ FIX24_DRAFT_GUARD_BUSY_SLOT_VI.md
 FIX25_CACHE_PENDING_PER_JOB_VI.md
 FIX26_E2E_SANDBOX_CLEANUP_VI.md
 FIX27_TOPBAR_BADGES_NARROW_VI.md
+FIX28_REMUX_FRESH_DEEP_VERIFY_VI.md
 FIX3_RATE_CONTROL_UNIT_TEST_v1.2.0_VI.md
 FIX4_BUNDLED_FFMPEG_PAYLOAD_v1.2.0_VI.md
 FIX5_CHANGELOG_ORDER_v1.2.0_VI.md
@@ -521,6 +522,7 @@ tests/integration/queue-retry-requeue.test.ts
 tests/integration/queue-startup-hold.test.ts
 tests/integration/queue-startup-session-jobs.test.ts
 tests/integration/queue-temp-cleanup-safety.test.ts
+tests/integration/remux-fresh-deep-verify.test.ts
 tests/integration/restore-sources-policy.test.ts
 tests/integration/settings-restore-policy.test.ts
 tests/integration/settings-rollback-compat.test.ts
@@ -605,6 +607,7 @@ tests/unit/merge-engine-aspect-ratio.test.ts
 tests/unit/merge-lane-visibility.test.ts
 tests/unit/merge-output-integrity.test.ts
 tests/unit/merge-product-name-length.test.ts
+tests/unit/merge-remux-verify-level.test.ts
 tests/unit/merge-target.test.ts
 tests/unit/merge-timeline-reorder.test.ts
 tests/unit/merge-visual-boundary-hotfix11.test.ts
