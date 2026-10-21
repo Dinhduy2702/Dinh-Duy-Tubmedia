@@ -58,6 +58,7 @@ electron.vite.config.ts
 eslint.config.js
 FFMPEG_PIPELINE.md
 FIX_ASPECT_RATIO_v1.0.1_VI.md
+FIX_MINIMIZE_KEEPS_TASKBAR_VI.md
 FIX_SUMMARY.md
 FIX_UNIT_TEST_GATE_v1.2.0_VI.md
 FIX10_TIMESTAMP_REPAIR_ERROR_DETAIL_v1.2.0_VI.md
@@ -533,7 +534,6 @@ tests/integration/restore-sources-policy.test.ts
 tests/integration/settings-restore-policy.test.ts
 tests/integration/settings-rollback-compat.test.ts
 tests/integration/system-cleanup-service.test.ts
-tests/integration/tray-minimize-hint.test.ts
 tests/integration/visual-verify-decode-detail.test.ts
 tests/integration/workbench-draft-busy-guard.test.ts
 tests/integration/ytdlp-killed-download-error.test.ts

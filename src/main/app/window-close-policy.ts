@@ -5,9 +5,12 @@ import type { AppSettings } from '@shared/types/domain.js';
  * Trước đây công tắc "Thu nhỏ xuống khay hệ thống" lấn át ô "Khi đóng ứng dụng": bấm X luôn ẩn xuống khay
  * dù chọn "Luôn hỏi", để lại tiến trình chạy ẩn nhiều giờ. Quyết định của người dùng: hai cài đặt tách bạch —
  * nút X CHỈ theo ô "Khi đóng ứng dụng", công tắc CHỈ áp dụng cho nút thu nhỏ.
+ * 2026-10-20 (bản cài 1.7.0): công tắc bật thì nút thu nhỏ từng ẩn cửa sổ khỏi thanh tác vụ → tưởng app đã đóng hẳn mà
+ * vẫn chạy. Người dùng chốt: nút thu nhỏ LUÔN thu nhỏ xuống thanh tác vụ; công tắc chỉ thêm biểu tượng ở khay; chỉ nút X
+ * (ô "Khi đóng ứng dụng" = "Thu nhỏ xuống khay") mới ẩn hẳn cửa sổ.
  */
 export type CloseAction = 'hide-to-tray' | 'quit' | 'ask' | 'pause_and_exit' | 'cancel_and_exit';
-export type MinimizeAction = 'hide-to-tray' | 'default';
+export type MinimizeAction = 'minimize-with-tray-icon' | 'default';
 
 /** Cố ý KHÔNG nhận minimizeToTray: nút X không bao giờ phụ thuộc công tắc của nút thu nhỏ. */
 export function decideCloseAction(input: {
@@ -21,5 +24,5 @@ export function decideCloseAction(input: {
 }
 
 export function decideMinimizeAction(input: { minimizeToTray: boolean }): MinimizeAction {
-  return input.minimizeToTray ? 'hide-to-tray' : 'default';
+  return input.minimizeToTray ? 'minimize-with-tray-icon' : 'default';
 }

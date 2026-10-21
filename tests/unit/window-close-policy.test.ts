@@ -30,9 +30,12 @@ describe('nút X chỉ theo ô "Khi đóng ứng dụng"', () => {
   });
 });
 
-describe('công tắc "Thu nhỏ xuống khay hệ thống" chỉ áp dụng cho nút thu nhỏ (—)', () => {
-  it('bật → nút thu nhỏ ẩn xuống khay; tắt → thu nhỏ bình thường xuống thanh tác vụ', () => {
-    expect(decideMinimizeAction({ minimizeToTray: true })).toBe('hide-to-tray');
+// Bản cài 1.7.0, 2026-10-20: công tắc bật → bấm "—" thì cửa sổ biến mất khỏi thanh tác vụ, người dùng tưởng app đã
+// đóng hẳn (thực ra vẫn chạy ẩn ở khay; lời nhắc chỉ hiện một lần duy nhất từ 09/10). Người dùng chốt: "—" LUÔN thu nhỏ
+// xuống thanh tác vụ như mọi app; công tắc chỉ thêm biểu tượng ở khay; chỉ nút X (theo "Khi đóng ứng dụng") mới ẩn hẳn.
+describe('công tắc khay chỉ thêm biểu tượng ở khay — nút thu nhỏ (—) không bao giờ ẩn cửa sổ', () => {
+  it('bật → thu nhỏ bình thường + có biểu tượng ở khay; tắt → thu nhỏ bình thường', () => {
+    expect(decideMinimizeAction({ minimizeToTray: true })).toBe('minimize-with-tray-icon');
     expect(decideMinimizeAction({ minimizeToTray: false })).toBe('default');
   });
 });
@@ -54,14 +57,19 @@ describe('index.ts dùng đúng chính sách (test canh mã nguồn)', () => {
     expect(quitBranch).not.toContain('window.close()');
   });
 
-  it('cửa sổ có xử lý sự kiện thu nhỏ qua decideMinimizeAction', () => {
+  it('sự kiện thu nhỏ đi qua decideMinimizeAction, chỉ tạo biểu tượng khay, KHÔNG ẩn cửa sổ', () => {
     expect(source).toMatch(/\.on\('minimize'/);
-    expect(source).toContain('decideMinimizeAction(');
+    const minimize = source.slice(source.indexOf("window.on('minimize'"), source.indexOf('async function connectToolsAtStartup'));
+    expect(minimize).toContain('decideMinimizeAction(');
+    expect(minimize).toContain('ensureTray()');
+    expect(minimize).not.toContain('.hide()');
+    expect(minimize).not.toContain('setSkipTaskbar');
   });
 
-  it('nhãn công tắc trong Cài đặt nói rõ là nút thu nhỏ, không còn trùng chữ với lựa chọn của nút X', () => {
+  it('nhãn công tắc trong Cài đặt nói đúng hành vi mới (thu nhỏ vẫn ở thanh tác vụ), không còn chữ "ẩn"', () => {
     const settings = readFileSync(join(process.cwd(), 'src/renderer/src/pages/SettingsPage.tsx'), 'utf8');
-    expect(settings).toContain('Nút thu nhỏ (—) ẩn xuống khay hệ thống');
+    expect(settings).toContain('Hiện biểu tượng ở khay hệ thống khi thu nhỏ (—)');
+    expect(settings).not.toContain('Nút thu nhỏ (—) ẩn xuống khay hệ thống');
     expect(settings).not.toContain('<Toggle label="Thu nhỏ xuống khay hệ thống"');
   });
 });
