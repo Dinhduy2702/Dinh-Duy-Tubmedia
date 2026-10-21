@@ -179,23 +179,12 @@ function wireWindow(window: BrowserWindow): void {
     event.preventDefault();
     void requestClose(window);
   });
-  // Công tắc "Thu nhỏ xuống khay hệ thống" chỉ áp dụng cho nút thu nhỏ (—), không ảnh hưởng nút X.
+  // Nút thu nhỏ (—) để Windows thu nhỏ bình thường xuống thanh tác vụ — KHÔNG ẩn cửa sổ (ẩn từng khiến tưởng app đã
+  // đóng hẳn, 2026-10-20). Công tắc khay chỉ bảo đảm có biểu tượng ở khay (kể cả khi vừa bật công tắc lúc app đang mở).
   window.on('minimize', () => {
     if (!context) return;
-    if (decideMinimizeAction({ minimizeToTray: context.settings.get().minimizeToTray }) !== 'hide-to-tray') return;
+    if (decideMinimizeAction({ minimizeToTray: context.settings.get().minimizeToTray }) !== 'minimize-with-tray-icon') return;
     ensureTray();
-    window.hide();
-    // Lần đầu: cửa sổ biến mất khỏi thanh tác vụ nên dễ tưởng app đã đóng — nhắc bằng thông báo của Windows.
-    if (context.settings.consumeTrayMinimizeHint()) {
-      tray?.displayBalloon({
-        iconType: 'info',
-        title: 'Tubmedia vẫn đang chạy',
-        content:
-          'Ứng dụng đã thu nhỏ xuống khay hệ thống (góc phải dưới, cạnh đồng hồ). Bấm biểu tượng Tubmedia để mở lại; ' +
-          'chuột phải → "Thoát an toàn" để tắt hẳn.'
-      });
-      context.logger.info('app', 'TRAY_MINIMIZE_HINT_SHOWN', 'Đã nhắc lần đầu: nút thu nhỏ ẩn ứng dụng xuống khay hệ thống.');
-    }
   });
 }
 

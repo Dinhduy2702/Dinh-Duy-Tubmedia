@@ -3634,6 +3634,85 @@ test('Thoát an toàn: một bước dọn dẹp bị treo vẫn thoát hẳn tr
   }
 });
 
+// Bản cài 1.7.0, 2026-10-20: công tắc khay bật → bấm "—" thì cửa sổ biến mất khỏi thanh tác vụ, người dùng tưởng app đã
+// đóng hẳn. Người dùng chốt: "—" luôn thu nhỏ xuống thanh tác vụ; công tắc chỉ thêm biểu tượng ở khay.
+test('Nút thu nhỏ (—) khi bật công tắc khay: cửa sổ vẫn thu nhỏ xuống thanh tác vụ, không bị ẩn, app không thoát', async () => {
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-minimize-'));
+  try {
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+        ),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: path.join(sandbox, 'userdata'),
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    const child = electronApplication.process();
+    mainProcessId = child.pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    let exited = false;
+    child.once('exit', () => {
+      exited = true;
+    });
+
+    const saved = await shellWindow.evaluate(async () =>
+      (
+        await (
+          window as unknown as {
+            desktop: { settings: { update: (patch: { minimizeToTray: boolean }) => Promise<{ minimizeToTray: boolean }> } };
+          }
+        ).desktop.settings.update({ minimizeToTray: true })
+      ).minimizeToTray
+    );
+    expect(saved).toBe(true);
+
+    // Cùng đường với nút "—" gốc của Windows: minimize() → sự kiện 'minimize' của cửa sổ. Đo bằng sự kiện 'hide'
+    // (window.hide() = biến mất khỏi thanh tác vụ); không dùng isVisible() — Electron trên Windows trả false cho mọi
+    // cửa sổ đang thu nhỏ.
+    await electronApplication.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0]!;
+      const scope = globalThis as unknown as { __minimizeHidden?: boolean };
+      scope.__minimizeHidden = false;
+      window.on('hide', () => {
+        scope.__minimizeHidden = true;
+      });
+      window.minimize();
+    });
+    await sleep(1_500);
+    const state = await electronApplication.evaluate(({ BrowserWindow }) => {
+      const windows = BrowserWindow.getAllWindows();
+      return {
+        count: windows.length,
+        minimized: windows[0]?.isMinimized() ?? false,
+        hidden: (globalThis as unknown as { __minimizeHidden?: boolean }).__minimizeHidden ?? true
+      };
+    });
+    expect(exited, 'bấm "—" không được thoát app').toBe(false);
+    expect(state.count).toBe(1);
+    expect(state.minimized, 'cửa sổ ở trạng thái thu nhỏ (nằm trên thanh tác vụ)').toBe(true);
+    expect(state.hidden, 'cửa sổ KHÔNG bị ẩn (ẩn = biến mất khỏi thanh tác vụ)').toBe(false);
+
+    await electronApplication.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.restore());
+    await sleep(500);
+    const restored = await electronApplication.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0]!;
+      return { minimized: window.isMinimized(), visible: window.isVisible() };
+    });
+    expect(restored).toEqual({ minimized: false, visible: true });
+  } finally {
+    await closeElectronApplication();
+    await removeSandbox(sandbox);
+  }
+});
+
 /**
  * Phần B rà soát thông báo (người dùng duyệt 2026-10-06). Gửi thông báo/nhật ký từ tiến trình chính qua ĐÚNG kênh sự
  * kiện app dùng thật (events:attention, events:log) rồi kiểm giao diện:
