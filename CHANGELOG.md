@@ -1,3 +1,23 @@
+# Tubmedia 1.7.1
+
+- Ghép video phát hiện sớm video nguồn bị hỏng tiếng hoặc hỏng hình, ngay ở bước chuẩn bị, thay vì ghép xong mới báo lỗi:
+  - Bản sao nhanh (remux) của từng video giờ được kiểm toàn bộ cả hình lẫn tiếng ngay khi vừa tạo. Trước đây một số video
+    nguồn hỏng tiếng lọt qua bước này, tới khi đã ghép xong cả thành phẩm mới bị chặn, mà câu lỗi chỉ nêu thời điểm trong
+    thành phẩm chứ không nói video nào hỏng.
+  - Giờ thông báo nói rõ tên video nguồn bị hỏng; tệp lỗi được chuyển vào khu cách ly và không được lưu lại để dùng lần sau.
+  - Tạm dừng hoặc huỷ đúng lúc đang kiểm không còn bị coi nhầm là video hỏng.
+- Trang Lịch sử có nút "Xuất báo cáo lỗi" trên dòng "Có lỗi" hoặc "Bị gián đoạn", để gửi cho bên hỗ trợ khi cần:
+  - Bấm nút, chọn nơi lưu (mặc định thư mục Tài liệu) → Tubmedia gom vào một tệp .zip: câu lỗi, nhật ký của tác vụ và của
+    danh sách, phiên bản ứng dụng và công cụ, và kết quả kiểm lại từng video (sạch / hỏng hình / hỏng tiếng / không còn
+    trên ổ). Với tác vụ ghép, mọi video của danh sách và các bản chuẩn bị của chúng đều được kiểm lại toàn bộ.
+  - Chạy nền, có tiến độ và nút Huỷ; xong bấm "Mở thư mục" để thấy tệp. Báo cáo không kèm video, và cookies hay mã đăng
+    nhập đều được che.
+- Nút thu nhỏ (—) giờ luôn thu nhỏ cửa sổ xuống thanh tác vụ như mọi ứng dụng khác. Trước đây, khi bật công tắc khay hệ
+  thống, bấm "—" làm cửa sổ biến mất khỏi thanh tác vụ, dễ tưởng Tubmedia đã tắt trong khi vẫn chạy ẩn:
+  - Công tắc đổi tên thành "Hiện biểu tượng ở khay hệ thống khi thu nhỏ (—)": khi bật, có thêm biểu tượng Tubmedia ở khay
+    (bấm để mở lại, chuột phải → "Thoát an toàn"). Lựa chọn bạn đã đặt được giữ nguyên.
+  - Chỉ nút X mới ẩn hẳn ứng dụng xuống khay, và chỉ khi "Khi đóng ứng dụng" được chọn là "Thu nhỏ xuống khay hệ thống".
+
 # Tubmedia 1.7.0
 
 - Số danh sách tải chạy cùng lúc giờ được tự chọn theo đúng sức máy của bạn (6 mức), thay vì để mọi danh sách chạy dồn một
