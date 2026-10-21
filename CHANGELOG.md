@@ -17,6 +17,12 @@
   - Công tắc đổi tên thành "Hiện biểu tượng ở khay hệ thống khi thu nhỏ (—)": khi bật, có thêm biểu tượng Tubmedia ở khay
     (bấm để mở lại, chuột phải → "Thoát an toàn"). Lựa chọn bạn đã đặt được giữ nguyên.
   - Chỉ nút X mới ẩn hẳn ứng dụng xuống khay, và chỉ khi "Khi đóng ứng dụng" được chọn là "Thu nhỏ xuống khay hệ thống".
+- Video tải về bị mất một đoạn hình không còn bị coi là tải thành công. Trước đây, đôi khi một đoạn hình bị rớt trong lúc
+  tải (ví dụ video 10:41 chỉ còn 9:47 hình, từ phút 1:21 hình chạy trước tiếng) mà tiếng vẫn đủ, nên Tubmedia vẫn cho qua:
+  - Sau khi tải, Tubmedia so độ dài phần hình với phần tiếng; hình ngắn hơn tiếng quá 3 giây thì coi là tải hỏng, chuyển
+    tệp lỗi vào khu cách ly và tự tải lại video đó.
+  - Video đã tải trước đó mà bị hụt hình cũng không còn được dùng lại cho danh sách khác.
+  - Nhật ký của danh sách giờ ghi lại cả cảnh báo của công cụ tải khi tải thành công, để dễ tìm nguyên nhân nếu có sự cố.
 
 # Tubmedia 1.7.0
 
