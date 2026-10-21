@@ -45,6 +45,10 @@ let downloadedAudioCodec = 'aac';
 let ytdlpExt = 'mp4';
 let ffmpegCalls: string[][] = [];
 let ffmpegAvailable = false;
+/** P4: tệp nào có luồng hình bị hụt (bộ phân tích giả trả luồng hình 468,9 s trong khi tiếng 522,3 s). */
+let shortVideo: (path: string) => boolean = () => false;
+/** P4: các dòng yt-dlp giả in ra stderr. */
+let ytdlpStderrLines: string[] = [];
 const AAC_MARK = 'AACM';
 const audioCodecOf = (path: string): string =>
   existsSync(path) && readFileSync(path).subarray(0, 4).toString() === AAC_MARK ? 'aac' : downloadedAudioCodec;
@@ -168,6 +172,8 @@ beforeEach(() => {
   ytdlpExt = 'mp4';
   ffmpegCalls = [];
   ffmpegAvailable = false;
+  shortVideo = () => false;
+  ytdlpStderrLines = [];
   toolsGet = vi.fn((name: string) =>
     name === 'yt-dlp' && ytdlpAvailable
       ? { available: true, executablePath: join(folder, 'yt-dlp-gia.exe') }
@@ -185,7 +191,12 @@ beforeEach(() => {
       Promise.resolve(
         noAudioStream
           ? { ...mediaInfo(4096), audioCodec: null, audioBitrate: null, sampleRate: null, channels: null, channelLayout: null }
-          : { ...mediaInfo(4096), audioCodec: audioCodecOf(path) }
+          : {
+              ...mediaInfo(4096),
+              audioCodec: audioCodecOf(path),
+              videoStreamDuration: shortVideo(path) ? 468.9 : 522.2,
+              audioStreamDuration: 522.3
+            }
       )
     )
   };
@@ -204,7 +215,7 @@ beforeEach(() => {
   };
   // yt-dlp giả: ghi tệp đúng theo mẫu -o engine truyền vào rồi báo đường dẫn như yt-dlp thật (__VDMSP_FILE__).
   const processes = {
-    run: vi.fn((options: { tool?: string; args: string[]; onStdoutLine?: (line: string) => void }) => {
+    run: vi.fn((options: { tool?: string; args: string[]; onStdoutLine?: (line: string) => void; onStderrLine?: (line: string) => void }) => {
       if (options.tool === 'ffmpeg') {
         // ffmpeg giả: ghi tệp đích (tham số cuối) mang dấu AAC_MARK như thể đã chuyển tiếng sang AAC.
         ffmpegCalls.push(options.args);
@@ -217,6 +228,7 @@ beforeEach(() => {
         field === 'ext' ? ytdlpExt : field === 'id' ? 'ID_TAI_LAI' : 'Ban tai lai'
       );
       writeVideo(output, 5000);
+      for (const line of ytdlpStderrLines) options.onStderrLine?.(line);
       if (ytdlpFormatLine) options.onStdoutLine?.(`__VDMSP_FORMAT__:${ytdlpFormatLine}`);
       options.onStdoutLine?.(`__VDMSP_FILE__:${output}`);
       return Promise.resolve({ code: 0, stdoutTail: '', stderrTail: '' });
@@ -490,6 +502,97 @@ describe('P2 — định dạng có tiếng mà tệp tải về không có lu�
 
     expect(result).toMatchObject({ skipped: false, audioIssue: 'missing' });
     expect(quarantineItems.listActive()).toEqual([]);
+  });
+});
+
+// P4 (2026-10-21, YouTube 1JtdsqPbsXw): yt-dlp báo mã 0 nhưng luồng hình mất trọn 10 mảnh HLS (54 s) — tiếng vẫn đủ nên thời
+// lượng tệp vẫn khớp YouTube và tệp được coi là hợp lệ, kể cả khi danh sách khác dùng lại. Phải coi là tải lỗi (thử lại được),
+// cách ly tệp lỗi, không dùng lại; và lưu lời nhắn của yt-dlp cả khi tải thành công.
+describe('P4 — luồng hình ngắn hơn luồng tiếng → tải lỗi, tự tải lại; lưu lời nhắn yt-dlp', () => {
+  const fresh = (name: string, id: string) => {
+    const own = join(driveRoot, name, 'video');
+    mkdirSync(own, { recursive: true });
+    const url = `https://www.youtube.com/watch?v=${id}`;
+    const project = makeProject(name, own);
+    const sourceId = insertSource(project.id, url, 'youtube', id);
+    ytdlpAvailable = true;
+    ytdlpFormatLine = ['270+140-drc', '1080', '30', '4959', '', '', 'avc1.640028', 'mp4a.40.2', '', '', '', '', '522.3'].join('|');
+    return { own, url, project, sourceId };
+  };
+  const failureOf = (promise: Promise<unknown>) =>
+    promise.then(
+      () => null,
+      (error: unknown) => error as { code?: string; retryable?: boolean; message?: string; details?: Record<string, unknown> }
+    );
+  const warnCodes = (): string[] => logger.warn.mock.calls.map((call) => String(call[1]));
+
+  it('tải mới: hình 468,9 s / tiếng 522,3 s → DOWNLOAD_FAILED thử lại được, tệp lỗi vào khu cách ly, không ghi nhận làm nguồn', async () => {
+    const { own, project, sourceId } = fresh('Hinh hut', 'shortVIDEO1');
+    shortVideo = () => true;
+
+    const failure = await failureOf(run(jobFor(project.id, sourceId, 'download-only')));
+
+    expect(failure, 'phải báo lỗi tải, không được coi là tải thành công').not.toBeNull();
+    expect(failure).toMatchObject({ code: 'DOWNLOAD_FAILED', retryable: true });
+    expect(failure?.message).toContain('bị hụt hình: Luồng hình chỉ dài 468.9 s, thiếu 53.4 s so với luồng tiếng (522.3 s)');
+    expect(failure?.details).toMatchObject({ reason: 'VIDEO_STREAM_SHORT' });
+    expect(warnCodes()).toContain('DOWNLOAD_VIDEO_STREAM_SHORT');
+    expect(quarantineItems.listActive()).toHaveLength(1);
+    expect(readdirSync(own).filter((name) => name.endsWith('.mp4'))).toEqual([]);
+    expect(sources.get(sourceId)?.sourceFile ?? null).toBeNull();
+  });
+
+  it('tệp hụt hình có sẵn trong thư mục (đúng ca thật: 3 danh sách dùng lại) → KHÔNG dùng lại, cách ly và tải lại bản mới', async () => {
+    const { own, url, project, sourceId } = fresh('Dung lai hut', 'reuseSHORT1');
+    const bad = join(own, `Video hụt hình [reuseSHORT1] [${downloadLinkTag(url)}].mp4`);
+    writeVideo(bad);
+    shortVideo = (path) => path === bad;
+
+    const result = await run(jobFor(project.id, sourceId, 'download-only'));
+
+    expect(eventCodes()).not.toContain('SOURCE_CACHE_HIT');
+    expect(result.skipped).toBe(false);
+    expect(result.outputPath).not.toBe(bad);
+    expect(ytdlpOutputTemplates).toHaveLength(1);
+    expect(quarantineItems.listActive().map((item) => item.originalPath)).toEqual([bad]);
+    expect(sources.get(sourceId)?.sourceFile).toBe(result.outputPath);
+  });
+
+  it('đối chứng: hình 522,2 s / tiếng 522,3 s → tải xong bình thường', async () => {
+    const { project, sourceId } = fresh('Du hinh', 'fullVIDEO01');
+
+    const result = await run(jobFor(project.id, sourceId, 'download-only'));
+
+    expect(result.skipped).toBe(false);
+    expect(quarantineItems.listActive()).toEqual([]);
+    expect(warnCodes()).not.toContain('DOWNLOAD_VIDEO_STREAM_SHORT');
+  });
+
+  it('tải thành công vẫn lưu lời nhắn của yt-dlp (mảnh lỗi, cảnh báo) vào nhật ký, URL được che', async () => {
+    const { project, sourceId } = fresh('Loi nhan', 'notesVIDEO1');
+    ytdlpStderrLines = [
+      '[hlsnative] Total fragments: 122',
+      '[download] Got error: HTTP Error 403: Forbidden. Retrying fragment 16 (1/20)...',
+      'WARNING: fragment 17 trả về rỗng https://rr1.googlevideo.com/videoplayback?expire=1&sig=abc'
+    ];
+
+    await run(jobFor(project.id, sourceId, 'download-only'));
+
+    const call = logger.warn.mock.calls.find((entry) => entry[1] === 'YTDLP_OUTPUT_NOTES');
+    expect(call, 'phải có dòng nhật ký YTDLP_OUTPUT_NOTES').toBeDefined();
+    const notes = (call![3] as { metadata: { notes: string[] } }).metadata.notes;
+    expect(notes).toContain('[download] Got error: HTTP Error 403: Forbidden. Retrying fragment 16 (1/20)...');
+    expect(notes.join('\n')).not.toContain('sig=abc');
+  });
+
+  it('tải thành công không có cảnh báo → lời nhắn ghi ở mức info (không làm ồn khung cảnh báo)', async () => {
+    const { project, sourceId } = fresh('Sach se', 'cleanVIDEO1');
+    ytdlpStderrLines = ['[hlsnative] Total fragments: 122'];
+
+    await run(jobFor(project.id, sourceId, 'download-only'));
+
+    expect(warnCodes()).not.toContain('YTDLP_OUTPUT_NOTES');
+    expect(logger.info.mock.calls.map((entry) => String(entry[1]))).toContain('YTDLP_OUTPUT_NOTES');
   });
 });
 
