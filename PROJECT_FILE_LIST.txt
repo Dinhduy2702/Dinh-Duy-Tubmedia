@@ -61,6 +61,7 @@ FIX_ASPECT_RATIO_v1.0.1_VI.md
 FIX_MINIMIZE_KEEPS_TASKBAR_VI.md
 FIX_SUMMARY.md
 FIX_UNIT_TEST_GATE_v1.2.0_VI.md
+FIX_VIDEO_STREAM_SHORT_VI.md
 FIX10_TIMESTAMP_REPAIR_ERROR_DETAIL_v1.2.0_VI.md
 FIX11_RETRY_PATH_PERSISTENCE_DRIVE_ROOT_VI.md
 FIX12_RATE_LIMIT_429_PLATFORM_WAIT_VI.md
@@ -496,7 +497,9 @@ src/shared/utils/ui-error.ts
 src/shared/utils/url.ts
 src/shared/utils/validation-message.ts
 src/shared/utils/video-link-filter.ts
+src/shared/utils/video-stream-shortfall.ts
 src/shared/utils/youtube-url-validation.ts
+src/shared/utils/ytdlp-notes.ts
 src/shared/video-link-filter.ts
 TEST_RESULTS.md
 tests/e2e/app.spec.ts
@@ -719,6 +722,7 @@ tests/unit/video-duration-input.test.ts
 tests/unit/video-duration-persistence.test.ts
 tests/unit/video-filter-encoding.test.ts
 tests/unit/video-link-filter.test.ts
+tests/unit/video-stream-shortfall.test.ts
 tests/unit/window-close-policy.test.ts
 tests/unit/windows-process-control.test.ts
 tests/unit/workbench-storage.test.ts

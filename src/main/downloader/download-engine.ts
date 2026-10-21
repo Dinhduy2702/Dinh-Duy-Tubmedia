@@ -58,6 +58,8 @@ import { buildCookieArguments } from './ytdlp-cookie-arguments.js';
 import { withLeasedCookieFile, type CookieJarStore, type CookieRunOutcome } from '../cookies/cookie-jar-store.js';
 import { acceptPathInside } from '../files/path-containment.js';
 import { downloadPacingArgs, type DownloadPacingContext } from '@shared/utils/download-pacing.js';
+import { detectVideoStreamShortfall } from '@shared/utils/video-stream-shortfall.js';
+import { createYtDlpNoteCollector } from '@shared/utils/ytdlp-notes.js';
 
 export interface DownloadProgress {
   percent: number;
@@ -170,6 +172,38 @@ export class DownloadEngine {
         );
       }
       throw new DownloadFailedError(`Tệp tải xong không hợp lệ: ${checked.reasons.join('; ')}`);
+    }
+
+    // P4 (2026-10-21): thời lượng tệp lấy theo luồng dài nhất nên luồng hình bị mất mảnh vẫn "khớp" — so riêng luồng hình.
+    const streams = await this.analyzer.analyze(path, job.id);
+    const shortfall = detectVideoStreamShortfall({
+      videoStreamDuration: streams.videoStreamDuration,
+      audioStreamDuration: streams.audioStreamDuration,
+      expectedDuration
+    });
+    if (shortfall) {
+      const reason =
+        `Luồng hình chỉ dài ${shortfall.videoSeconds.toFixed(1)} s, thiếu ${shortfall.missingSeconds.toFixed(1)} s so với ` +
+        (shortfall.reference === 'audio'
+          ? `luồng tiếng (${shortfall.referenceSeconds.toFixed(1)} s)`
+          : `thời lượng nền tảng công bố (${shortfall.referenceSeconds.toFixed(1)} s)`) +
+        ' — một phần hình bị mất trong lúc tải.';
+      this.logger.warn('download', 'DOWNLOAD_VIDEO_STREAM_SHORT', reason, {
+        jobId: job.id,
+        ...(job.projectId ? { projectId: job.projectId } : {}),
+        metadata: { path, ...shortfall, ...(expectedDuration !== undefined ? { expectedDuration } : {}) }
+      });
+      const details = { reason: 'VIDEO_STREAM_SHORT', ...shortfall };
+      const project = job.projectId ? this.projects.get(job.projectId) : null;
+      if (project && quarantineOnFailure) {
+        const quarantined = await this.quarantine.move(path, reason, { jobId: job.id, projectId: project.id });
+        throw new DownloadFailedError(
+          `Tệp tải về bị hụt hình: ${reason} Tubmedia đã chuyển tệp lỗi vào khu cách ly (${quarantined}) và sẽ tự tải lại.`,
+          true,
+          details
+        );
+      }
+      throw new DownloadFailedError(`Tệp tải về bị hụt hình: ${reason}`, true, details);
     }
 
     this.logger.info(
@@ -1035,10 +1069,17 @@ export class DownloadEngine {
             }
           );
           if (!this.keptBecauseShared(cachedPath, job, project.id)) {
-            const fastCheck = await this.verifier.verify(cachedPath, 'fast');
-            if (!fastCheck.ok) {
+            // P4: tệp hụt hình vẫn qua kiểm tra nhanh (đọc được, thời lượng khớp) → phải cách ly theo chính lỗi vừa gặp, nếu
+            // không lượt tải lại sẽ thấy tệp cùng mã liên kết trong thư mục rồi dùng lại nó.
+            const videoStreamShort =
+              error instanceof DownloadFailedError && error.details?.reason === 'VIDEO_STREAM_SHORT';
+            const fastCheck = videoStreamShort ? null : await this.verifier.verify(cachedPath, 'fast');
+            if (videoStreamShort || !fastCheck?.ok) {
               await this.quarantine
-                .move(cachedPath, fastCheck.reasons.join('; '), { jobId: job.id, projectId: project.id })
+                .move(cachedPath, videoStreamShort ? message : (fastCheck?.reasons ?? []).join('; '), {
+                  jobId: job.id,
+                  projectId: project.id
+                })
                 .catch(() => undefined);
             }
           }
@@ -1245,7 +1286,9 @@ export class DownloadEngine {
       stage: 'analyzing',
       displayName: cleanExternalText(source.title) ?? source.originalUrl
     };
+    const ytdlpNotes = createYtDlpNoteCollector();
     const parseLine = (line: string): void => {
+      ytdlpNotes.push(line);
       const parsedProgress = parseYtDlpProgress(line);
       if (parsedProgress) {
         latestProgress = {
@@ -1375,6 +1418,22 @@ export class DownloadEngine {
             : 'other-failure';
     } finally {
       await cookieLease?.release(cookieOutcome);
+    }
+    if (result.code === 0 && finalPath) {
+      // P4: lưu lời nhắn của yt-dlp cả khi tải thành công (trước đây chỉ khi lỗi) — mảnh bị thử lại/bỏ qua mà yt-dlp vẫn báo
+      // mã 0 là dấu vết duy nhất của một tệp hụt hình. Có cảnh báo → mức warn; chỉ có dòng tổng số mảnh → info.
+      const notes = ytdlpNotes.lines();
+      if (notes.length) {
+        const log = ytdlpNotes.hasProblems() ? this.logger.warn.bind(this.logger) : this.logger.info.bind(this.logger);
+        log(
+          'download',
+          'YTDLP_OUTPUT_NOTES',
+          ytdlpNotes.hasProblems()
+            ? 'yt-dlp tải xong nhưng có cảnh báo hoặc phải thử lại một phần dữ liệu; Tubmedia vẫn kiểm tra tệp như thường.'
+            : 'Lời nhắn của yt-dlp trong lượt tải.',
+          { jobId: job.id, projectId: project.id, metadata: { notes, selectedFormatId } }
+        );
+      }
     }
     if (result.code !== 0 || !finalPath) {
       const text = `${result.stderrTail}\n${result.stdoutTail}`;
