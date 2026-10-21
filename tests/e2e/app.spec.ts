@@ -36,6 +36,12 @@ function sleep(milliseconds: number): Promise<void> {
   });
 }
 
+// Mở CSDL của sandbox, chờ tối đa 30 giây nếu tệp đang bị khoá (busy timeout của SQLite). Lượt Publish 1.7.1
+// (2026-10-21) trượt vì ngay sau khi đóng app, Defender trên máy GitHub còn giữ studio.sqlite → "database is locked".
+function openStudioDatabase(userDataDirectory: string): DatabaseSync {
+  return new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'), { timeout: 30_000 });
+}
+
 function appendRuntimeLog(message: string): void {
   fs.mkdirSync(path.dirname(runtimeLogPath), {
     recursive: true
@@ -3761,7 +3767,7 @@ test('Phần B thông báo: thay thông báo trùng, đã tắt thì không hi�
     await launch();
     await closeElectronApplication();
     const now = new Date().toISOString();
-    const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+    const db = openStudioDatabase(userDataDirectory);
     db.prepare(
       `INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,aspect_ratio,created_at,updated_at,archived_at)
        VALUES(?,?,NULL,'','failed',?,?,?,?,'x','quality-source-size','resource-balanced',0,'original',?,?,NULL)`
@@ -3809,14 +3815,14 @@ test('Phần B thông báo: thay thông báo trùng, đã tắt thì không hi�
 
     // 6) Tình huống đổi khác (danh sách hết bị chặn) → lần chặn mới HIỆN lại, và tự tắt sau ≥ 12 giây.
     await closeElectronApplication();
-    const db2 = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+    const db2 = openStudioDatabase(userDataDirectory);
     db2.prepare("UPDATE queue_jobs SET status='completed', error_code=NULL, error_message=NULL WHERE id=?").run(jobId);
     db2.close();
     await launch(); // mở app lúc danh sách đã hết bị chặn → bỏ ghi nhớ "đã tắt"
     await closeElectronApplication();
     // Lần bị chặn MỚI (thông báo ổ đầy thật chỉ đến khi danh sách đang bị chặn; nếu không, thông báo tự đóng sớm vì
     // vấn đề đã được giải quyết — cơ chế cũ vẫn giữ).
-    const db3 = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+    const db3 = openStudioDatabase(userDataDirectory);
     db3.prepare("UPDATE queue_jobs SET status='failed', error_code='DISK_FULL', error_message='Ổ đầy lần mới' WHERE id=?").run(jobId);
     db3.close();
     await launch();
