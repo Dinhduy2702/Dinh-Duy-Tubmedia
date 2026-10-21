@@ -117,6 +117,9 @@ export class NormalizeEngine {
    * Remux stream-compatible media to a clean MP4 without re-encoding.
    * This is the fast fallback for mixed containers or broken timestamps before
    * resorting to an expensive full normalization pass.
+   *
+   * `sourceDecodeVerified`: nguồn đã được giải mã toàn bộ ngay trước đó (bước "kiểm tra toàn bộ nguồn stream-copy" của
+   * MergeEngine) → tệp vừa remux chỉ cần kiểm standard, khỏi giải mã lần hai.
    */
   public async remuxForConcat(
     job: QueueJob,
@@ -124,7 +127,8 @@ export class NormalizeEngine {
     outputFolder: string,
     resource: ResourceProfile,
     signal: AbortSignal,
-    onProgress: (percent: number) => void
+    onProgress: (percent: number) => void,
+    options: { sourceDecodeVerified?: boolean } = {}
   ): Promise<string> {
     const source = await this.analyzer.analyze(input, job.id);
     const ffmpeg = this.tools.get('ffmpeg');
@@ -194,19 +198,35 @@ export class NormalizeEngine {
       throw new ProcessingFailedError(result.stderrTail || 'Remux video thất bại.');
     }
 
-    const check = await this.verifier.verify(pending, 'standard', source.duration, {
+    // Tệp vừa remux phải giải mã được TOÀN BỘ hình + tiếng (mức deep, như bản đệm lấy lại — FIX18). Remux là chép luồng nên
+    // gói hỏng của nguồn đi thẳng sang; ở bước chuẩn hóa timestamp, tệp remux thay chỗ nguồn nên nguồn cũng không qua bước
+    // "kiểm tra toàn bộ nguồn stream-copy" của MergeEngine — trước đây tiếng hỏng lọt tới tận hậu kiểm thành phẩm.
+    const level = options.sourceDecodeVerified ? 'standard' : 'deep';
+    const check = await this.verifier.verify(pending, level, source.duration, {
       jobId: job.id,
       projectId: job.projectId,
       signal,
       expectedStreams: { video: true, audio: source.audioCodec !== null }
     });
+    if (signal.aborted) {
+      // Tạm dừng/hủy giữa lúc kiểm: tệp chưa bị chứng minh là hỏng → không cách ly, chỉ bỏ tệp tạm.
+      await rm(pending, { force: true }).catch(() => undefined);
+      throw signal.reason instanceof Error ? signal.reason : new Error('Đã dừng khi đang kiểm tệp remux.');
+    }
     if (!check.ok) {
-      const quarantined = await this.quarantine.move(
-        pending,
-        check.reasons.join('; '),
-        { jobId: job.id, projectId: job.projectId }
+      const reason = check.reasons.join('; ');
+      this.logger.warn('normalize', 'REMUX_FRESH_REJECTED', 'Tệp vừa remux không qua kiểm tra giải mã — không dùng làm bản đệm.', {
+        ...(job.projectId ? { projectId: job.projectId } : {}),
+        jobId: job.id,
+        metadata: { input, level, reason: reason.slice(0, 1_500) }
+      });
+      const quarantined = await this.quarantine.move(pending, reason, { jobId: job.id, projectId: job.projectId });
+      throw new ProcessingFailedError(
+        level === 'deep'
+          ? `Tệp remux không giải mã được toàn bộ — remux chép nguyên luồng nên lỗi nằm ở video nguồn ${basename(input)} ` +
+              `(${reason.slice(0, 300)}). Tệp lỗi đã chuyển vào khu cách ly: ${quarantined}`
+          : `Tệp remux bị lỗi, đã chuyển vào khu cách ly: ${quarantined}`
       );
-      throw new ProcessingFailedError(`Tệp remux bị lỗi, đã chuyển vào khu cách ly: ${quarantined}`);
     }
 
     const committed = await this.commitCacheFile(pending, final, job);

@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
+import safeExtractZip from '@tubmedia/safe-extract-zip';
 import { downloadPacingArgs } from '../../src/shared/utils/download-pacing.js';
 import { removeSandbox as removeSandboxWithRetry } from './helpers/sandbox-cleanup.js';
 
@@ -6097,6 +6098,31 @@ test('Lịch sử: video lỗi hiện lý do cụ thể trên bảng và CSV có
     const failedRow = lines.find((line) => line.includes('"failed"')) ?? '';
     expect(failedRow, 'dòng failed có mã lỗi').toContain(`"${job!.errorCode}"`);
     expect(failedRow, 'dòng failed có câu lỗi cụ thể').toContain('liên kết gốc');
+
+    // "Xuất báo cáo lỗi" (2026-10-20): bấm trên dòng lỗi → .zip thật, giải nén được, có tóm tắt + báo cáo + nhật ký tác vụ.
+    const zipPath = path.join(sandbox, 'bao-cao-loi');
+    await electronApplication.evaluate(({ dialog }, filePath) => {
+      dialog.showSaveDialog = () => Promise.resolve({ canceled: false, filePath });
+    }, zipPath);
+    const failedRowCell = shellWindow.locator('.history-path-cell', { has: shellWindow.locator('[data-history-error="failed"]') }).first();
+    await failedRowCell.getByRole('button', { name: 'Xuất báo cáo lỗi' }).click();
+    await expect(failedRowCell.locator('[data-error-report="completed"]')).toBeVisible({ timeout: 30_000 });
+    await expect(failedRowCell.getByRole('button', { name: 'Mở thư mục' })).toBeVisible();
+    expect(fs.existsSync(zipPath + '.zip'), 'tự thêm đuôi .zip').toBe(true);
+    const extracted = path.join(sandbox, 'bao-cao-giai-nen');
+    await safeExtractZip(zipPath + '.zip', { dir: extracted });
+    const summary = fs.readFileSync(path.join(extracted, 'tom-tat.txt'), 'utf8');
+    expect(summary).toContain('Tác vụ: download · failed · ' + job!.errorCode);
+    expect(summary).toContain('liên kết gốc');
+    const report = JSON.parse(fs.readFileSync(path.join(extracted, 'bao-cao.json'), 'utf8')) as {
+      job: { errorCode: string };
+      failure: { eventCode: string } | null;
+      tools: Array<{ name: string }>;
+    };
+    expect(report.job.errorCode).toBe(job!.errorCode);
+    expect(report.failure?.eventCode).toBe('JOB_FAILED');
+    expect(report.tools.map((tool) => tool.name)).toContain('ffmpeg');
+    expect(fs.readFileSync(path.join(extracted, 'nhat-ky', 'tac-vu.jsonl'), 'utf8')).toContain('"JOB_FAILED"');
   } finally {
     server?.close();
     await closeElectronApplication();

@@ -1118,6 +1118,7 @@ export class MergeEngine {
     // already protected by FFmpeg -xerror/-err_detect explode in NormalizeEngine,
     // and a reused normalize/remux CACHE file is fully decoded (video + audio)
     // there before reuse (vụ khách 2026-10-15: bản đệm hỏng tiếng từng lọt qua).
+    // A FRESH timestamp remux (stream copy) is also fully decoded in remuxForConcat.
     const passthroughIndexes = prepared
       .map((item, index) => (item.path === inputs[index]?.path ? index : -1))
       .filter((index) => index >= 0);
@@ -1205,7 +1206,9 @@ export class MergeEngine {
               currentItem: Math.max(1, remuxed + 1),
               totalSeconds: knownTotalDuration
             });
-          }
+          },
+          // Không cần chuẩn hóa → mọi nguồn đều là stream-copy và vừa qua "kiểm tra toàn bộ nguồn" ở trên.
+          { sourceDecodeVerified: true }
         );
         remuxProgress[index] = 100;
         remuxed += 1;

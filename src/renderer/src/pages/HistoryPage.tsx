@@ -5,9 +5,12 @@ import { buildCsv } from '@shared/utils/csv';
 import { historyCsvTable, historyErrorDetail } from '@shared/utils/history-export';
 import { useAppStore } from '../stores/app-store';
 import { StatusBadge } from '../components/StatusBadge';
+import { ErrorReportButton } from '../components/ErrorReportButton';
 import { jobTypeLabel } from '../utils/vi-labels';
 
 const TERMINAL = new Set(['completed', 'skipped', 'cancelled', 'failed', 'interrupted']);
+// "Xuất báo cáo lỗi" (2026-10-20): chỉ cho tác vụ lỗi / bị gián đoạn.
+const REPORTABLE = new Set(['failed', 'interrupted']);
 
 function text(job: QueueJob, key: string): string {
   const value = job.input[key];
@@ -86,7 +89,7 @@ export function HistoryPage(): React.JSX.Element {
             <td>{projects.find((item) => item.id === job.projectId)?.name ?? 'Toàn ứng dụng'}</td>
             <td>{jobTypeLabel(job.type)}</td>
             <td><StatusBadge status={job.status} fixed title={historyErrorDetail(job)} /></td>
-            <td className="history-path-cell"><b>{text(job, 'displayName') || text(job, 'url') || 'Tác vụ hệ thống'}</b><span title={text(job, 'outputPath')}>{text(job, 'outputPath') || 'Chưa có tệp đầu ra'}</span>{historyErrorDetail(job) && <span className="history-error-detail" data-history-error={job.status} title={historyErrorDetail(job) ?? undefined}>{historyErrorDetail(job)}</span>}</td>
+            <td className="history-path-cell"><b>{text(job, 'displayName') || text(job, 'url') || 'Tác vụ hệ thống'}</b><span title={text(job, 'outputPath')}>{text(job, 'outputPath') || 'Chưa có tệp đầu ra'}</span>{historyErrorDetail(job) && <span className="history-error-detail" data-history-error={job.status} title={historyErrorDetail(job) ?? undefined}>{historyErrorDetail(job)}</span>}{REPORTABLE.has(job.status) && <ErrorReportButton jobId={job.id} />}</td>
           </tr>)}</tbody>
         </table>
         {!history.length && <div className="p-12 text-center text-sm" style={{ color: 'var(--muted)' }}>Không có lịch sử phù hợp với bộ lọc.</div>}

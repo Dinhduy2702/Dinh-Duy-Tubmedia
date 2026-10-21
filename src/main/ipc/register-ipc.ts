@@ -41,6 +41,7 @@ import {
   systemCleanupRequestSchema,
   systemCleanupRunSchema,
   systemCleanupQuarantineRestoreSchema,
+  errorReportRunSchema,
   quarantineDeleteSchema,
   videoLinkFilterRequestSchema,
   quickDownloadRequestSchema,
@@ -67,6 +68,7 @@ import { CLEANUP_QUARANTINE_REMIND_MS } from '@shared/utils/quarantine-policy.js
 import { resolveCleanupEnvironmentPaths, type CleanupEnvironmentPaths } from '../system/cleanup-scanner.js';
 import { VideoLinkFilterService } from '../media/video-link-filter-service.js';
 import { LocalCutService } from '../media/local-cut-service.js';
+import { ErrorReportService, errorReportFileName } from '../diagnostics/error-report.js';
 type MaybePromise<T> = T | Promise<T>;
 
 /**
@@ -149,6 +151,18 @@ export function registerIpc(ctx: AppContext): void {
     ctx.logger,
     async (filePath) => (await ctx.analyzer.analyze(filePath, 'local-cut-duration')).duration
   );
+  const errorReports = new ErrorReportService({
+    getJob: (id) => ctx.queue.list().find((job) => job.id === id) ?? null,
+    getProject: (id) => ctx.projects.get(id),
+    listItems: (projectId) => ctx.itemRepo.list(projectId),
+    getSource: (id) => ctx.sourceRepo.get(id),
+    listLogs: (query) => ctx.logRepo.list(query),
+    listTools: () => ctx.tools.list(),
+    analyzer: ctx.analyzer,
+    verifier: ctx.verifier,
+    appInfo: () => ({ appVersion: app.getVersion(), buildCommit: APP_BUILD_COMMIT }),
+    hardware: () => ctx.settings.detectHardware()
+  });
 
   const handle = <Input, Output>(
     channel: string,
@@ -471,6 +485,26 @@ export function registerIpc(ctx: AppContext): void {
       'utf8'
     );
     return target;
+  });
+  handle(IPC.errorReport.start, jobIdSchema, async ({ jobId }) => {
+    const job = ctx.queue.list().find((entry) => entry.id === jobId);
+    if (!job) throw new InvalidInputError('Không tìm thấy tác vụ để xuất báo cáo.');
+    const project = job.projectId ? ctx.projects.get(job.projectId) : null;
+    const result = await dialog.showSaveDialog({
+      title: 'Lưu báo cáo lỗi',
+      defaultPath: join(app.getPath('documents'), errorReportFileName(job, project?.name ?? null, new Date())),
+      filters: [{ name: 'Tệp nén ZIP', extensions: ['zip'] }]
+    });
+    if (result.canceled || !result.filePath) return null;
+    const outputPath = /\.zip$/i.test(result.filePath) ? result.filePath : result.filePath + '.zip';
+    return errorReports.start(jobId, outputPath);
+  });
+  handle(IPC.errorReport.status, errorReportRunSchema, ({ runId }) => errorReports.status(runId));
+  handle(IPC.errorReport.cancel, errorReportRunSchema, ({ runId }) => errorReports.cancel(runId));
+  // Chỉ mở đúng tệp do lượt đã xong ghi ra — không nhận đường dẫn từ giao diện.
+  handle(IPC.errorReport.reveal, errorReportRunSchema, ({ runId }) => {
+    const status = errorReports.status(runId);
+    if (status?.state === 'completed') shell.showItemInFolder(status.outputPath);
   });
 
   handle(IPC.backups.create, backupCreateSchema, ({ projectId, includeMedia }) =>

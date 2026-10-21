@@ -78,6 +78,8 @@ FIX24_DRAFT_GUARD_BUSY_SLOT_VI.md
 FIX25_CACHE_PENDING_PER_JOB_VI.md
 FIX26_E2E_SANDBOX_CLEANUP_VI.md
 FIX27_TOPBAR_BADGES_NARROW_VI.md
+FIX28_REMUX_FRESH_DEEP_VERIFY_VI.md
+FIX29_ERROR_REPORT_EXPORT_VI.md
 FIX3_RATE_CONTROL_UNIT_TEST_v1.2.0_VI.md
 FIX4_BUNDLED_FFMPEG_PAYLOAD_v1.2.0_VI.md
 FIX5_CHANGELOG_ORDER_v1.2.0_VI.md
@@ -278,6 +280,7 @@ src/main/database/repositories/quarantine-repository.ts
 src/main/database/repositories/queue-repository.ts
 src/main/database/repositories/settings-repository.ts
 src/main/database/sqlite.ts
+src/main/diagnostics/error-report.ts
 src/main/download/preview-frame-command.ts
 src/main/download/preview-frame-service.ts
 src/main/download/quick-download-command.ts
@@ -295,6 +298,7 @@ src/main/files/path-containment.ts
 src/main/files/quarantine-location.ts
 src/main/files/save-text-file-policy.ts
 src/main/files/temporary-cleanup.ts
+src/main/files/zip-writer.ts
 src/main/index.ts
 src/main/input/input-service.ts
 src/main/ipc/register-ipc.ts
@@ -355,6 +359,7 @@ src/renderer/src/components/ConfirmDialog.tsx
 src/renderer/src/components/CookieManagerDialog.tsx
 src/renderer/src/components/DiagnosticDock.tsx
 src/renderer/src/components/ErrorBanner.tsx
+src/renderer/src/components/ErrorReportButton.tsx
 src/renderer/src/components/FolderField.tsx
 src/renderer/src/components/GpuEncoderIssueNotice.tsx
 src/renderer/src/components/HoverTip.tsx
@@ -441,6 +446,7 @@ src/shared/release-notes.ts
 src/shared/schemas/ipc.ts
 src/shared/system-cleanup.ts
 src/shared/types/domain.ts
+src/shared/types/error-report.ts
 src/shared/utils/active-download-workers-label.ts
 src/shared/utils/apply-temp-folder.ts
 src/shared/utils/attempt-display.ts
@@ -501,6 +507,7 @@ tests/integration/cookie-resume-fingerprint.test.ts
 tests/integration/database.test.ts
 tests/integration/download-existing-file-reuse.test.ts
 tests/integration/download-pacing-args.test.ts
+tests/integration/error-report.test.ts
 tests/integration/helpers/queue-harness.ts
 tests/integration/helpers/real-ffmpeg.ts
 tests/integration/legacy-quarantine-untouched.test.ts
@@ -521,6 +528,7 @@ tests/integration/queue-retry-requeue.test.ts
 tests/integration/queue-startup-hold.test.ts
 tests/integration/queue-startup-session-jobs.test.ts
 tests/integration/queue-temp-cleanup-safety.test.ts
+tests/integration/remux-fresh-deep-verify.test.ts
 tests/integration/restore-sources-policy.test.ts
 tests/integration/settings-restore-policy.test.ts
 tests/integration/settings-rollback-compat.test.ts
@@ -605,6 +613,7 @@ tests/unit/merge-engine-aspect-ratio.test.ts
 tests/unit/merge-lane-visibility.test.ts
 tests/unit/merge-output-integrity.test.ts
 tests/unit/merge-product-name-length.test.ts
+tests/unit/merge-remux-verify-level.test.ts
 tests/unit/merge-target.test.ts
 tests/unit/merge-timeline-reorder.test.ts
 tests/unit/merge-visual-boundary-hotfix11.test.ts
@@ -719,6 +728,7 @@ tests/unit/ytdlp-cookie-arguments.test.ts
 tests/unit/ytdlp-killed-classification.test.ts
 tests/unit/ytdlp-progress.test.ts
 tests/unit/ytdlp-runtime-temp.test.ts
+tests/unit/zip-writer.test.ts
 TOOL_UPDATE.md
 tool/.vdmsp-tool-metadata.json
 tool/README_TOOL_VI.txt
