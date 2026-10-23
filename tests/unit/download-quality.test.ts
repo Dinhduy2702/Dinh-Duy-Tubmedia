@@ -168,7 +168,9 @@ describe('download quality', () => {
     const engine = await readFile(join(process.cwd(), 'src/main/downloader/download-engine.ts'), 'utf8');
 
     expect(engine).toContain("'--format-sort-force', '--format-sort', forcedFormatSort");
-    expect(engine).toContain('[Nguon-chat-luong-cao] [%(id)s]');
+    // 2026-10-23: tên tệp ghép từ phần tiêu đề (đã tính độ dài đường dẫn) + nhãn chất lượng + mã video + mã liên kết.
+    expect(engine).toContain("workflow === 'download-merge' ? ' [Nguon-chat-luong-cao]' : ''");
+    expect(engine).toContain('`${titlePart}${qualityTag} [%(id)s]${nameTail}.%(ext)s`');
     expect(engine).toContain("workflow === 'download-merge' ? isMergeSource : !isMergeSource");
     expect(engine).toContain('GOOGLE_DRIVE_NATIVE_DOWNLOAD_MODE');
     expect(engine).toContain('if (requestedFormat)');

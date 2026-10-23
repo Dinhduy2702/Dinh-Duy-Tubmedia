@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { AppDatabase } from '@main/database/database.js';
 import { ProjectRepository } from '@main/database/repositories/project-repository.js';
@@ -149,9 +149,12 @@ beforeEach(() => {
     run: vi.fn((options: { tool?: string; args: string[]; onStdoutLine?: (line: string) => void }) => {
       ytdlpArgs.push(options.args);
       const template = options.args[options.args.indexOf('-o') + 1] ?? '';
-      const output = template.replace(/%\((\w+)\)[.\d]*[sB]/g, (_match, field: string) =>
+      const name = template.replace(/%\((\w+)\)[.\d]*[sB]/g, (_match, field: string) =>
         field === 'ext' ? 'mp4' : field === 'id' ? 'ID' : 'Video'
       );
+      // Như yt-dlp thật: mẫu tương đối nằm trong thư mục "home:" của --paths.
+      const homeIndex = options.args.findIndex((arg, index) => options.args[index - 1] === '--paths' && arg.startsWith('home:'));
+      const output = isAbsolute(name) || homeIndex < 0 ? name : join(options.args[homeIndex]!.slice('home:'.length), name);
       writeFileSync(output, Buffer.alloc(5000, 7));
       options.onStdoutLine?.(`__VDMSP_FILE__:${output}`);
       return Promise.resolve({ code: 0, stdoutTail: '', stderrTail: '' });

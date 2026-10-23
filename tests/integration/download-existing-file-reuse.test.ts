@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, isAbsolute, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { AppDatabase } from '@main/database/database.js';
 import { ProjectRepository } from '@main/database/repositories/project-repository.js';
@@ -224,9 +224,12 @@ beforeEach(() => {
       }
       const template = options.args[options.args.indexOf('-o') + 1] ?? '';
       ytdlpOutputTemplates.push(template);
-      const output = template.replace(/%\((\w+)\)[.\d]*[sB]/g, (_match, field: string) =>
+      const name = template.replace(/%\((\w+)\)[.\d]*[sB]/g, (_match, field: string) =>
         field === 'ext' ? ytdlpExt : field === 'id' ? 'ID_TAI_LAI' : 'Ban tai lai'
       );
+      // Như yt-dlp thật: mẫu tương đối nằm trong thư mục "home:" của --paths.
+      const homeIndex = options.args.findIndex((arg, index) => options.args[index - 1] === '--paths' && arg.startsWith('home:'));
+      const output = isAbsolute(name) || homeIndex < 0 ? name : join(options.args[homeIndex]!.slice('home:'.length), name);
       writeVideo(output, 5000);
       for (const line of ytdlpStderrLines) options.onStderrLine?.(line);
       if (ytdlpFormatLine) options.onStdoutLine?.(`__VDMSP_FORMAT__:${ytdlpFormatLine}`);

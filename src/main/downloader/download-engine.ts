@@ -30,6 +30,7 @@ import {
 import { FfmpegProgressTracker } from '@shared/utils/ffmpeg-progress.js';
 import {
   classifyYtDlpFailure,
+  pathTooLongLength,
   sanitizeYtDlpDiagnostic,
   unsupportedSourceUrlMessage,
   ytDlpFailureLogMessage
@@ -60,6 +61,7 @@ import { acceptPathInside } from '../files/path-containment.js';
 import { downloadPacingArgs, type DownloadPacingContext } from '@shared/utils/download-pacing.js';
 import { detectVideoStreamShortfall } from '@shared/utils/video-stream-shortfall.js';
 import { createYtDlpNoteCollector } from '@shared/utils/ytdlp-notes.js';
+import { planDownloadName, UNTITLED_DOWNLOAD_NAME } from '@shared/utils/download-path-budget.js';
 
 export interface DownloadProgress {
   percent: number;
@@ -99,6 +101,8 @@ export class DownloadEngine {
   private readonly cookieRequiredJobs = new Set<string>();
   /** S2: tác vụ đã gặp tệp có sẵn đang được danh sách khác dùng — lượt tải lại phải ghi ra tệp mới tên khác. */
   private readonly sharedFileKeptJobs = new Set<string>();
+  /** Số lần yt-dlp báo đường dẫn quá dài cho từng tác vụ — lượt thử lại đặt tên ngắn hơn (xem planDownloadName). */
+  private readonly pathTooLongStrikes = new Map<string, number>();
   private cookieJar: CookieJarStore | null = null;
 
   /** yt-dlp nhận bản sao tạm của tệp cookies cho mỗi lượt (xem cookie-jar-store.ts). */
@@ -826,6 +830,7 @@ export class DownloadEngine {
       throw new DownloadFailedError('Tác vụ tải thiếu dữ liệu nguồn hoặc dự án.');
     }
     this.sharedFileKeptJobs.delete(job.id);
+    if (job.attempts === 0) this.pathTooLongStrikes.delete(job.id);
     let source = this.sources.get(job.sourceId);
     const project = this.projects.get(job.projectId);
     if (!source || !project) {
@@ -1113,12 +1118,53 @@ export class DownloadEngine {
     // S2: tệp cùng tên đang là nguồn của danh sách khác → ghi ra tệp riêng của danh sách này (mã liên kết vẫn đứng cuối để
     // lần sau vẫn nhận ra), không bao giờ ghi đè hay dời tệp đang được dùng.
     const ownCopyTag = this.sharedFileKeptJobs.delete(job.id) ? ` [ban-rieng-${project.id.slice(0, 8)}]` : '';
-    const outputTemplate = join(
-      project.sourceFolder,
-      workflow === 'download-merge'
-        ? `%(title).145B [Nguon-chat-luong-cao] [%(id)s]${ownCopyTag} [${linkTag}].%(ext)s`
-        : `%(title).165B [%(id)s]${ownCopyTag} [${linkTag}].%(ext)s`
-    );
+    // 2026-10-23: tệp tạm của yt-dlp (.part, mảnh HLS, tệp ghép) nằm trong thư mục tạm riêng của danh sách (tên ngắn "_dl"
+    // vì mỗi ký tự thư mục bớt đi một ký tự tên video); tệp cuối được
+    // yt-dlp dời sang thư mục nguồn. Trước đây -o là đường dẫn tuyệt đối nên yt-dlp bỏ qua --paths temp ("--paths is
+    // ignored since an absolute path is given") và mọi tệp tạm nằm ngay cạnh video.
+    const workFolder = join(project.tempFolder, '_dl', project.id.slice(0, 8));
+    const qualityTag = workflow === 'download-merge' ? ' [Nguon-chat-luong-cao]' : '';
+    const nameTail = `${ownCopyTag} [${linkTag}]`;
+    const defaultTitleBytes = workflow === 'download-merge' ? 145 : 165;
+    const namePlan = planDownloadName({
+      homeFolder: project.sourceFolder,
+      workFolder,
+      fixedLength: qualityTag.length + ' ['.length + ']'.length + nameTail.length,
+      mediaIdLength: source.mediaId?.length,
+      maxTitleBytes: defaultTitleBytes,
+      pathStrikes: this.pathTooLongStrikes.get(job.id)
+    });
+    if (namePlan.kind === 'folder-too-long') {
+      throw new DownloadFailedError(
+        `Thư mục lưu video quá dài (${namePlan.folderLength} ký tự): ${namePlan.folder}. Windows chỉ cho đường dẫn tệp tối đa ` +
+          `260 ký tự nên không còn chỗ cho tên video. Hãy chọn thư mục ngắn hơn (tối đa khoảng ${namePlan.maxFolderLength} ký tự, ` +
+          'gần gốc ổ đĩa) cho danh sách này rồi bấm Thử lại.',
+        false,
+        {
+          reason: 'DOWNLOAD_FOLDER_TOO_LONG',
+          failureSubtype: 'path_too_long',
+          folder: namePlan.folder,
+          folderLength: namePlan.folderLength,
+          maxFolderLength: namePlan.maxFolderLength
+        }
+      );
+    }
+    await ensureDirectory(workFolder);
+    // Tên giữ mã video + mã liên kết ở cuối (findExistingByLinkTag/ByMediaId vẫn nhận ra tệp); chỉ tiêu đề bị cắt ngắn.
+    const titlePart = namePlan.kind === 'title' ? `%(title).${namePlan.titleBytes}B` : UNTITLED_DOWNLOAD_NAME;
+    const outputTemplate = `${titlePart}${qualityTag} [%(id)s]${nameTail}.%(ext)s`;
+    if (namePlan.kind === 'untitled' || namePlan.titleBytes < defaultTitleBytes) {
+      this.logger.info('download', 'DOWNLOAD_NAME_SHORTENED', 'Rút ngắn tên tệp để đường dẫn không vượt giới hạn 260 ký tự của Windows.', {
+        jobId: job.id,
+        projectId: project.id,
+        metadata: {
+          titleBytes: namePlan.kind === 'title' ? namePlan.titleBytes : 0,
+          pathStrikes: this.pathTooLongStrikes.get(job.id) ?? 0,
+          sourceFolder: project.sourceFolder,
+          workFolder
+        }
+      });
+    }
     const args = [
       '--no-playlist',
       ...(job.attempts > 0 ? ['--no-cache-dir'] : []),
@@ -1158,7 +1204,9 @@ export class DownloadEngine {
       '--merge-output-format',
       mergeOutputFormat(appSettings, workflow),
       '--paths',
-      `temp:${project.tempFolder}`,
+      `home:${project.sourceFolder}`,
+      '--paths',
+      `temp:${workFolder}`,
       '-o',
       outputTemplate,
       '--progress-template',
@@ -1569,6 +1617,17 @@ export class DownloadEngine {
         }
         if (failure.category === 'rate_limit') {
           throw new SourceRateLimitedError(failureDetails);
+        }
+        if (failure.subtype === 'path_too_long') {
+          // Lượt thử lại của tác vụ này sẽ đặt tên ngắn hơn (tiêu đề một nửa, rồi bỏ tiêu đề).
+          this.pathTooLongStrikes.set(job.id, (this.pathTooLongStrikes.get(job.id) ?? 0) + 1);
+          const pathLength = pathTooLongLength(text);
+          throw new DownloadFailedError(
+            `Không lưu được video vì đường dẫn tệp quá dài${pathLength ? ` (${pathLength} ký tự)` : ''} — Windows chỉ cho tối đa ` +
+              '260 ký tự. Tubmedia sẽ tự rút ngắn tên tệp và thử lại.',
+            true,
+            { ...failureDetails, pathLength }
+          );
         }
         if (failure.retryable) {
           throw new DownloadFailedError(
