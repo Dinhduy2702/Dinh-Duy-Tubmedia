@@ -3,6 +3,7 @@ import { formatDiskShortfall } from '@shared/utils/disk-shortfall-format.js';
 import { type BrowserWindow } from 'electron';
 import { cpus, freemem, totalmem } from 'node:os';
 import { rm, stat, statfs } from 'node:fs/promises';
+import { nearestExistingFolder } from '../files/disk-check-path.js';
 import { basename, dirname, join } from 'node:path';
 import type { AttentionNotice, JobType, LaneWaitState, QueueJob, RateLimitWaitState, ResourceProfile } from '@shared/types/domain.js';
 import { IPC } from '@shared/contracts/channels.js';
@@ -664,9 +665,10 @@ export class QueueManager {
     const project = this.projects.get(job.projectId);
     if (!project) return [];
 
+    // 2026-10-23: lượt tải ghi tệp tạm vào <thư mục tạm>\_dl\<mã danh sách> rồi mới dời sang thư mục video → kiểm cả hai ổ.
     const folders =
       job.type === 'download'
-        ? [project.sourceFolder]
+        ? [project.sourceFolder, project.tempFolder]
         : job.type === 'clip'
           ? [project.tempFolder]
           : job.type === 'merge' && job.input.timelineOnly !== true
@@ -678,24 +680,34 @@ export class QueueManager {
     return [...new Set(folders.filter((folder) => folder.trim().length > 0))];
   }
 
+  /**
+   * Dung lượng trống của ổ chứa `folder`. Thư mục tạm của lượt tải chỉ được tạo lúc bắt đầu tải → đo qua thư mục cha gần nhất
+   * đang có (cùng ổ); các thư mục khác giữ nguyên cách cũ (thư mục không còn → lỗi → tạm dừng để người dùng sửa).
+   */
+  private async freeBytesForDiskCheck(job: QueueJob, folder: string): Promise<number> {
+    const project = job.type === 'download' && job.projectId ? this.projects.get(job.projectId) : undefined;
+    const mayNotExistYet = Boolean(project && folder === project.tempFolder && folder !== project.sourceFolder);
+    const fsInfo = await statfs(mayNotExistYet ? await nearestExistingFolder(folder) : folder);
+    return Number(fsInfo.bavail) * Number(fsInfo.bsize);
+  }
+
   private async diskSpaceStateForJobs(jobs: QueueJob[]): Promise<{
     ready: boolean;
     folder: string | null;
     freeBytes: number;
     requiredBytes: number;
   }> {
-    const checks = new Map<string, number>();
+    const checks = new Map<string, { requiredBytes: number; job: QueueJob }>();
     for (const job of jobs) {
       if (!job.projectId) continue;
       const required = this.profileFor(job).diskFreeMinimumBytes;
       for (const folder of this.diskFoldersForJob(job)) {
-        checks.set(folder, Math.max(checks.get(folder) ?? 0, required));
+        checks.set(folder, { requiredBytes: Math.max(checks.get(folder)?.requiredBytes ?? 0, required), job });
       }
     }
-    for (const [folder, requiredBytes] of checks) {
+    for (const [folder, { requiredBytes, job }] of checks) {
       try {
-        const fsInfo = await statfs(folder);
-        const freeBytes = Number(fsInfo.bavail) * Number(fsInfo.bsize);
+        const freeBytes = await this.freeBytesForDiskCheck(job, folder);
         if (freeBytes < requiredBytes) return { ready: false, folder, freeBytes, requiredBytes };
       } catch {
         return { ready: false, folder, freeBytes: 0, requiredBytes };
@@ -717,8 +729,7 @@ export class QueueManager {
       for (const folder of this.diskFoldersForJob(current)) {
         let freeBytes = 0;
         try {
-          const fsInfo = await statfs(folder);
-          freeBytes = Number(fsInfo.bavail) * Number(fsInfo.bsize);
+          freeBytes = await this.freeBytesForDiskCheck(current, folder);
         } catch (error) {
           const message =
             `Không thể tiếp tục ghi vào ${folder}: ${error instanceof Error ? error.message : String(error)}. ` +
@@ -1145,8 +1156,7 @@ export class QueueManager {
     if (job.projectId) {
       for (const targetFolder of this.diskFoldersForJob(job)) {
         try {
-          const fs = await statfs(targetFolder);
-          const free = Number(fs.bavail) * Number(fs.bsize);
+          const free = await this.freeBytesForDiskCheck(job, targetFolder);
           if (free < profile.diskFreeMinimumBytes) {
             const message =
               `Ổ đĩa chứa ${targetFolder} không đủ dung lượng trống để bắt đầu tác vụ. ` +

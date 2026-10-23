@@ -293,6 +293,7 @@ src/main/downloader/ytdlp-arguments.ts
 src/main/downloader/ytdlp-cookie-arguments.ts
 src/main/downloader/ytdlp-progress.ts
 src/main/files/cleanup-protection.ts
+src/main/files/disk-check-path.ts
 src/main/files/ensure-directory.ts
 src/main/files/file-ownership.ts
 src/main/files/legacy-quarantine.ts
@@ -527,6 +528,7 @@ tests/integration/normalize-cache-corrupt-audio.test.ts
 tests/integration/quarantine-service.test.ts
 tests/integration/queue-attempts.test.ts
 tests/integration/queue-audio-issue.test.ts
+tests/integration/queue-disk-temp-folder.test.ts
 tests/integration/queue-ipc-coalesce.test.ts
 tests/integration/queue-list-concurrency.test.ts
 tests/integration/queue-load-governor.test.ts
