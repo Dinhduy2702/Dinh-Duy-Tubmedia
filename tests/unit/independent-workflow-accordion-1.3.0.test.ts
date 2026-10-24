@@ -16,7 +16,10 @@ describe('danh sách tải độc lập và giao diện accordion 1.3.0', () => 
   it('mỗi danh sách đang chạy dùng đủ luồng của chính hồ sơ; chỉ giới hạn SỐ danh sách chạy cùng lúc', () => {
     expect(queueLane).toContain('independentDownloadProjectCanStart');
     expect(queueLane).toContain('export function laneSlotAvailable');
-    expect(queueManager).toContain('independentDownloadProjectCanStart(activeOfProjectType, profile)');
+    // Đề xuất A (2026-10-24): số luồng gốc vẫn là của hồ sơ (downloadListLimit trả profile.downloadWorkers ở bậc 0/khi tắt),
+    // chỉ được tăng thêm khi còn phần trống.
+    expect(queueManager).toContain('independentDownloadProjectCanStart(activeOfProjectType, { downloadWorkers: listLimit })');
+    expect(queueManager).toContain('if (!this.settings.get().downloadAdaptiveBoost) return profile.downloadWorkers;');
     expect(queueManager).toContain("executionLane === 'download-list' ? downloadListCap : mergeWorkflowCap");
   });
 

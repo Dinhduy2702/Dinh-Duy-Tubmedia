@@ -25,8 +25,24 @@ import {
   recentJobStarts,
   type QueueExecutionLane
 } from '@shared/utils/queue-lane.js';
-import { automaticGlobalDownloadCap, recommendedConcurrentLists } from '@shared/utils/hardware-recommendation.js';
+import {
+  automaticGlobalDownloadCap,
+  recommendedConcurrentFragments,
+  recommendedConcurrentLists
+} from '@shared/utils/hardware-recommendation.js';
 import type { DownloadPacingContext } from '@shared/utils/download-pacing.js';
+import {
+  ADAPTIVE_MAX_LEVEL,
+  AdaptiveDownloadController,
+  adaptiveConnectionBudget,
+  adaptiveFragments,
+  adaptivePerListLimit,
+  driveLetterOf,
+  parseSpeedBytesPerSecond,
+  type AdaptiveDecision,
+  type AdaptiveReason
+} from '@shared/utils/adaptive-download.js';
+import { DiskBusyMonitor } from './disk-busy-monitor.js';
 import type { QueueRepository } from '../database/repositories/queue-repository.js';
 import type { ProjectRepository } from '../database/repositories/project-repository.js';
 import type { ItemRepository } from '../database/repositories/item-repository.js';
@@ -76,6 +92,16 @@ interface ActiveJob {
   /** Hướng B 429: lúc bắt đầu lượt chạy này — video chạy từ trước lần dính 429 gần nhất không tính thêm lần. */
   startedAtMs: number;
 }
+/** Đề xuất A: khoảng giữa hai lần đo cho bộ tự tận dụng phần trống; tốc độ một video cũ hơn mức này coi như 0. */
+const ADAPTIVE_SAMPLE_MS = 5_000;
+const ADAPTIVE_SPEED_STALE_MS = 15_000;
+const ADAPTIVE_REASON_TEXT: Record<AdaptiveReason, string> = {
+  probe: 'mạng/ổ còn trống, thử tăng thêm',
+  no_gain: 'tăng thêm mà tổng tốc độ không tăng — lùi lại',
+  disk_busy: 'ổ đang lưu bận liên tục — lùi lại',
+  throttled: 'nền tảng giới hạn/từ chối (429/403) — lùi lại',
+  idle_reset: 'đã hết video tải — lượt sau bắt đầu lại từ mức cơ bản'
+};
 /** Lag bước 3: khoảng tối thiểu giữa hai lần gửi CẢ danh sách tác vụ sang giao diện. */
 const QUEUE_CHANGED_THROTTLE_MS = 300;
 const TERMINAL_STATUSES = new Set(['completed', 'skipped', 'cancelled', 'failed']);
@@ -233,6 +259,11 @@ export class QueueManager {
   private waitingLaneProjects: { downloadLists: string[]; mergeWorkflows: string[] } = { downloadLists: [], mergeWorkflows: [] };
   private autoListsCache: { at: number; value: number } | null = null;
   private globalDownloadCapCache: { at: number; value: number } | null = null;
+  /** Đề xuất A: bộ tự tận dụng phần trống + đo độ bận ổ + tốc độ thật gần nhất của từng video đang tải. */
+  private readonly adaptive = new AdaptiveDownloadController();
+  private readonly diskBusy = new DiskBusyMonitor();
+  private readonly downloadSpeeds = new Map<string, { bytesPerSecond: number; at: number }>();
+  private adaptiveSampleAt = 0;
   private startupReadyResolve: (() => void) | null = null;
   private readonly startupReady = new Promise<void>((resolve) => {
     this.startupReadyResolve = resolve;
@@ -483,6 +514,7 @@ export class QueueManager {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     this.cancelQueueChangedSend();
+    this.diskBusy.stop();
     for (const active of this.active.values()) {
       if (preserveForResume)
         this.repo.update(active.job.id, {
@@ -1053,6 +1085,94 @@ export class QueueManager {
   /** Nền tảng của tác vụ tải (khóa của detectPlatform), hoặc null nếu không xác định được. */
   /** Hướng C 429: số video cùng nền tảng đang tải trên toàn ứng dụng (tính cả video này) và số lần nền tảng vừa dính 429. */
   private downloadPacingContext(job: QueueJob): DownloadPacingContext {
+    const fragments = this.adaptiveFragmentsFor(job);
+    const base = this.platformPacingContext(job);
+    return fragments === undefined ? base : { ...base, concurrentFragments: fragments };
+  }
+
+  /**
+   * Đề xuất A: số mảnh cho video sắp tải khi bật tự tận dụng phần trống VÀ ô số mảnh để tự động (tự chọn tay → tôn trọng số
+   * đã chọn, trả undefined để bộ tải dùng ô Cài đặt). Bậc 0 = đúng số gốc theo máy như trước.
+   */
+  private adaptiveFragmentsFor(job: QueueJob): number | undefined {
+    const settings = this.settings.get();
+    if (!settings.downloadAdaptiveBoost || settings.downloadFragmentsAuto === false) return undefined;
+    const base = recommendedConcurrentFragments(cpus().length, totalmem());
+    let downloads = 0;
+    for (const entry of this.active.values()) if (entry.job.type === 'download') downloads += 1;
+    if (!this.active.has(job.id)) downloads += 1;
+    return adaptiveFragments(base, adaptiveConnectionBudget(this.autoGlobalDownloadCap(), base), downloads, this.adaptive.level);
+  }
+
+  /**
+   * Đề xuất A: số video một danh sách được chạy cùng lúc — gốc là số luồng của hồ sơ (như trước); khi bật tự tận dụng phần
+   * trống thì được tăng dần tới phần chia đều của trần tổng theo máy cho các danh sách đang có việc.
+   */
+  private downloadListLimit(profile: ResourceProfile, listsWithWork: number): number {
+    if (!this.settings.get().downloadAdaptiveBoost) return profile.downloadWorkers;
+    return adaptivePerListLimit(profile.downloadWorkers, this.autoGlobalDownloadCap(), listsWithWork, this.adaptive.level);
+  }
+
+  /**
+   * Đề xuất A: mỗi ≥5 s ghi một lần đo (tổng tốc độ thật của các video đang tải + độ bận các ổ chúng đang ghi) cho bộ điều
+   * khiển; bậc đổi thì ghi nhật ký để sau này tra được vì sao tăng/lùi.
+   */
+  private sampleAdaptive(now: number, demand: boolean): void {
+    const downloads = [...this.active.values()].filter((entry) => entry.job.type === 'download');
+    const adaptiveOn = this.settings.get().downloadAdaptiveBoost;
+    // Hết video tải hoặc đã tắt → dừng đo ổ ngay (không chờ tới lượt đo kế tiếp).
+    if (!downloads.length || !adaptiveOn) this.diskBusy.stop();
+    if (!adaptiveOn || now - this.adaptiveSampleAt < ADAPTIVE_SAMPLE_MS) return;
+    this.adaptiveSampleAt = now;
+    const letters = new Set<string>();
+    let bytesPerSecond = 0;
+    for (const entry of downloads) {
+      const speed = this.downloadSpeeds.get(entry.job.id);
+      if (speed && now - speed.at <= ADAPTIVE_SPEED_STALE_MS) bytesPerSecond += speed.bytesPerSecond;
+      const project = entry.job.projectId ? this.projects.get(entry.job.projectId) : null;
+      for (const folder of [project?.sourceFolder, project?.tempFolder]) {
+        const letter = driveLetterOf(folder);
+        if (letter) letters.add(letter);
+      }
+    }
+    if (downloads.length && adaptiveOn) this.diskBusy.ensureRunning();
+    const decision = this.adaptive.observe({
+      at: now,
+      bytesPerSecond,
+      activeDownloads: downloads.length,
+      demand,
+      diskBusyPercent: this.diskBusy.busiestOf(letters, now)
+    });
+    if (decision) this.logAdaptiveDecision(decision);
+  }
+
+  private logAdaptiveDecision(decision: AdaptiveDecision): void {
+    this.logger.info(
+      'queue',
+      'ADAPTIVE_DOWNLOAD_LEVEL_CHANGED',
+      `Tự tận dụng phần trống: bậc ${decision.previousLevel} → ${decision.level}/${ADAPTIVE_MAX_LEVEL} (${ADAPTIVE_REASON_TEXT[decision.reason]}).`,
+      {
+        metadata: {
+          level: decision.level,
+          previousLevel: decision.previousLevel,
+          reason: decision.reason,
+          mbitPerSecond: Math.round((decision.bytesPerSecond * 8) / 1e6),
+          diskBusyPercent: decision.diskBusyPercent
+        }
+      }
+    );
+  }
+
+  /** Đề xuất A: video bị nền tảng chặn (429) hoặc từ chối (403) → bộ tự tăng tốc lùi ngay, không tăng lại một lúc. */
+  private noteAdaptiveThrottle(job: QueueJob, code: string, details: Record<string, unknown> | undefined): void {
+    if (job.type !== 'download') return;
+    const subtype = details?.failureSubtype;
+    if (code !== 'SOURCE_RATE_LIMITED' && subtype !== 'http_403' && subtype !== 'rate_limit') return;
+    const decision = this.adaptive.noteThrottled(Date.now());
+    if (decision) this.logAdaptiveDecision(decision);
+  }
+
+  private platformPacingContext(job: QueueJob): DownloadPacingContext {
     const platform = this.downloadPlatformOf(job);
     if (!platform) return { samePlatformActive: 1, rateLimitStrikes: 0 };
     let samePlatformActive = 0;
@@ -1266,6 +1386,14 @@ export class QueueManager {
         if (next) fairPending.push(next);
       }
     }
+    // Đề xuất A: số danh sách / quy trình đang có việc tải (đang chạy hoặc còn video chờ) — trần tổng chia đều cho chúng.
+    const downloadProjects = new Set<string>();
+    for (const entry of this.active.values()) {
+      if (entry.job.type === 'download') downloadProjects.add(entry.job.projectId ?? '__global__');
+    }
+    const pendingDownloads = fairPending.filter((job) => job.type === 'download');
+    for (const job of pendingDownloads) downloadProjects.add(job.projectId ?? '__global__');
+    const listsWithWork = Math.max(1, downloadProjects.size);
     const waitingDownloadLists: string[] = [];
     const waitingMergeWorkflows: string[] = [];
     const downloadListCap = effectiveConcurrentDownloadLists(
@@ -1323,7 +1451,9 @@ export class QueueManager {
           }
         }
         // Mỗi danh sách / quy trình đang giữ lượt chạy đủ downloadWorkers của hồ sơ (không chia nhỏ luồng).
-        if (!independentDownloadProjectCanStart(activeOfProjectType, profile)) continue;
+        // Đề xuất A: khi bật tự tận dụng phần trống, số luồng này tăng dần theo bậc (tối đa phần chia đều của trần tổng).
+        const listLimit = this.downloadListLimit(profile, listsWithWork);
+        if (!independentDownloadProjectCanStart(activeOfProjectType, { downloadWorkers: listLimit })) continue;
       } else if (job.type === 'merge') {
         const globalMergeLimit = Math.max(1, Math.min(4, this.settings.get().maxGlobalMergeJobs));
         if (activeOfProjectType >= 1 || activeOfType >= globalMergeLimit) continue;
@@ -1338,6 +1468,8 @@ export class QueueManager {
       startsLeft -= 1;
     }
     this.waitingLaneProjects = { downloadLists: waitingDownloadLists, mergeWorkflows: waitingMergeWorkflows };
+    // Còn video chờ chưa được bắt đầu → tăng bậc mới có ích.
+    this.sampleAdaptive(Date.now(), pendingDownloads.some((job) => !this.active.has(job.id)));
     if (stateChanged) this.emit();
   }
   private runJob(job: QueueJob, profile: ResourceProfile): void {
@@ -1349,6 +1481,7 @@ export class QueueManager {
       .finally(() => {
         this.active.delete(job.id);
         this.progressUpdates.delete(job.id);
+        this.downloadSpeeds.delete(job.id);
         if (sourceLock) this.sourceLocks.delete(sourceLock);
         try {
           if (job.projectId) this.syncProjectStatus(job.projectId);
@@ -1603,6 +1736,10 @@ export class QueueManager {
   }
 
   private updateDownloadProgress(jobId: string, progress: DownloadProgress): void {
+    // Đề xuất A: tốc độ thật từng video (trước bước lọc bớt cập nhật giao diện) cho bộ tự tận dụng phần trống.
+    if (progress.stage === undefined || progress.stage === 'downloading') {
+      this.downloadSpeeds.set(jobId, { bytesPerSecond: parseSpeedBytesPerSecond(progress.speed), at: Date.now() });
+    }
     const current = this.repo.get(jobId);
     const displayNameChanged = Boolean(
       progress.displayName && current?.input.displayName !== progress.displayName
@@ -1977,6 +2114,7 @@ export class QueueManager {
       const appError = error as Partial<AppError>;
       const code = appError.code ?? 'UNHANDLED_ERROR';
       let message = error instanceof Error ? error.message : String(error);
+      this.noteAdaptiveThrottle(job, code, appError.details);
       if (code === 'RETRY_WITH_CONFIGURED_COOKIES') {
         const retrying = this.repo.update(job.id, {
           status: 'retrying',

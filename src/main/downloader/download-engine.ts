@@ -1199,8 +1199,15 @@ export class DownloadEngine {
       'file_access:exp=1:10',
       '--abort-on-unavailable-fragments',
       '--concurrent-fragments',
-      // Tự động → số mảnh theo cấu hình máy đang chạy (không theo máy dev); lượt thử lại luôn 1 mảnh cho chắc.
-      String(job.attempts > 0 ? 1 : effectiveConcurrentFragments(appSettings, cpus().length, totalmem())),
+      // Tự động → số mảnh theo cấu hình máy đang chạy (không theo máy dev), hoặc số hàng đợi đã tính khi tự tận dụng phần trống
+      // (đề xuất A); lượt thử lại luôn 1 mảnh cho chắc.
+      String(
+        job.attempts > 0
+          ? 1
+          : pacing?.concurrentFragments !== undefined
+            ? Math.max(1, Math.min(8, Math.trunc(pacing.concurrentFragments)))
+            : effectiveConcurrentFragments(appSettings, cpus().length, totalmem())
+      ),
       '--http-chunk-size',
       '10M',
       '--no-mtime',

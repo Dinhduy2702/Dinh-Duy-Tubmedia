@@ -17,7 +17,9 @@ const checks = [
   // Lag bước 1 (2026-10-12): mỗi danh sách đang chạy vẫn dùng đủ luồng của hồ sơ; có trần SỐ danh sách / quy trình chạy cùng lúc.
   [
     'running lists keep their full project capacity',
-    files.manager.includes('independentDownloadProjectCanStart(activeOfProjectType, profile)')
+    // Đề xuất A (2026-10-24): gốc vẫn là số luồng của hồ sơ, chỉ tăng thêm khi còn phần trống.
+    files.manager.includes('independentDownloadProjectCanStart(activeOfProjectType, { downloadWorkers: listLimit })') &&
+      files.manager.includes('if (!this.settings.get().downloadAdaptiveBoost) return profile.downloadWorkers;')
   ],
   [
     'download lists and merge workflows have their own concurrent-lane caps',

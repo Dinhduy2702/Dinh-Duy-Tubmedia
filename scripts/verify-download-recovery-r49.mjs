@@ -84,7 +84,10 @@ check(
 );
 check(
   // 2026-10-24: lượt đầu dùng số mảnh tự dò theo máy (effectiveConcurrentFragments, tối đa 8); lượt thử lại vẫn 1 mảnh.
-  engine.includes('job.attempts > 0 ? 1 : effectiveConcurrentFragments(') && engine.includes('job.attempts === 0'),
+  // Đề xuất A: hoặc số mảnh hàng đợi tính theo phần trống (pacing.concurrentFragments).
+  /job\.attempts > 0\s*\?\s*1\s*:\s*pacing\?\.concurrentFragments/.test(engine) &&
+    engine.includes('effectiveConcurrentFragments(appSettings') &&
+    engine.includes('job.attempts === 0'),
   'retry attempts use one fragment at a time and aria2c remains first-attempt only'
 );
 check(

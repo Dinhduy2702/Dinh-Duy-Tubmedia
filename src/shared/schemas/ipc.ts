@@ -73,6 +73,7 @@ export const appSettingsSchema = z
     maxGlobalDownloadWorkers: z.number().int().min(1).max(16),
     downloadConcurrentFragments: z.number().int().min(1).max(8),
     downloadFragmentsAuto: z.boolean().default(true),
+    downloadAdaptiveBoost: z.boolean().default(true),
     // A1 (2026-09-25): tăng từ 4 lên 6 lane CẤU HÌNH song song; maxGlobalMergeJobs (trần ghép ĐỒNG THỜI
     // thật) cố tình giữ nguyên 1-4 theo khuyến nghị phần cứng có sẵn của app.
     downloadLaneCount: z.union([

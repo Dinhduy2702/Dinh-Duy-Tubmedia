@@ -279,12 +279,12 @@ describe('Hướng B — dính 429 thì cả ứng dụng nghỉ với NỀN T�
     const job = youtube(list, 'rate-limited');
     await tick();
     await idle();
-    expect(pacingByUrl.get(urlOf(job)), 'lần đầu: chưa dính lần nào').toEqual({ samePlatformActive: 1, rateLimitStrikes: 0 });
+    expect(pacingByUrl.get(urlOf(job)), 'lần đầu: chưa dính lần nào').toMatchObject({ samePlatformActive: 1, rateLimitStrikes: 0 });
     behaviors.set(urlOf(job), 'ok');
     await sleep(90);
     await tick();
     await idle();
     expect(queue.get(job.id)?.status).toBe('completed');
-    expect(pacingByUrl.get(urlOf(job)), 'lần tự tiếp tục: đã dính 1 lần').toEqual({ samePlatformActive: 1, rateLimitStrikes: 1 });
+    expect(pacingByUrl.get(urlOf(job)), 'lần tự tiếp tục: đã dính 1 lần').toMatchObject({ samePlatformActive: 1, rateLimitStrikes: 1 });
   });
 });

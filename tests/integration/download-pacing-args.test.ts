@@ -232,4 +232,10 @@ describe('số mảnh tải mỗi video theo máy đang chạy', () => {
     expect(valueAfter(await argsFor('youtube', youtube, pacing), '--concurrent-fragments')).toBe('5');
     expect(valueAfter(await argsFor('youtube', youtube, pacing, 1), '--concurrent-fragments')).toBe('1');
   });
+
+  it('đề xuất A: dùng số mảnh hàng đợi đã tính (giới hạn 1–8); lượt thử lại vẫn 1', async () => {
+    expect(valueAfter(await argsFor('youtube', youtube, { ...pacing, concurrentFragments: 6 }), '--concurrent-fragments')).toBe('6');
+    expect(valueAfter(await argsFor('youtube', youtube, { ...pacing, concurrentFragments: 20 }), '--concurrent-fragments')).toBe('8');
+    expect(valueAfter(await argsFor('youtube', youtube, { ...pacing, concurrentFragments: 6 }, 1), '--concurrent-fragments')).toBe('1');
+  });
 });

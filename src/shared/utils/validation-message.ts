@@ -10,6 +10,7 @@ const FIELD_LABELS: Record<string, string> = {
   maxConcurrentDownloadLists: 'Số danh sách tải chạy cùng lúc',
   downloadConcurrentFragments: 'Mảnh tải đồng thời mỗi video',
   downloadFragmentsAuto: 'Mảnh tải đồng thời mỗi video (tự động theo máy)',
+  downloadAdaptiveBoost: 'Tự tận dụng mạng còn trống',
   progressRefreshMs: 'Chu kỳ làm mới tiến độ',
   sourceCacheDays: 'Số ngày giữ nguồn',
   logRetentionDays: 'Số ngày giữ nhật ký',

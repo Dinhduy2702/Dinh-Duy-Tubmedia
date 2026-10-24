@@ -27,6 +27,8 @@ export interface DownloadPacingContext {
   samePlatformActive: number;
   /** Số lần dính 429 liên tiếp gần đây của nền tảng (0 = không). */
   rateLimitStrikes: number;
+  /** Đề xuất A: số mảnh hàng đợi đã tính cho video này (tự tận dụng phần trống). Không có → bộ tải dùng ô Cài đặt. */
+  concurrentFragments?: number;
 }
 
 /** Nghỉ ~1 s giữa các yêu cầu và 1–3 s trước mỗi lần tải khi từ 2 video cùng nền tảng tải song song. */

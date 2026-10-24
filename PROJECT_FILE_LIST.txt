@@ -323,6 +323,7 @@ src/main/normalize/normalize-engine.ts
 src/main/processes/process-manager.ts
 src/main/processes/ytdlp-runtime-temp.ts
 src/main/projects/project-service.ts
+src/main/queue/disk-busy-monitor.ts
 src/main/queue/platform-rate-limit-gate.ts
 src/main/queue/queue-manager.ts
 src/main/queue/system-load-governor.ts
@@ -452,6 +453,7 @@ src/shared/system-cleanup.ts
 src/shared/types/domain.ts
 src/shared/types/error-report.ts
 src/shared/utils/active-download-workers-label.ts
+src/shared/utils/adaptive-download.ts
 src/shared/utils/apply-temp-folder.ts
 src/shared/utils/attempt-display.ts
 src/shared/utils/audio-presence.ts
@@ -549,6 +551,7 @@ tests/integration/ytdlp-killed-download-error.test.ts
 tests/integration/ytdlp-mei-temp-cleanup.test.ts
 tests/unit/active-download-workers-label.test.ts
 tests/unit/adapt-to-user-machine.test.ts
+tests/unit/adaptive-download.test.ts
 tests/unit/app-update-version.test.ts
 tests/unit/apply-temp-folder.test.ts
 tests/unit/attempt-display.test.ts
