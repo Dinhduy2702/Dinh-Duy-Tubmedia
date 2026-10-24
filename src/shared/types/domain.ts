@@ -451,6 +451,16 @@ export interface AppUpdateProgress {
   total: number;
 }
 
+/** Việc đang chạy lúc người dùng bấm "khởi động lại để cài bản mới" — để hỏi lại trước khi dừng (2026-10-24). */
+export interface AppUpdateActiveWork {
+  /** Số tác vụ hàng đợi đang chạy (tải, cắt, ghép…). */
+  queueJobs: number;
+  /** Tải nhanh đang chạy. */
+  quickDownload: boolean;
+  /** Tiến trình công cụ khác còn chạy (yt-dlp, FFmpeg…) ngoài hai loại trên. */
+  otherProcesses: number;
+}
+
 export interface AppUpdateStatus {
   state: AppUpdateState;
   currentVersion: string;

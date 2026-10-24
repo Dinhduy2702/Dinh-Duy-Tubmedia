@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { X, Cookie, Copy, DownloadCloud } from 'lucide-react';
+import { X, Cookie, Copy, DownloadCloud, Rocket } from 'lucide-react';
+import { UPDATE_ATTENTION_ID_PREFIX, isUpdateAttention } from '../utils/update-notice';
+import { useInstallUpdate } from '../hooks/use-install-update';
 import {
   ACTION_REQUIRED_WARNING_MIN_DURATION_MS,
   isAttentionNoticeResolved,
@@ -16,8 +18,7 @@ type Phase = 'entering' | 'visible' | 'leaving';
 const EXIT_DURATION_MS = 280;
 const MIN_REMAINING_MS = 180;
 /* TUBMEDIA_UPDATE_NOTICE_ACTIONABLE (2026-09-25): id do use-desktop-events.ts đặt cho thông báo phát
- * hiện bản cập nhật ("app-update-available:<version>" / "app-update-downloaded:<version>"). */
-const UPDATE_ATTENTION_ID_PREFIX = 'app-update-';
+ * hiện bản cập nhật ("app-update-available:<version>" / "app-update-downloaded:<version>") — UPDATE_ATTENTION_ID_PREFIX. */
 
 export function AttentionCenter(): React.JSX.Element | null {
   const error = useAppStore((state) => state.error);
@@ -55,7 +56,9 @@ export function AttentionCenter(): React.JSX.Element | null {
    * không có nút bấm nào. Xử lý y hệt "cảnh báo cần hành động" (Vấn đề 1: chặn cookies) — giữ hiện tối
    * thiểu 12 giây và thêm nút đi thẳng tới Trung tâm cập nhật — nhưng GIỮ NGUYÊN màu info/success đúng
    * ngữ nghĩa (không đổi thành warning chỉ để mượn thời lượng hiện lâu hơn). */
-  const updateAttention = !error && Boolean(attention?.id?.startsWith(UPDATE_ATTENTION_ID_PREFIX));
+  const updateAttention = !error && isUpdateAttention(attention);
+  const updateReadyAttention = updateAttention && Boolean(attention?.id?.startsWith(`${UPDATE_ATTENTION_ID_PREFIX}downloaded:`));
+  const installUpdate = useInstallUpdate();
   // Quy tắc hiển thị duy nhất (notification-policy.ts): lỗi thật không tự tắt (đóng được, trừ khi nguyên nhân đã
   // được giải quyết); cảnh báo cần hành động hiện tối thiểu 12 giây; mức khác tự tắt nhanh. Trỏ chuột hoặc focus
   // vào thông báo sẽ tạm dừng đồng hồ đếm ngược.
@@ -148,7 +151,8 @@ export function AttentionCenter(): React.JSX.Element | null {
 
   useEffect(() => clearTimers, [clearTimers]);
 
-  if (!error && !attention) return null;
+  // Hộp hỏi lại "đang có việc chạy" vẫn hiện nếu thông báo vừa đóng.
+  if (!error && !attention) return installUpdate.dialog;
 
   const title = issue?.title ?? attention?.title ?? 'Thông báo';
   const message = issue?.message ?? attention?.message ?? '';
@@ -193,7 +197,7 @@ export function AttentionCenter(): React.JSX.Element | null {
               {'Thêm Cookies'}
             </button>
           )}
-          {updateAttention && (
+          {updateAttention && !updateReadyAttention && (
             <button
               className="btn btn-primary mt-3"
               onClick={() => {
@@ -203,6 +207,19 @@ export function AttentionCenter(): React.JSX.Element | null {
             >
               <DownloadCloud size={16} />
               {'Cập nhật ngay'}
+            </button>
+          )}
+          {/* 2026-10-24: bản mới đã tải xong → nút khởi động lại cài NGAY, cùng luồng với nút ở trang Cập nhật (trước đây chỉ mở
+              trang Cập nhật). Đang có việc chạy thì hỏi lại trước. */}
+          {updateReadyAttention && (
+            <button
+              className="btn btn-primary mt-3"
+              disabled={installUpdate.busy}
+              // Đóng thông báo (vốn không tự tắt) sau khi bấm: lỗi cài hoặc hộp hỏi lại phải hiện ngay, không xếp hàng sau nó.
+              onClick={() => void installUpdate.start().finally(beginClose)}
+            >
+              <Rocket size={16} />
+              {installUpdate.busy ? 'Đang chuẩn bị...' : 'Cài đặt & khởi động lại'}
             </button>
           )}
           {steps.length > 0 && (
@@ -246,6 +263,7 @@ export function AttentionCenter(): React.JSX.Element | null {
         {!sticky && <div className={`attention-life ${paused ? 'is-paused' : ''}`} aria-hidden="true" />}
       </div>
       <CookieManagerDialog open={cookieOpen} onClose={() => setCookieOpen(false)} />
+      {installUpdate.dialog}
     </>
   );
 }

@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import type { AppUpdater, ProgressInfo, UpdateInfo } from 'electron-updater';
-import type { AppUpdateReleaseInfo, AppUpdateStatus } from '@shared/types/domain.js';
+import type { AppUpdateActiveWork, AppUpdateReleaseInfo, AppUpdateStatus } from '@shared/types/domain.js';
 import { IPC } from '@shared/contracts/channels.js';
 import { AppError } from '@shared/errors/app-errors.js';
 import { sanitizeProgress } from '@shared/utils/progress-policy.js';
@@ -19,6 +19,19 @@ type ElectronUpdaterModule = { autoUpdater?: AppUpdater };
 
 const MANUAL_UPDATE_CHECK_TIMEOUT_MS = 8_000;
 const SILENT_UPDATE_CHECK_TIMEOUT_MS = 5_000;
+/**
+ * 2026-10-24: dò ngầm bản mới mỗi giờ suốt lúc app mở (trước đây 6 giờ — mở app cả buổi vẫn có thể không thấy bản vừa phát
+ * hành). Mỗi lượt chỉ tải tệp latest.yml vài trăm byte từ máy chủ phát hành, không đáng kể với mọi mạng. Mở trang Cập nhật mà
+ * lần dò gần nhất đã quá UPDATE_PAGE_REFRESH_AFTER_MS thì dò ngầm thêm một lượt để trang luôn thấy bản mới nhất.
+ */
+export const APP_UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1_000;
+export const UPDATE_PAGE_REFRESH_AFTER_MS = 10 * 60 * 1_000;
+/** Hai lượt dò tự động cách nhau ít nhất chừng này (tránh dò dồn khi vừa dò tay). */
+export const MIN_BACKGROUND_CHECK_GAP_MS = 5 * 60 * 1_000;
+
+export function hasActiveWork(work: AppUpdateActiveWork): boolean {
+  return work.queueJobs > 0 || work.quickDownload || work.otherProcesses > 0;
+}
 const BUNDLED_UPDATE_CONFIG = 'app-update.yml';
 const UPDATE_METADATA_UNAVAILABLE_MESSAGE =
   'Máy chủ phát hành chưa cung cấp dữ liệu cập nhật cho kênh này. Ứng dụng vẫn hoạt động bình thường.';
@@ -99,7 +112,7 @@ export class AppUpdateService {
   private feedUnavailableForSession = false;
   private feedUnavailableLogged = false;
   private configuredChannel = '';
-  private readonly hasActiveWork: () => boolean;
+  private readonly activeWorkSummary: () => AppUpdateActiveWork;
 
   public constructor(
     private readonly settings: SettingsService,
@@ -107,9 +120,10 @@ export class AppUpdateService {
     private readonly backups: BackupService,
     private readonly logger: Logger,
     private readonly prepareForInstall: () => Promise<void> = () => Promise.resolve(),
-    hasActiveWork?: () => boolean
+    activeWork?: () => AppUpdateActiveWork
   ) {
-    this.hasActiveWork = hasActiveWork ?? (() => this.queue.activeCount() > 0);
+    this.activeWorkSummary =
+      activeWork ?? (() => ({ queueJobs: this.queue.activeCount(), quickDownload: false, otherProcesses: 0 }));
     const sourceReady = app.isPackaged && this.hasConfiguredUpdateSource();
     this.status = this.baseStatus(
       app.isPackaged && sourceReady ? 'idle' : 'disabled',
@@ -146,6 +160,17 @@ export class AppUpdateService {
       const currentVersion = app.getVersion();
       const relation = compareAppVersions(info.version, currentVersion);
       const checkedAt = new Date().toISOString();
+
+      // 2026-10-24: lượt dò định kỳ chạy cả khi bản mới đã tải xong. Cùng phiên bản đó thì giữ "sẵn sàng cài đặt" (chỉ cập
+      // nhật giờ dò) — trước đây bị đặt lại thành "có bản mới", trang Cập nhật và thông báo quay về bước tải.
+      if (
+        this.status.state === 'downloaded' &&
+        this.status.info?.version &&
+        compareAppVersions(info.version, this.status.info.version) === 0
+      ) {
+        this.emit({ ...this.status, checkedAt });
+        return;
+      }
 
       if (relation !== 1) {
         const invalid = relation === null;
@@ -283,6 +308,23 @@ export class AppUpdateService {
 
   public getStatus(): AppUpdateStatus {
     return this.status;
+  }
+
+  /**
+   * Dò ngầm (không hiện "đang kiểm tra", lỗi mạng chỉ ghi nhật ký) nếu lần dò gần nhất đã cũ hơn maxAgeMs. Dùng cho lịch dò
+   * định kỳ và khi người dùng mở trang Cập nhật. Không phụ thuộc việc thông báo có đang được hiện hay không.
+   * @returns true nếu đã bắt đầu một lượt dò.
+   */
+  public refreshIfStale(maxAgeMs: number, now = Date.now()): boolean {
+    if (!this.settings.get().autoCheckAppUpdates) return false;
+    const state = this.status.state;
+    if (state === 'checking' || state === 'downloading' || state === 'installing') return false;
+    const checkedAt = this.status.checkedAt ? Date.parse(this.status.checkedAt) : 0;
+    if (Number.isFinite(checkedAt) && now - checkedAt < maxAgeMs) return false;
+    void this.check(true).catch((error: unknown) => {
+      this.logger.warn('update', 'APP_UPDATE_CHECK_FAILED', error instanceof Error ? error.message : String(error));
+    });
+    return true;
   }
 
   public async check(silent = false): Promise<AppUpdateStatus> {
@@ -446,7 +488,17 @@ export class AppUpdateService {
     }
   }
 
-  public async install(): Promise<void> {
+  /** Việc đang chạy ngay lúc này — giao diện hỏi lại người dùng trước khi khởi động lại để cài (2026-10-24). */
+  public activeWork(): AppUpdateActiveWork {
+    return this.activeWorkSummary();
+  }
+
+  /**
+   * Cài bản đã tải rồi khởi động lại. 2026-10-24 (người dùng duyệt): đang có việc chạy thì giao diện hỏi lại; người dùng
+   * chọn "Vẫn khởi động lại" mới gửi allowActiveWork — Tubmedia không tự hủy, không tự hoãn: bước thoát giữ tác vụ ở trạng
+   * thái dở dang (như khi đóng app bình thường) để tiếp tục sau khi mở lại. Không có xác nhận đó thì vẫn chặn như cũ.
+   */
+  public async install(options: { allowActiveWork?: boolean } = {}): Promise<void> {
     if (
       this.status.state !== 'downloaded' ||
       !isNewerAppVersion(this.status.info?.version, app.getVersion())
@@ -457,10 +509,21 @@ export class AppUpdateService {
       );
     }
 
-    if (this.hasActiveWork()) {
-      throw new AppError(
-        'UPDATE_BLOCKED_ACTIVE_WORK',
-        'Hãy tạm dừng hoặc hoàn tất mọi tác vụ tải, cắt, ghép và Tải nhanh trước khi cập nhật.'
+    const work = this.activeWorkSummary();
+    if (hasActiveWork(work)) {
+      if (!options.allowActiveWork) {
+        throw new AppError(
+          'UPDATE_BLOCKED_ACTIVE_WORK',
+          'Hãy tạm dừng hoặc hoàn tất mọi tác vụ tải, cắt, ghép và Tải nhanh trước khi cập nhật.'
+        );
+      }
+      this.logger.warn(
+        'update',
+        'APP_UPDATE_INSTALL_WITH_ACTIVE_WORK',
+        `Người dùng xác nhận khởi động lại để cài bản mới dù đang có việc chạy (${work.queueJobs} tác vụ hàng đợi` +
+          `${work.quickDownload ? ', Tải nhanh' : ''}${work.otherProcesses ? `, ${work.otherProcesses} tiến trình công cụ` : ''}). ` +
+          'Các tác vụ được giữ dở dang để tiếp tục sau khi mở lại.',
+        { metadata: { ...work } }
       );
     }
 

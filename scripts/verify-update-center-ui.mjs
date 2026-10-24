@@ -3,6 +3,8 @@ import { join } from 'node:path';
 
 const root = process.cwd();
 const page = readFileSync(join(root, 'src/renderer/src/pages/UpdatesPage.tsx'), 'utf8');
+// 2026-10-24: cài & khởi động lại đi qua luồng chung useInstallUpdate (trang Cập nhật + thông báo).
+const installFlow = readFileSync(join(root, 'src/renderer/src/hooks/use-install-update.tsx'), 'utf8');
 const topbar = readFileSync(join(root, 'src/renderer/src/layout/Topbar.tsx'), 'utf8');
 const service = readFileSync(join(root, 'src/main/updates/app-update-service.ts'), 'utf8');
 const versionUtility = readFileSync(join(root, 'src/shared/app-version.ts'), 'utf8');
@@ -44,7 +46,8 @@ const checks = [
     'install action requires a newer remote version',
     page.includes("const canInstall = state === 'downloaded' && remoteIsNewer") &&
       page.includes('if (canInstall)') &&
-      page.includes('window.desktop.updates.install()')
+      page.includes('installUpdate.start()') &&
+      installFlow.includes('window.desktop.updates.install(')
   ],
   [
     'older remote version is labelled correctly',

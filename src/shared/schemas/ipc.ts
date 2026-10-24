@@ -378,6 +378,12 @@ export const localCutRequestSchema = z
     aspectRatio: aspectRatioSchema
   })
   .strict();
+/** 2026-10-24: allowActiveWork chỉ gửi khi người dùng đã xác nhận "Vẫn khởi động lại" dù đang có việc chạy. */
+export const updateInstallSchema = z
+  .object({ allowActiveWork: z.boolean().optional() })
+  .strict()
+  .optional();
+
 export const localCutTaskSchema = z
   .object({
     taskId: idSchema

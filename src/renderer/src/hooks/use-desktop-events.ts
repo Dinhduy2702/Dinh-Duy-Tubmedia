@@ -3,22 +3,16 @@ import type { AppUpdateStatus, LogEntry, QueueJob } from '@shared/types/domain';
 import { useAppStore } from '../stores/app-store';
 import { isNewerAppVersion } from '../../../shared/app-version';
 import { coalesceBatchJobFailureAttention } from '../../../shared/batch-error-notification-aggregator.js';
+import { UPDATE_ATTENTION_ID_PREFIX, shouldShowUpdateNotice, updateNoticeKey } from '../utils/update-notice';
 
 const JOB_FLUSH_MS = 150;
 const LOG_FLUSH_MS = 280;
 const QUEUE_FLUSH_MS = 220;
-const UPDATE_NOTICE_STORAGE_PREFIX = 'tubmedia:update-notice:v1';
-
-function claimUpdateNotice(state: 'available' | 'downloaded', version: string): boolean {
-  const storageKey = `${UPDATE_NOTICE_STORAGE_PREFIX}:${state}:${version}`;
-  try {
-    if (window.localStorage.getItem(storageKey) === '1') return false;
-    window.localStorage.setItem(storageKey, '1');
-  } catch {
-    // localStorage có thể bị chặn; bộ nhớ trong phiên bên dưới vẫn ngăn lặp liên tục.
-  }
-  return true;
-}
+/**
+ * 2026-10-24: thông báo cập nhật đã hiện trong PHIÊN này (mở lại app thì nhắc lại nếu vẫn còn bản mới / bản chờ cài). Trước
+ * đây ghi vĩnh viễn vào localStorage theo phiên bản. Ngoài module để dùng chung khi hook gắn lại (React StrictMode, đổi cửa sổ).
+ */
+const updateNoticesShownThisSession = new Set<string>();
 
 /* TUBMEDIA_R31N_NOTIFICATION_SPAM_COOKIE_ACTION */
 const COOKIE_BLOCKING_CODES_R31N = [
@@ -35,7 +29,6 @@ export function useDesktopEvents(): void {
     let jobTimer: number | null = null;
     let logTimer: number | null = null;
     let queueTimer: number | null = null;
-    let lastUpdateNotice = '';
 
     const flushJobs = (): void => {
       jobTimer = null;
@@ -81,18 +74,26 @@ export function useDesktopEvents(): void {
       }
 
       const state = status.state;
-      const key = `${state}:${version}`;
-      if (key === lastUpdateNotice) return;
-      lastUpdateNotice = key;
-      if (!claimUpdateNotice(state, version)) return;
+      const key = updateNoticeKey(state, version);
+      // Đã vào trang Cập nhật trong phiên này, hoặc đã hiện đúng thông báo này → không hiện lại (việc dò vẫn chạy ngầm).
+      if (
+        !shouldShowUpdateNotice({
+          updateCenterVisited: store.updateCenterVisited,
+          shownThisSession: updateNoticesShownThisSession,
+          key
+        })
+      ) {
+        return;
+      }
+      updateNoticesShownThisSession.add(key);
 
       const downloaded = state === 'downloaded';
       store.setAttention({
-        id: `app-update-${key}`,
+        id: `${UPDATE_ATTENTION_ID_PREFIX}${key}`,
         severity: downloaded ? 'success' : 'info',
         title: downloaded ? 'Bản cập nhật đã sẵn sàng' : `Đã có Tubmedia ${version}`,
         message: downloaded
-          ? 'Bản cập nhật đã tải và xác minh xong. Mở Trung tâm cập nhật để cài im lặng và khởi động lại khi mọi tác vụ đã an toàn.'
+          ? 'Bản cập nhật đã tải và xác minh xong. Bấm Cài đặt & khởi động lại để cài ngay; dữ liệu và cấu hình được giữ nguyên.'
           : 'Một phiên bản Tubmedia mới hơn đang có sẵn. Chọn Cập nhật ngay để tải và theo dõi tiến độ trực tiếp trong app.',
         sticky: downloaded
       });

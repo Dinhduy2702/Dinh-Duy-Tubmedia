@@ -18,6 +18,7 @@ import { ToneIcon } from '../components/ui/ToneIcon';
 import { compareAppVersions } from '../../../shared/app-version';
 import { formatReleaseNotesForDisplay } from '../../../shared/release-notes';
 import { progressFillStyle } from '../utils/progress-style';
+import { useInstallUpdate } from '../hooks/use-install-update';
 
 const LAST_KNOWN_RELEASE_KEY = 'tubmedia:last-known-app-release';
 
@@ -77,10 +78,16 @@ export function UpdatesPage(): React.JSX.Element {
   const setStatus = useAppStore((state) => state.setUpdateStatus);
   const setError = useAppStore((state) => state.setError);
   const setPage = useAppStore((state) => state.setPage);
-  const [busy, setBusy] = useState<'check' | 'update' | 'install' | null>(null);
+  const [busy, setBusy] = useState<'check' | 'update' | null>(null);
+  const installUpdate = useInstallUpdate();
   const [lastKnownRelease, setLastKnownRelease] = useState<AppUpdateReleaseInfo | null>(() =>
     readLastKnownRelease()
   );
+
+  // 2026-10-24: mở trang mà lần dò gần nhất đã cũ → dò ngầm thêm một lượt để trang thấy bản mới nhất (lịch dò mỗi giờ vẫn chạy).
+  useEffect(() => {
+    void window.desktop.updates.refreshIfStale().catch(() => false);
+  }, []);
 
   useEffect(() => {
     if (!status?.info?.version) return;
@@ -126,13 +133,13 @@ export function UpdatesPage(): React.JSX.Element {
 
   const runUpdate = async (): Promise<void> => {
     if (!canDownload && !canInstall) return;
-    const kind = canInstall ? 'install' : 'update';
-    setBusy(kind);
+    if (canInstall) {
+      // Cùng luồng với nút trong thông báo: hỏi lại nếu đang có việc chạy rồi mới khởi động lại.
+      await installUpdate.start();
+      return;
+    }
+    setBusy('update');
     try {
-      if (canInstall) {
-        await window.desktop.updates.install();
-        return;
-      }
       const result = await window.desktop.updates.download();
       setStatus(result);
     } catch (error) {
@@ -257,9 +264,9 @@ export function UpdatesPage(): React.JSX.Element {
 
           {(canDownload || canInstall) && (
             <div className="mt-5 flex flex-wrap gap-2">
-              <button className="btn btn-primary" disabled={busy !== null} onClick={() => void runUpdate()}>
+              <button className="btn btn-primary" disabled={busy !== null || installUpdate.busy} onClick={() => void runUpdate()}>
                 {canInstall ? <Rocket size={17} /> : <Download size={17} />}
-                {busy
+                {busy || installUpdate.busy
                   ? canInstall
                     ? 'Đang chuẩn bị...'
                     : 'Đang bắt đầu tải...'
@@ -272,7 +279,7 @@ export function UpdatesPage(): React.JSX.Element {
 
           {!['available', 'downloading', 'downloaded', 'installing'].includes(state) && (
             <div className="mt-5 flex flex-wrap gap-2">
-              <button className="btn" disabled={busy !== null} onClick={() => void runCheck()}>
+              <button className="btn" disabled={busy !== null || installUpdate.busy} onClick={() => void runCheck()}>
                 <RefreshCcw size={17} className={busy === 'check' ? 'animate-spin' : ''} />
                 {busy === 'check'
                   ? 'Đang kiểm tra...'
@@ -334,6 +341,7 @@ export function UpdatesPage(): React.JSX.Element {
           </section>
         </div>
       </div>
+      {installUpdate.dialog}
     </div>
   );
 }

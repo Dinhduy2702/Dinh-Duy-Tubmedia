@@ -2986,6 +2986,106 @@ test('Sửa lỗi sau phát hành 2026-09-25: phát hiện bản cập nhật hi
 });
 
 /**
+ * 2026-10-24 (người dùng duyệt): (1) nút khởi động lại trong thông báo "bản mới đã sẵn sàng" phải CÀI và khởi động lại như
+ * nút ở trang Cập nhật — trước đây chỉ mở trang Cập nhật; (2) đã vào trang Cập nhật trong phiên này thì không hiện lại thông
+ * báo cập nhật nữa, kể cả khi sang trang khác. Bản chạy từ mã nguồn không có bản cài thật nên lệnh cài bị dịch vụ cập nhật từ
+ * chối ("Chỉ có thể cài phiên bản mới hơn…") — chính câu đó chứng minh nút đã gọi đúng lệnh cài chứ không chỉ chuyển trang.
+ */
+test('Cập nhật 2026-10-24: nút khởi động lại trong thông báo gọi lệnh cài như trang Cập nhật; đã vào trang Cập nhật thì không hiện lại thông báo', async () => {
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-update-restart-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
+  db.exec(
+    'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
+  );
+  db.close();
+
+  const status = (state: 'available' | 'downloaded', version: string): Record<string, unknown> => ({
+    state,
+    currentVersion: '1.0.0',
+    channel: 'stable',
+    supported: true,
+    checkedAt: new Date().toISOString(),
+    message: null,
+    info: { version, releaseDate: null, releaseName: null, releaseNotes: null },
+    progress: null,
+    error: null
+  });
+
+  try {
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+        ),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+        TUBMEDIA_E2E_FAKE_UPDATE_STATUS_JSON: JSON.stringify(status('downloaded', '99.9.9')),
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+
+    const attention = shellWindow.locator('.attention-center');
+    await expect(attention, 'thông báo bản mới đã sẵn sàng phải hiện').toBeVisible({ timeout: 10_000 });
+    const restart = attention.getByRole('button', { name: 'Cài đặt & khởi động lại' });
+    await expect(restart, 'thông báo phải có nút cài & khởi động lại ngay').toBeVisible();
+    await expect(attention.getByRole('button', { name: 'Cập nhật ngay' })).toHaveCount(0);
+
+    const heading = async (): Promise<string> =>
+      shellWindow!.evaluate(() => document.querySelector('.page-shell h1')?.textContent?.trim() ?? '');
+    const before = await heading();
+    await restart.click();
+    // Lúc vừa mở app, bước dò công cụ có thể còn chạy tiến trình yt-dlp/FFmpeg → app phải HỎI LẠI trước khi khởi động lại.
+    // Gặp hộp hỏi thì chọn "Vẫn khởi động lại" (đúng luồng người dùng tự quyết); không có việc chạy thì cài ngay.
+    const confirmDialog = shellWindow.locator('.confirm-dialog');
+    const errorNotice = shellWindow.locator('.attention-center', { hasText: 'Chỉ có thể cài phiên bản mới hơn' });
+    await expect.poll(async () => (await confirmDialog.isVisible()) || (await errorNotice.isVisible()), { timeout: 10_000 }).toBe(true);
+    if (await confirmDialog.isVisible()) {
+      await expect(confirmDialog).toContainText('Đang có việc chạy');
+      await confirmDialog.getByRole('button', { name: 'Vẫn khởi động lại' }).click();
+    }
+    await expect(
+      shellWindow.locator('.attention-center'),
+      'nút phải gọi lệnh cài (bản chạy từ mã nguồn bị từ chối đúng câu của dịch vụ cập nhật)'
+    ).toContainText('Chỉ có thể cài phiên bản mới hơn', { timeout: 10_000 });
+    expect(await heading(), 'không được chỉ chuyển sang trang Cập nhật như trước').toBe(before);
+
+    // Vào trang Cập nhật rồi sang trang khác: thông báo cập nhật mới (kể cả bản khác) không hiện lại trong phiên này.
+    await shellWindow.locator('.topbar-update-button').click();
+    await expect.poll(heading).toBe('Trung tâm cập nhật');
+    await shellWindow.locator('.tool-status-button').click();
+    await expect.poll(heading).not.toBe('Trung tâm cập nhật');
+    await shellWindow.waitForTimeout(6_500); // hết lượt gửi lặp của hook giả lập lúc khởi động
+    for (const next of [status('available', '99.9.10'), status('downloaded', '99.9.10')]) {
+      await electronApplication.evaluate(({ BrowserWindow }, payload) => {
+        for (const window of BrowserWindow.getAllWindows()) window.webContents.send('events:update-status', payload);
+      }, next);
+    }
+    await shellWindow.waitForTimeout(1_500);
+    const updateNoticeVisible = await shellWindow.evaluate(() =>
+      [...document.querySelectorAll('.attention-center')].some((element) =>
+        /99\.9\.10|Bản cập nhật đã sẵn sàng|Đã có Tubmedia/.test(element.textContent ?? '')
+      )
+    );
+    expect(updateNoticeVisible, 'đã vào trang Cập nhật trong phiên này → không hiện lại thông báo cập nhật').toBe(false);
+    const topbarLabel = await shellWindow.locator('.topbar-update-button').innerText();
+    expect(topbarLabel, 'trạng thái mới vẫn được nhận (nút trên thanh đầu vẫn cập nhật)').toContain('Cài bản mới');
+  } finally {
+    await closeElectronApplication();
+    await removeSandbox(sandbox);
+  }
+});
+
+/**
  * Sự cố 2026-09-25: máy có nhiều hồ sơ Chrome (đã xác nhận thật trên máy người dùng có 6 hồ sơ, mỗi hồ
  * sơ một tài khoản Google khác nhau) thì để trống ô "Hồ sơ trình duyệt" khiến yt-dlp tự chọn hồ sơ "dùng
  * gần nhất trong Chrome" — người dùng không kiểm soát được và không biết đang lấy cookies của ai. Bài

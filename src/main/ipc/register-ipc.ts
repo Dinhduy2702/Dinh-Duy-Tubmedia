@@ -50,8 +50,10 @@ import {
   localCutPreviewFrameRequestSchema,
   localCutRequestSchema,
   localCutSuggestRequestSchema,
-  localCutTaskSchema
+  localCutTaskSchema,
+  updateInstallSchema
 } from '@shared/schemas/ipc.js';
+import { UPDATE_PAGE_REFRESH_AFTER_MS } from '../updates/app-update-service.js';
 import type { AppSettings, CookieConfigurationStatus } from '@shared/types/domain.js';
 import { InvalidInputError } from '@shared/errors/app-errors.js';
 import type { ZodType } from 'zod';
@@ -657,5 +659,11 @@ export function registerIpc(ctx: AppContext): void {
   noArgs(IPC.updates.status, () => ctx.appUpdates.getStatus());
   noArgs(IPC.updates.check, () => ctx.appUpdates.check());
   noArgs(IPC.updates.download, () => ctx.appUpdates.download());
-  noArgs(IPC.updates.install, () => ctx.appUpdates.install());
+  // 2026-10-24: nút "Cài đặt & khởi động lại" ở trang Cập nhật và trong thông báo dùng chung luồng: hỏi việc đang chạy →
+  // người dùng xác nhận → cài (allowActiveWork chỉ có khi người dùng đã chọn "Vẫn khởi động lại").
+  handle(IPC.updates.install, updateInstallSchema, (options) =>
+    ctx.appUpdates.install({ allowActiveWork: options?.allowActiveWork === true })
+  );
+  noArgs(IPC.updates.activeWork, () => ctx.appUpdates.activeWork());
+  noArgs(IPC.updates.refreshIfStale, () => ctx.appUpdates.refreshIfStale(UPDATE_PAGE_REFRESH_AFTER_MS));
 }

@@ -45,13 +45,14 @@ const checks = [
   ],
   [
     'download never invokes installer',
-    /public async download\(\)[\s\S]*?public async install\(\)/.test(service) &&
-      !/public async download\(\)[\s\S]*?quitAndInstall[\s\S]*?public async install\(\)/.test(service)
+    /public async download\(\)[\s\S]*?public async install\([^)]*\)/.test(service) &&
+      !/public async download\(\)[\s\S]*?quitAndInstall[\s\S]*?public async install\([^)]*\)/.test(service)
   ],
   [
     'only explicit install performs silent force-run update',
     (service.match(/quitAndInstall\(true, true\)/g) ?? []).length === 1 &&
-      /public async install\(\)[\s\S]*?quitAndInstall\(true, true\)/.test(service)
+      // 2026-10-24: install nhận { allowActiveWork } (người dùng đã xác nhận khởi động lại dù đang có việc chạy).
+      /public async install\([^)]*\)[\s\S]*?quitAndInstall\(true, true\)/.test(service)
   ],
   [
     'legacy parallel updater files remain absent',

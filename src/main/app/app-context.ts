@@ -175,7 +175,12 @@ export class AppContext {
       this.backups,
       this.logger,
       prepareForAppUpdate,
-      () => this.queue.activeCount() > 0 || this.processes.count() > 0 || this.quickDownload.isActive()
+      () => {
+        // Tiến trình công cụ của hàng đợi và Tải nhanh đã nằm trong hai mục đầu — chỉ báo riêng khi còn tiến trình lẻ khác.
+        const queueJobs = this.queue.activeCount();
+        const quickDownload = this.quickDownload.isActive();
+        return { queueJobs, quickDownload, otherProcesses: queueJobs === 0 && !quickDownload ? this.processes.count() : 0 };
+      }
     );
   }
   public initialize(): void {

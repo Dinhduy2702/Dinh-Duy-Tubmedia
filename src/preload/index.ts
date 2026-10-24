@@ -165,7 +165,9 @@ const api: DesktopApi = {
     status: () => invoke(IPC.updates.status),
     check: () => invoke(IPC.updates.check),
     download: () => invoke(IPC.updates.download),
-    install: () => invoke(IPC.updates.install)
+    install: (options?: { allowActiveWork?: boolean }) => invoke(IPC.updates.install, options),
+    activeWork: () => invoke(IPC.updates.activeWork),
+    refreshIfStale: () => invoke(IPC.updates.refreshIfStale)
   },
   events: {
     onQueueChanged: (listener) => on(IPC.events.queueChanged, listener),
