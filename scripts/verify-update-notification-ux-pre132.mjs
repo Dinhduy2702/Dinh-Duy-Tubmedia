@@ -2,6 +2,9 @@ import fs from 'node:fs';
 
 const events = fs.readFileSync('src/renderer/src/hooks/use-desktop-events.ts', 'utf8');
 const page = fs.readFileSync('src/renderer/src/pages/UpdatesPage.tsx', 'utf8');
+// 2026-10-24: nút cài ở trang Cập nhật và trong thông báo dùng chung luồng useInstallUpdate (hỏi lại khi đang có việc chạy).
+const installFlow = fs.readFileSync('src/renderer/src/hooks/use-install-update.tsx', 'utf8');
+const store = fs.readFileSync('src/renderer/src/stores/app-store.ts', 'utf8');
 const service = fs.readFileSync('src/main/updates/app-update-service.ts', 'utf8');
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
 
@@ -11,10 +14,11 @@ const checks = [
     events.includes("status.state !== 'available' && status.state !== 'downloaded'")
   ],
   [
-    'same version/state is claimed once across renderer sessions',
-    events.includes('claimUpdateNotice') &&
-      events.includes('UPDATE_NOTICE_STORAGE_PREFIX') &&
-      events.includes('lastUpdateNotice')
+    // 2026-10-24 (người dùng duyệt): mỗi phiên mở app chỉ hiện một lần; đã vào trang Cập nhật thì không hiện lại tới lần mở sau.
+    'same version/state is shown once per app session and hidden after visiting the Updates page',
+    events.includes('updateNoticesShownThisSession') &&
+      events.includes('shouldShowUpdateNotice') &&
+      store.includes('updateCenterVisited: true')
   ],
   [
     'update attention is informational rather than an error',
@@ -32,7 +36,9 @@ const checks = [
   [
     'download and install actions remain in the app',
     page.includes('window.desktop.updates.download()') &&
-      page.includes('window.desktop.updates.install()') &&
+      page.includes('installUpdate.start()') &&
+      installFlow.includes('window.desktop.updates.install(') &&
+      installFlow.includes('window.desktop.updates.activeWork()') &&
       page.includes('Cài đặt & khởi động lại')
   ],
   [

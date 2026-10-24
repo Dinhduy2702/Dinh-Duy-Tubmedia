@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { IPC } from '@shared/contracts/channels.js';
 import type { AppUpdateStatus } from '@shared/types/domain.js';
 import { AppContext } from './app/app-context.js';
+import { APP_UPDATE_CHECK_INTERVAL_MS, MIN_BACKGROUND_CHECK_GAP_MS } from './updates/app-update-service.js';
 import { decideCloseAction, decideMinimizeAction } from './app/window-close-policy.js';
 import { runShutdownSequence, type ShutdownStep } from './app/shutdown-sequence.js';
 import { registerIpc } from './ipc/register-ipc.js';
@@ -277,24 +278,16 @@ function startStatsTimer(): void {
   }, 2_000);
 }
 
+/**
+ * Dò bản mới chạy ngầm đều đặn suốt lúc app mở (2026-10-24: mỗi giờ, trước đây 6 giờ) — độc lập với việc thông báo có được
+ * hiện hay không (người dùng đã vào trang Cập nhật thì chỉ ẩn thông báo, không ngừng dò).
+ */
 function startUpdateScheduler(current: AppContext): void {
   const check = (): void => {
-    if (!current.settings.get().autoCheckAppUpdates) return;
-    const status = current.appUpdates.getStatus();
-    if (status.state === 'checking' || status.state === 'downloading' || status.state === 'installing')
-      return;
-    const checkedAt = status.checkedAt ? Date.parse(status.checkedAt) : 0;
-    if (Number.isFinite(checkedAt) && Date.now() - checkedAt < 5 * 60 * 1_000) return;
-    void current.appUpdates.check(true).catch((error: unknown) => {
-      current.logger.warn(
-        'update',
-        'APP_UPDATE_CHECK_FAILED',
-        error instanceof Error ? error.message : String(error)
-      );
-    });
+    current.appUpdates.refreshIfStale(MIN_BACKGROUND_CHECK_GAP_MS);
   };
   updateInitialTimer = setTimeout(check, 25_000);
-  updateTimer = setInterval(check, 6 * 60 * 60 * 1_000);
+  updateTimer = setInterval(check, APP_UPDATE_CHECK_INTERVAL_MS);
 }
 
 function initializeApplication(): void {
@@ -378,7 +371,7 @@ function initializeApplication(): void {
       // 'did-finish-load' chỉ báo trang HTML đã tải xong — KHÔNG đảm bảo React đã mount và
       // useDesktopEvents() đã đăng ký lắng nghe onUpdateStatus (sự kiện gửi quá sớm sẽ bị mất, không ai
       // nhận). Gửi LẶP LẠI trong vài giây đầu thay vì đúng 1 lần: renderer tự chống lặp thông báo theo
-      // đúng state+version (xem claimUpdateNotice trong use-desktop-events.ts) nên gửi thêm vài lần
+      // đúng state+version trong phiên (updateNoticesShownThisSession trong use-desktop-events.ts) nên gửi thêm vài lần
       // không gây hiện thông báo nhiều lần — chỉ đảm bảo CHẮC CHẮN có ít nhất một lượt gửi tới đúng lúc
       // renderer đã sẵn sàng nhận, không phụ thuộc vào thời điểm chính xác của 'did-finish-load'.
       let attemptsLeft = 20;

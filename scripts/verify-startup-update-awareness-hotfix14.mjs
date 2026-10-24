@@ -19,10 +19,12 @@ const checks = [
       !exists('src/renderer/src/update-awareness.ts')
   ],
   [
-    'packaged app checks silently after startup and every six hours',
+    // 2026-10-24: dò ngầm mỗi giờ (APP_UPDATE_CHECK_INTERVAL_MS) thay vì 6 giờ; ẩn thông báo không làm ngừng dò.
+    'packaged app checks silently after startup and every hour',
     main.includes('runBackgroundUpdateChecks') &&
       main.includes('startUpdateScheduler') &&
-      /6\s*\*\s*60\s*\*\s*60\s*\*\s*1_000/.test(main)
+      main.includes('setInterval(check, APP_UPDATE_CHECK_INTERVAL_MS)') &&
+      /APP_UPDATE_CHECK_INTERVAL_MS\s*=\s*60\s*\*\s*60\s*\*\s*1_000/.test(service)
   ],
   [
     'startup check obeys user setting',
@@ -41,8 +43,9 @@ const checks = [
       events.includes('onUpdateStatus(updateStatus)')
   ],
   [
-    'update notices are version claimed and deduplicated',
-    events.includes('claimUpdateNotice') && events.includes('lastUpdateNotice')
+    // 2026-10-24: ghi nhớ theo phiên (mở lại app thì nhắc lại bản còn chờ), không ghi vĩnh viễn theo phiên bản nữa.
+    'update notices are deduplicated per app session',
+    events.includes('updateNoticesShownThisSession') && events.includes('shouldShowUpdateNotice')
   ],
   [
     'startup update verifier remains registered',

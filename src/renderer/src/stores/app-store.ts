@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { friendlyIssue, safeUiText } from '../utils/ui-error';
 import { isJobNoticeStillBlocking, shouldRouteIssueToAttention } from '@shared/utils/notification-policy';
 import { isNoticeTone } from '@shared/utils/notice-tone';
+import { isUpdateAttention } from '../utils/update-notice';
 import {
   isIssueDismissed,
   mergeNoticeIntoQueue,
@@ -76,6 +77,8 @@ interface State {
   notifications: NotificationRecord[];
   notificationCenterOpen: boolean;
   updateStatus: AppUpdateStatus | null;
+  /** 2026-10-24: người dùng đã mở trang Cập nhật trong phiên này → không hiện lại thông báo cập nhật tới lần mở app sau. */
+  updateCenterVisited: boolean;
   bootstrap(): Promise<void>;
   setPage(page: PageId): void;
   selectProject(id: string | null): void;
@@ -445,6 +448,7 @@ export const useAppStore = create<State>((set, get) => ({
   notifications: initialNotifications,
   notificationCenterOpen: false,
   updateStatus: null,
+  updateCenterVisited: false,
   bootstrap: async () => {
     set({ loading: true, error: null });
     try {
@@ -480,7 +484,15 @@ export const useAppStore = create<State>((set, get) => ({
       set({ loading: false, error });
     }
   },
-  setPage: (page) => set({ page }),
+  setPage: (page) =>
+    set((state) => {
+      if (page !== 'updates') return { page };
+      // Vào trang Cập nhật: đóng luôn thông báo cập nhật đang hiện / đang chờ hiện, và không hiện lại trong phiên này.
+      const current = isUpdateAttention(state.attention) ? null : state.attention;
+      const queue = state.attentionQueue.filter((notice) => !isUpdateAttention(notice));
+      const [next, ...rest] = current ? [current, ...queue] : queue;
+      return { page, updateCenterVisited: true, attention: next ?? null, attentionQueue: rest };
+    }),
   selectProject: (id) => set({ selectedProjectId: id, page: get().page }),
   refreshProjects: async () => set({ projects: await window.desktop.projects.list() }),
   refreshJobs: async () => {
@@ -575,6 +587,8 @@ export const useAppStore = create<State>((set, get) => ({
         const [next, ...rest] = state.attentionQueue;
         return { attention: next ?? null, attentionQueue: rest };
       }
+      // Đã vào trang Cập nhật trong phiên này → bỏ hẳn thông báo cập nhật (không hiện, không thêm vào chuông).
+      if (state.updateCenterVisited && isUpdateAttention(attention)) return {};
       const cleanAttention = cleanNotice(attention);
       const notifications = addNotification(state.notifications, cleanAttention);
       if (isIssueDismissed(state.dismissedIssues, cleanAttention)) return { notifications };

@@ -96,7 +96,8 @@ check(
 );
 
 check(
-  desktopEvents.includes('store.setAttention({') && desktopEvents.includes('app-update-${key}'),
+  // 2026-10-24: id = UPDATE_ATTENTION_ID_PREFIX ('app-update-') + key.
+  desktopEvents.includes('store.setAttention({') && desktopEvents.includes('${UPDATE_ATTENTION_ID_PREFIX}${key}`'),
   'app-update notifications remain outside the batch job-failure aggregator'
 );
 

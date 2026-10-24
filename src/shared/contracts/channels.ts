@@ -156,7 +156,9 @@ export const IPC = {
     status: 'updates:status',
     check: 'updates:check',
     download: 'updates:download',
-    install: 'updates:install'
+    install: 'updates:install',
+    activeWork: 'updates:active-work',
+    refreshIfStale: 'updates:refresh-if-stale'
   },
   events: {
     queueChanged: 'events:queue-changed',

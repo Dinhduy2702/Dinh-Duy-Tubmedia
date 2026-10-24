@@ -1,5 +1,6 @@
 import type {
   AppSettings,
+  AppUpdateActiveWork,
   AppUpdateStatus,
   AttentionNotice,
   BrowserProfileOption,
@@ -244,7 +245,11 @@ export interface DesktopApi {
     status(): Promise<AppUpdateStatus>;
     check(): Promise<AppUpdateStatus>;
     download(): Promise<AppUpdateStatus>;
-    install(): Promise<void>;
+    /** allowActiveWork: chỉ khi người dùng đã xác nhận khởi động lại dù đang có việc chạy. */
+    install(options?: { allowActiveWork?: boolean }): Promise<void>;
+    activeWork(): Promise<AppUpdateActiveWork>;
+    /** Dò ngầm nếu lần dò gần nhất đã cũ (mở trang Cập nhật); true = đã bắt đầu dò. */
+    refreshIfStale(): Promise<boolean>;
   };
   events: {
     onQueueChanged(listener: (jobs: QueueJob[]) => void): () => void;

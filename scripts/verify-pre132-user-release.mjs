@@ -231,15 +231,17 @@ check(
 
 check(
   /networkCheckInFlight/.test(service) &&
-    /claimUpdateNotice/.test(updateEvents) &&
-    /lastUpdateNotice/.test(updateEvents),
+    /updateNoticesShownThisSession/.test(updateEvents) &&
+    /shouldShowUpdateNotice/.test(updateEvents),
   'update checks are coalesced and version notices are deduplicated'
 );
 
 check(
   /app\.isPackaged/.test(service) &&
     /startUpdateScheduler/.test(mainIndex) &&
-    /6\s*\*\s*60\s*\*\s*60\s*\*\s*1_000/.test(mainIndex),
+    // 2026-10-24: mỗi giờ (APP_UPDATE_CHECK_INTERVAL_MS trong app-update-service.ts).
+    /setInterval\(check, APP_UPDATE_CHECK_INTERVAL_MS\)/.test(mainIndex) &&
+    /APP_UPDATE_CHECK_INTERVAL_MS\s*=\s*60\s*\*\s*60\s*\*\s*1_000/.test(service),
   'update checks are packaged-only with bounded startup and periodic cadence'
 );
 

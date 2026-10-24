@@ -398,6 +398,7 @@ src/renderer/src/env.d.ts
 src/renderer/src/features/projects/CreateProjectDialog.tsx
 src/renderer/src/features/projects/ImportLinksDialog.tsx
 src/renderer/src/hooks/use-desktop-events.ts
+src/renderer/src/hooks/use-install-update.tsx
 src/renderer/src/hooks/use-is-light-theme.ts
 src/renderer/src/hooks/use-lane-logs.ts
 src/renderer/src/layout/Sidebar.tsx
@@ -436,6 +437,7 @@ src/renderer/src/utils/notify.ts
 src/renderer/src/utils/progress-style.ts
 src/renderer/src/utils/ui-error.ts
 src/renderer/src/utils/ui-id.ts
+src/renderer/src/utils/update-notice.ts
 src/renderer/src/utils/vi-labels.ts
 src/renderer/src/utils/workbench-path-memory.ts
 src/renderer/src/video-link-filter.css
@@ -552,6 +554,7 @@ tests/integration/ytdlp-mei-temp-cleanup.test.ts
 tests/unit/active-download-workers-label.test.ts
 tests/unit/adapt-to-user-machine.test.ts
 tests/unit/adaptive-download.test.ts
+tests/unit/app-update-restart-flow.test.ts
 tests/unit/app-update-version.test.ts
 tests/unit/apply-temp-folder.test.ts
 tests/unit/attempt-display.test.ts
@@ -725,6 +728,7 @@ tests/unit/ui-screenshot-script.test.ts
 tests/unit/unified-download-progress-1.3.0.test.ts
 tests/unit/unsupported-url-dot5.test.ts
 tests/unit/update-center-release-notes.test.ts
+tests/unit/update-notice-session.test.ts
 tests/unit/url.test.ts
 tests/unit/user-facing-notifications.test.ts
 tests/unit/user-runtime-hardening-r55.test.ts

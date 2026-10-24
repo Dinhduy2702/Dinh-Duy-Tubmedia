@@ -80,8 +80,11 @@ check(
   has('src/main/updates/app-update-service.ts', 'updater.autoDownload = false')
 );
 check(
-  'update install is blocked while jobs run',
-  has('src/main/updates/app-update-service.ts', 'this.queue.activeCount() > 0')
+  // 2026-10-24: vẫn chặn khi đang có việc chạy, trừ khi người dùng đã xác nhận "Vẫn khởi động lại" (allowActiveWork).
+  'update install is blocked while jobs run unless the user confirms',
+  has('src/main/updates/app-update-service.ts', 'if (hasActiveWork(work)) {') &&
+    has('src/main/updates/app-update-service.ts', 'if (!options.allowActiveWork) {') &&
+    has('src/main/updates/app-update-service.ts', "'UPDATE_BLOCKED_ACTIVE_WORK'")
 );
 check(
   'update backup uses bounded update category',

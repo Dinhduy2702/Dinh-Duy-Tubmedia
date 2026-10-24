@@ -2,6 +2,8 @@ import fs from 'node:fs';
 
 const main = fs.readFileSync('src/main/updates/app-update-service.ts', 'utf8');
 const page = fs.readFileSync('src/renderer/src/pages/UpdatesPage.tsx', 'utf8');
+// 2026-10-24: cài & khởi động lại đi qua luồng chung useInstallUpdate (trang Cập nhật + thông báo).
+const installFlow = fs.readFileSync('src/renderer/src/hooks/use-install-update.tsx', 'utf8');
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
 
 let checks = 0;
@@ -17,7 +19,8 @@ const quitInstallMatches = main.match(/quitAndInstall\s*\(\s*true\s*,\s*true\s*\
 
 check(
   quitInstallMatches.length === 1 &&
-    /public async install\(\)[\s\S]*?quitAndInstall\(true, true\)/.test(main),
+    // 2026-10-24: install nhận { allowActiveWork } (người dùng đã xác nhận khởi động lại dù đang có việc chạy).
+    /public async install\([^)]*\)[\s\S]*?quitAndInstall\(true, true\)/.test(main),
   'professional silent install/relaunch contract has one explicit owned path'
 );
 
@@ -63,7 +66,8 @@ check(
 check(
   page.includes("state === 'downloaded'") &&
     page.includes('Cài đặt & khởi động lại') &&
-    page.includes('window.desktop.updates.install()'),
+    page.includes('installUpdate.start()') &&
+    installFlow.includes('window.desktop.updates.install('),
   'downloaded update exposes explicit install and restart action'
 );
 
