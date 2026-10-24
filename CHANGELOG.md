@@ -1,3 +1,27 @@
+# Tubmedia 1.7.2
+
+- Video có tên dài (thường gặp ở Facebook) không còn bị lỗi "không lưu được tệp". Trước đây đường dẫn tệp vượt giới hạn 260
+  ký tự của Windows nên tải thất bại:
+  - Tên tệp tự rút ngắn theo độ dài thư mục lưu, vẫn giữ mã video và mã liên kết ở cuối tên.
+  - Nếu vẫn quá dài, Tubmedia tự rút ngắn thêm rồi thử lại; thư mục lưu quá sâu thì thông báo nói rõ và gợi ý chọn thư mục
+    gần gốc ổ đĩa (ví dụ E:\Video).
+  - Tệp đang tải dở giờ nằm đúng trong thư mục tạm của danh sách, tải xong mới chuyển sang thư mục lưu.
+- Bước kiểm dung lượng trước và trong khi tải giờ xem cả ổ chứa thư mục tạm, không chỉ ổ chứa thư mục lưu video.
+- Tốc độ tải tự điều chỉnh theo đúng máy và mạng của bạn:
+  - Khi mạng và ổ lưu còn trống, Tubmedia tăng dần số video tải cùng lúc và số mảnh tải mỗi video, không vượt mức máy chịu
+    được. Tăng mà không nhanh hơn, ổ lưu bận liên tục, hoặc nền tảng báo giới hạn thì tự lùi lại. Tắt được ở Cài đặt › Tải
+    danh sách › "Tự tận dụng mạng còn trống".
+  - Số mảnh tải mỗi video mặc định "Tự động theo máy" (dùng cho cả Tải nhanh): máy rất yếu dùng 1, các máy khác 2. Số bạn
+    đã tự chọn trước đây được giữ nguyên.
+  - Tổng số video tải cùng lúc toàn ứng dụng có mức trần tự tính theo máy, để máy yếu không bị quá tải.
+  - Cài đặt › Cấu hình máy hiện loại từng ổ đĩa (SSD/HDD).
+- Cập nhật ứng dụng:
+  - Nút trong thông báo "bản cập nhật đã sẵn sàng" giờ là "Cài đặt & khởi động lại" và cài ngay, giống nút ở trang Cập nhật
+    (trước đây chỉ mở trang Cập nhật). Nếu đang có việc chạy, Tubmedia hỏi lại trước; chọn "Vẫn khởi động lại" thì các tác
+    vụ được giữ ở trạng thái dở dang để tiếp tục sau khi mở lại.
+  - Đã mở trang Cập nhật thì thông báo cập nhật không hiện lại nữa cho tới lần mở ứng dụng sau.
+  - Tubmedia dò bản mới mỗi giờ trong lúc mở (trước đây 6 giờ một lần), và dò thêm khi bạn mở trang Cập nhật.
+
 # Tubmedia 1.7.1
 
 - Ghép video phát hiện sớm video nguồn bị hỏng tiếng hoặc hỏng hình, ngay ở bước chuẩn bị, thay vì ghép xong mới báo lỗi:
