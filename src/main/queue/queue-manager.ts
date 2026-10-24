@@ -70,7 +70,16 @@ import {
 } from '@shared/utils/download-failure.js';
 import { effectiveMemoryReserveBytes } from '@shared/utils/resource-memory.js';
 import { toneForErrorCode } from '@shared/utils/notice-tone.js';
-import { detectPlatform } from '@shared/utils/url.js';
+import { detectPlatform, downloadLinkTag } from '@shared/utils/url.js';
+import {
+  downloadWorkFolder,
+  mergeCachesIdle,
+  removeDownloadWorkFolder,
+  removeMergeCaches,
+  removeVideoDownloadTemp,
+  sweepDownloadTemp,
+  type DownloadTempProtection
+} from '../files/download-temp-cleanup.js';
 import { RATE_LIMIT_MAX_AUTO_ROUNDS, formatAutoResumeEta, rateLimitPlatformLabel } from '@shared/utils/rate-limit-backoff.js';
 import { PlatformRateLimitGate } from './platform-rate-limit-gate.js';
 
@@ -102,6 +111,10 @@ const ADAPTIVE_REASON_TEXT: Record<AdaptiveReason, string> = {
   throttled: 'nền tảng giới hạn/từ chối (429/403) — lùi lại',
   idle_reset: 'đã hết video tải — lượt sau bắt đầu lại từ mức cơ bản'
 };
+/** 2026-10-24: quét tệp tạm mồ côi định kỳ trong lúc app mở (ngoài lượt quét khi mở app). */
+const TEMP_SWEEP_INTERVAL_MS = 6 * 60 * 60 * 1_000;
+/** Trạng thái tác vụ đã kết thúc — không còn tiếp tục được bằng phần đã tải. */
+const TERMINAL_JOB_STATUSES: ReadonlySet<QueueJob['status']> = new Set(['completed', 'skipped', 'cancelled', 'failed']);
 /** Lag bước 3: khoảng tối thiểu giữa hai lần gửi CẢ danh sách tác vụ sang giao diện. */
 const QUEUE_CHANGED_THROTTLE_MS = 300;
 const TERMINAL_STATUSES = new Set(['completed', 'skipped', 'cancelled', 'failed']);
@@ -264,6 +277,7 @@ export class QueueManager {
   private readonly diskBusy = new DiskBusyMonitor();
   private readonly downloadSpeeds = new Map<string, { bytesPerSecond: number; at: number }>();
   private adaptiveSampleAt = 0;
+  private tempSweepTimer: NodeJS.Timeout | null = null;
   private startupReadyResolve: (() => void) | null = null;
   private readonly startupReady = new Promise<void>((resolve) => {
     this.startupReadyResolve = resolve;
@@ -348,6 +362,13 @@ export class QueueManager {
     if (this.schedulerRunning) return;
     this.schedulerRunning = true;
     this.scheduleTick(0);
+    // 2026-10-24: sau khi trạng thái tác vụ lúc mở app đã ổn định (tác vụ dở được giữ "tạm dừng" → thư mục tải dở của chúng
+    // được giữ để tải tiếp), quét tệp tạm mồ côi; lặp lại mỗi 6 giờ trong lúc app mở.
+    void this.sweepOrphanTemporaryFiles();
+    if (!this.tempSweepTimer) {
+      this.tempSweepTimer = setInterval(() => void this.sweepOrphanTemporaryFiles(), TEMP_SWEEP_INTERVAL_MS);
+      this.tempSweepTimer.unref?.();
+    }
   }
 
   private async prepareStartupQueue(): Promise<void> {
@@ -515,6 +536,8 @@ export class QueueManager {
     this.timer = null;
     this.cancelQueueChangedSend();
     this.diskBusy.stop();
+    if (this.tempSweepTimer) clearInterval(this.tempSweepTimer);
+    this.tempSweepTimer = null;
     for (const active of this.active.values()) {
       if (preserveForResume)
         this.repo.update(active.job.id, {
@@ -1482,6 +1505,8 @@ export class QueueManager {
         this.active.delete(job.id);
         this.progressUpdates.delete(job.id);
         this.downloadSpeeds.delete(job.id);
+        // 2026-10-24: video tải xong / lỗi hẳn / bị huỷ → xoá tệp tạm của riêng video đó (tạm dừng / chờ thử lại thì giữ).
+        if (job.type === 'download') void this.cleanupVideoDownloadTemp(job.id);
         if (sourceLock) this.sourceLocks.delete(sourceLock);
         try {
           if (job.projectId) this.syncProjectStatus(job.projectId);
@@ -1658,6 +1683,10 @@ export class QueueManager {
         }),
         { removedFiles: 0, removedDirectories: 0, skippedUnsafePaths: 0 }
       );
+      // 2026-10-24: tệp tạm của lượt tải (thư mục _dl của danh sách) và bản đệm của quy trình ghép.
+      const extra = await this.cleanupProjectDownloadTemp(project, protection);
+      report.removedFiles += extra.files;
+      report.removedDirectories += extra.folders;
       if (!preserveTrackedClips) {
         for (const item of items) {
           if (item.clipFile) this.items.setClipFile(item.id, null);
@@ -1683,6 +1712,133 @@ export class QueueManager {
       );
     } finally {
       this.cleanupInProgress.delete(projectId);
+    }
+  }
+
+  /** Danh sách còn tác vụ chưa kết thúc (chờ, đang chạy, thử lại, tạm dừng, gián đoạn) — phần đã tải còn cần để tải tiếp. */
+  private projectHasOpenJobs(projectId: string): boolean {
+    return this.repo.list(projectId).some((job) => !TERMINAL_JOB_STATUSES.has(job.status));
+  }
+
+  private downloadTempProtection(): DownloadTempProtection {
+    return buildCleanupProtection({
+      projects: this.projects.list(true),
+      settings: this.settings.get(),
+      jobs: this.repo.list(),
+      sourceFiles: this.sources.listSourceFiles()
+    });
+  }
+
+  /**
+   * 2026-10-24 (người dùng yêu cầu): một video tải xong, lỗi hẳn hoặc bị huỷ → xoá tệp tạm (.part, mảnh, luồng riêng…) của
+   * riêng video đó trong thư mục _dl của danh sách. Đang chờ thử lại / tạm dừng / gián đoạn thì GIỮ để tải tiếp từ phần đã
+   * tải. Lỗi hẳn cũng xoá: bấm Thử lại sẽ tải lại từ đầu, đổi lại thư mục tạm không phình to theo thời gian.
+   */
+  private async cleanupVideoDownloadTemp(jobId: string): Promise<void> {
+    const job = this.repo.get(jobId);
+    if (!job || job.type !== 'download' || !job.projectId || !TERMINAL_JOB_STATUSES.has(job.status)) return;
+    const project = this.projects.get(job.projectId);
+    const source = job.sourceId ? this.sources.get(job.sourceId) : null;
+    if (!project || !source) return;
+    let linkTag: string;
+    try {
+      linkTag = downloadLinkTag(source.normalizedUrl || source.originalUrl);
+    } catch {
+      return;
+    }
+    try {
+      // Chỉ cần thư mục người dùng chọn: tệp trong _dl\<mã> luôn là tệp tạm của yt-dlp (thành phẩm nằm ở thư mục nguồn).
+      const settings = this.settings.get();
+      const protection: DownloadTempProtection = {
+        protectedFolders: [
+          settings.defaultSourceFolder,
+          settings.defaultTempFolder,
+          settings.defaultOutputFolder,
+          ...this.projects.list(true).flatMap((item) => [item.sourceFolder, item.tempFolder, item.outputFolder])
+        ].filter((folder): folder is string => typeof folder === 'string' && folder.trim().length > 0),
+        protectedFiles: []
+      };
+      const removed = await removeVideoDownloadTemp(downloadWorkFolder(project.tempFolder, project.id), linkTag, protection);
+      if (removed > 0) {
+        this.logger.info(
+          'cleanup',
+          'DOWNLOAD_TEMP_CLEANED',
+          `Đã xoá ${removed} tệp tạm của video ${job.status === 'completed' || job.status === 'skipped' ? 'đã tải xong' : job.status === 'failed' ? 'tải lỗi' : 'đã huỷ'}.`,
+          { jobId: job.id, projectId: project.id, metadata: { removed, status: job.status } }
+        );
+      }
+    } catch (error) {
+      this.logger.warn('cleanup', 'DOWNLOAD_TEMP_CLEANUP_WARNING', error instanceof Error ? error.message : String(error), {
+        jobId: job.id,
+        projectId: job.projectId
+      });
+    }
+  }
+
+  /**
+   * Danh sách không còn tác vụ nào chưa kết thúc → xoá cả thư mục _dl\<mã danh sách>. Bản đệm ghép (_normalized-cache,
+   * _remux-cache) nằm chung thư mục tạm có thể dùng chung với danh sách khác → chỉ xoá khi MỌI danh sách dùng thư mục tạm này
+   * đều đã kết thúc và không có quy trình lỗi nào đang chờ thử lại (lỗi thì giữ để ghép lại nhanh; lượt quét định kỳ dọn sau).
+   */
+  private async cleanupProjectDownloadTemp(
+    project: { id: string; tempFolder: string },
+    protection: DownloadTempProtection
+  ): Promise<{ files: number; folders: number }> {
+    if (this.projectHasOpenJobs(project.id)) return { files: 0, folders: 0 };
+    const files = await removeDownloadWorkFolder(downloadWorkFolder(project.tempFolder, project.id), protection);
+    let folders = files > 0 ? 1 : 0;
+    const sameTemp = this.projects
+      .list(true)
+      .filter((item) => item.tempFolder && item.tempFolder.toLowerCase() === project.tempFolder.toLowerCase());
+    const cachesStillUseful = sameTemp.some((item) =>
+      this.repo.list(item.id).some((job) => !TERMINAL_JOB_STATUSES.has(job.status) || job.status === 'failed')
+    );
+    if (!cachesStillUseful) folders += await removeMergeCaches(project.tempFolder, protection);
+    return { files, folders };
+  }
+
+  /**
+   * 2026-10-24: quét tệp tạm mồ côi khi mở app và mỗi 6 giờ — tệp còn sót khi app bị tắt đột ngột, mất điện, hoặc của danh
+   * sách đã xoá. Giữ thư mục của danh sách còn tiếp tục được (trừ khi bị bỏ quên quá 14 ngày). Bản đệm ghép của thư mục tạm
+   * không còn danh sách nào mở thì dọn luôn; còn quy trình lỗi chờ thử lại thì giữ tối đa 14 ngày.
+   */
+  public async sweepOrphanTemporaryFiles(now = Date.now()): Promise<void> {
+    try {
+      const projects = this.projects.list(true);
+      const protection = this.downloadTempProtection();
+      const openByWorkName = new Map<string, boolean>();
+      const openByTemp = new Map<string, { open: boolean; failed: boolean; tempFolder: string }>();
+      for (const project of projects) {
+        const jobs = this.repo.list(project.id);
+        const open = jobs.some((job) => !TERMINAL_JOB_STATUSES.has(job.status));
+        const failed = jobs.some((job) => job.status === 'failed');
+        const workName = project.id.slice(0, 8).toLowerCase();
+        openByWorkName.set(workName, (openByWorkName.get(workName) ?? false) || open);
+        if (!project.tempFolder?.trim()) continue;
+        const key = project.tempFolder.toLowerCase();
+        const current = openByTemp.get(key) ?? { open: false, failed: false, tempFolder: project.tempFolder };
+        openByTemp.set(key, { open: current.open || open, failed: current.failed || failed, tempFolder: current.tempFolder });
+      }
+      const settings = this.settings.get();
+      const tempFolders = [...openByTemp.values()].map((item) => item.tempFolder);
+      if (settings.defaultTempFolder?.trim()) tempFolders.push(settings.defaultTempFolder);
+      const report = await sweepDownloadTemp({ tempFolders, resumableByWorkName: openByWorkName, protection, now });
+      let caches = 0;
+      for (const item of openByTemp.values()) {
+        if (item.open) continue;
+        if (item.failed && !(await mergeCachesIdle(item.tempFolder, now))) continue;
+        caches += await removeMergeCaches(item.tempFolder, protection);
+      }
+      if (report.removedFolders + report.removedFiles + caches > 0) {
+        this.logger.info(
+          'cleanup',
+          'ORPHAN_TEMP_SWEPT',
+          `Đã tự dọn tệp tạm còn sót: ${report.removedFiles} tệp trong ${report.removedFolders} thư mục tải dở, ${caches} thư mục bản đệm ghép.`,
+          { metadata: { ...report, mergeCaches: caches } }
+        );
+      }
+    } catch (error) {
+      this.logger.warn('cleanup', 'ORPHAN_TEMP_SWEEP_WARNING', error instanceof Error ? error.message : String(error));
     }
   }
 
