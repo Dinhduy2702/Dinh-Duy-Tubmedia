@@ -1,3 +1,5 @@
+import { cpus, totalmem } from 'node:os';
+import { recommendedConcurrentFragments } from '@shared/utils/hardware-recommendation.js';
 import {
   formatQuickDownloadTime,
   type QuickDownloadMediaMode,
@@ -20,6 +22,14 @@ export interface QuickDownloadCommandOptions {
   forceGenericExtractor?: boolean;
   /** Giai đoạn 6 mục 7 (2026-09-24): mẫu đặt tên tệp do người dùng cấu hình trong Cài đặt. */
   filenameTemplate?: string | undefined;
+  /** 2026-10-24: số mảnh tải mỗi video (ô Cài đặt dùng chung với Tải danh sách). Bỏ trống → tự dò theo máy đang chạy. */
+  concurrentFragments?: number | undefined;
+}
+
+/** Trước đây cố định 4 mảnh trên mọi máy; giờ theo số truyền vào (1–8) hoặc tự dò theo máy. */
+function quickConcurrentFragments(requested: number | undefined): string {
+  const value = requested ?? recommendedConcurrentFragments(cpus().length, totalmem());
+  return String(Math.max(1, Math.min(8, Math.trunc(Number(value) || 1))));
 }
 
 // Giai đoạn 6 mục 7 (2026-09-24) — "Mẫu đặt tên tệp": mặc định GIỮ NGUYÊN đúng tên hiện có (tên video +
@@ -125,7 +135,7 @@ export function buildQuickDownloadArguments(
     '--retry-sleep',
     'fragment:exp=1:20',
     '--concurrent-fragments',
-    '4',
+    quickConcurrentFragments(options.concurrentFragments),
     '--ffmpeg-location',
     paths.ffmpegDirectory,
     '-P',

@@ -4,7 +4,9 @@ import { app, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { access, mkdir, readFile, readdir, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import { constants as fsConstants, existsSync } from 'node:fs';
+import { cpus, totalmem } from 'node:os';
 import { basename, dirname, extname, join } from 'node:path';
+import { effectiveConcurrentFragments } from '@shared/utils/hardware-recommendation.js';
 import {
   formatQuickDownloadTime,
   validateQuickDownloadRequest,
@@ -179,6 +181,12 @@ export class QuickDownloadService {
   ) {
     this.statePath = join(stateDirectory, 'state.json');
     this.tempRoot = join(app.getPath('temp'), 'TubmediaQD');
+  }
+
+  /** 2026-10-24: số mảnh mỗi video theo ô Cài đặt dùng chung (tự động theo máy / tự chọn); chưa có cài đặt → tự dò. */
+  private concurrentFragments(): number | undefined {
+    const settings = this.settings?.get();
+    return settings ? effectiveConcurrentFragments(settings, cpus().length, totalmem()) : undefined;
   }
 
   private cookieSettings(): {
@@ -559,7 +567,8 @@ export class QuickDownloadService {
             {
               compactFilename: active.compactFilename,
               forceGenericExtractor: active.genericFallbackTried,
-              filenameTemplate: this.settings?.get().quickDownloadFilenameTemplate
+              filenameTemplate: this.settings?.get().quickDownloadFilenameTemplate,
+              concurrentFragments: this.concurrentFragments()
             }
           );
 
