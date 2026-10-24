@@ -21,6 +21,15 @@
     vụ được giữ ở trạng thái dở dang để tiếp tục sau khi mở lại.
   - Đã mở trang Cập nhật thì thông báo cập nhật không hiện lại nữa cho tới lần mở ứng dụng sau.
   - Tubmedia dò bản mới mỗi giờ trong lúc mở (trước đây 6 giờ một lần), và dò thêm khi bạn mở trang Cập nhật.
+- Tubmedia luôn tự dọn tệp tạm, không cần xoá tay; thư mục tạm không còn phình to dần theo thời gian:
+  - Video tải xong, tải lỗi hẳn hoặc bị huỷ: tệp tạm của video đó được xoá ngay. Trước đây tệp tải dở của video lỗi hoặc bị
+    huỷ nằm lại mãi. Video đang chờ thử lại hoặc tạm dừng vẫn giữ phần đã tải để tải tiếp.
+  - Danh sách kết thúc thì thư mục tải dở của nó được xoá. Bản đệm của quy trình ghép được xoá khi không còn danh sách nào
+    dùng chung thư mục tạm đó (quy trình lỗi giữ tối đa 14 ngày để ghép lại nhanh).
+  - Tải nhanh bị lỗi cũng xoá thư mục tạm của lượt đó.
+  - Mỗi lần mở ứng dụng và cứ 6 giờ một lần, Tubmedia quét tệp tạm còn sót khi app bị tắt đột ngột hoặc mất điện, của danh
+    sách đã xoá, hoặc của danh sách tạm dừng bị bỏ quên quá 14 ngày. Chỉ xoá trong thư mục tạm do Tubmedia tạo, không đụng
+    thư mục bạn chọn hay video thành phẩm.
 
 # Tubmedia 1.7.1
 
