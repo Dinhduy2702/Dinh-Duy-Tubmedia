@@ -294,6 +294,7 @@ src/main/downloader/ytdlp-cookie-arguments.ts
 src/main/downloader/ytdlp-progress.ts
 src/main/files/cleanup-protection.ts
 src/main/files/disk-check-path.ts
+src/main/files/download-temp-cleanup.ts
 src/main/files/ensure-directory.ts
 src/main/files/file-ownership.ts
 src/main/files/legacy-quarantine.ts
@@ -519,6 +520,7 @@ tests/integration/database.test.ts
 tests/integration/download-existing-file-reuse.test.ts
 tests/integration/download-pacing-args.test.ts
 tests/integration/download-path-too-long.test.ts
+tests/integration/download-temp-cleanup.test.ts
 tests/integration/error-report.test.ts
 tests/integration/helpers/queue-harness.ts
 tests/integration/helpers/real-ffmpeg.ts
@@ -677,6 +679,7 @@ tests/unit/quick-download-service.test.ts
 tests/unit/quick-download-silent-source.test.ts
 tests/unit/quick-download-state-persist-race.test.ts
 tests/unit/quick-download-sync.test.ts
+tests/unit/quick-download-temp-cleanup.test.ts
 tests/unit/quick-download-video-only.test.ts
 tests/unit/quick-download.test.ts
 tests/unit/rate-limit-backoff.test.ts

@@ -60,6 +60,26 @@ const TERMINAL_PHASES = new Set<QuickDownloadStatus['phase']>([
   'interrupted'
 ]);
 
+/** Thư mục tạm Tải nhanh không được ghi thêm gì chừng này mới coi là mồ côi (xem sweepOrphanTemp). */
+export const QUICK_TEMP_ORPHAN_AFTER_MS = 60 * 60 * 1_000;
+
+/** Lần ghi tệp gần nhất trong thư mục (cả thư mục con); không có tệp nào → thời điểm của chính thư mục. */
+async function newestModificationDeep(folder: string): Promise<number> {
+  const newestFile = async (current: string): Promise<number> => {
+    let newest = 0;
+    const entries = await readdir(current, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      const path = join(current, entry.name);
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) newest = Math.max(newest, await newestFile(path));
+      else newest = Math.max(newest, (await stat(path).catch(() => null))?.mtimeMs ?? 0);
+    }
+    return newest;
+  };
+  const newest = await newestFile(folder);
+  return newest > 0 ? newest : ((await stat(folder).catch(() => null))?.mtimeMs ?? 0);
+}
+
 function cloneStatus(status: QuickDownloadStatus): QuickDownloadStatus {
   return {
     ...status,
@@ -273,6 +293,10 @@ export class QuickDownloadService {
 
   public async recover(): Promise<void> {
     await mkdir(dirname(this.statePath), { recursive: true });
+    const sweptTemp = await this.sweepOrphanTemp();
+    if (sweptTemp > 0) {
+      this.logger.info('cleanup', 'QUICK_DOWNLOAD_TEMP_SWEPT', `Đã dọn ${sweptTemp} thư mục tạm Tải nhanh còn sót từ phiên trước.`);
+    }
     const raw = await readFile(this.statePath, 'utf8').catch(() => null);
     if (!raw) return;
 
@@ -637,7 +661,8 @@ export class QuickDownloadService {
           if (cookieCode) {
             this.cookieBlockedRequest = active.request;
             this.failTask(active, cookieFailureMessage(cookieCode), cookieCode);
-            await this.cleanupActive(active, false);
+            // 2026-10-24: thử lại bằng cookies là một lượt Tải nhanh MỚI (thư mục tạm mới) → tệp tạm lượt này không dùng lại.
+            await this.cleanupActive(active, true);
             return;
           }
 
@@ -722,8 +747,39 @@ export class QuickDownloadService {
       }
 
       this.failTask(active, error instanceof Error ? error.message : String(error), null);
-      await this.cleanupActive(active, false);
+      // 2026-10-24: Tải nhanh không tải tiếp từ phần dở (lượt sau luôn tạo thư mục tạm mới) → lỗi thì dọn ngay.
+      await this.cleanupActive(active, true);
     }
+  }
+
+  /**
+   * 2026-10-24: thư mục tạm Tải nhanh còn sót (app tắt đột ngột / mất điện giữa lúc tải — đóng app bình thường giữ lại để
+   * an toàn trong lúc thoát). Gọi khi mở app. %TEMP%\TubmediaQD dùng CHUNG với Tubmedia khác đang mở trên cùng máy (bản cài
+   * + bản thử, hoặc nhiều người dùng chung một tài khoản) → chỉ xoá thư mục không có tệp nào được ghi thêm suốt
+   * QUICK_TEMP_ORPHAN_AFTER_MS (lượt tải đang chạy ghi liên tục), và không bao giờ xoá thư mục của lượt đang chạy ở đây.
+   * @returns số thư mục đã xoá.
+   */
+  public async sweepOrphanTemp(now = Date.now()): Promise<number> {
+    let entries;
+    try {
+      entries = await readdir(this.tempRoot, { withFileTypes: true });
+    } catch {
+      return 0;
+    }
+    const activeDirectory = this.activeTask?.tempDirectory.toLowerCase();
+    let removed = 0;
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+      const folder = join(this.tempRoot, entry.name);
+      if (folder.toLowerCase() === activeDirectory) continue;
+      if (now - (await newestModificationDeep(folder)) < QUICK_TEMP_ORPHAN_AFTER_MS) continue;
+      await rm(folder, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 })
+        .then(() => {
+          removed += 1;
+        })
+        .catch(() => undefined);
+    }
+    return removed;
   }
 
   private async prepareAutomaticRetry(active: ActiveQuickTask, message: string): Promise<void> {
