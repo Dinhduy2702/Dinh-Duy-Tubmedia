@@ -3042,7 +3042,6 @@ test('Cập nhật 2026-10-24: nút khởi động lại trong thông báo gọi
 
     const heading = async (): Promise<string> =>
       shellWindow!.evaluate(() => document.querySelector('.page-shell h1')?.textContent?.trim() ?? '');
-    const before = await heading();
     await restart.click();
     // Lúc vừa mở app, bước dò công cụ có thể còn chạy tiến trình yt-dlp/FFmpeg → app phải HỎI LẠI trước khi khởi động lại.
     // Gặp hộp hỏi thì chọn "Vẫn khởi động lại" (đúng luồng người dùng tự quyết); không có việc chạy thì cài ngay.
@@ -3057,7 +3056,8 @@ test('Cập nhật 2026-10-24: nút khởi động lại trong thông báo gọi
       shellWindow.locator('.attention-center'),
       'nút phải gọi lệnh cài (bản chạy từ mã nguồn bị từ chối đúng câu của dịch vụ cập nhật)'
     ).toContainText('Chỉ có thể cài phiên bản mới hơn', { timeout: 10_000 });
-    expect(await heading(), 'không được chỉ chuyển sang trang Cập nhật như trước').toBe(before);
+    // So với "Trung tâm cập nhật" chứ không so với tiêu đề lúc bấm: lúc đó trang đầu có thể chưa vẽ xong tiêu đề.
+    expect(await heading(), 'không được chỉ chuyển sang trang Cập nhật như trước').not.toBe('Trung tâm cập nhật');
 
     // Vào trang Cập nhật rồi sang trang khác: thông báo cập nhật mới (kể cả bản khác) không hiện lại trong phiên này.
     await shellWindow.locator('.topbar-update-button').click();
