@@ -23,6 +23,7 @@ type Internals = {
   tickRunning: boolean;
   active: Map<string, unknown>;
   autoConcurrentDownloadLists: () => number;
+  autoGlobalDownloadCap: () => number;
 };
 
 const resource: ResourceProfile = {
@@ -145,6 +146,8 @@ beforeEach(() => {
     logger as never
   );
   internals().schedulerRunning = true;
+  // Trần tổng theo máy (2026-10-24) đo máy đang chạy bài kiểm — các bài dưới kiểm trần KHÁC nên gỡ nó ra cho khỏi phụ thuộc máy.
+  internals().autoGlobalDownloadCap = () => 99;
 });
 
 afterEach(async () => {
@@ -218,6 +221,41 @@ describe('Lag bước 1 — trần số danh sách tải / quy trình ghép ch�
     addDownloads(tiktokB, 4, 'tiktok');
     await tickUntilSettled();
     expect(startedIn(tiktokA) + startedIn(tiktokB)).toBe(8);
+  });
+});
+
+// 2026-10-24 (nguyên tắc tự dò theo máy): ô "Tổng video tải đồng thời toàn ứng dụng" (maxGlobalDownloadWorkers) được lưu
+// nhưng hàng đợi không đọc — chọn tay 2 danh sách × 4 luồng trên máy yếu vẫn mở 8 video. Giờ có trần tổng tự dò theo máy.
+describe('Trần tổng video tải cùng lúc tự dò theo máy', () => {
+  it('máy chỉ chịu 3 video: 2 danh sách × 4 luồng chỉ mở 3, xong một video thì mở tiếp đúng một', async () => {
+    internals().autoGlobalDownloadCap = () => 3;
+    const [a, b] = [makeProject('A'), makeProject('B')];
+    for (const project of [a, b]) addDownloads(project, 4, 'tiktok');
+    await tickUntilSettled();
+    expect(started.length, 'trần tổng 3 dù danh sách cho phép 8').toBe(3);
+
+    held.get(started[0]!.id)?.();
+    await settle();
+    await tickUntilSettled();
+    expect(started.length, 'một video xong → mở thêm đúng một').toBe(4);
+  });
+
+  it('tính cả video của làn ghép vào trần tổng', async () => {
+    internals().autoGlobalDownloadCap = () => 2;
+    const [list, merge] = [makeProject('Danh sach'), makeProject('Ghep')];
+    addDownloads(list, 2, 'tiktok');
+    addDownloads(merge, 2, 'tiktok', { workflow: 'download-merge' });
+    await tickUntilSettled();
+    expect(started.length).toBe(2);
+  });
+
+  it('không dùng số cũ đã lưu ở maxGlobalDownloadWorkers (máy người dùng đang lưu 2 nhưng chạy 6–8 video)', async () => {
+    settings = { ...settings, maxGlobalDownloadWorkers: 1 };
+    internals().autoGlobalDownloadCap = () => 6;
+    const [a, b] = [makeProject('A'), makeProject('B')];
+    for (const project of [a, b]) addDownloads(project, 4, 'tiktok');
+    await tickUntilSettled();
+    expect(started.length).toBe(6);
   });
 });
 

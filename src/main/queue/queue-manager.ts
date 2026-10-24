@@ -25,7 +25,7 @@ import {
   recentJobStarts,
   type QueueExecutionLane
 } from '@shared/utils/queue-lane.js';
-import { recommendedConcurrentLists } from '@shared/utils/hardware-recommendation.js';
+import { automaticGlobalDownloadCap, recommendedConcurrentLists } from '@shared/utils/hardware-recommendation.js';
 import type { DownloadPacingContext } from '@shared/utils/download-pacing.js';
 import type { QueueRepository } from '../database/repositories/queue-repository.js';
 import type { ProjectRepository } from '../database/repositories/project-repository.js';
@@ -232,6 +232,7 @@ export class QueueManager {
   private rateLimits = new PlatformRateLimitGate();
   private waitingLaneProjects: { downloadLists: string[]; mergeWorkflows: string[] } = { downloadLists: [], mergeWorkflows: [] };
   private autoListsCache: { at: number; value: number } | null = null;
+  private globalDownloadCapCache: { at: number; value: number } | null = null;
   private startupReadyResolve: (() => void) | null = null;
   private readonly startupReady = new Promise<void>((resolve) => {
     this.startupReadyResolve = resolve;
@@ -1030,6 +1031,15 @@ export class QueueManager {
     return this.autoListsCache.value;
   }
 
+  /** Trần tổng video tải cùng lúc toàn ứng dụng, tự dò theo máy (đo lại mỗi phút như số danh sách tự động). */
+  private autoGlobalDownloadCap(): number {
+    const now = Date.now();
+    if (!this.globalDownloadCapCache || now - this.globalDownloadCapCache.at > 60_000) {
+      this.globalDownloadCapCache = { at: now, value: automaticGlobalDownloadCap(cpus().length, freemem()) };
+    }
+    return this.globalDownloadCapCache.value;
+  }
+
   /** Hướng B 429: các nền tảng đang nghỉ / đã dừng / đang tăng dần lại — cho huy hiệu "Đang chờ do giới hạn …". */
   public rateLimitWaits(): RateLimitWaitState[] {
     return this.rateLimits.snapshot(Date.now());
@@ -1286,6 +1296,9 @@ export class QueueManager {
         (x) => x.job.type === job.type && x.job.projectId === job.projectId
       ).length;
       if (job.type === 'download') {
+        // 2026-10-24: trần tổng theo máy (2 × số danh sách tự động: máy yếu 2 … rất mạnh 12) — thay ô "Tổng video tải đồng
+        // thời toàn ứng dụng" đã lưu nhưng hàng đợi không đọc.
+        if (activeOfType >= this.autoGlobalDownloadCap()) continue;
         const platform = this.downloadPlatformOf(job);
         const activeOfPlatform = (): number =>
           [...this.active.values()].filter(

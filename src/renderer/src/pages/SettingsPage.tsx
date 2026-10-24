@@ -16,7 +16,7 @@ import {
   type LucideIcon
 } from 'lucide-react';
 import type { AppSettings, QualityProfile, ResourceProfile } from '@shared/types/domain';
-import { planForListCount, recommendDownloadConcurrency } from '@shared/utils/hardware-recommendation';
+import { planForListCount, recommendDownloadConcurrency, recommendedConcurrentFragments } from '@shared/utils/hardware-recommendation';
 import { CookieManagerDialog } from '../components/CookieManagerDialog';
 import { FolderField } from '../components/FolderField';
 import { InfoDisclosure } from '../components/InfoDisclosure';
@@ -111,9 +111,8 @@ export function SettingsPage(): React.JSX.Element | null {
       });
       const nextSettings = await window.desktop.settings.update({
         defaultResourceProfileId: saved.id,
-        maxGlobalDownloadWorkers: currentPlan.globalWorkers,
-        downloadConcurrentFragments: concurrency.recommendedConcurrentFragments,
-        aria2Connections: concurrency.recommendedAria2Connections
+        // 2026-10-24: số mảnh mỗi video và trần tổng video giờ tự dò theo máy — không ghi cứng số của lần quét này.
+        downloadFragmentsAuto: true
       });
       useAppStore.setState({
         resources: [...resources.filter((item) => item.id !== saved.id), saved],
@@ -121,7 +120,7 @@ export function SettingsPage(): React.JSX.Element | null {
       });
       setSettings(nextSettings);
       setLocal(nextSettings);
-      setAttention({ id: createUiEventId('hardware-apply'), severity: 'success', title: 'Đã áp dụng cấu hình tối ưu', message: `${currentPlan.workersPerList} luồng tải/danh sách, tối đa ${currentPlan.globalWorkers} video tải đồng thời.`, sticky: false });
+      setAttention({ id: createUiEventId('hardware-apply'), severity: 'success', title: 'Đã áp dụng cấu hình tối ưu', message: `${currentPlan.workersPerList} luồng tải/danh sách; tổng video tải đồng thời và số mảnh mỗi video tự theo máy (hiện tối đa ${concurrency.maximumSafeGlobalWorkers} video).`, sticky: false });
     } catch (error) { setError(messageOf(error)); }
     finally { setSettingsAction(null); }
   };
@@ -153,7 +152,7 @@ export function SettingsPage(): React.JSX.Element | null {
       <aside className="settings-assistant space-y-4">
         <div className="card p-4">
           <div className="flex items-center justify-between"><h2 className="font-extrabold">Cấu hình máy</h2><button className="btn p-1.5" title="Kiểm tra lại cấu hình máy" onClick={() => void detect()} disabled={settingsAction !== null}>{settingsAction === 'detect' ? <LoaderCircle className="animate-spin" size={15}/> : <RefreshCcw size={15}/>}</button></div>
-          <div className="mt-3 space-y-2 text-sm"><Row a="Bộ xử lý trung tâm" b={hardware?.cpuModel ?? '—'}/><Row a="Luồng xử lý" b={String(hardware?.logicalCpuCount ?? 0)}/><Row a="Nhân vật lý" b={String(hardware?.physicalCpuCount ?? 0)}/><Row a="RAM" b={`${((hardware?.totalMemoryBytes ?? 0) / 1024 ** 3).toFixed(0)} GB`}/><Row a="Bộ xử lý đồ họa" b={hardware?.gpuAdapters.map((item) => item.name).join(', ') || 'Chưa nhận diện'}/></div>
+          <div className="mt-3 space-y-2 text-sm"><Row a="Bộ xử lý trung tâm" b={hardware?.cpuModel ?? '—'}/><Row a="Luồng xử lý" b={String(hardware?.logicalCpuCount ?? 0)}/><Row a="Nhân vật lý" b={String(hardware?.physicalCpuCount ?? 0)}/><Row a="RAM" b={`${((hardware?.totalMemoryBytes ?? 0) / 1024 ** 3).toFixed(0)} GB`}/><Row a="Bộ xử lý đồ họa" b={hardware?.gpuAdapters.map((item) => item.name).join(', ') || 'Chưa nhận diện'}/><Row a="Ổ đĩa" b={hardware?.disks.map((disk) => `${disk.device} ${disk.type === 'ssd' ? 'SSD' : disk.type === 'hdd' ? 'HDD' : 'chưa rõ loại'}`).join(' · ') || 'Chưa nhận diện'}/></div>
           <button className="btn mt-4 w-full" onClick={() => void recommend()} disabled={settingsAction !== null}>{settingsAction === 'recommend' ? <LoaderCircle className="animate-spin" size={17}/> : <Sparkles size={17}/>} {settingsAction === 'recommend' ? 'Đang phân tích...' : 'Tạo đề xuất tự động'}</button>
         </div>
         {recommended && concurrency && currentPlan && <div className="card p-4" style={{ borderColor: 'var(--accent)' }}><h3 className="font-extrabold">{recommended.name}</h3><p className="mt-1 text-xs" style={{ color: 'var(--muted)' }}>{recommended.description}</p><div className="mt-3 space-y-2 text-sm"><Row a="Số danh sách khuyến nghị" b={String(concurrency.recommendedConcurrentLists)}/><Row a={`Luồng tải mỗi danh sách khi mở ${settings.downloadLaneCount} danh sách`} b={String(currentPlan.workersPerList)}/><Row a="Giới hạn tổng hiện tại" b={String(currentPlan.globalWorkers)}/><Row a="Tối đa an toàn" b={String(concurrency.maximumSafeGlobalWorkers)}/><Row a="Mảnh tải đồng thời mỗi video" b={String(concurrency.recommendedConcurrentFragments)}/><Row a="Luồng xử lý FFmpeg" b={String(recommended.ffmpegThreads)}/></div><p className="mt-3 text-xs" style={{ color: 'var(--muted)' }}>{concurrency.summary} {currentPlan.note}</p><div className="mt-3 space-y-1 rounded-lg border p-2 text-[11px]" style={{ borderColor: 'var(--border)', background: 'var(--panel2)' }}>{concurrency.plans.map((plan) => <div key={plan.listCount} className="flex justify-between gap-2"><span>{plan.listCount} danh sách</span><b>{plan.workersPerList}/danh sách · {plan.globalWorkers} tổng</b></div>)}</div><button className="btn btn-primary mt-4 w-full" onClick={() => void applyRecommendation()} disabled={settingsAction !== null}>{settingsAction === 'apply' ? <LoaderCircle className="animate-spin" size={17}/> : <Save size={17}/>} {settingsAction === 'apply' ? 'Đang áp dụng...' : 'Lưu và áp dụng theo số danh sách'}</button></div>}
@@ -241,10 +240,7 @@ function DownloadSettings({ settings, patch, setError }: { settings: AppSettings
     settings.downloadCodecPreference === 'h264' &&
     settings.downloadContainerPreference === 'mp4' &&
     settings.downloadAllowBelowMinimum &&
-    settings.useAria2c &&
-    settings.aria2Connections === 16 &&
-    settings.downloadConcurrentFragments === 2 &&
-    settings.maxGlobalDownloadWorkers === 2;
+    settings.downloadFragmentsAuto;
   const light720Active =
     !capCutMode &&
     settings.downloadMinHeight === 0 &&
@@ -277,10 +273,8 @@ function DownloadSettings({ settings, patch, setError }: { settings: AppSettings
     patch('downloadMinAudioBitrateKbps', 0);
     patch('downloadAudioBitrateKbps', 0);
     patch('downloadAllowBelowMinimum', true);
-    patch('useAria2c', true);
-    patch('aria2Connections', 16);
-    patch('downloadConcurrentFragments', 2);
-    patch('maxGlobalDownloadWorkers', 2);
+    // 2026-10-24: trước đây ép 16 kết nối aria2c (không dùng) + 2 mảnh + "2 video toàn app" (không dùng) cho mọi máy.
+    patch('downloadFragmentsAuto', true);
   };
   const useLight720 = (): void => {
     patch('downloadCompatibilityMode', 'source');
@@ -303,7 +297,7 @@ function DownloadSettings({ settings, patch, setError }: { settings: AppSettings
     <h3 className="mb-3 font-black">Chất lượng đầu ra của Tải danh sách</h3>
     <div className="download-preset-grid">
       <div className={`download-source-preset ${reference1080Active ? 'is-active' : ''}`}>
-        <ShieldCheck size={19}/><div><b>Đa nền tảng 720p–1080p · KHUYÊN DÙNG</b><span>H.264 + MP4, dễ phát và dễ dựng.<InfoHint text="H.264 + MP4, fallback thông minh, 2 fragment và tối đa 2 video tải đồng thời; đầu ra giống workflow tham chiếu, dễ phát và dễ dựng."/></span></div>
+        <ShieldCheck size={19}/><div><b>Đa nền tảng 720p–1080p · KHUYÊN DÙNG</b><span>H.264 + MP4, dễ phát và dễ dựng.<InfoHint text="H.264 + MP4, fallback thông minh, số mảnh tải mỗi video tự theo máy; đầu ra giống workflow tham chiếu, dễ phát và dễ dựng."/></span></div>
         <button className="btn" type="button" disabled={reference1080Active} onClick={useReference1080}>{reference1080Active ? 'Đang dùng' : 'Áp dụng'}</button>
       </div>
       <div className={`download-source-preset ${highestSourceActive ? 'is-active' : ''}`}>
@@ -381,7 +375,8 @@ function DownloadSettings({ settings, patch, setError }: { settings: AppSettings
       </div>
       {/* Lag bước 1 (2026-10-12): thay ô chết "Tổng video tải đồng thời toàn ứng dụng" (không còn được hàng đợi đọc từ 1.3.0). Đây là trần SỐ DANH SÁCH chạy cùng lúc; mỗi danh sách vẫn dùng đủ luồng theo hồ sơ. */}
       <Select label="Số danh sách tải chạy cùng lúc (mỗi danh sách vẫn đủ luồng theo hồ sơ)" value={String(settings.maxConcurrentDownloadLists)} onChange={(value) => patch('maxConcurrentDownloadLists', Number(value) as AppSettings['maxConcurrentDownloadLists'])} options={[["0", `Tự động theo máy${concurrency ? ` (${concurrency.recommendedConcurrentLists})` : ''}`],["1","1 danh sách"],["2","2 danh sách"],["3","3 danh sách"],["4","4 danh sách"],["5","5 danh sách"],["6","6 danh sách"]]}/>
-      <NumberField label="Fragment đồng thời mỗi video" value={settings.downloadConcurrentFragments} min={1} max={8} onChange={(value) => patch('downloadConcurrentFragments', value)}/>
+      {/* 2026-10-24: mặc định "Tự động theo máy" (máy rất yếu 1, còn lại 2); chọn số cụ thể thì dùng đúng số đó. */}
+      <Select label="Mảnh tải đồng thời mỗi video" value={settings.downloadFragmentsAuto ? 'auto' : String(settings.downloadConcurrentFragments)} onChange={(value) => { if (value === 'auto') { patch('downloadFragmentsAuto', true); } else { patch('downloadFragmentsAuto', false); patch('downloadConcurrentFragments', Number(value)); } }} options={[["auto", `Tự động theo máy${hardware ? ` (${recommendedConcurrentFragments(hardware.logicalCpuCount, hardware.totalMemoryBytes)})` : ''}`], ...[1, 2, 3, 4, 5, 6, 7, 8].map((count): [string, string] => [String(count), `${count} mảnh`])]}/>
     </Grid>
 
     <h3 className="mb-3 mt-7 font-black">Tên tệp Tải nhanh</h3>

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { cpus, tmpdir, totalmem } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { AppDatabase } from '@main/database/database.js';
@@ -11,6 +11,7 @@ import { QuarantineService } from '@main/media/quarantine-service.js';
 import { DownloadEngine } from '@main/downloader/download-engine.js';
 import { builtInResourceProfiles, defaultAppSettings } from '@main/settings/defaults.js';
 import type { DownloadPacingContext } from '@shared/utils/download-pacing.js';
+import { recommendedConcurrentFragments } from '@shared/utils/hardware-recommendation.js';
 import type { AppSettings, MediaInfo, Project, QueueJob } from '@shared/types/domain.js';
 
 // Hướng C kế hoạch 429 (2026-10-13). Trước đây yt-dlp không nghỉ giữa các yêu cầu dù 6 video YouTube cùng tải hay nền tảng
@@ -212,5 +213,23 @@ describe('Hướng C 429 — bộ tải giãn nhịp với nền tảng', () => 
     const args = await argsFor('youtube', youtube, { samePlatformActive: 3, rateLimitStrikes: 0 }, 1);
     expect(args).not.toContain('--downloader-args');
     expect(valueAfter(args, '--sleep-requests')).toBe('1');
+  });
+});
+
+// 2026-10-24 (nguyên tắc tự dò theo máy): số mảnh mỗi video trước đây là số cố định đã lưu (mặc định 2 cho mọi máy).
+describe('số mảnh tải mỗi video theo máy đang chạy', () => {
+  const youtube = 'https://www.youtube.com/watch?v=abcDEF12345';
+  const pacing = { samePlatformActive: 1, rateLimitStrikes: 0 };
+
+  it('để tự động: dùng số dò theo máy, bỏ qua số cũ đã lưu', async () => {
+    settings = { ...settings, downloadFragmentsAuto: true, downloadConcurrentFragments: 8 };
+    const args = await argsFor('youtube', youtube, pacing);
+    expect(valueAfter(args, '--concurrent-fragments')).toBe(String(recommendedConcurrentFragments(cpus().length, totalmem())));
+  });
+
+  it('tự chọn: dùng đúng số đã chọn; lượt thử lại luôn 1 mảnh', async () => {
+    settings = { ...settings, downloadFragmentsAuto: false, downloadConcurrentFragments: 5 };
+    expect(valueAfter(await argsFor('youtube', youtube, pacing), '--concurrent-fragments')).toBe('5');
+    expect(valueAfter(await argsFor('youtube', youtube, pacing, 1), '--concurrent-fragments')).toBe('1');
   });
 });

@@ -539,6 +539,7 @@ tests/integration/queue-startup-session-jobs.test.ts
 tests/integration/queue-temp-cleanup-safety.test.ts
 tests/integration/remux-fresh-deep-verify.test.ts
 tests/integration/restore-sources-policy.test.ts
+tests/integration/settings-adapt-to-machine.test.ts
 tests/integration/settings-restore-policy.test.ts
 tests/integration/settings-rollback-compat.test.ts
 tests/integration/system-cleanup-service.test.ts
@@ -547,6 +548,7 @@ tests/integration/workbench-draft-busy-guard.test.ts
 tests/integration/ytdlp-killed-download-error.test.ts
 tests/integration/ytdlp-mei-temp-cleanup.test.ts
 tests/unit/active-download-workers-label.test.ts
+tests/unit/adapt-to-user-machine.test.ts
 tests/unit/app-update-version.test.ts
 tests/unit/apply-temp-folder.test.ts
 tests/unit/attempt-display.test.ts

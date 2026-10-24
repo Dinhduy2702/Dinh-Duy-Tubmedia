@@ -83,7 +83,8 @@ check(
   'yt-dlp keeps safe partial resume, follows dynamic official clients and refreshes retry metadata'
 );
 check(
-  engine.includes('Math.min(job.attempts > 0 ? 1 : 8') && engine.includes('job.attempts === 0'),
+  // 2026-10-24: lượt đầu dùng số mảnh tự dò theo máy (effectiveConcurrentFragments, tối đa 8); lượt thử lại vẫn 1 mảnh.
+  engine.includes('job.attempts > 0 ? 1 : effectiveConcurrentFragments(') && engine.includes('job.attempts === 0'),
   'retry attempts use one fragment at a time and aria2c remains first-attempt only'
 );
 check(

@@ -39,8 +39,11 @@ describe('recommendDownloadConcurrency', () => {
       recommendedConcurrentLists: 2,
       recommendedPerListWorkers: 1,
       recommendedGlobalWorkers: 2,
-      recommendedConcurrentFragments: 1
+      // 2026-10-24: số mảnh dò theo luồng CPU + RAM TỔNG (recommendedConcurrentFragments) — 8 luồng/16 GB vẫn 2 như máy
+      // này luôn chạy; chỉ máy ≤4 luồng hoặc ≤8 GB mới xuống 1.
+      recommendedConcurrentFragments: 2
     });
+    expect(recommendDownloadConcurrency(hardware(4, 8)).recommendedConcurrentFragments).toBe(1);
   });
 
   it('recommends two active lists for a strong workstation', () => {
@@ -50,7 +53,8 @@ describe('recommendDownloadConcurrency', () => {
       recommendedPerListWorkers: 2,
       recommendedSingleListWorkers: 4,
       recommendedGlobalWorkers: 4,
-      maximumSafeGlobalWorkers: 8,
+      // 2026-10-24: = trần tổng hàng đợi thật sự áp dụng (2 × 6 danh sách tự động).
+      maximumSafeGlobalWorkers: 12,
       recommendedConcurrentFragments: 2
     });
     // A1 (2026-09-25): tăng từ 4 lên 6 quy trình song song — bảng đề xuất theo phần cứng phải phủ đủ

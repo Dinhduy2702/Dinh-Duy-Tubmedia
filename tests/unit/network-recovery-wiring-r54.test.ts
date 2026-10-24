@@ -7,7 +7,8 @@ describe('network recovery wiring R54', () => {
 
     expect(engine).not.toContain('youtube:player_client=default,web_safari');
     expect(engine).toContain("...(job.attempts > 0 ? ['--no-cache-dir'] : [])");
-    expect(engine).toContain('Math.min(job.attempts > 0 ? 1 : 8');
+    // 2026-10-24: lượt đầu số mảnh tự dò theo máy (tối đa 8), lượt thử lại vẫn 1 mảnh.
+    expect(engine).toContain('job.attempts > 0 ? 1 : effectiveConcurrentFragments(');
     expect(engine).toContain("clientPolicy: 'yt-dlp-dynamic-default-no-manual-web-safari'");
   });
 

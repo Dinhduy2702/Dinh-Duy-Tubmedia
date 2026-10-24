@@ -1,7 +1,9 @@
 /* TUBMEDIA_V132_DOWNLOAD_STALL_RECOVERY_R11 */
 import { copyFile, link, readdir, rename, rm, stat } from 'node:fs/promises';
+import { cpus, totalmem } from 'node:os';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { PROGRESS_MARKER } from '@shared/constants/app.js';
+import { effectiveConcurrentFragments } from '@shared/utils/hardware-recommendation.js';
 import {
   AuthenticationRequiredError,
   BrowserCookieLockedError,
@@ -1197,7 +1199,8 @@ export class DownloadEngine {
       'file_access:exp=1:10',
       '--abort-on-unavailable-fragments',
       '--concurrent-fragments',
-      String(Math.max(1, Math.min(job.attempts > 0 ? 1 : 8, appSettings.downloadConcurrentFragments))),
+      // Tự động → số mảnh theo cấu hình máy đang chạy (không theo máy dev); lượt thử lại luôn 1 mảnh cho chắc.
+      String(job.attempts > 0 ? 1 : effectiveConcurrentFragments(appSettings, cpus().length, totalmem())),
       '--http-chunk-size',
       '10M',
       '--no-mtime',

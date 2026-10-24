@@ -51,10 +51,53 @@ export function recommendConcurrentListsForHardware(hardware: HardwareProfile): 
   return recommendedConcurrentLists(hardware.logicalCpuCount, hardware.freeMemoryBytes);
 }
 
+/**
+ * Số mảnh tải song song mỗi video khi để "Tự động theo máy" (2026-10-24, nguyên tắc tự dò theo máy người dùng). Mảnh là
+ * luồng mạng + bộ đệm nhỏ, không tốn RAM/CPU đáng kể như số video — nên dò theo cấu hình CỐ ĐỊNH của máy (luồng CPU, RAM
+ * tổng), không theo RAM trống lúc đo (đổi liên tục làm số mảnh nhảy qua lại). Máy rất yếu (≤4 luồng hoặc ≤8 GB RAM) → 1
+ * để không nghẽn; còn lại → 2 (đúng mức mọi máy vẫn chạy trước đây, nên không máy nào bị chậm đi).
+ */
+export function recommendedConcurrentFragments(logicalCpuCount: number, totalMemoryBytes: number): 1 | 2 {
+  const logical = Number.isFinite(logicalCpuCount) ? logicalCpuCount : 1;
+  const totalGb = Number.isFinite(totalMemoryBytes) ? gib(totalMemoryBytes) : 0;
+  return logical <= 4 || totalGb <= 8 ? 1 : 2;
+}
+
+/** Số mảnh thật sự dùng cho lượt tải: tự động → theo máy; tự chọn → đúng số đã chọn (1–8). */
+export function effectiveConcurrentFragments(
+  settings: { downloadFragmentsAuto?: boolean; downloadConcurrentFragments: number },
+  logicalCpuCount: number,
+  totalMemoryBytes: number
+): number {
+  if (settings.downloadFragmentsAuto !== false) return recommendedConcurrentFragments(logicalCpuCount, totalMemoryBytes);
+  return Math.max(1, Math.min(8, Math.trunc(Number(settings.downloadConcurrentFragments) || 1)));
+}
+
+/** Số video mỗi "suất danh sách" máy chịu được trong trần tổng — bằng số luồng/danh sách của hồ sơ tự động máy phổ thông. */
+export const AUTO_DOWNLOADS_PER_LIST_SLOT = 2;
+
+/**
+ * Trần TỔNG số video tải cùng lúc trên toàn ứng dụng (mọi danh sách + làn ghép), tự dò theo máy (2026-10-24) — thay ô cũ
+ * "Tổng video tải đồng thời toàn ứng dụng" đã lưu nhưng hàng đợi không đọc từ 1.3.0. = 2 × số danh sách tự động của trần 6
+ * mức (luồng CPU + RAM trống, đo lại mỗi phút): máy yếu 2, … máy rất mạnh 12. Bằng đúng số video máy đã chạy khi để mọi thứ
+ * tự động, nên không máy nào chậm đi; chỉ chặn trường hợp chọn tay nhiều danh sách × nhiều luồng hơn sức máy (VD 6 danh
+ * sách × 4 luồng = 24 video trên máy 4 lõi). Trần riêng YouTube 6 vẫn áp dụng thêm.
+ */
+export function automaticGlobalDownloadCap(logicalCpuCount: number, freeMemoryBytes: number): number {
+  return AUTO_DOWNLOADS_PER_LIST_SLOT * recommendedConcurrentLists(logicalCpuCount, freeMemoryBytes);
+}
+
 export function recommendDownloadConcurrency(
   hardware: HardwareProfile
 ): DownloadConcurrencyRecommendation {
-  return { ...recommendWorkerConcurrency(hardware), recommendedConcurrentLists: recommendConcurrentListsForHardware(hardware) };
+  return {
+    ...recommendWorkerConcurrency(hardware),
+    recommendedConcurrentLists: recommendConcurrentListsForHardware(hardware),
+    // "Tối đa an toàn" ở Cài đặt = đúng trần tổng hàng đợi thật sự áp dụng.
+    maximumSafeGlobalWorkers: automaticGlobalDownloadCap(hardware.logicalCpuCount, hardware.freeMemoryBytes),
+    // Ô "Mảnh tải đồng thời mỗi video" phải hiện đúng số bộ tải thật sự dùng khi để tự động.
+    recommendedConcurrentFragments: recommendedConcurrentFragments(hardware.logicalCpuCount, hardware.totalMemoryBytes)
+  };
 }
 
 function recommendWorkerConcurrency(hardware: HardwareProfile): DownloadConcurrencyRecommendation {

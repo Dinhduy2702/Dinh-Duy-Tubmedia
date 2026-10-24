@@ -65,6 +65,35 @@ export function cpuCountsFromWmi(
   };
 }
 
+type DiskType = HardwareProfile['disks'][number]['type'];
+
+/**
+ * 2026-10-24 (nguyên tắc tự dò theo máy): trước đây mọi ổ luôn ghi loại 'unknown', nên lời khuyên HDD/SSD của bảng đề xuất
+ * không bao giờ chạy. Loại ổ của một ký tự ổ lấy từ ổ vật lý chứa phân vùng đó (Get-Partition → Get-PhysicalDisk):
+ * MediaType HDD → hdd; SSD/SCM → ssd; không rõ mà nối qua NVMe → ssd (NVMe luôn là bộ nhớ thể rắn). Còn lại (ổ mạng, ổ ảo,
+ * Storage Spaces, USB không báo loại…) giữ 'unknown' — không đoán.
+ */
+export function diskTypeOf(mediaType: unknown, busType: unknown): DiskType {
+  const media = stringValue(mediaType).trim().toLowerCase();
+  // Một số bản PowerShell trả số của MSFT_PhysicalDisk.MediaType thay vì tên: 3 = HDD, 4 = SSD, 5 = SCM.
+  if (media === 'hdd' || media === '3') return 'hdd';
+  if (media === 'ssd' || media === 'scm' || media === '4' || media === '5') return 'ssd';
+  const bus = stringValue(busType).trim().toLowerCase();
+  if (bus === 'nvme' || bus === '17') return 'ssd';
+  return 'unknown';
+}
+
+/** { "C" → loại ổ } từ kết quả dò phân vùng; ký tự ổ viết hoa, bỏ dòng thiếu ký tự ổ. */
+export function diskTypesByDriveLetter(rows: Array<Record<string, unknown>>): Map<string, DiskType> {
+  const types = new Map<string, DiskType>();
+  for (const row of rows) {
+    const letter = stringValue(row.DriveLetter).trim().toUpperCase();
+    if (!/^[A-Z]$/.test(letter)) continue;
+    types.set(letter, diskTypeOf(row.MediaType, row.BusType));
+  }
+  return types;
+}
+
 /**
  * Mã cố định cho hồ sơ đề xuất tự động: áp dụng lại chỉ ghi đè đúng một hồ sơ. Trước đây mỗi lần áp dụng
  * lưu thêm `resource-auto-<thời điểm>` cùng tên, dồn thành nhiều hồ sơ trùng tên (khám phá bản cài #6).
@@ -94,7 +123,7 @@ export class HardwareService {
   public async detect(): Promise<HardwareProfile> {
     const quick = this.quickSnapshot();
     const cpuList = cpus();
-    const [coreData, gpuData, diskData] = await Promise.all([
+    const [coreData, gpuData, diskData, diskTypeData] = await Promise.all([
       powershellJson(
         'Get-CimInstance Win32_Processor | Select-Object Name,NumberOfCores,NumberOfLogicalProcessors'
       ),
@@ -103,12 +132,17 @@ export class HardwareService {
       ),
       powershellJson(
         'Get-Volume | Where-Object DriveLetter | Select-Object DriveLetter,Size,SizeRemaining,DriveType'
+      ),
+      // Chỉ đọc: ký tự ổ → ổ vật lý chứa nó (loại ổ + chuẩn nối). Lỗi/không có quyền thì mọi ổ giữ 'unknown' như trước.
+      powershellJson(
+        "Get-Partition | Where-Object DriveLetter | ForEach-Object { $physical = Get-PhysicalDisk | Where-Object DeviceId -eq ([string]$_.DiskNumber) | Select-Object -First 1; [pscustomobject]@{ DriveLetter = [string]$_.DriveLetter; MediaType = [string]$physical.MediaType; BusType = [string]$physical.BusType } }"
       )
     ]);
 
     const cores = asRows(coreData);
     const gpus = asRows(gpuData);
     const disks = asRows(diskData);
+    const diskTypes = diskTypesByDriveLetter(asRows(diskTypeData));
     const cpuModel = stringValue(cores[0]?.Name, cpuList[0]?.model ?? 'Bộ xử lý không xác định');
     const cpuCounts = cpuCountsFromWmi(cores, cpuList.length);
 
@@ -132,7 +166,7 @@ export class HardwareService {
         return {
           device: `${driveLetter}:`,
           mount: `${driveLetter}:\\`,
-          type: 'unknown' as const,
+          type: diskTypes.get(driveLetter.toUpperCase()) ?? 'unknown',
           totalBytes: numberValue(disk.Size),
           freeBytes: numberValue(disk.SizeRemaining)
         };

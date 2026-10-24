@@ -65,15 +65,22 @@ export class SettingsService {
     }
     if (!this.repo.get<boolean>('download_speed_profile_v086', false)) {
       const current = this.repo.getAppSettings(defaultAppSettings);
+      // 2026-10-24 (nguyên tắc tự dò theo máy): bỏ phần ép MỌI máy lên tối thiểu 16 kết nối aria2c + 2 mảnh mỗi video —
+      // máy yếu bị đẩy lên mức của máy mạnh. aria2c vốn không được dùng; số mảnh giờ tự dò (fragments_auto_v172).
       this.repo.saveAppSettings({
         ...current,
         useAria2c: true,
-        aria2Connections: Math.max(16, current.aria2Connections),
-        downloadConcurrentFragments: Math.max(2, current.downloadConcurrentFragments),
         downloadVerifyEntireFile: false,
         progressRefreshMs: Math.min(300, current.progressRefreshMs)
       });
       this.repo.set('download_speed_profile_v086', true);
+    }
+    if (!this.repo.get<boolean>('fragments_auto_v172', false)) {
+      const current = this.repo.getAppSettings(defaultAppSettings);
+      // Số mảnh mỗi video chuyển sang "Tự động theo máy". Không phân biệt được 2 do người dùng chọn hay do mặc định cũ, nên chỉ
+      // máy còn đúng 2 (mặc định cũ, hoặc bị bước v086 ép lên) mới chuyển tự động; số khác là người dùng tự chọn → giữ nguyên.
+      this.repo.saveAppSettings({ ...current, downloadFragmentsAuto: current.downloadConcurrentFragments === 2 });
+      this.repo.set('fragments_auto_v172', true);
     }
     if (!this.repo.get<boolean>('merge_source_quality_v090', false)) {
       const current = this.repo.getAppSettings(defaultAppSettings);
