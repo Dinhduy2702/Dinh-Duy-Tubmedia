@@ -3077,8 +3077,11 @@ test('Cập nhật 2026-10-24: nút khởi động lại trong thông báo gọi
       )
     );
     expect(updateNoticeVisible, 'đã vào trang Cập nhật trong phiên này → không hiện lại thông báo cập nhật').toBe(false);
-    const topbarLabel = await shellWindow.locator('.topbar-update-button').innerText();
-    expect(topbarLabel, 'trạng thái mới vẫn được nhận (nút trên thanh đầu vẫn cập nhật)').toContain('Cài bản mới');
+    // Không đọc chữ ĐANG HIỆN: cửa sổ ≤ 1180 px (máy GitHub) ẩn chữ trên nút, chỉ còn biểu tượng — lượt Publish 1.7.2 đầu
+    // tiên (run 40083904535) trượt vì innerText rỗng dù app đúng. Đọc trạng thái nút (lớp is-ready) + chữ trong DOM.
+    const topbarButton = shellWindow.locator('.topbar-update-button');
+    await expect(topbarButton, 'trạng thái mới vẫn được nhận (nút trên thanh đầu vẫn cập nhật)').toHaveClass(/is-ready/);
+    expect(await topbarButton.textContent()).toContain('Cài bản mới');
   } finally {
     await closeElectronApplication();
     await removeSandbox(sandbox);
