@@ -42,6 +42,8 @@ export const defaultAppSettings: AppSettings = {
   aria2Connections: 16,
   maxGlobalDownloadWorkers: 2,
   downloadConcurrentFragments: 2,
+  downloadFragmentsAuto: true,
+  downloadAdaptiveBoost: true,
   downloadLaneCount: 2,
   mergeLaneCount: 2,
   maxGlobalMergeJobs: 2,

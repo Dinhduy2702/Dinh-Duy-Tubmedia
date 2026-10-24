@@ -588,9 +588,8 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
         downloadMinAudioBitrateKbps: 0,
         downloadAudioBitrateKbps: 0,
         downloadAllowBelowMinimum: false,
-        maxGlobalDownloadWorkers: plan.globalWorkers,
-        downloadConcurrentFragments: recommendation.recommendedConcurrentFragments,
-        aria2Connections: recommendation.recommendedAria2Connections
+        // 2026-10-24: số mảnh mỗi video và trần tổng video tự dò theo máy, không ghi cứng số của lần quét này.
+        downloadFragmentsAuto: true
       });
       useAppStore.setState((current) => ({
         hardware: detected,
@@ -610,7 +609,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
       );
       notify(
         'Đã áp dụng đề xuất theo máy',
-        `Giữ master cao nhất theo nguồn + tạo bản edit CapCut ${recommendedEditMode === 'capcut_sdr_2k' ? '2K' : '1080p'}; ${plan.workersPerList} luồng/danh sách, ${plan.globalWorkers} luồng toàn ứng dụng.`
+        `Giữ master cao nhất theo nguồn + tạo bản edit CapCut ${recommendedEditMode === 'capcut_sdr_2k' ? '2K' : '1080p'}; ${plan.workersPerList} luồng/danh sách; tổng video tải cùng lúc tự theo máy (hiện tối đa ${recommendation.maximumSafeGlobalWorkers}).`
       );
     } catch (error) {
       setError(messageOf(error));
@@ -636,15 +635,12 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
         downloadMinAudioBitrateKbps: 0,
         downloadAudioBitrateKbps: 0,
         downloadAllowBelowMinimum: true,
-        useAria2c: true,
-        aria2Connections: 16,
-        downloadConcurrentFragments: 2,
-        maxGlobalDownloadWorkers: 2
+        downloadFragmentsAuto: true
       });
       setSettings(next);
       notify(
         'Đã áp dụng chuẩn đa nền tảng 1080p',
-        'H.264/MP4, 720p–1080p, fallback thông minh và 2 fragment cho mỗi video; mỗi danh sách vẫn chạy độc lập.'
+        'H.264/MP4, 720p–1080p, fallback thông minh, số mảnh tải mỗi video tự theo máy; mỗi danh sách vẫn chạy độc lập.'
       );
     } catch (error) {
       setError(messageOf(error));

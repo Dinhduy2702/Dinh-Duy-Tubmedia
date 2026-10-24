@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { cpus, tmpdir, totalmem } from 'node:os';
 import { join } from 'node:path';
 import { AppDatabase } from '@main/database/database.js';
 import { ProjectRepository } from '@main/database/repositories/project-repository.js';
@@ -10,6 +10,7 @@ import { MediaSourceRepository } from '@main/database/repositories/media-source-
 import { QueueManager } from '@main/queue/queue-manager.js';
 import { builtInQualityProfiles, defaultAppSettings } from '@main/settings/defaults.js';
 import type { AppSettings, Project, QueueJob, ResourceProfile } from '@shared/types/domain.js';
+import { recommendedConcurrentFragments } from '@shared/utils/hardware-recommendation.js';
 
 // Lag bước 1 (2026-10-12). Trước đây mỗi danh sách tải tự dùng đủ downloadWorkers, độc lập hoàn toàn: 6 danh sách × 4 luồng
 // = 24 tiến trình yt-dlp cùng lúc (mỗi lần mở yt-dlp tốn ≈0,77 s CPU). Quy trình ghép thì bị chặn theo TỔNG số video
@@ -23,6 +24,15 @@ type Internals = {
   tickRunning: boolean;
   active: Map<string, unknown>;
   autoConcurrentDownloadLists: () => number;
+  autoGlobalDownloadCap: () => number;
+  adaptive: { level: number; observe: (sample: unknown) => unknown; noteThrottled: (now: number) => unknown };
+};
+
+/** Đề xuất A: ghim bộ tự tận dụng phần trống ở một bậc cố định (bỏ phần đo theo thời gian). */
+const pinAdaptiveLevel = (level: number): { noteThrottled: ReturnType<typeof vi.fn> } => {
+  const stub = { level, observe: () => null, noteThrottled: vi.fn(() => null) };
+  internals().adaptive = stub;
+  return stub;
 };
 
 const resource: ResourceProfile = {
@@ -145,6 +155,8 @@ beforeEach(() => {
     logger as never
   );
   internals().schedulerRunning = true;
+  // Trần tổng theo máy (2026-10-24) đo máy đang chạy bài kiểm — các bài dưới kiểm trần KHÁC nên gỡ nó ra cho khỏi phụ thuộc máy.
+  internals().autoGlobalDownloadCap = () => 99;
 });
 
 afterEach(async () => {
@@ -221,6 +233,41 @@ describe('Lag bước 1 — trần số danh sách tải / quy trình ghép ch�
   });
 });
 
+// 2026-10-24 (nguyên tắc tự dò theo máy): ô "Tổng video tải đồng thời toàn ứng dụng" (maxGlobalDownloadWorkers) được lưu
+// nhưng hàng đợi không đọc — chọn tay 2 danh sách × 4 luồng trên máy yếu vẫn mở 8 video. Giờ có trần tổng tự dò theo máy.
+describe('Trần tổng video tải cùng lúc tự dò theo máy', () => {
+  it('máy chỉ chịu 3 video: 2 danh sách × 4 luồng chỉ mở 3, xong một video thì mở tiếp đúng một', async () => {
+    internals().autoGlobalDownloadCap = () => 3;
+    const [a, b] = [makeProject('A'), makeProject('B')];
+    for (const project of [a, b]) addDownloads(project, 4, 'tiktok');
+    await tickUntilSettled();
+    expect(started.length, 'trần tổng 3 dù danh sách cho phép 8').toBe(3);
+
+    held.get(started[0]!.id)?.();
+    await settle();
+    await tickUntilSettled();
+    expect(started.length, 'một video xong → mở thêm đúng một').toBe(4);
+  });
+
+  it('tính cả video của làn ghép vào trần tổng', async () => {
+    internals().autoGlobalDownloadCap = () => 2;
+    const [list, merge] = [makeProject('Danh sach'), makeProject('Ghep')];
+    addDownloads(list, 2, 'tiktok');
+    addDownloads(merge, 2, 'tiktok', { workflow: 'download-merge' });
+    await tickUntilSettled();
+    expect(started.length).toBe(2);
+  });
+
+  it('không dùng số cũ đã lưu ở maxGlobalDownloadWorkers (máy người dùng đang lưu 2 nhưng chạy 6–8 video)', async () => {
+    settings = { ...settings, maxGlobalDownloadWorkers: 1 };
+    internals().autoGlobalDownloadCap = () => 6;
+    const [a, b] = [makeProject('A'), makeProject('B')];
+    for (const project of [a, b]) addDownloads(project, 4, 'tiktok');
+    await tickUntilSettled();
+    expect(started.length).toBe(6);
+  });
+});
+
 // Lag bước 2 (2026-10-12). Đo thật: mỗi lần mở yt-dlp tốn ≈0,77 s CPU; một lượt tick trước đây mở hết mọi video còn chỗ
 // trong cùng một lúc (2 danh sách × 4 luồng = 8 tiến trình trong vài ms → máy đứng hình vài giây). Giờ mỗi 350 ms chỉ bắt đầu
 // tối đa 2 tác vụ — tính theo THỜI GIAN, vì mỗi lần hàng đợi đổi trạng thái (emit) đều gọi tick ngay. Tổng số chạy cùng lúc
@@ -287,6 +334,107 @@ describe('Hướng C 429 — hàng đợi báo bộ tải tình trạng nền t�
       .map((job) => (pacingOf.get(job.id) as { samePlatformActive: number } | undefined)?.samePlatformActive);
     expect(youtubeCounts, 'video YouTube thứ n bắt đầu khi đã có n video YouTube đang tải').toEqual([1, 2, 3, 4]);
     const tiktok = started.find((job) => String(job.input.url).includes('tiktok.com'))!;
-    expect(pacingOf.get(tiktok.id)).toEqual({ samePlatformActive: 1, rateLimitStrikes: 0 });
+    expect(pacingOf.get(tiktok.id)).toMatchObject({ samePlatformActive: 1, rateLimitStrikes: 0 });
+  });
+});
+
+// Đề xuất A (người dùng duyệt 2026-10-24). Đo thật: 1 danh sách chỉ chạy đúng số luồng của hồ sơ dù máy cho phép nhiều hơn,
+// mỗi video 2 mảnh → mạng chỉ dùng ~1/4. Giờ tăng dần theo bậc; bậc 0 = y như cũ.
+describe('Đề xuất A — tự tận dụng phần trống', () => {
+  it('bậc 0: đúng như cũ (danh sách chạy đúng số luồng của hồ sơ)', async () => {
+    pinAdaptiveLevel(0);
+    internals().autoGlobalDownloadCap = () => 12;
+    const a = makeProject('A');
+    addDownloads(a, 10, 'tiktok');
+    await tickUntilSettled();
+    expect(startedIn(a)).toBe(4);
+  });
+
+  it('bậc tối đa, chỉ 1 danh sách: được dùng tới trần tổng theo máy', async () => {
+    pinAdaptiveLevel(4);
+    internals().autoGlobalDownloadCap = () => 12;
+    const a = makeProject('A');
+    addDownloads(a, 10, 'tiktok');
+    await tickUntilSettled();
+    expect(startedIn(a)).toBe(10);
+  });
+
+  it('bậc giữa: tăng từng phần (4 → 8 khi trần tổng 12, bậc 2/4)', async () => {
+    pinAdaptiveLevel(2);
+    internals().autoGlobalDownloadCap = () => 12;
+    const a = makeProject('A');
+    addDownloads(a, 10, 'tiktok');
+    await tickUntilSettled();
+    expect(startedIn(a)).toBe(8);
+  });
+
+  it('2 danh sách cùng có việc: trần tổng chia đều (12 → mỗi danh sách 6)', async () => {
+    pinAdaptiveLevel(4);
+    internals().autoGlobalDownloadCap = () => 12;
+    const [a, b] = [makeProject('A'), makeProject('B')];
+    for (const project of [a, b]) addDownloads(project, 8, 'tiktok');
+    await tickUntilSettled();
+    expect([startedIn(a), startedIn(b)]).toEqual([6, 6]);
+  });
+
+  it('máy yếu (trần tổng 2): không có gì để tăng — không vượt trần tổng', async () => {
+    pinAdaptiveLevel(4);
+    internals().autoGlobalDownloadCap = () => 2;
+    const a = makeProject('A');
+    addDownloads(a, 6, 'tiktok');
+    await tickUntilSettled();
+    expect(startedIn(a)).toBe(2);
+  });
+
+  it('YouTube vẫn tối đa 6 video toàn ứng dụng dù bậc tối đa', async () => {
+    pinAdaptiveLevel(4);
+    internals().autoGlobalDownloadCap = () => 12;
+    const a = makeProject('A');
+    addDownloads(a, 10, 'youtube');
+    await tickUntilSettled();
+    expect(startedIn(a)).toBe(6);
+  });
+
+  it('tắt "Tự tận dụng mạng còn trống": đúng như cũ dù bộ điều khiển ở bậc tối đa', async () => {
+    settings = { ...settings, downloadAdaptiveBoost: false };
+    pinAdaptiveLevel(4);
+    internals().autoGlobalDownloadCap = () => 12;
+    const a = makeProject('A');
+    addDownloads(a, 10, 'tiktok');
+    await tickUntilSettled();
+    expect(startedIn(a)).toBe(4);
+    expect((pacingOf.get(started[0]!.id) as { concurrentFragments?: number }).concurrentFragments).toBeUndefined();
+  });
+
+  it('số mảnh: video bắt đầu khi còn ít video tải được nhiều mảnh hơn; tự chọn số mảnh thì không đụng tới', async () => {
+    pinAdaptiveLevel(4);
+    internals().autoGlobalDownloadCap = () => 12;
+    const a = makeProject('A');
+    addDownloads(a, 1, 'tiktok');
+    await tickUntilSettled();
+    const base = recommendedConcurrentFragments(cpus().length, totalmem());
+    expect((pacingOf.get(started[0]!.id) as { concurrentFragments?: number }).concurrentFragments).toBe(
+      Math.min(8, 12 * base)
+    );
+
+    settings = { ...settings, downloadFragmentsAuto: false, downloadConcurrentFragments: 3 };
+    const b = makeProject('B');
+    addDownloads(b, 1, 'tiktok');
+    await tickUntilSettled();
+    const jobB = started.find((job) => job.projectId === b.id)!;
+    expect((pacingOf.get(jobB.id) as { concurrentFragments?: number }).concurrentFragments).toBeUndefined();
+  });
+
+  it('video bị 429 hoặc 403 → báo bộ điều khiển lùi; lỗi khác thì không', () => {
+    const stub = pinAdaptiveLevel(3);
+    const a = makeProject('A');
+    const [job] = addDownloads(a, 1, 'youtube');
+    const note = (manager as unknown as { noteAdaptiveThrottle: (job: QueueJob, code: string, details?: Record<string, unknown>) => void })
+      .noteAdaptiveThrottle.bind(manager);
+    note(job!, 'DOWNLOAD_FAILED', { failureSubtype: 'network' });
+    expect(stub.noteThrottled).not.toHaveBeenCalled();
+    note(job!, 'DOWNLOAD_FAILED', { failureSubtype: 'http_403' });
+    note(job!, 'SOURCE_RATE_LIMITED', {});
+    expect(stub.noteThrottled).toHaveBeenCalledTimes(2);
   });
 });

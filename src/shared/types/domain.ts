@@ -290,8 +290,16 @@ export interface AppSettings {
   rateLimit: string;
   useAria2c: boolean;
   aria2Connections: number;
+  /** Không còn được hàng đợi đọc (từ 1.3.0). Trần tổng video tải cùng lúc giờ tự dò theo máy: automaticGlobalDownloadCap. Giữ
+   * khóa để bản cũ quay lui vẫn đọc được cài đặt. */
   maxGlobalDownloadWorkers: number;
+  /** Chỉ dùng khi downloadFragmentsAuto = false. */
   downloadConcurrentFragments: number;
+  /** 2026-10-24: true = số mảnh tải mỗi video tự dò theo máy (recommendedConcurrentFragments). Lưu ngoài khối 'app'. */
+  downloadFragmentsAuto: boolean;
+  /** Đề xuất A (2026-10-24): tự tận dụng phần trống (thêm video khi ít danh sách, thêm mảnh khi ít video), tự lùi theo tốc độ
+   * thật / độ bận ổ / 429-403. Lưu ngoài khối 'app'. */
+  downloadAdaptiveBoost: boolean;
   // A1 (2026-09-25): tăng từ 4 lên 6 — chỉ số DỰ ÁN CẤU HÌNH song song, KHÔNG phải số ghép chạy đồng
   // thời thật (đó vẫn là maxGlobalMergeJobs, cố tình giữ nguyên 1-4 theo khuyến nghị phần cứng).
   downloadLaneCount: 1 | 2 | 3 | 4 | 5 | 6;

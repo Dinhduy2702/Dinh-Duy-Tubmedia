@@ -14,6 +14,7 @@ export type YtDlpFailureSubtype =
   | 'extractor'
   | 'network'
   | 'interrupted'
+  | 'path_too_long'
   | 'unknown';
 
 export interface YtDlpFailureDetail {
@@ -42,6 +43,7 @@ const ALL_FAILURE_SUBTYPES: ReadonlySet<YtDlpFailureSubtype> = new Set([
   'extractor',
   'network',
   'interrupted',
+  'path_too_long',
   'unknown'
 ]);
 
@@ -101,6 +103,9 @@ export function exhaustedDownloadFailureMessage(
   if (subtype === 'network') {
     return `Kết nối tới máy chủ video vẫn không ổn định ${attemptLabel}. Tubmedia đã dừng riêng video này và giữ dữ liệu tải dở để thử lại sau.`;
   }
+  if (subtype === 'path_too_long') {
+    return `Vẫn không lưu được video vì đường dẫn tệp quá dài ${attemptLabel}, dù Tubmedia đã rút ngắn tên tệp (Windows chỉ cho tối đa 260 ký tự). Hãy chọn thư mục lưu ngắn hơn, gần gốc ổ đĩa (ví dụ E:\\Video), rồi bấm Thử lại.`;
+  }
   return originalMessage;
 }
 
@@ -117,6 +122,7 @@ const YTDLP_FAILURE_CAUSES: Record<YtDlpFailureSubtype, string> = {
   extractor: 'nền tảng chưa trả dữ liệu video ổn định',
   network: 'kết nối mạng hoặc máy chủ video không ổn định',
   interrupted: 'tiến trình tải bị dừng đột ngột, không có thông báo lỗi (ứng dụng hoặc máy bị tắt ngang, phần mềm khác dừng tiến trình)',
+  path_too_long: 'đường dẫn tệp quá dài (Windows chỉ cho tối đa 260 ký tự)',
   unknown: 'chưa xác định — xem chi tiết kỹ thuật trong Nhật ký'
 };
 
@@ -161,8 +167,35 @@ export function isExplicitlyRemovedYoutubeSource(text: string): boolean {
 /** Dòng "ERROR: …" (có thể kèm tiền tố "[extractor] ") hoặc Traceback của Python — dấu hiệu yt-dlp TỰ báo lỗi. */
 const YTDLP_ERROR_MARKER = /(?:^|\n)\s*(?:\[[^\]\n]*\]\s*)?ERROR:|Traceback \(most recent call last\)/i;
 
+/** Windows cổ điển: đường dẫn tối đa 259 ký tự (MAX_PATH 260 gồm ký tự kết thúc). */
+const WINDOWS_PATH_LIMIT = 259;
+/** Python báo không mở/tạo được tệp, kèm đường dẫn dạng repr ('…' hoặc "…", dấu "\" nhân đôi). */
+const PYTHON_FILE_ERROR = /\[Errno (?:2|22)\][^'"\n]*?:\s*(?:'((?:[^'\\\n]|\\.)+)'|"((?:[^"\\\n]|\\.)+)")/g;
+const WINDOWS_NAME_TOO_LONG = /\[WinError 206\]|filename or extension is too long|\[Errno 36\]|file name too long/i;
+
+/**
+ * 2026-10-23: độ dài (ký tự) của đường dẫn mà yt-dlp không ghi được vì vượt MAX_PATH — null nếu lỗi không phải do đường dẫn
+ * dài. "[Errno 2] No such file or directory" cũng xảy ra khi thư mục thật sự không còn → chỉ tính khi đường dẫn ≥ 260 ký tự.
+ * Windows báo thẳng tên quá dài (WinError 206 / Errno 36) → luôn tính, độ dài lấy từ đường dẫn nếu có.
+ */
+export function pathTooLongLength(text: string): number | null {
+  let longest = 0;
+  for (const match of text.matchAll(PYTHON_FILE_ERROR)) {
+    const path = (match[1] ?? match[2] ?? '').replace(/\\(.)/g, '$1');
+    longest = Math.max(longest, path.length);
+  }
+  if (longest > WINDOWS_PATH_LIMIT) return longest;
+  if (WINDOWS_NAME_TOO_LONG.test(text)) return longest > 0 ? longest : WINDOWS_PATH_LIMIT + 1;
+  return null;
+}
+
 export function classifyYtDlpFailure(text: string): YtDlpFailureDetail {
   const lower = text.toLowerCase();
+
+  // Kiểm trước mọi loại khác: đường dẫn chứa nguyên tiêu đề video, mà tiêu đề có thể chứa "403", "fragment", "removed"…
+  if (pathTooLongLength(text) !== null) {
+    return { category: 'retryable', subtype: 'path_too_long', httpStatus: null, retryable: true };
+  }
 
   if (isExplicitlyRemovedYoutubeSource(lower)) {
     return {
