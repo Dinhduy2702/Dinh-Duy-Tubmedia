@@ -5938,6 +5938,9 @@ test('Lag bước 2 + 3: 2 danh sách × 4 luồng bắt đầu dần, vẫn ch�
         TUBMEDIA_E2E: '1',
         TUBMEDIA_E2E_USER_DATA: userDataDirectory,
         TUBMEDIA_E2E_DRIVE_ROOT: fakeDrive,
+        // Bài này kiểm "bắt đầu dần" với 8 video song song, không kiểm trần theo máy (đã có bài riêng). Máy GitHub yếu có trần
+        // tổng thấp hơn 8 → lượt Publish 1.7.2 (run 40254806668) trượt dù app đúng. Ghim trần 8 cho khỏi phụ thuộc máy chạy.
+        TUBMEDIA_E2E_GLOBAL_DOWNLOAD_CAP: '8',
         PLAYWRIGHT_TEST: '1',
         ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
       },

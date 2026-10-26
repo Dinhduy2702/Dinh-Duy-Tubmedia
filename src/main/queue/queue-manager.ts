@@ -278,6 +278,7 @@ export class QueueManager {
   private readonly downloadSpeeds = new Map<string, { bytesPerSecond: number; at: number }>();
   private adaptiveSampleAt = 0;
   private tempSweepTimer: NodeJS.Timeout | null = null;
+  private globalDownloadCapOverride: number | null = null;
   private startupReadyResolve: (() => void) | null = null;
   private readonly startupReady = new Promise<void>((resolve) => {
     this.startupReadyResolve = resolve;
@@ -1086,8 +1087,14 @@ export class QueueManager {
     return this.autoListsCache.value;
   }
 
+  /** Chỉ bài e2e (TUBMEDIA_E2E_GLOBAL_DOWNLOAD_CAP): ghim trần tổng — bài kiểm việc khác không phụ thuộc cấu hình máy chạy. */
+  public setGlobalDownloadCapOverride(cap: number): void {
+    this.globalDownloadCapOverride = Math.max(1, Math.trunc(cap));
+  }
+
   /** Trần tổng video tải cùng lúc toàn ứng dụng, tự dò theo máy (đo lại mỗi phút như số danh sách tự động). */
   private autoGlobalDownloadCap(): number {
+    if (this.globalDownloadCapOverride !== null) return this.globalDownloadCapOverride;
     const now = Date.now();
     if (!this.globalDownloadCapCache || now - this.globalDownloadCapCache.at > 60_000) {
       this.globalDownloadCapCache = { at: now, value: automaticGlobalDownloadCap(cpus().length, freemem()) };

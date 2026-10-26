@@ -20,6 +20,9 @@ export interface DevelopmentEnvironment {
   /** Hướng B 429 (2026-10-12): thời gian nghỉ thay thế (ms, 100 ms – 60 s) cho mọi vòng chờ giới hạn nền tảng, để bài e2e
    * thấy cả lúc nghỉ lẫn lúc tự tiếp tục mà không chờ 2 phút thật. Chỉ có tác dụng khi e2e=true và chạy từ mã nguồn. */
   e2eRateLimitWaitMs: number | undefined;
+  /** 2026-10-26: ghim trần tổng video tải cùng lúc (1–32) cho bài e2e không kiểm trần theo máy — máy GitHub yếu có trần thấp
+   * hơn số video bài kiểm cần chạy song song. Chỉ có tác dụng khi e2e=true và chạy từ mã nguồn. */
+  e2eGlobalDownloadCap: number | undefined;
 }
 
 /**
@@ -40,11 +43,13 @@ export function readDevelopmentEnvironment(
       e2eShutdownHangStep: undefined,
       e2eQueueStartDelayMs: 0,
       e2eDriveRoot: undefined,
-      e2eRateLimitWaitMs: undefined
+      e2eRateLimitWaitMs: undefined,
+      e2eGlobalDownloadCap: undefined
     };
   }
   const queueStartDelay = Number(env.TUBMEDIA_E2E_QUEUE_START_DELAY_MS);
   const rateLimitWait = Number(env.TUBMEDIA_E2E_RATE_LIMIT_WAIT_MS);
+  const globalDownloadCap = Number(env.TUBMEDIA_E2E_GLOBAL_DOWNLOAD_CAP);
   return {
     rendererUrl: env.ELECTRON_RENDERER_URL || undefined,
     e2e: env.TUBMEDIA_E2E === '1',
@@ -58,6 +63,10 @@ export function readDevelopmentEnvironment(
     e2eRateLimitWaitMs:
       env.TUBMEDIA_E2E === '1' && env.TUBMEDIA_E2E_RATE_LIMIT_WAIT_MS && Number.isFinite(rateLimitWait)
         ? Math.min(Math.max(100, Math.trunc(rateLimitWait)), 60_000)
+        : undefined,
+    e2eGlobalDownloadCap:
+      env.TUBMEDIA_E2E === '1' && env.TUBMEDIA_E2E_GLOBAL_DOWNLOAD_CAP && Number.isFinite(globalDownloadCap)
+        ? Math.min(Math.max(1, Math.trunc(globalDownloadCap)), 32)
         : undefined
   };
 }

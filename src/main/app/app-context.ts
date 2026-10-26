@@ -44,6 +44,7 @@ import { CookieJarStore } from '../cookies/cookie-jar-store.js';
 /** P2: chỉ có giá trị khi chạy e2e từ mã nguồn (xem development-environment.ts); bản đóng gói luôn undefined. */
 const E2E_DRIVE_ROOT = readDevelopmentEnvironment(process.env, app.isPackaged).e2eDriveRoot;
 const E2E_RATE_LIMIT_WAIT_MS = readDevelopmentEnvironment(process.env, app.isPackaged).e2eRateLimitWaitMs;
+const E2E_GLOBAL_DOWNLOAD_CAP = readDevelopmentEnvironment(process.env, app.isPackaged).e2eGlobalDownloadCap;
 
 export class AppContext {
   public readonly userData = app.getPath('userData');
@@ -169,6 +170,7 @@ export class AppContext {
     this.previewFrame.setCookieJar(this.cookieJar);
     this.queue.setCookieJar(this.cookieJar);
     if (E2E_RATE_LIMIT_WAIT_MS !== undefined) this.queue.setRateLimitWaitOverrideMs(E2E_RATE_LIMIT_WAIT_MS);
+    if (E2E_GLOBAL_DOWNLOAD_CAP !== undefined) this.queue.setGlobalDownloadCapOverride(E2E_GLOBAL_DOWNLOAD_CAP);
     this.appUpdates = new AppUpdateService(
       this.settings,
       this.queue,
