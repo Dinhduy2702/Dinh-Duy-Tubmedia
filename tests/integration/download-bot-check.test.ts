@@ -109,12 +109,12 @@ describe('lượt tải gặp chặn chống bot', () => {
     const { job } = setup();
     await expect(run(job)).rejects.toMatchObject({ code: 'RETRY_WITH_CONFIGURED_COOKIES' });
     await expect(run(job)).rejects.toMatchObject({ code: 'SOURCE_RATE_LIMITED', details: { rateLimitReason: 'bot_check' } });
-    expect(logger.warn).toHaveBeenCalledWith(
-      'download',
-      'YTDLP_AUTHENTICATION_FAILURE',
-      expect.any(String),
-      expect.objectContaining({ metadata: expect.objectContaining({ failureSubtype: 'bot_check', cookiesAttached: true, technicalSummary: expect.stringContaining('not a bot') }) })
+    const logged = (logger.warn.mock.calls as Array<[string, string, string, { metadata: Record<string, unknown> }]>).filter(
+      (call) => call[1] === 'YTDLP_AUTHENTICATION_FAILURE'
     );
+    const withCookies = logged.at(-1)?.[3].metadata;
+    expect(withCookies).toMatchObject({ failureSubtype: 'bot_check', cookiesAttached: true });
+    expect(String(withCookies?.technicalSummary), 'nhật ký giữ câu gốc của YouTube').toContain('not a bot');
   });
 
   it('chưa cấu hình cookie mà bị chặn chống bot → cũng chờ tự tiếp tục, không bắt người dùng thêm cookie', async () => {
