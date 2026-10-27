@@ -251,7 +251,10 @@ export function classifyYtDlpFailure(text: string): YtDlpFailureDetail {
   // KHÔNG gắn cookie cũng dính, rồi vài phút sau tự hết). Không phải cookie hỏng — tách riêng để hàng đợi nghỉ với YouTube
   // rồi tự tiếp tục như HTTP 429, thay vì báo "cookie hết hạn".
   if (
-    includesAny(lower, ['sign in to confirm', 'confirm you are not a bot', "confirm you're not a bot", 'confirm you’re not a bot', 'not a bot'])
+    // Chỉ câu "not a bot" — KHÔNG dùng "sign in to confirm" chung: "Sign in to confirm your age" là video giới hạn độ tuổi, cần
+    // đăng nhập thật (rà soát 2026-10-27).
+    includesAny(lower, ['confirm you are not a bot', "confirm you're not a bot", 'confirm you’re not a bot', 'not a bot']) &&
+    !includesAny(lower, ['confirm your age'])
   ) {
     return { category: 'authentication', subtype: 'bot_check', httpStatus: null, retryable: false };
   }
@@ -267,7 +270,9 @@ export function classifyYtDlpFailure(text: string): YtDlpFailureDetail {
       'login required',
       'authentication required',
       'members-only',
-      'age-restricted'
+      'age-restricted',
+      'confirm your age',
+      'inappropriate for some users'
     ])
   ) {
     return {

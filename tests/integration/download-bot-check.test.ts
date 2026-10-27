@@ -30,6 +30,13 @@ describe('phân loại câu lỗi YouTube', () => {
   it('yt-dlp báo cookie đã bị xoay/thu hồi → cookie hỏng thật (cookies_invalid), kể cả khi kèm câu "not a bot"', () => {
     expect(classifyYtDlpFailure(ROTATED)).toMatchObject({ category: 'authentication', subtype: 'cookies_invalid' });
   });
+  // 2026-10-27 (rà soát trước 1.7.3): "Sign in to confirm your age" là video giới hạn độ tuổi — CẦN đăng nhập thật, không phải
+  // YouTube chặn tạm. Bản đầu của bot_check bắt mọi câu "sign in to confirm" → app sẽ chờ rồi thử lại vô ích thay vì xin cookie.
+  it('"Sign in to confirm your age" (giới hạn độ tuổi) là lỗi đăng nhập thật, KHÔNG phải chặn chống bot', () => {
+    const age = 'ERROR: [youtube] abc: Sign in to confirm your age. This video may be inappropriate for some users. Use --cookies-from-browser or --cookies for the authentication.';
+    expect(classifyYtDlpFailure(age)).toMatchObject({ category: 'authentication', subtype: 'authentication' });
+  });
+
   it('kèm HTTP 429 → giới hạn 429; video cần đăng nhập thật → lỗi đăng nhập như cũ', () => {
     expect(classifyYtDlpFailure(`WARNING: HTTP Error 429: Too Many Requests\n${BOT}`)).toMatchObject({ subtype: 'http_429' });
     expect(classifyYtDlpFailure('ERROR: [youtube] x: This video is members-only content.')).toMatchObject({ subtype: 'authentication' });
