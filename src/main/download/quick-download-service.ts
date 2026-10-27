@@ -549,7 +549,10 @@ export class QuickDownloadService {
   public async shutdown(preserve = true): Promise<void> {
     const active = this.activeTask;
     if (!active || TERMINAL_PHASES.has(active.status.phase)) {
-      await this.persist();
+      // 2026-10-27: lượt vừa kết thúc có thể còn đang dọn thư mục tạm + ghi trạng thái — chờ xong rồi mới coi là đã thoát
+      // (trước đây thoát luôn, bước ghi trạng thái chạy sau khi thư mục đã bị dọn → lỗi EPERM không ai bắt).
+      if (active) await active.done.catch(() => undefined);
+      await this.persist().catch(() => undefined);
       return;
     }
 
@@ -1225,7 +1228,8 @@ export class QuickDownloadService {
     }
 
     if (this.activeTask === active) this.activeTask = null;
-    await this.persist();
+    // Lỗi ghi trạng thái đã được persist() ghi nhật ký; không để nó thành lỗi không ai bắt của lượt tải.
+    await this.persist().catch(() => undefined);
   }
 
   private async persist(): Promise<void> {
