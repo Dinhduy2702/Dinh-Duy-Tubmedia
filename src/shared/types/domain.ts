@@ -630,6 +630,8 @@ export interface AttentionNotice {
   code?: string;
   steps?: string[];
   sticky?: boolean;
+  /** 2026-10-27: nguyên nhân NGẮN của lỗi tác vụ ("Video đã bị xoá khỏi YouTube") — thông báo gộp liệt kê theo lý do. */
+  reason?: string;
 }
 
 export interface CookieConfigurationStatus {

@@ -258,6 +258,9 @@ export function classifyYtDlpFailure(text: string): YtDlpFailureDetail {
 
   if (
     includesAny(lower, [
+      // 2026-10-27: Vimeo "The web client only works when logged-in … provide account credentials" (nhật ký 22/10 ra "chưa xác định").
+      'only works when logged-in',
+      'provide account credentials',
       'use --cookies-from-browser',
       'use --cookies for the authentication',
       'cookies for the authentication',

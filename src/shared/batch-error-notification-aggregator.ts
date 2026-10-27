@@ -1,3 +1,5 @@
+import { summarizeFailureReasons } from './utils/failure-reason.js';
+
 export type BatchAttentionNotice = {
   id: string;
   severity: string;
@@ -8,11 +10,15 @@ export type BatchAttentionNotice = {
   code?: string;
   sticky?: boolean;
   steps?: string[];
+  /** Nguyên nhân ngắn của lỗi (xem failure-reason.ts) — gộp nhiều video thì liệt kê theo lý do. */
+  reason?: string;
 };
 
 type ProjectBucket = {
   firstSeenAt: number;
   jobIds: Set<string>;
+  /** Mã tác vụ → lý do (2026-10-27: thông báo gộp nêu lý do, không chỉ "gặp lỗi"). */
+  reasons: Map<string, string>;
 };
 
 const PROJECT_WINDOW_MS = 10 * 60 * 1000;
@@ -97,7 +103,8 @@ export function coalesceBatchJobFailureAttention<T extends BatchAttentionNotice>
   if (!bucket) {
     bucket = {
       firstSeenAt: current,
-      jobIds: new Set<string>()
+      jobIds: new Set<string>(),
+      reasons: new Map<string, string>()
     };
 
     buckets.set(projectId, bucket);
@@ -108,21 +115,46 @@ export function coalesceBatchJobFailureAttention<T extends BatchAttentionNotice>
   }
 
   bucket.jobIds.add(jobId);
+  const reason = notice.reason?.trim();
+  if (reason) bucket.reasons.set(jobId, reason);
 
   const count = bucket.jobIds.size;
   const recoverableWarning = notice.severity === 'warning';
   const name = projectName?.trim();
   const where = name ? `"${name}"` : 'một danh sách tải';
+  // 2026-10-27 (người dùng yêu cầu): nêu nguyên nhân ngay trong thông báo. Cùng một lý do → đưa lên tiêu đề; nhiều lý do →
+  // liệt kê ngắn theo số video (nhiều nhất trước). Video không có lý do (bản cũ) tính là "chưa rõ".
+  if (bucket.reasons.size === 0) {
+    // Thông báo không kèm lý do (nguồn khác/bản cũ): giữ đúng câu cũ.
+    return {
+      ...notice,
+      id: `batch-job-failures:${projectId}`,
+      title: recoverableWarning
+        ? `Có ${count} video${name ? ` trong ${where}` : ''} chưa tải được sau khi tự thử lại`
+        : `Có ${count} video gặp lỗi trong ${where}`,
+      message: recoverableWarning
+        ? 'Tubmedia đã gom các cảnh báo phục hồi vào một thông báo. Tệp .part vẫn được giữ để thử lại đúng video khi nguồn ổn định.'
+        : 'Các lỗi được gom vào một thông báo. Mở Nhật ký riêng của danh sách để xem chi tiết từng video.',
+      sticky: false
+    };
+  }
+  const reasons = [...bucket.jobIds].map((id) => bucket.reasons.get(id) ?? 'Lỗi chưa xác định (xem Nhật ký)');
+  const distinct = new Set(reasons);
+  const single = distinct.size === 1 ? [...distinct][0]! : null;
+  const title = recoverableWarning
+    ? `Có ${count} video${name ? ` trong ${where}` : ''} chưa tải được sau khi tự thử lại${single ? `: ${single}` : ''}`
+    : single
+      ? `Có ${count} video lỗi trong ${where}: ${single}`
+      : `Có ${count} video lỗi trong ${where}`;
+  const reasonLine = single ? '' : `Lý do: ${summarizeFailureReasons(reasons)}. `;
 
   return {
     ...notice,
     id: `batch-job-failures:${projectId}`,
-    title: recoverableWarning
-      ? `Có ${count} video${name ? ` trong ${where}` : ''} chưa tải được sau khi tự thử lại`
-      : `Có ${count} video gặp lỗi trong ${where}`,
+    title,
     message: recoverableWarning
-      ? 'Tubmedia đã gom các cảnh báo phục hồi vào một thông báo. Tệp .part vẫn được giữ để thử lại đúng video khi nguồn ổn định.'
-      : 'Các lỗi được gom vào một thông báo. Mở Nhật ký riêng của danh sách để xem chi tiết từng video.',
+      ? `${reasonLine}Tệp .part vẫn được giữ để thử lại đúng video khi nguồn ổn định.`
+      : `${reasonLine}Xem từng video ở trang Tiến trình; Nhật ký riêng của danh sách có chi tiết kỹ thuật.`,
     sticky: false
   };
 }

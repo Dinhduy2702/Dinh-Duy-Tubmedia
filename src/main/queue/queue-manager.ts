@@ -71,6 +71,7 @@ import {
 import { effectiveMemoryReserveBytes } from '@shared/utils/resource-memory.js';
 import { toneForErrorCode } from '@shared/utils/notice-tone.js';
 import { detectPlatform, downloadLinkTag } from '@shared/utils/url.js';
+import { failureReasonLabel } from '@shared/utils/failure-reason.js';
 import {
   downloadWorkFolder,
   mergeCachesIdle,
@@ -2103,11 +2104,22 @@ export class QueueManager {
     code: string,
     message: string,
     job: QueueJob,
-    recoverableExternalFailure = false
+    recoverableExternalFailure = false,
+    details?: Record<string, unknown>
   ): void {
     if (!this.window || this.window.isDestroyed()) return;
     const scope = job.projectId ?? job.id;
+    // 2026-10-27: nêu nguyên nhân ngay trong thông báo (có tên nền tảng gốc), không bắt mở Nhật ký.
+    const platform = job.type === 'download' ? this.downloadPlatformOf(job) : null;
+    const reason = failureReasonLabel({
+      code,
+      subtype: typeof details?.failureSubtype === 'string' ? details.failureSubtype : null,
+      technicalSummary: typeof details?.technicalSummary === 'string' ? details.technicalSummary : null,
+      platformLabel: platform ? rateLimitPlatformLabel(platform) : null,
+      jobType: job.type
+    });
     const notice: AttentionNotice = {
+      reason,
       id: `job-failure-${scope}-${code}`,
       severity: recoverableExternalFailure ? 'warning' : 'error',
       title:
@@ -2491,12 +2503,12 @@ export class QueueManager {
         });
         if (circuitEligible) {
           const circuitOpened = await this.openCircuitAfterRepeatedFailure(job, finalMessage);
-          if (!circuitOpened) this.notifyJobFailure(code, finalMessage, job, true);
+          if (!circuitOpened) this.notifyJobFailure(code, finalMessage, job, true, appError.details);
         } else {
           if (job.type === 'download' && job.projectId) {
             this.repeatedFailures.delete(job.projectId);
           }
-          this.notifyJobFailure(code, finalMessage, job);
+          this.notifyJobFailure(code, finalMessage, job, false, appError.details);
         }
       }
     } finally {

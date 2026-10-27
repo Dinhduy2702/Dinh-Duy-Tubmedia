@@ -17,7 +17,8 @@ describe('network recovery wiring R54', () => {
     const queue = readFileSync('src/main/queue/queue-manager.ts', 'utf8');
     const circuit = queue.indexOf('const circuitOpened = await this.openCircuitAfterRepeatedFailure');
     const fallbackNotice = queue.indexOf(
-      'if (!circuitOpened) this.notifyJobFailure(code, finalMessage, job, true)'
+      // 2026-10-27: kèm appError.details để thông báo nêu được nguyên nhân.
+      'if (!circuitOpened) this.notifyJobFailure(code, finalMessage, job, true, appError.details)'
     );
 
     expect(circuit).toBeGreaterThan(-1);
