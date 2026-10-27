@@ -265,8 +265,6 @@ export class QueueManager {
   private readonly cleanupInProgress = new Set<string>();
   private readonly blockingNoticeKeys = new Set<string>();
   private readonly keptOldVersionCounts = new Map<string, number>();
-  /** P1: theo danh sách — các tác vụ tải đã báo không có tiếng (mã tác vụ → tên video). */
-  private readonly audioIssueJobs = new Map<string, Map<string, string>>();
   /** Hướng B 429: nghỉ theo NỀN TẢNG trên toàn ứng dụng khi dính HTTP 429 (xem PlatformRateLimitGate). */
   private rateLimits = new PlatformRateLimitGate();
   private waitingLaneProjects: { downloadLists: string[]; mergeWorkflows: string[] } = { downloadLists: [], mergeWorkflows: [] };
@@ -873,31 +871,17 @@ export class QueueManager {
   }
 
   /**
-   * P1 (2026-10-10): video tải xong nhưng không có tiếng / tiếng im lặng (do nguồn). Gộp theo danh sách như "Đã giữ bản cũ"
-   * để 20 video im lặng chỉ hiện một thông báo, số đếm tăng dần.
+   * P1 (2026-10-10): video tải xong nhưng không có tiếng / tiếng im lặng (do nguồn). 2026-10-27 (người dùng yêu cầu): KHÔNG
+   * bật thông báo nữa — mỗi video lỗi tiếng bật thêm một thông báo, dồn dập. Chỉ ghi nhật ký; giao diện hiện huy hiệu
+   * "Không có tiếng" / "Tiếng im lặng" trên từng video ở trang Hàng đợi (input.audioIssue).
    */
-  private notifyAudioIssue(job: QueueJob, issue: AudioIssue): void {
-    const scope = job.projectId ?? job.id;
-    const entries = this.audioIssueJobs.get(scope) ?? new Map<string, string>();
+  private logAudioIssue(job: QueueJob, issue: AudioIssue): void {
     const source = job.sourceId ? this.sources.get(job.sourceId) : null;
-    entries.set(job.id, source?.title ?? job.input.displayName?.toString() ?? job.input.url?.toString() ?? 'Video');
-    this.audioIssueJobs.set(scope, entries);
-    if (!this.window || this.window.isDestroyed()) return;
-    const titles = [...entries.values()];
-    const named = titles.slice(0, 3).map((title) => `"${title}"`).join(', ') + (titles.length > 3 ? '…' : '');
-    const notice: AttentionNotice = {
-      id: `audio-issue-${scope}`,
-      severity: 'warning',
-      title: 'Có video không có tiếng',
-      message:
-        `${titles.length} video tải xong nhưng không có tiếng từ nguồn: ${named}. ` +
-        (titles.length === 1 ? `${audioIssueNote(issue)} ` : 'Nguồn không có luồng âm thanh hoặc âm thanh im lặng hoàn toàn — tải lại cũng không có tiếng. ') +
-        'Xem huy hiệu "Không có tiếng" / "Tiếng im lặng" trên từng video ở trang Hàng đợi.',
-      code: 'DOWNLOAD_AUDIO_ISSUE',
-      sticky: false,
-      ...(job.projectId ? { projectId: job.projectId } : {})
-    };
-    this.window.webContents.send(IPC.events.attention, notice);
+    this.logger.info('queue', 'DOWNLOAD_AUDIO_ISSUE', `${source?.title ?? 'Video'}: ${audioIssueNote(issue)}`, {
+      jobId: job.id,
+      ...(job.projectId ? { projectId: job.projectId } : {}),
+      metadata: { audioIssue: issue }
+    });
   }
 
   /**
@@ -2173,7 +2157,7 @@ export class QueueManager {
           );
           completionStatus = result.skipped ? 'skipped' : 'completed';
           if (result.keptOldVersions?.length) this.notifyKeptOldVersions(job, result.keptOldVersions);
-          if (result.audioIssue) this.notifyAudioIssue(job, result.audioIssue);
+          if (result.audioIssue) this.logAudioIssue(job, result.audioIssue);
           const source = job.sourceId ? this.sources.get(job.sourceId) : null;
           this.repo.updateInput(job.id, {
             outputPath: result.outputPath,

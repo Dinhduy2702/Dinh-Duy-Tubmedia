@@ -127,7 +127,9 @@ afterEach(() => {
 const audioNotices = (): AttentionNotice[] => notices.filter((notice) => notice?.code === 'DOWNLOAD_AUDIO_ISSUE');
 
 describe('P1 — hàng đợi lưu và báo rõ video không có tiếng / im lặng', () => {
-  it('tác vụ tải xong mà nguồn im lặng → lưu audioIssue trên tác vụ và hiện một thông báo gộp theo danh sách', async () => {
+  // 2026-10-27 (người dùng yêu cầu): bỏ hẳn thông báo bật lên "Có video không có tiếng" — mỗi video lỗi tiếng lại bật thêm
+  // một thông báo, dồn dập. Chỉ giữ huy hiệu "Không có tiếng" / "Tiếng im lặng" trên từng video ở trang Hàng đợi (audioIssue).
+  it('tác vụ tải xong mà nguồn im lặng → lưu audioIssue trên tác vụ (cho huy hiệu), KHÔNG bật thông báo', async () => {
     const project = makeProject('Danh sach 1');
     downloaderResult = { ...downloaderResult, audioIssue: 'silent', audioMaxVolumeDb: -91 };
     const first = downloadJob(project);
@@ -140,13 +142,7 @@ describe('P1 — hàng đợi lưu và báo rõ video không có tiếng / im l�
     expect(queue.get(first.id)?.errorMessage ?? null).toBeNull();
     expect(queue.get(first.id)).toMatchObject({ status: 'completed', input: { audioIssue: 'silent', audioMaxVolumeDb: -91 } });
     expect(queue.get(second.id)?.input.audioIssue).toBe('missing');
-    const shown = audioNotices();
-    expect(shown.length).toBeGreaterThan(0);
-    expect(new Set(shown.map((notice) => notice.id)).size, 'cùng danh sách → cùng một thông báo (được cập nhật số đếm)').toBe(1);
-    const last = shown.at(-1)!;
-    expect(last).toMatchObject({ severity: 'warning', projectId: project.id });
-    expect(last.message).toContain('2 video');
-    expect(last.message).toContain('từ nguồn');
+    expect(audioNotices(), 'không bật thông báo nào cho video không có tiếng').toEqual([]);
   });
 
   it('đối chứng: tiếng bình thường → không lưu audioIssue, không thông báo', async () => {
