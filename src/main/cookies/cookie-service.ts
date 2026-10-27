@@ -1,4 +1,5 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import type { AppSettings, BrowserProfileOption, CookieCheckResult, CookieConfigurationStatus } from '@shared/types/domain.js';
 import { checkYouTubeCookies } from './youtube-cookie-check.js';
@@ -194,9 +195,21 @@ export class CookieService {
 
   /** Lưu cookies (luôn lưu, kể cả khi kiểm thấy không dùng được — người dùng tự quyết) rồi kiểm với YouTube. */
   private async saveNormalized(normalized: string): Promise<CookieConfigurationStatus> {
-    await mkdir(dirname(this.managedPath), { recursive: true });
-    await writeFile(this.managedPath, normalized, { encoding: 'utf8', mode: 0o600 });
-    await this.jar?.recordUserSave(this.managedPath);
+    // 2026-10-27: ghi tệp + ghi nhận thế hệ mới trong CÙNG khoá với bước ghi ngược sau mỗi video, ghi nguyên tử (tệp tạm →
+    // đổi tên) — video xong đúng lúc lưu không ghi đè được bản mới; tắt máy giữa chừng không để tệp cookie dở dang.
+    if (this.jar) {
+      await this.jar.saveUserContent(this.managedPath, normalized);
+    } else {
+      await mkdir(dirname(this.managedPath), { recursive: true });
+      const temporary = `${this.managedPath}.${randomUUID()}.tmp`;
+      await writeFile(temporary, normalized, { encoding: 'utf8', mode: 0o600 });
+      try {
+        await rename(temporary, this.managedPath);
+      } catch (error) {
+        await rm(temporary, { force: true });
+        throw error;
+      }
+    }
     this.settings.update({
       cookiesFilePath: this.managedPath,
       cookiesBrowser: 'none',

@@ -37,6 +37,11 @@ export interface CookieJarFileState {
   lastUserSaveAt: string | null;
   /** Hash nội dung app ghi vào tệp gốc lần cuối (lưu của người dùng hoặc ghi ngược sau yt-dlp). */
   lastAppWrittenSha256: string | null;
+  /**
+   * 2026-10-27: hash bản app ghi TRƯỚC lần cuối. Ghi ngược ghi trạng thái TRƯỚC rồi mới thay tệp — máy tắt giữa hai bước thì
+   * tệp vẫn là bản trước, nhận ra được nhờ trường này (không coi nhầm là người dùng đổi cookie).
+   */
+  previousAppWrittenSha256?: string | null;
 }
 
 interface StateFile {
@@ -48,6 +53,9 @@ const RUNS_FOLDER = 'cookie-runs';
 const STATE_FILE = 'cookie-jar-state.json';
 /** Tên bản sao tạm do lease() tạo: randomUUID() + .txt. */
 const RUN_COPY_NAME = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.txt$/i;
+/** Tệp tạm của atomicWrite cho tệp cookie quản lý / tệp trạng thái: <tên>.<uuid>.tmp. */
+const STALE_ATOMIC_TEMP =
+  /^(?:cookies-managed\.txt|cookie-jar-state\.json)\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/i;
 
 /** Thay đường dẫn tệp cookies gốc trong tham số yt-dlp (--cookies <tệp>) bằng bản sao tạm của lượt này. */
 export function withLeasedCookieFile(args: readonly string[], lease: CookieLease): string[] {
@@ -177,6 +185,30 @@ export class CookieJarStore {
     return state.files[keyOf(path)] ?? null;
   }
 
+  /**
+   * 2026-10-27: người dùng lưu cookies qua app — GHI tệp và ghi nhận thế hệ mới trong CÙNG khoá với bước ghi ngược. Trước đây
+   * CookieService ghi tệp ngoài khoá rồi mới gọi recordUserSave: một video xong đúng lúc đó vẫn thấy số thế hệ cũ và trộn
+   * cookie của phiên cũ vào bản người dùng vừa lưu (bài kiểm tái hiện ngay vòng đầu). Ghi nguyên tử (tệp tạm → đổi tên): tắt
+   * máy giữa chừng không để tệp cookie dở dang.
+   */
+  public saveUserContent(path: string, content: string): Promise<void> {
+    return this.exclusive(async () => {
+      await mkdir(dirname(path), { recursive: true });
+      await this.atomicWrite(path, content);
+      const hash = sha256(content);
+      const state = await this.readState();
+      const previous = state.files[keyOf(path)];
+      state.files[keyOf(path)] = {
+        generation: (previous?.generation ?? 0) + 1,
+        lastUserSaveSha256: hash,
+        lastUserSaveAt: new Date().toISOString(),
+        lastAppWrittenSha256: hash,
+        previousAppWrittenSha256: null
+      };
+      await this.writeState(state);
+    });
+  }
+
   /** Người dùng vừa lưu cookies qua app vào `path`: ghi nhận hash và tăng số thế hệ. */
   public recordUserSave(path: string): Promise<void> {
     return this.exclusive(async () => {
@@ -245,7 +277,8 @@ export class CookieJarStore {
       const merged = mergeCookieRun(baseContent.toString('utf8'), updated.toString('utf8'), current.toString('utf8'));
       if (merged === null) return;
       const updatedHash = sha256(merged);
-      await this.atomicWrite(original, merged);
+      // Ghi TRẠNG THÁI trước, tệp cookie sau (2026-10-27): máy tắt giữa hai bước thì tệp vẫn là bản trước
+      // (= previousAppWrittenSha256) → lần mở sau vẫn nhận là bản do app ghi, không coi nhầm là người dùng đổi cookie.
       const state = await this.readState();
       const key = keyOf(original);
       const previous = state.files[key];
@@ -253,10 +286,28 @@ export class CookieJarStore {
         generation: previous?.generation ?? 0,
         lastUserSaveSha256: previous?.lastUserSaveSha256 ?? null,
         lastUserSaveAt: previous?.lastUserSaveAt ?? null,
-        lastAppWrittenSha256: updatedHash
+        lastAppWrittenSha256: updatedHash,
+        previousAppWrittenSha256: sha256(current)
       };
       await this.writeState(state);
+      await this.atomicWrite(original, merged);
     });
+  }
+
+  /**
+   * 2026-10-27: tệp tạm của bước ghi nguyên tử (<tệp>.<uuid>.tmp) còn sót trong thư mục bảo mật khi app tắt ngang giữa lúc ghi
+   * — chứa cookies, không để nằm lại. Chỉ đúng mẫu tên tệp tạm của cookies-managed.txt / cookie-jar-state.json, nằm TRỰC TIẾP
+   * trong thư mục bảo mật thật (không theo liên kết).
+   */
+  private async cleanupStaleAtomicTemps(): Promise<void> {
+    if (!this.securityDirectory || !isAbsolute(this.securityDirectory)) return;
+    const info = await lstat(this.securityDirectory).catch(() => null);
+    if (!info || !info.isDirectory() || info.isSymbolicLink()) return;
+    const entries = await readdir(this.securityDirectory, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (!entry.isFile() || !STALE_ATOMIC_TEMP.test(entry.name)) continue;
+      await rm(join(this.securityDirectory, entry.name), { force: true }).catch(() => undefined);
+    }
   }
 
   /** Dọn bản sao tạm sót lại khi app bị tắt ngang giữa lượt chạy (chứa cookies — không để nằm lại). */
@@ -282,7 +333,9 @@ export class CookieJarStore {
         if (!entry.isFile() || !RUN_COPY_NAME.test(entry.name)) continue;
         await rm(join(runs, entry.name), { force: true }).catch(() => undefined);
       }
-    })().catch(() => undefined);
+    })()
+      .then(() => this.cleanupStaleAtomicTemps())
+      .catch(() => undefined);
     return this.staleCleanup;
   }
 }
