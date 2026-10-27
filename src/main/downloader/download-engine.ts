@@ -35,8 +35,11 @@ import {
   pathTooLongLength,
   sanitizeYtDlpDiagnostic,
   unsupportedSourceUrlMessage,
-  ytDlpFailureLogMessage
+  ytDlpFailureLogMessage,
+  retryableDownloadFailureMessage,
+  finalDownloadFailureMessage
 } from '@shared/utils/download-failure.js';
+import { rateLimitPlatformLabel } from '@shared/utils/rate-limit-backoff.js';
 import { hasConfiguredCookies, shouldAttachConfiguredCookies } from '@shared/utils/cookie-policy.js';
 import { cleanExternalText } from '@shared/utils/text-encoding.js';
 import { downloadLinkTag } from '@shared/utils/url.js';
@@ -174,10 +177,12 @@ export class DownloadEngine {
           { jobId: job.id, projectId: project.id }
         );
         throw new DownloadFailedError(
-          `Tệp tải xong không hợp lệ và đã chuyển vào khu cách ly: ${quarantined}. ${checked.reasons.join(' ')}`
+          `Tệp tải xong không hợp lệ và đã chuyển vào khu cách ly: ${quarantined}. ${checked.reasons.join(' ')}`,
+          false,
+          { failureSubtype: 'file_invalid' }
         );
       }
-      throw new DownloadFailedError(`Tệp tải xong không hợp lệ: ${checked.reasons.join('; ')}`);
+      throw new DownloadFailedError(`Tệp tải xong không hợp lệ: ${checked.reasons.join('; ')}`, false, { failureSubtype: 'file_invalid' });
     }
 
     // P4 (2026-10-21): thời lượng tệp lấy theo luồng dài nhất nên luồng hình bị mất mảnh vẫn "khớp" — so riêng luồng hình.
@@ -199,7 +204,7 @@ export class DownloadEngine {
         ...(job.projectId ? { projectId: job.projectId } : {}),
         metadata: { path, ...shortfall, ...(expectedDuration !== undefined ? { expectedDuration } : {}) }
       });
-      const details = { reason: 'VIDEO_STREAM_SHORT', ...shortfall };
+      const details = { reason: 'VIDEO_STREAM_SHORT', failureSubtype: 'video_short', ...shortfall };
       const project = job.projectId ? this.projects.get(job.projectId) : null;
       if (project && quarantineOnFailure) {
         const quarantined = await this.quarantine.move(path, reason, { jobId: job.id, projectId: project.id });
@@ -330,7 +335,9 @@ export class DownloadEngine {
       }
       if (appSettings.downloadContainerPreference === 'mp4') {
         throw new DownloadFailedError(
-          `Không thể đóng gói lại tệp sang MP4: ${result.stderrTail || 'FFmpeg thất bại.'}`
+          `Không thể đóng gói lại tệp sang MP4: ${result.stderrTail || 'FFmpeg thất bại.'}`,
+          false,
+          { failureSubtype: 'remux_failed' }
         );
       }
       this.logger.warn(
@@ -355,7 +362,9 @@ export class DownloadEngine {
       await rm(pending, { force: true });
       if (appSettings.downloadContainerPreference === 'mp4' && !alreadyMp4) {
         throw new DownloadFailedError(
-          `Tệp MP4 sau khi đóng gói lại không hợp lệ: ${checked.reasons.join('; ')}`
+          `Tệp MP4 sau khi đóng gói lại không hợp lệ: ${checked.reasons.join('; ')}`,
+          false,
+          { failureSubtype: 'remux_failed' }
         );
       }
       return input;
@@ -420,16 +429,20 @@ export class DownloadEngine {
     }
     const capabilities = new Set(ffmpeg.capabilities);
     if (!capabilities.has('aac')) {
-      throw new DownloadFailedError('FFmpeg hiện tại thiếu bộ mã hóa AAC nên chưa thể tạo bản dựng CapCut.');
+      throw new DownloadFailedError('FFmpeg hiện tại thiếu bộ mã hóa AAC nên chưa thể tạo bản dựng CapCut.', false, { failureSubtype: 'encoder_missing' });
     }
     if (plan.requiresHdrToneMap && (!capabilities.has('zscale') || !capabilities.has('tonemap'))) {
       throw new DownloadFailedError(
-        'Video master là HDR nhưng FFmpeg thiếu zscale hoặc tonemap. Bản master vẫn được giữ nguyên; hãy vào Trung tâm công cụ và chọn Sửa chữa tất cả rồi thử tạo lại bản edit.'
+        'Video master là HDR nhưng FFmpeg thiếu zscale hoặc tonemap. Bản master vẫn được giữ nguyên; hãy vào Trung tâm công cụ và chọn Sửa chữa tất cả rồi thử tạo lại bản edit.',
+        false,
+        { failureSubtype: 'encoder_missing' }
       );
     }
     if (plan.requiresColorConversion && !capabilities.has('zscale')) {
       throw new DownloadFailedError(
-        'Video cần chuyển màu BT.709 nhưng FFmpeg thiếu zscale. Bản master vẫn được giữ nguyên.'
+        'Video cần chuyển màu BT.709 nhưng FFmpeg thiếu zscale. Bản master vẫn được giữ nguyên.',
+        false,
+        { failureSubtype: 'encoder_missing' }
       );
     }
 
@@ -438,7 +451,9 @@ export class DownloadEngine {
     );
     if (encoderCandidates.length === 0) {
       throw new DownloadFailedError(
-        'FFmpeg không có bộ mã hóa H.264 phù hợp. Bản master vẫn được giữ nguyên; hãy sửa chữa bộ công cụ FFmpeg.'
+        'FFmpeg không có bộ mã hóa H.264 phù hợp. Bản master vẫn được giữ nguyên; hãy sửa chữa bộ công cụ FFmpeg.',
+        false,
+        { failureSubtype: 'encoder_missing' }
       );
     }
 
@@ -611,7 +626,9 @@ export class DownloadEngine {
     if (!completed) {
       await rm(pending, { force: true });
       throw new DownloadFailedError(
-        `Không thể tạo bản edit CapCut sau khi đã thử GPU và CPU. Bản master vẫn an toàn: ${lastError || 'FFmpeg thất bại.'}`
+        `Không thể tạo bản edit CapCut sau khi đã thử GPU và CPU. Bản master vẫn an toàn: ${lastError || 'FFmpeg thất bại.'}`,
+        false,
+        { failureSubtype: 'edit_copy_failed' }
       );
     }
 
@@ -623,7 +640,9 @@ export class DownloadEngine {
     if (!checked.ok) {
       await rm(pending, { force: true });
       throw new DownloadFailedError(
-        `Bản edit CapCut không hợp lệ; video master vẫn được giữ nguyên: ${checked.reasons.join('; ')}`
+        `Bản edit CapCut không hợp lệ; video master vẫn được giữ nguyên: ${checked.reasons.join('; ')}`,
+        false,
+        { failureSubtype: 'edit_copy_failed' }
       );
     }
 
@@ -672,7 +691,9 @@ export class DownloadEngine {
       // S2: không xóa tệp cùng tên mà danh sách khác đang dùng để thay bằng bản sao.
       if (job.sourceId && this.sources.othersUsingFile(materialized, job.sourceId).length > 0) {
         throw new DownloadFailedError(
-          `Không tạo được bản video trong thư mục danh sách vì tệp cùng tên ${basename(materialized)} đang là nguồn của danh sách khác.`
+          `Không tạo được bản video trong thư mục danh sách vì tệp cùng tên ${basename(materialized)} đang là nguồn của danh sách khác.`,
+          false,
+          { failureSubtype: 'name_conflict' }
         );
       }
       await rm(materialized, { force: true });
@@ -685,7 +706,9 @@ export class DownloadEngine {
       if (!copiedCheck.ok) {
         await rm(materialized, { force: true });
         throw new DownloadFailedError(
-          `Không thể tạo bản video hợp lệ trong thư mục danh sách: ${copiedCheck.reasons.join('; ')}`
+          `Không thể tạo bản video hợp lệ trong thư mục danh sách: ${copiedCheck.reasons.join('; ')}`,
+          false,
+          { failureSubtype: 'file_invalid' }
         );
       }
     }
@@ -829,14 +852,14 @@ export class DownloadEngine {
     pacing?: DownloadPacingContext
   ): Promise<DownloadResult> {
     if (!job.sourceId || !job.projectId) {
-      throw new DownloadFailedError('Tác vụ tải thiếu dữ liệu nguồn hoặc dự án.');
+      throw new DownloadFailedError('Tác vụ tải thiếu dữ liệu nguồn hoặc dự án.', false, { failureSubtype: 'source_missing' });
     }
     this.sharedFileKeptJobs.delete(job.id);
     if (job.attempts === 0) this.pathTooLongStrikes.delete(job.id);
     let source = this.sources.get(job.sourceId);
     const project = this.projects.get(job.projectId);
     if (!source || !project) {
-      throw new DownloadFailedError('Không tìm thấy nguồn video hoặc dự án.');
+      throw new DownloadFailedError('Không tìm thấy nguồn video hoặc dự án.', false, { failureSubtype: 'source_missing' });
     }
 
     const storedSettings = this.settings.get();
@@ -989,7 +1012,7 @@ export class DownloadEngine {
           const finalInfo = await this.analyzer.analyze(readyPath, job.id);
           const finalQuality = validateDownloadedQuality(appSettings, finalInfo);
           if (!finalQuality.ok) {
-            throw new DownloadFailedError(finalQuality.blockingReasons.join('; '));
+            throw new DownloadFailedError(finalQuality.blockingReasons.join('; '), false, { failureSubtype: 'quality_unmet' });
           }
 
           if (beforeRemux === cachedPath) {
@@ -1657,27 +1680,16 @@ export class DownloadEngine {
           );
         }
         if (failure.retryable) {
-          throw new DownloadFailedError(
-            failure.subtype === 'http_403'
-              ? 'Máy chủ video tạm thời từ chối yêu cầu (HTTP 403).'
-              : failure.subtype === 'interrupted'
-                ? 'Tiến trình tải bị dừng đột ngột mà không có thông báo lỗi nào (ứng dụng, máy hoặc một phần mềm khác dừng nó). Tubmedia sẽ thử tải lại video này.'
-                : failure.subtype === 'fragment'
-                ? 'Một phần dữ liệu video bị gián đoạn.'
-                : 'Kết nối mạng hoặc máy chủ video đang không ổn định.',
-            true,
-            failureDetails
-          );
+          throw new DownloadFailedError(retryableDownloadFailureMessage(failure.subtype), true, failureDetails);
         }
 
         if (failure.subtype === 'unsupported_url') {
           throw new DownloadFailedError(unsupportedSourceUrlMessage(), false, failureDetails);
         }
 
+        // 2026-10-27: nêu nguyên nhân cụ thể + tên nền tảng (định dạng không khớp chất lượng, đang phát trực tiếp, 404/410…).
         throw new DownloadFailedError(
-          failure.subtype === 'unavailable'
-            ? 'Video không khả dụng hoặc nền tảng đang từ chối truy cập (video riêng tư, bị chặn theo vùng hoặc không còn định dạng phù hợp). Mở Nhật ký riêng của danh sách để xem loại lỗi đã được phân loại.'
-            : 'Không tải được video này vì một lỗi không xác định do công cụ tải (yt-dlp) báo về. Mở Nhật ký riêng của danh sách để xem chi tiết kỹ thuật; nếu lỗi lặp lại, hãy gửi gói chẩn đoán cho bên hỗ trợ.',
+          finalDownloadFailureMessage(failure.subtype, source.platform ? rateLimitPlatformLabel(source.platform) : null),
           false,
           failureDetails
         );
@@ -1694,7 +1706,7 @@ export class DownloadEngine {
         initialCheck.reasons.join('; '),
         { jobId: job.id, projectId: project.id }
       );
-      throw new DownloadFailedError(`Tệp tải xong không hợp lệ và đã chuyển vào khu cách ly: ${quarantined}`);
+      throw new DownloadFailedError(`Tệp tải xong không hợp lệ và đã chuyển vào khu cách ly: ${quarantined}`, false, { failureSubtype: 'file_invalid' });
     }
 
     finalPath = await this.prepareDownloadedFile(
@@ -1732,7 +1744,7 @@ export class DownloadEngine {
       throw new DownloadFailedError(
         `Tệp tải về bị mất luồng âm thanh: ${reason} Tubmedia đã chuyển tệp lỗi vào khu cách ly (${quarantined}) và sẽ tự tải lại.`,
         true,
-        { reason: 'AUDIO_STREAM_LOST', selectedFormatId, selectedAudioCodec }
+        { reason: 'AUDIO_STREAM_LOST', failureSubtype: 'audio_lost', selectedFormatId, selectedAudioCodec }
       );
     }
     const selectedSize = validateSelectedDownloadSize(
@@ -1749,7 +1761,9 @@ export class DownloadEngine {
         { jobId: job.id, projectId: project.id }
       );
       throw new DownloadFailedError(
-        `Tệp tải về không hợp lệ và đã chuyển vào khu cách ly: ${quarantined}. ${selectedSize.message ?? ''}`
+        `Tệp tải về không hợp lệ và đã chuyển vào khu cách ly: ${quarantined}. ${selectedSize.message ?? ''}`,
+        false,
+        { failureSubtype: 'file_invalid' }
       );
     }
     if (selectedSize.suspicious) {
@@ -1804,7 +1818,9 @@ export class DownloadEngine {
         { jobId: job.id, projectId: project.id }
       );
       throw new DownloadFailedError(
-        `Tệp không đạt giới hạn chất lượng và đã chuyển vào khu cách ly: ${quarantined}. ${quality.blockingReasons.join(' ')}`
+        `Tệp không đạt giới hạn chất lượng và đã chuyển vào khu cách ly: ${quarantined}. ${quality.blockingReasons.join(' ')}`,
+        false,
+        { failureSubtype: 'quality_unmet' }
       );
     }
     for (const warning of quality.warnings) {

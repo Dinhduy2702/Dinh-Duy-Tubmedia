@@ -17,6 +17,23 @@ export type YtDlpFailureSubtype =
   | 'network'
   | 'interrupted'
   | 'path_too_long'
+  // 2026-10-27 (rà soát trước 1.7.3): lỗi yt-dlp còn rơi vào "chưa xác định" hoặc báo lệch.
+  | 'format_unavailable'
+  | 'live'
+  | 'not_found'
+  | 'file_access'
+  | 'ssl'
+  | 'postprocess'
+  // Lỗi Tubmedia tự phát hiện sau khi tải (không đến từ yt-dlp).
+  | 'file_invalid'
+  | 'video_short'
+  | 'audio_lost'
+  | 'quality_unmet'
+  | 'remux_failed'
+  | 'edit_copy_failed'
+  | 'encoder_missing'
+  | 'name_conflict'
+  | 'source_missing'
   | 'unknown';
 
 export interface YtDlpFailureDetail {
@@ -48,6 +65,21 @@ const ALL_FAILURE_SUBTYPES: ReadonlySet<YtDlpFailureSubtype> = new Set([
   'network',
   'interrupted',
   'path_too_long',
+  'format_unavailable',
+  'live',
+  'not_found',
+  'file_access',
+  'ssl',
+  'postprocess',
+  'file_invalid',
+  'video_short',
+  'audio_lost',
+  'quality_unmet',
+  'remux_failed',
+  'edit_copy_failed',
+  'encoder_missing',
+  'name_conflict',
+  'source_missing',
   'unknown'
 ]);
 
@@ -55,7 +87,8 @@ const CIRCUIT_FAILURE_SUBTYPES: ReadonlySet<YtDlpFailureSubtype> = new Set([
   'http_403',
   'fragment',
   'extractor',
-  'network'
+  'network',
+  'ssl'
 ]);
 
 export function failureSubtypeFromDetails(details: unknown): YtDlpFailureSubtype | null {
@@ -110,6 +143,18 @@ export function exhaustedDownloadFailureMessage(
   if (subtype === 'path_too_long') {
     return `Vẫn không lưu được video vì đường dẫn tệp quá dài ${attemptLabel}, dù Tubmedia đã rút ngắn tên tệp (Windows chỉ cho tối đa 260 ký tự). Hãy chọn thư mục lưu ngắn hơn, gần gốc ổ đĩa (ví dụ E:\\Video), rồi bấm Thử lại.`;
   }
+  if (subtype === 'file_access') {
+    return `Vẫn không ghi được tệp ${attemptLabel}: tệp đang bị chương trình khác khoá (trình phát, diệt virus, đồng bộ đám mây…) hoặc thư mục thiếu quyền ghi. Đóng chương trình đang mở tệp hoặc chọn thư mục khác rồi bấm Thử lại.`;
+  }
+  if (subtype === 'ssl') {
+    return `Vẫn lỗi kết nối bảo mật (SSL/chứng chỉ) ${attemptLabel} — thường do proxy, mạng công ty hoặc phần mềm diệt virus chặn. Kiểm tra proxy/diệt virus rồi bấm Thử lại.`;
+  }
+  if (subtype === 'postprocess') {
+    return `Bước ghép hình + tiếng (FFmpeg) sau khi tải vẫn lỗi ${attemptLabel}. Vào Trung tâm công cụ chọn Sửa chữa tất cả rồi bấm Thử lại.`;
+  }
+  if (subtype === 'video_short' || subtype === 'audio_lost' || subtype === 'file_invalid') {
+    return `Tệp tải về vẫn bị hỏng ${attemptLabel} (${YTDLP_FAILURE_CAUSES[subtype]}). Tệp lỗi nằm trong khu cách ly; thử lại sau, hoặc chọn chất lượng khác.`;
+  }
   return originalMessage;
 }
 
@@ -129,8 +174,65 @@ const YTDLP_FAILURE_CAUSES: Record<YtDlpFailureSubtype, string> = {
   network: 'kết nối mạng hoặc máy chủ video không ổn định',
   interrupted: 'tiến trình tải bị dừng đột ngột, không có thông báo lỗi (ứng dụng hoặc máy bị tắt ngang, phần mềm khác dừng tiến trình)',
   path_too_long: 'đường dẫn tệp quá dài (Windows chỉ cho tối đa 260 ký tự)',
+  format_unavailable: 'không có định dạng nào khớp cài đặt chất lượng (video vẫn còn trên nền tảng)',
+  live: 'video đang phát trực tiếp hoặc sắp công chiếu — chưa có bản tải được',
+  not_found: 'liên kết không còn tồn tại (HTTP 404/410)',
+  file_access: 'không ghi được tệp: tệp đang bị chương trình khác khoá hoặc thiếu quyền ghi',
+  ssl: 'lỗi kết nối bảo mật (SSL/chứng chỉ) — thường do mạng, proxy hoặc phần mềm diệt virus chặn',
+  postprocess: 'bước ghép hình + tiếng (FFmpeg) sau khi tải bị lỗi',
+  file_invalid: 'tệp tải về bị hỏng nên đã chuyển vào khu cách ly',
+  video_short: 'tệp tải về bị hụt hình (hình ngắn hơn tiếng)',
+  audio_lost: 'tệp tải về bị mất tiếng',
+  quality_unmet: 'không có bản nào đạt giới hạn chất lượng đã đặt',
+  remux_failed: 'đóng gói lại sang MP4 bị lỗi',
+  edit_copy_failed: 'tạo bản dựng CapCut bị lỗi',
+  encoder_missing: 'FFmpeg thiếu bộ mã hoá cần cho bản dựng CapCut',
+  name_conflict: 'trùng tên tệp với video nguồn của danh sách khác',
+  source_missing: 'thiếu dữ liệu nguồn video của danh sách',
   unknown: 'chưa xác định — xem chi tiết kỹ thuật trong Nhật ký'
 };
+
+/**
+ * 2026-10-27: câu cho lượt thất bại SẼ được thử lại — nói đúng nguyên nhân (trước đây mọi loại ngoài 403/gián đoạn/mảnh đều
+ * thành "mạng không ổn định", kể cả tệp bị khoá hay lỗi ghép FFmpeg).
+ */
+export function retryableDownloadFailureMessage(subtype: YtDlpFailureSubtype): string {
+  switch (subtype) {
+    case 'http_403':
+      return 'Máy chủ video tạm thời từ chối yêu cầu (HTTP 403).';
+    case 'interrupted':
+      return 'Tiến trình tải bị dừng đột ngột mà không có thông báo lỗi nào (ứng dụng, máy hoặc một phần mềm khác dừng nó). Tubmedia sẽ thử tải lại video này.';
+    case 'fragment':
+      return 'Một phần dữ liệu video bị gián đoạn.';
+    case 'file_access':
+      return 'Không ghi được tệp: tệp đang bị chương trình khác khoá (trình phát, diệt virus…) hoặc thiếu quyền ghi. Tubmedia sẽ thử lại.';
+    case 'ssl':
+      return 'Lỗi kết nối bảo mật (SSL/chứng chỉ) — thường do mạng, proxy hoặc phần mềm diệt virus chặn. Tubmedia sẽ thử lại.';
+    case 'postprocess':
+      return 'Bước ghép hình + tiếng (FFmpeg) sau khi tải bị lỗi. Tubmedia sẽ thử lại.';
+    case 'extractor':
+      return 'Nền tảng chưa trả dữ liệu video ổn định.';
+    default:
+      return 'Kết nối mạng hoặc máy chủ video đang không ổn định.';
+  }
+}
+
+/** 2026-10-27: câu cho lỗi KHÔNG thử lại — nêu nguyên nhân cụ thể (tên nền tảng nếu biết) thay vì "lỗi không xác định". */
+export function finalDownloadFailureMessage(subtype: YtDlpFailureSubtype, platformLabel: string | null): string {
+  const where = platformLabel?.trim() || 'nền tảng gốc';
+  switch (subtype) {
+    case 'format_unavailable':
+      return `Video vẫn còn trên ${where} nhưng không có định dạng nào khớp cài đặt chất lượng hiện tại (độ phân giải / FPS / bitrate / codec). Hãy nới giới hạn chất lượng trong Cài đặt › Tải danh sách rồi bấm Thử lại.`;
+    case 'live':
+      return `Video đang phát trực tiếp hoặc sắp công chiếu trên ${where} — chưa có bản tải được. Hãy thử lại sau khi buổi phát kết thúc và ${where} đã lưu bản ghi.`;
+    case 'not_found':
+      return `Liên kết không còn tồn tại trên ${where} (HTTP 404/410) — video có thể đã bị xoá hoặc link sai. Kiểm tra lại link trong trình duyệt.`;
+    case 'unavailable':
+      return `Video không khả dụng trên ${where} (riêng tư, bị gỡ hoặc bị chặn theo vùng). Mở link trong trình duyệt để xem lý do cụ thể.`;
+    default:
+      return 'Không tải được video này vì một lỗi không xác định do công cụ tải (yt-dlp) báo về. Mở Nhật ký riêng của danh sách để xem chi tiết kỹ thuật; nếu lỗi lặp lại, hãy gửi gói chẩn đoán cho bên hỗ trợ.';
+  }
+}
 
 /**
  * Câu nhật ký YTDLP_DOWNLOAD_FAILED nêu NGUYÊN NHÂN đã phân loại (Đợt 5 mục 14: câu chung cũ khiến Chẩn đoán → "Lỗi gần
@@ -263,6 +365,8 @@ export function classifyYtDlpFailure(text: string): YtDlpFailureDetail {
     includesAny(lower, [
       // 2026-10-27: Vimeo "The web client only works when logged-in … provide account credentials" (nhật ký 22/10 ra "chưa xác định").
       'only works when logged-in',
+      'http error 401',
+      'status code 401',
       'provide account credentials',
       'use --cookies-from-browser',
       'use --cookies for the authentication',
@@ -281,6 +385,49 @@ export function classifyYtDlpFailure(text: string): YtDlpFailureDetail {
       httpStatus: null,
       retryable: false
     };
+  }
+
+  // 2026-10-27 (rà soát trước 1.7.3): các lỗi trước đây rơi vào "chưa xác định" hoặc báo lệch.
+  // Video đang phát trực tiếp / sắp công chiếu — chưa có bản tải được (khác video bị gỡ).
+  if (
+    includesAny(lower, [
+      'live event will begin',
+      'premieres in',
+      'premiere will begin',
+      'will begin in a few moments',
+      'this live event has ended',
+      'is currently live',
+      'live streams are not supported'
+    ])
+  ) {
+    return { category: 'non_retryable', subtype: 'live', httpStatus: null, retryable: false };
+  }
+  // Không có định dạng khớp cài đặt chất lượng: video VẪN còn — trước đây báo nhầm "không còn khả dụng".
+  if (includesAny(lower, ['requested format is not available', 'no video formats found'])) {
+    return { category: 'non_retryable', subtype: 'format_unavailable', httpStatus: null, retryable: false };
+  }
+  if (includesAny(lower, ['http error 404', 'http error 410', 'status code 404', 'status code 410', '404: not found', '410: gone'])) {
+    return { category: 'non_retryable', subtype: 'not_found', httpStatus: lower.includes('410') ? 410 : 404, retryable: false };
+  }
+  // Tệp bị chương trình khác khoá / thiếu quyền ghi — thường tự hết (diệt virus, trình phát đang mở tệp) nên vẫn thử lại.
+  if (
+    includesAny(lower, [
+      'permission denied',
+      'access is denied',
+      '[winerror 5]',
+      '[winerror 32]',
+      'being used by another process',
+      'permissionerror',
+      '[errno 13]'
+    ])
+  ) {
+    return { category: 'retryable', subtype: 'file_access', httpStatus: null, retryable: true };
+  }
+  if (includesAny(lower, ['certificate verify failed', 'ssl:', 'sslerror', 'ssl error', 'tlsv1 alert', 'unsafe legacy renegotiation'])) {
+    return { category: 'retryable', subtype: 'ssl', httpStatus: null, retryable: true };
+  }
+  if (includesAny(lower, ['postprocessing:', 'conversion failed', 'error merging', 'ffmpeg exited with code'])) {
+    return { category: 'retryable', subtype: 'postprocess', httpStatus: null, retryable: true };
   }
 
   // Đợt 5 mục 19: yt-dlp nói rõ link KHÔNG phải trang video nó tải được (trang báo, trang chủ, tìm kiếm...) — loại riêng,
@@ -305,9 +452,7 @@ export function classifyYtDlpFailure(text: string): YtDlpFailureDetail {
       'video has been removed',
       'video has been deleted',
       'geo-restricted',
-      'not available in your country',
-      'requested format is not available',
-      'no video formats found'
+      'not available in your country'
     ])
   ) {
     return {

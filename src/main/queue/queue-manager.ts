@@ -2116,7 +2116,8 @@ export class QueueManager {
       subtype: typeof details?.failureSubtype === 'string' ? details.failureSubtype : null,
       technicalSummary: typeof details?.technicalSummary === 'string' ? details.technicalSummary : null,
       platformLabel: platform ? rateLimitPlatformLabel(platform) : null,
-      jobType: job.type
+      jobType: job.type,
+      message
     });
     const notice: AttentionNotice = {
       reason,
