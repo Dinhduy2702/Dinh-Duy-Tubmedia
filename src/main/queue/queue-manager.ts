@@ -86,6 +86,8 @@ import { PlatformRateLimitGate } from './platform-rate-limit-gate.js';
 
 /** S3: số lượt ghép tự đưa video nguồn bị thiếu đi tải lại trước khi dừng hẳn và báo lỗi. */
 const MAX_MISSING_SOURCE_REQUEUES = 2;
+/** "Đã giữ bản cũ" bật tối đa một lần cho mỗi danh sách trong khoảng này (2026-10-27). */
+const KEPT_OLD_VERSION_NOTICE_WINDOW_MS = 30 * 60_000;
 
 /** P1: một video của quy trình ghép không có tiếng / im lặng từ nguồn. */
 interface MergeAudioIssue {
@@ -266,6 +268,7 @@ export class QueueManager {
   private readonly cleanupInProgress = new Set<string>();
   private readonly blockingNoticeKeys = new Set<string>();
   private readonly keptOldVersionCounts = new Map<string, number>();
+  private readonly keptOldVersionNoticeAt = new Map<string, number>();
   /** Hướng B 429: nghỉ theo NỀN TẢNG trên toàn ứng dụng khi dính HTTP 429 (xem PlatformRateLimitGate). */
   private rateLimits = new PlatformRateLimitGate();
   private waitingLaneProjects: { downloadLists: string[]; mergeWorkflows: string[] } = { downloadLists: [], mergeWorkflows: [] };
@@ -854,16 +857,27 @@ export class QueueManager {
    * ly ở lượt thử trước.
    */
   private notifyKeptOldVersions(job: QueueJob, kept: ReadonlyArray<{ path: string; bytes: number }>): void {
-    if (!this.window || this.window.isDestroyed()) return;
     const scope = job.projectId ?? job.id;
     const total = (this.keptOldVersionCounts.get(scope) ?? 0) + kept.length;
     this.keptOldVersionCounts.set(scope, total);
     const folder = dirname(kept[0]!.path);
+    this.logger.info('queue', 'SOURCE_OLD_VERSION_KEPT', `Đã giữ ${kept.length} bản cũ trong khu cách ly (${folder}).`, {
+      jobId: job.id,
+      ...(job.projectId ? { projectId: job.projectId } : {}),
+      metadata: { kept: kept.map((item) => item.path), totalForList: total }
+    });
+    // 2026-10-27 (rà soát trước 1.7.3): trước đây gửi lại sau MỖI video → thông báo bật lại liên tục (cùng kiểu "không có
+    // tiếng"). Giờ mỗi danh sách chỉ bật một lần trong KEPT_OLD_VERSION_NOTICE_WINDOW_MS; các video sau chỉ ghi nhật ký.
+    const now = Date.now();
+    const lastNoticeAt = this.keptOldVersionNoticeAt.get(scope);
+    if (lastNoticeAt !== undefined && now - lastNoticeAt < KEPT_OLD_VERSION_NOTICE_WINDOW_MS) return;
+    if (!this.window || this.window.isDestroyed()) return;
+    this.keptOldVersionNoticeAt.set(scope, now);
     const notice: AttentionNotice = {
       id: `kept-old-version-${scope}`,
       severity: 'info',
       title: 'Đã giữ bản cũ',
-      message: `Đã tải bản mới đạt chất lượng và giữ ${total} bản cũ trong khu cách ly (${folder}). Tubmedia không tự xóa bản cũ; xem và xóa khi không cần nữa ở Dọn dẹp máy → Khu cách ly của danh sách.`,
+      message: `Đã tải bản mới đạt chất lượng và giữ bản cũ trong khu cách ly (${folder}). Các video khác của danh sách cũng vậy sẽ không báo thêm. Tubmedia không tự xóa bản cũ; xem và xóa khi không cần nữa ở Dọn dẹp máy → Khu cách ly của danh sách.`,
       code: 'SOURCE_OLD_VERSION_KEPT',
       sticky: false,
       ...(job.projectId ? { projectId: job.projectId } : {})

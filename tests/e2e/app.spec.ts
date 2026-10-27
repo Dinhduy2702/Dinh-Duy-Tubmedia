@@ -3279,8 +3279,14 @@ test('Cookie 2026-10-27: dán cookie → hộp thoại hiện ngay "Cookie hoạ
     await expect(result.locator('[data-cookie-account]')).toContainText('Kênh Thử Nghiệm · @kenhthu');
     await expect(result).toContainText('Ngày hết hạn ghi trong tệp: 27/10/2027');
     await expect(result.locator('[data-cookie-lifetime-note]')).toContainText('Hạn thật có thể ngắn hơn');
+    // Rà soát trước 1.7.3: không bật thêm thông báo "Cookies đã được lưu" trùng với ô kiểm.
     await result.getByRole('button', { name: 'Xong' }).click();
     await expect(dialog).toBeHidden();
+    // Thông báo (nếu có) bật sau khi làm mới hàng đợi — chờ qua khoảng đó rồi mới khẳng định không có.
+    await shellWindow.waitForTimeout(1_500);
+    console.log('DBG', (await shellWindow.locator('body').textContent())?.includes('Cookies'), await shellWindow.evaluate(() => JSON.stringify(document.body.textContent?.match(/.{0,60}ookies.{0,80}/g)?.slice(0, 6))));
+    const hasSavedToast = await shellWindow.evaluate((title) => (document.body.textContent ?? '').normalize('NFC').includes(title.normalize('NFC')), 'Cookies đã được lưu');
+    expect(hasSavedToast, 'không bật thông báo trùng với ô kiểm').toBe(false);
   } finally {
     await closeElectronApplication();
     await removeSandbox(sandbox);

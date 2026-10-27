@@ -34,7 +34,7 @@ const COOKIE_LIFETIME_NOTE =
   'Hạn thật có thể ngắn hơn nhiều so với ngày ghi trong tệp — YouTube có thể tự thu hồi hoặc xoay cookie sớm. ' +
   'Khi Tubmedia báo cookie không còn được chấp nhận thì xuất cookie mới, không cần chờ tới ngày đó.';
 
-function CookieCheckPanel({ check, onDone }: { check: CookieCheckResult; onDone: () => void }): React.JSX.Element {
+function CookieCheckPanel({ check, outcome, onDone }: { check: CookieCheckResult; outcome: string | null; onDone: () => void }): React.JSX.Element {
   const account = [check.accountName, check.channelHandle].filter(Boolean).join(' · ');
   const expiry = check.fileExpiresAt ? new Date(check.fileExpiresAt).toLocaleDateString('vi-VN') : null;
   const tone = check.state === 'valid' ? 'good' : check.state === 'invalid' ? 'bad' : 'warn';
@@ -49,6 +49,7 @@ function CookieCheckPanel({ check, onDone }: { check: CookieCheckResult; onDone:
           )}
           {check.reason && <div style={{ color: 'var(--muted)' }}>{check.reason}</div>}
           {expiry && <div style={{ color: 'var(--muted)' }}>Ngày hết hạn ghi trong tệp: {expiry}</div>}
+          {outcome && <div className="mt-1" data-cookie-outcome>{outcome}</div>}
           <div className="mt-1 text-xs" style={{ color: 'var(--muted)' }} data-cookie-lifetime-note>{COOKIE_LIFETIME_NOTE}</div>
         </div>
         <button className="btn btn-primary px-3 py-1.5 text-xs" onClick={onDone}>Xong</button>
@@ -72,9 +73,14 @@ export function CookieManagerDialog({ open, onClose, onConfigured }: Props): Rea
   const [busy, setBusy] = useState(false);
   // 2026-10-27: kết quả kiểm cookie với YouTube ngay lúc thêm — hộp thoại giữ mở để người dùng đọc rồi bấm "Xong".
   const [check, setCheck] = useState<CookieCheckResult | null>(null);
+  // Kết quả "đã tự tiếp tục N video" hiện NGAY trong ô kiểm (trước đây thêm một thông báo bật lên trùng nội dung).
+  const [outcome, setOutcome] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open) setCheck(null);
+    if (!open) {
+      setCheck(null);
+      setOutcome(null);
+    }
   }, [open]);
 
   useEffect(() => {
@@ -133,11 +139,18 @@ export function CookieManagerDialog({ open, onClose, onConfigured }: Props): Rea
           ? `${resumed} video bị chặn đã tự nhận cookies mới và tiếp tục; không cần dừng danh sách hoặc bấm tải lại.`
           : 'Chưa có video bị chặn nào được chạy lại: không có video đang bị chặn, hoặc cookies vừa lưu giống hệt ' +
             'cookies lúc bị chặn — hãy đăng nhập lại rồi xuất cookies mới.';
+      const full = detail ? `${detail} ${outcome}` : outcome;
+      // 2026-10-27: hộp thoại đang mở hiện ô kiểm cookie → ghi kết quả vào đó, KHÔNG bật thêm thông báo trùng.
+      // Không có video nào được chạy lại thì ô kiểm đã đủ (tránh câu "hãy xuất cookies mới" cạnh "Cookie hoạt động").
+      if (next.check) {
+        setOutcome(resumed > 0 ? full : null);
+        return;
+      }
       setAttention({
         id: `cookies-updated-${Date.now()}`,
         severity: resumed > 0 ? 'success' : 'info',
         title: 'Cookies đã được lưu',
-        message: detail ? `${detail} ${outcome}` : outcome,
+        message: full,
         sticky: false
       });
     } finally {
@@ -260,7 +273,7 @@ export function CookieManagerDialog({ open, onClose, onConfigured }: Props): Rea
           )}
         </div>
 
-        {check && <CookieCheckPanel check={check} onDone={onClose} />}
+        {check && <CookieCheckPanel check={check} outcome={outcome} onDone={onClose} />}
 
         <div className="cookie-tabs mt-5">
           <button className={tab === 'browser' ? 'active' : ''} onClick={() => setTab('browser')}>

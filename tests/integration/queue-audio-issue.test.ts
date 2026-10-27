@@ -167,6 +167,35 @@ describe('P1 — hàng đợi lưu và báo rõ video không có tiếng / im l�
   });
 });
 
+// 2026-10-27 (rà soát trước 1.7.3, người dùng duyệt): "Đã giữ bản cũ" từng bật lại sau MỖI video tải lại — cùng kiểu dồn dập
+// với thông báo "không có tiếng". Giờ một danh sách chỉ bật MỘT lần cho cả đợt; các video sau chỉ ghi nhật ký.
+describe('"Đã giữ bản cũ" không bật lại sau mỗi video', () => {
+  it('5 video cùng danh sách giữ bản cũ → 1 thông báo; mỗi video vẫn ghi nhật ký', async () => {
+    const project = makeProject('Giu ban cu');
+    for (let index = 0; index < 5; index += 1) {
+      downloaderResult = {
+        ...downloaderResult,
+        keptOldVersions: [{ path: join(folder, 'quarantine', `cu-${index}.mp4`), bytes: 1000 }]
+      };
+      await execute(downloadJob(project));
+    }
+    const kept = notices.filter((notice) => notice?.code === 'SOURCE_OLD_VERSION_KEPT');
+    expect(kept).toHaveLength(1);
+    expect(kept[0]?.message).toContain('Dọn dẹp máy');
+    expect(logger.info.mock.calls.filter((call) => call[1] === 'SOURCE_OLD_VERSION_KEPT')).toHaveLength(5);
+  });
+
+  it('hai danh sách khác nhau → mỗi danh sách một thông báo', async () => {
+    for (const name of ['Giu A', 'Giu B']) {
+      const project = makeProject(name);
+      downloaderResult = { ...downloaderResult, keptOldVersions: [{ path: join(folder, 'q', `${name}.mp4`), bytes: 1 }] };
+      await execute(downloadJob(project));
+      await execute(downloadJob(project));
+    }
+    expect(notices.filter((notice) => notice?.code === 'SOURCE_OLD_VERSION_KEPT')).toHaveLength(2);
+  });
+});
+
 describe('P1 — quy trình ghép liệt kê đoạn không có tiếng trước khi ghép và ghi trong kết quả', () => {
   it('nguồn vị trí 2 im lặng, vị trí 3 không có tiếng → cảnh báo trước khi ghép + kết quả ghi rõ từng vị trí', async () => {
     const project = makeProject('Ghep 1');
