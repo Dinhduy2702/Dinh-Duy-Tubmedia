@@ -69,6 +69,62 @@ function keyOf(path: string): string {
   return resolve(path).toLowerCase();
 }
 
+interface CookieLine {
+  /** Nguyên dòng Netscape (giữ tiền tố #HttpOnly_ nếu có). */
+  line: string;
+  expires: number;
+}
+
+/** Cookie theo khoá miền + đường dẫn + tên (bỏ tiền tố #HttpOnly_ khi lập khoá); giữ thứ tự xuất hiện. */
+function cookieLines(text: string): Map<string, CookieLine> {
+  const map = new Map<string, CookieLine>();
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trimEnd();
+    const data = line.startsWith('#HttpOnly_') ? line.slice('#HttpOnly_'.length) : line;
+    if (!data || data.startsWith('#')) continue;
+    const parts = data.split('\t');
+    if (parts.length < 7) continue;
+    map.set(`${parts[0]!.toLowerCase()}\t${parts[2]}\t${parts[5]}`, { line, expires: Number(parts[4]) || 0 });
+  }
+  return map;
+}
+
+/**
+ * Gộp theo TỪNG cookie (2026-10-27). Lượt yt-dlp chỉ mang về những cookie NÓ đã đổi so với lúc mượn (base → updated), áp lên
+ * tệp gốc HIỆN TẠI (có thể đã có thay đổi của lượt khác). Cùng một cookie bị nhiều lượt đổi: giữ bản có hạn muộn hơn (Google
+ * đặt hạn = lúc cấp + cố định, nên hạn muộn hơn = cấp sau), bằng nhau thì lấy bản của lượt trả sau. Cookie lượt này xoá: xoá,
+ * trừ khi lượt khác vừa làm mới nó. Trả null nếu không có gì đổi.
+ */
+export function mergeCookieRun(baseText: string, updatedText: string, currentText: string): string | null {
+  const base = cookieLines(baseText);
+  const updated = cookieLines(updatedText);
+  const merged = cookieLines(currentText);
+  let changed = false;
+  for (const key of new Set([...base.keys(), ...updated.keys()])) {
+    const before = base.get(key);
+    const after = updated.get(key);
+    if (before?.line === after?.line) continue; // lượt này không đổi cookie này
+    const current = merged.get(key);
+    const othersChanged = current?.line !== before?.line;
+    if (!after) {
+      if (!othersChanged && current) {
+        merged.delete(key);
+        changed = true;
+      }
+      continue;
+    }
+    if (othersChanged && current && current.expires > after.expires) continue; // lượt khác đã có bản cấp sau
+    if (current?.line !== after.line) {
+      merged.set(key, after);
+      changed = true;
+    }
+  }
+  if (!changed) return null;
+  const header = currentText.split(/\r?\n/).filter((line) => line.startsWith('#') && !line.startsWith('#HttpOnly_'));
+  const newline = currentText.includes('\r\n') ? '\r\n' : '\n';
+  return [...(header.length ? header : ['# Netscape HTTP Cookie File']), ...[...merged.values()].map((cookie) => cookie.line)].join(newline) + newline;
+}
+
 export class CookieJarStore {
   private readonly runsDirectory: string;
   private readonly statePath: string;
@@ -152,7 +208,8 @@ export class CookieJarStore {
     await mkdir(this.runsDirectory, { recursive: true });
     const copyPath = join(this.runsDirectory, `${randomUUID()}.txt`);
     await writeFile(copyPath, content, { mode: 0o600 });
-    const originalHashAtLease = sha256(content);
+    // Số thế hệ lúc mượn: người dùng lưu cookie mới trong lúc chạy thì không trộn cookie của phiên cũ vào.
+    const generationAtLease = (await this.describe(original))?.generation ?? 0;
     let released = false;
     return {
       settings: { ...settings, cookiesFilePath: copyPath },
@@ -161,7 +218,7 @@ export class CookieJarStore {
         released = true;
         try {
           if (outcome === 'success' || outcome === 'other-failure') {
-            await this.writeBack(original, copyPath, originalHashAtLease);
+            await this.writeBack(original, copyPath, content, generationAtLease);
           }
         } finally {
           await rm(copyPath, { force: true });
@@ -170,18 +227,25 @@ export class CookieJarStore {
     };
   }
 
-  private writeBack(original: string, copyPath: string, originalHashAtLease: string): Promise<void> {
+  /**
+   * 2026-10-27 (mô phỏng nhiều video song song dùng chung một cookie): trước đây chỉ ghi ngược khi tệp gốc CHƯA đổi kể từ lúc
+   * mượn — lượt trả đầu tiên thắng, mọi lượt sau bị bỏ hẳn kể cả khi mang cookie YouTube cấp SAU (mô phỏng 20 lượt: tệp giữ bản
+   * thứ 3 thay vì bản thứ 20). Giờ gộp theo từng cookie (mergeCookieRun). Chỉ bỏ qua khi người dùng đã lưu cookie mới trong lúc
+   * chạy (số thế hệ đổi) — không trộn cookie của phiên/tài khoản cũ vào.
+   */
+  private writeBack(original: string, copyPath: string, baseContent: Buffer, generationAtLease: number): Promise<void> {
     return this.exclusive(async () => {
       const updated = await readFile(copyPath).catch(() => null);
       if (!updated) return;
-      const updatedHash = sha256(updated);
-      if (updatedHash === originalHashAtLease) return;
+      if (sha256(updated) === sha256(baseContent)) return;
       if (!looksLikeNetscapeCookies(updated.toString('utf8'))) return;
       const current = await readFile(original).catch(() => null);
-      // Tệp gốc đã đổi kể từ lúc mượn (người dùng vừa lưu cookies mới, hoặc lượt khác vừa ghi ngược):
-      // không ghi đè bằng bản sao cũ.
-      if (!current || sha256(current) !== originalHashAtLease) return;
-      await this.atomicWrite(original, updated);
+      if (!current) return;
+      if (((await this.describe(original))?.generation ?? 0) !== generationAtLease) return;
+      const merged = mergeCookieRun(baseContent.toString('utf8'), updated.toString('utf8'), current.toString('utf8'));
+      if (merged === null) return;
+      const updatedHash = sha256(merged);
+      await this.atomicWrite(original, merged);
       const state = await this.readState();
       const key = keyOf(original);
       const previous = state.files[key];
