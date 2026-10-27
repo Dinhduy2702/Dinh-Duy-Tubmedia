@@ -3228,6 +3228,66 @@ test('Sự cố 2026-09-25: chọn đúng hồ sơ Chrome thật khi lấy cooki
 });
 
 /**
+ * 2026-10-27 (người dùng yêu cầu): thêm cookie mới → thấy ngay cookie có hoạt động không, của tài khoản/kênh nào, kèm ghi chú
+ * hạn thật có thể ngắn hơn ngày ghi trong tệp. Kết quả kiểm YouTube là giả (TUBMEDIA_E2E_FAKE_COOKIE_CHECK) — bài kiểm không
+ * gọi YouTube và không dùng cookie thật.
+ */
+test('Cookie 2026-10-27: dán cookie → hộp thoại hiện ngay "Cookie hoạt động", tên tài khoản, ngày hết hạn và ghi chú hạn thật', async () => {
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-cookie-check-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+  try {
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+        TUBMEDIA_E2E_FAKE_COOKIE_CHECK: JSON.stringify({
+          state: 'valid',
+          accountName: 'Kênh Thử Nghiệm',
+          channelHandle: '@kenhthu',
+          fileExpiresAt: '2027-10-27T00:00:00.000Z'
+        }),
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await shellWindow.waitForSelector('.tool-status-button.is-ready', { timeout: 30_000 });
+    await shellWindow
+      .getByRole('navigation', { name: 'Điều hướng chính' })
+      .getByRole('button', { name: 'Cài đặt', exact: true })
+      .click({ timeout: 20_000 });
+    await shellWindow.locator('.settings-nav').getByRole('button', { name: 'Tải danh sách', exact: true }).click();
+    await shellWindow.getByRole('button', { name: 'Quản lý cookies' }).click();
+    const dialog = shellWindow.locator('[role="dialog"][aria-label="Quản lý cookies"]');
+    await expect(dialog).toBeVisible({ timeout: 5_000 });
+    await dialog.getByRole('button', { name: 'Dán trực tiếp' }).click();
+    await dialog.locator('textarea').fill('# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t1824681600\tSID\tgia\n');
+    await dialog.getByRole('button', { name: /Kiểm\s*tra và lưu cookies/ }).click();
+
+    const result = dialog.locator('[data-cookie-check]');
+    await expect(result, 'kết quả kiểm hiện ngay trong hộp thoại, không phải đợi tải').toBeVisible({ timeout: 10_000 });
+    await expect(result).toHaveAttribute('data-cookie-check', 'valid');
+    await expect(result).toContainText('Cookie hoạt động');
+    await expect(result.locator('[data-cookie-account]')).toContainText('Kênh Thử Nghiệm · @kenhthu');
+    await expect(result).toContainText('Ngày hết hạn ghi trong tệp: 27/10/2027');
+    await expect(result.locator('[data-cookie-lifetime-note]')).toContainText('Hạn thật có thể ngắn hơn');
+    await result.getByRole('button', { name: 'Xong' }).click();
+    await expect(dialog).toBeHidden();
+  } finally {
+    await closeElectronApplication();
+    await removeSandbox(sandbox);
+  }
+});
+
+/**
  * Tính năng C1 (2026-09-26) — "Gợi ý điểm cắt tự động" (khoảng lặng + đổi cảnh, KHÔNG dùng AI). Dựng một
  * video mẫu THẬT có cấu trúc biết trước (đỏ+có tiếng 3s, xanh dương+im lặng 2s, xanh lá+có tiếng 3s —
  * đã đối chiếu định dạng output thật của FFmpeg 8.1.2 trước khi viết regex phân tích, xem

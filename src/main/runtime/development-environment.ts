@@ -1,3 +1,5 @@
+import type { CookieCheckResult } from '@shared/types/domain.js';
+
 export interface DevelopmentEnvironment {
   /** Địa chỉ dev server của electron-vite; chỉ dùng khi chạy từ mã nguồn. */
   rendererUrl: string | undefined;
@@ -23,6 +25,28 @@ export interface DevelopmentEnvironment {
   /** 2026-10-26: ghim trần tổng video tải cùng lúc (1–32) cho bài e2e không kiểm trần theo máy — máy GitHub yếu có trần thấp
    * hơn số video bài kiểm cần chạy song song. Chỉ có tác dụng khi e2e=true và chạy từ mã nguồn. */
   e2eGlobalDownloadCap: number | undefined;
+  /** 2026-10-27: kết quả giả của bước kiểm cookie với YouTube (JSON CookieCheckResult) để bài e2e thấy giao diện kết quả mà
+   * không gọi YouTube. Chỉ có tác dụng khi e2e=true và chạy từ mã nguồn. */
+  e2eFakeCookieCheck: CookieCheckResult | undefined;
+}
+
+function parseFakeCookieCheck(raw: string | undefined): CookieCheckResult | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as Partial<CookieCheckResult>;
+    return parsed.state === 'valid' || parsed.state === 'invalid' || parsed.state === 'unknown'
+      ? {
+          state: parsed.state,
+          reason: parsed.reason ?? null,
+          accountName: parsed.accountName ?? null,
+          channelHandle: parsed.channelHandle ?? null,
+          fileExpiresAt: parsed.fileExpiresAt ?? null,
+          checkedAt: new Date(0).toISOString()
+        }
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -44,7 +68,8 @@ export function readDevelopmentEnvironment(
       e2eQueueStartDelayMs: 0,
       e2eDriveRoot: undefined,
       e2eRateLimitWaitMs: undefined,
-      e2eGlobalDownloadCap: undefined
+      e2eGlobalDownloadCap: undefined,
+      e2eFakeCookieCheck: undefined
     };
   }
   const queueStartDelay = Number(env.TUBMEDIA_E2E_QUEUE_START_DELAY_MS);
@@ -67,6 +92,7 @@ export function readDevelopmentEnvironment(
     e2eGlobalDownloadCap:
       env.TUBMEDIA_E2E === '1' && env.TUBMEDIA_E2E_GLOBAL_DOWNLOAD_CAP && Number.isFinite(globalDownloadCap)
         ? Math.min(Math.max(1, Math.trunc(globalDownloadCap)), 32)
-        : undefined
+        : undefined,
+    e2eFakeCookieCheck: env.TUBMEDIA_E2E === '1' ? parseFakeCookieCheck(env.TUBMEDIA_E2E_FAKE_COOKIE_CHECK) : undefined
   };
 }

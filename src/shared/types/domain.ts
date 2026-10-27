@@ -641,6 +641,20 @@ export interface CookieConfigurationStatus {
   managed: boolean;
   /** Sau khi lưu cookies: số video bị chặn đã được chạy lại vì cookies THẬT SỰ đổi (0 nếu lưu lại cookies cũ). */
   resumedBlockedJobs?: number;
+  /** 2026-10-27: kết quả kiểm cookie với YouTube ngay lúc thêm (dán / chọn tệp). Không có khi lấy từ trình duyệt. */
+  check?: CookieCheckResult;
+}
+
+/** Kiểm cookie YouTube lúc thêm: còn dùng được không, của tài khoản nào, hạn ghi trong tệp. */
+export interface CookieCheckResult {
+  /** valid = YouTube nhận là đã đăng nhập; invalid = không dùng được; unknown = chưa kiểm được (mạng, 429…). */
+  state: 'valid' | 'invalid' | 'unknown';
+  reason: string | null;
+  accountName: string | null;
+  channelHandle: string | null;
+  /** Hạn sớm nhất của cookie đăng nhập ghi trong tệp (ISO) — hạn THẬT có thể ngắn hơn nhiều. */
+  fileExpiresAt: string | null;
+  checkedAt: string;
 }
 
 /**

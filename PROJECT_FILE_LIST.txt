@@ -272,6 +272,7 @@ src/main/cookies/browser-profile-directory.ts
 src/main/cookies/cookie-fingerprint.ts
 src/main/cookies/cookie-jar-store.ts
 src/main/cookies/cookie-service.ts
+src/main/cookies/youtube-cookie-check.ts
 src/main/database/database.ts
 src/main/database/migration-report.ts
 src/main/database/migrations.ts
@@ -747,6 +748,7 @@ tests/unit/video-stream-shortfall.test.ts
 tests/unit/window-close-policy.test.ts
 tests/unit/windows-process-control.test.ts
 tests/unit/workbench-storage.test.ts
+tests/unit/youtube-cookie-check.test.ts
 tests/unit/youtube-source-removed-r36.test.ts
 tests/unit/youtube-url-validation-r34.test.ts
 tests/unit/ytdlp-arguments.test.ts

@@ -1,6 +1,8 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
-import type { AppSettings, BrowserProfileOption, CookieConfigurationStatus } from '@shared/types/domain.js';
+import type { AppSettings, BrowserProfileOption, CookieCheckResult, CookieConfigurationStatus } from '@shared/types/domain.js';
+import { checkYouTubeCookies } from './youtube-cookie-check.js';
+import { readDevelopmentEnvironment } from '../runtime/development-environment.js';
 import { InvalidCookieTextError } from '@shared/errors/app-errors.js';
 import type { SettingsService } from '../settings/settings-service.js';
 import { listChromiumProfiles } from './browser-profile-directory.js';
@@ -111,6 +113,29 @@ export function normalizeCookieText(text: string): string {
   return normalized;
 }
 
+/**
+ * Kiểm cookie với YouTube thật — trừ khi đang chạy bài kiểm: vitest không bao giờ gọi mạng; bài e2e (chỉ bản chạy từ mã
+ * nguồn) dùng kết quả giả TUBMEDIA_E2E_FAKE_COOKIE_CHECK hoặc bỏ qua. Bản đã cài luôn kiểm thật.
+ */
+async function defaultCookieCheck(netscapeText: string): Promise<CookieCheckResult> {
+  const skipped = (reason: string): CookieCheckResult => ({
+    state: 'unknown',
+    reason,
+    accountName: null,
+    channelHandle: null,
+    fileExpiresAt: null,
+    checkedAt: new Date().toISOString()
+  });
+  if (process.env.VITEST !== undefined) return skipped('Bỏ qua kiểm YouTube trong bài kiểm tự động.');
+  const { app } = await import('electron');
+  const development = readDevelopmentEnvironment(process.env, app.isPackaged);
+  if (development.e2e) {
+    if (development.e2eFakeCookieCheck) return { ...development.e2eFakeCookieCheck, checkedAt: new Date().toISOString() };
+    return skipped('Bỏ qua kiểm YouTube khi chạy thử (e2e).');
+  }
+  return checkYouTubeCookies(netscapeText);
+}
+
 export class CookieService {
   private readonly managedPath: string;
 
@@ -118,7 +143,9 @@ export class CookieService {
     userData: string,
     private readonly settings: SettingsService,
     /** Ghi nhận mỗi lần người dùng lưu cookies qua app (số thế hệ + hash) — xem cookie-jar-store.ts. */
-    private readonly jar?: CookieJarStore
+    private readonly jar?: CookieJarStore,
+    /** 2026-10-27: kiểm cookie với YouTube ngay lúc thêm (bài kiểm truyền bản giả, không gọi mạng thật). */
+    private readonly checkCookies: (netscapeText: string) => Promise<CookieCheckResult> = defaultCookieCheck
   ) {
     this.managedPath = join(userData, 'security', 'cookies-managed.txt');
   }
@@ -158,21 +185,15 @@ export class CookieService {
   }
 
   public async saveText(text: string): Promise<CookieConfigurationStatus> {
-    const normalized = normalizeCookieText(text);
-    await mkdir(dirname(this.managedPath), { recursive: true });
-    await writeFile(this.managedPath, normalized, { encoding: 'utf8', mode: 0o600 });
-    await this.jar?.recordUserSave(this.managedPath);
-    this.settings.update({
-      cookiesFilePath: this.managedPath,
-      cookiesBrowser: 'none',
-      cookiesBrowserProfile: ''
-    });
-    return this.status();
+    return this.saveNormalized(normalizeCookieText(text));
   }
 
   public async useFile(path: string): Promise<CookieConfigurationStatus> {
-    const text = await readFile(path, 'utf8');
-    const normalized = normalizeCookieText(text);
+    return this.saveNormalized(normalizeCookieText(await readFile(path, 'utf8')));
+  }
+
+  /** Lưu cookies (luôn lưu, kể cả khi kiểm thấy không dùng được — người dùng tự quyết) rồi kiểm với YouTube. */
+  private async saveNormalized(normalized: string): Promise<CookieConfigurationStatus> {
     await mkdir(dirname(this.managedPath), { recursive: true });
     await writeFile(this.managedPath, normalized, { encoding: 'utf8', mode: 0o600 });
     await this.jar?.recordUserSave(this.managedPath);
@@ -181,7 +202,7 @@ export class CookieService {
       cookiesBrowser: 'none',
       cookiesBrowserProfile: ''
     });
-    return this.status();
+    return { ...this.status(), check: await this.checkCookies(normalized) };
   }
 
   public useBrowser(

@@ -10,7 +10,7 @@ import {
   Trash2,
   X
 } from 'lucide-react';
-import type { BrowserProfileOption, CookieConfigurationStatus } from '@shared/types/domain';
+import type { BrowserProfileOption, CookieCheckResult, CookieConfigurationStatus } from '@shared/types/domain';
 import { COOKIE_BLOCKING_CODES } from '@shared/utils/cookie-policy';
 import { useAppStore } from '../stores/app-store';
 import { InfoHint } from './InfoHint';
@@ -29,6 +29,34 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** Ghi chú cố định (người dùng yêu cầu 2026-10-27): hạn thật của cookie có thể ngắn hơn ngày ghi trong tệp. */
+const COOKIE_LIFETIME_NOTE =
+  'Hạn thật có thể ngắn hơn nhiều so với ngày ghi trong tệp — YouTube có thể tự thu hồi hoặc xoay cookie sớm. ' +
+  'Khi Tubmedia báo cookie không còn được chấp nhận thì xuất cookie mới, không cần chờ tới ngày đó.';
+
+function CookieCheckPanel({ check, onDone }: { check: CookieCheckResult; onDone: () => void }): React.JSX.Element {
+  const account = [check.accountName, check.channelHandle].filter(Boolean).join(' · ');
+  const expiry = check.fileExpiresAt ? new Date(check.fileExpiresAt).toLocaleDateString('vi-VN') : null;
+  const tone = check.state === 'valid' ? 'good' : check.state === 'invalid' ? 'bad' : 'warn';
+  return (
+    <div className={`cookie-check mt-4 tone-${tone}`} data-cookie-check={check.state} role="status">
+      <div className="flex items-start gap-2">
+        {check.state === 'valid' ? <CheckCircle2 size={18} style={{ color: 'var(--good)' }} /> : <ShieldAlert size={18} style={{ color: check.state === 'invalid' ? 'var(--bad)' : 'var(--warn)' }} />}
+        <div className="min-w-0 flex-1 text-sm">
+          <b>{check.state === 'valid' ? 'Cookie hoạt động' : check.state === 'invalid' ? 'Cookie không hoạt động' : 'Chưa kiểm được cookie'}</b>
+          {check.state === 'valid' && (
+            <div data-cookie-account>Tài khoản YouTube: <b>{account || 'đã đăng nhập (YouTube không trả tên kênh)'}</b></div>
+          )}
+          {check.reason && <div style={{ color: 'var(--muted)' }}>{check.reason}</div>}
+          {expiry && <div style={{ color: 'var(--muted)' }}>Ngày hết hạn ghi trong tệp: {expiry}</div>}
+          <div className="mt-1 text-xs" style={{ color: 'var(--muted)' }} data-cookie-lifetime-note>{COOKIE_LIFETIME_NOTE}</div>
+        </div>
+        <button className="btn btn-primary px-3 py-1.5 text-xs" onClick={onDone}>Xong</button>
+      </div>
+    </div>
+  );
+}
+
 export function CookieManagerDialog({ open, onClose, onConfigured }: Props): React.JSX.Element | null {
   const setSettings = useAppStore((state) => state.setSettings);
   const setError = useAppStore((state) => state.setError);
@@ -42,6 +70,12 @@ export function CookieManagerDialog({ open, onClose, onConfigured }: Props): Rea
   const [text, setText] = useState('');
   const [status, setStatus] = useState<CookieConfigurationStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  // 2026-10-27: kết quả kiểm cookie với YouTube ngay lúc thêm — hộp thoại giữ mở để người dùng đọc rồi bấm "Xong".
+  const [check, setCheck] = useState<CookieCheckResult | null>(null);
+
+  useEffect(() => {
+    if (!open) setCheck(null);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -85,6 +119,7 @@ export function CookieManagerDialog({ open, onClose, onConfigured }: Props): Rea
 
   const finish = async (next: CookieConfigurationStatus, detail?: string): Promise<void> => {
     setStatus(next);
+    if (next.check) setCheck(next.check);
     setSettings(await window.desktop.settings.get());
     setError(null);
     dismissAttentionByCodes(COOKIE_BLOCKING_CODES);
@@ -106,7 +141,8 @@ export function CookieManagerDialog({ open, onClose, onConfigured }: Props): Rea
         sticky: false
       });
     } finally {
-      onClose();
+      // Có kết quả kiểm thì giữ hộp thoại mở để người dùng xem tài khoản / tình trạng cookie.
+      if (!next.check) onClose();
     }
   };
 
@@ -223,6 +259,8 @@ export function CookieManagerDialog({ open, onClose, onConfigured }: Props): Rea
             </button>
           )}
         </div>
+
+        {check && <CookieCheckPanel check={check} onDone={onClose} />}
 
         <div className="cookie-tabs mt-5">
           <button className={tab === 'browser' ? 'active' : ''} onClick={() => setTab('browser')}>
