@@ -6,6 +6,8 @@ export type YtDlpFailureSubtype =
   | 'tool_missing'
   | 'http_429'
   | 'authentication'
+  | 'bot_check'
+  | 'cookies_invalid'
   | 'removed'
   | 'unsupported_url'
   | 'unavailable'
@@ -35,6 +37,8 @@ const ALL_FAILURE_SUBTYPES: ReadonlySet<YtDlpFailureSubtype> = new Set([
   'tool_missing',
   'http_429',
   'authentication',
+  'bot_check',
+  'cookies_invalid',
   'removed',
   'unsupported_url',
   'unavailable',
@@ -114,6 +118,8 @@ const YTDLP_FAILURE_CAUSES: Record<YtDlpFailureSubtype, string> = {
   tool_missing: 'thiếu công cụ tải (yt-dlp/ffmpeg/aria2c)',
   http_429: 'nền tảng đang giới hạn số lần tải (HTTP 429)',
   authentication: 'nền tảng yêu cầu đăng nhập hoặc cookies hợp lệ',
+  bot_check: 'YouTube tạm chặn vì nghi tải tự động ("Sign in to confirm you’re not a bot") — giới hạn theo lượng yêu cầu, không phải cookie hỏng',
+  cookies_invalid: 'cookies không còn hợp lệ (yt-dlp báo cookie đã bị xoay/thu hồi)',
   removed: 'video đã bị xóa khỏi nền tảng',
   unsupported_url: 'liên kết không phải trang video (yt-dlp báo Unsupported URL)',
   unavailable: 'video không khả dụng (riêng tư, bị chặn theo vùng hoặc không còn định dạng phù hợp)',
@@ -222,19 +228,36 @@ export function classifyYtDlpFailure(text: string): YtDlpFailureDetail {
     return { category: 'tool', subtype: 'tool_missing', httpStatus: null, retryable: false };
   }
 
+  // 2026-10-27 (điều tra "cookie hỏng sau vài phút"): yt-dlp nói RÕ cookie YouTube không còn hợp lệ (bị xoay/thu hồi) — đây
+  // mới là dấu hiệu cookie hỏng thật. Kiểm trước 429 vì câu này chắc chắn hơn mọi lỗi khác cùng lượt.
+  if (
+    includesAny(lower, [
+      'cookies are no longer valid',
+      'account cookies are no longer valid',
+      'have likely been rotated',
+      'cookies have been rotated'
+    ])
+  ) {
+    return { category: 'authentication', subtype: 'cookies_invalid', httpStatus: null, retryable: false };
+  }
+
   if (
     includesAny(lower, ['http error 429', 'status code 429', 'too many requests', '429 too many requests'])
   ) {
     return { category: 'rate_limit', subtype: 'http_429', httpStatus: 429, retryable: false };
   }
 
+  // "Sign in to confirm you’re not a bot": YouTube chặn tạm theo lượng yêu cầu từ một địa chỉ IP (nhật ký 27/10: cả video
+  // KHÔNG gắn cookie cũng dính, rồi vài phút sau tự hết). Không phải cookie hỏng — tách riêng để hàng đợi nghỉ với YouTube
+  // rồi tự tiếp tục như HTTP 429, thay vì báo "cookie hết hạn".
+  if (
+    includesAny(lower, ['sign in to confirm', 'confirm you are not a bot', "confirm you're not a bot", 'confirm you’re not a bot', 'not a bot'])
+  ) {
+    return { category: 'authentication', subtype: 'bot_check', httpStatus: null, retryable: false };
+  }
+
   if (
     includesAny(lower, [
-      'sign in to confirm',
-      'confirm you are not a bot',
-      "confirm you're not a bot",
-      'confirm you’re not a bot',
-      'not a bot',
       'use --cookies-from-browser',
       'use --cookies for the authentication',
       'cookies for the authentication',

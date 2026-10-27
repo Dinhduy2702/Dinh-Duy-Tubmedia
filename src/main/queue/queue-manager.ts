@@ -1181,7 +1181,8 @@ export class QueueManager {
   private noteAdaptiveThrottle(job: QueueJob, code: string, details: Record<string, unknown> | undefined): void {
     if (job.type !== 'download') return;
     const subtype = details?.failureSubtype;
-    if (code !== 'SOURCE_RATE_LIMITED' && subtype !== 'http_403' && subtype !== 'rate_limit') return;
+    // 2026-10-27: chặn chống bot của YouTube ("not a bot") cũng là tín hiệu tải quá dồn — lùi ngay, kể cả lần đầu (chưa gắn cookie).
+    if (code !== 'SOURCE_RATE_LIMITED' && subtype !== 'http_403' && subtype !== 'rate_limit' && subtype !== 'bot_check') return;
     const decision = this.adaptive.noteThrottled(Date.now());
     if (decision) this.logAdaptiveDecision(decision);
   }
@@ -1215,15 +1216,29 @@ export class QueueManager {
    * hẳn như trước: tạm dừng danh sách, thông báo đứng cố định, chờ người dùng xác minh rồi bấm Tiếp tục.
    * @returns true nếu đã xử lý xong (video quay lại chờ); false nếu phải dừng hẳn (người gọi tạm dừng như mã chặn khác).
    */
-  private handleSourceRateLimited(job: QueueJob, message: string): { handled: true } | { handled: false; message: string } {
+  private handleSourceRateLimited(
+    job: QueueJob,
+    message: string,
+    details?: Record<string, unknown>
+  ): { handled: true } | { handled: false; message: string } {
     const platform = this.downloadPlatformOf(job);
     if (!platform) return { handled: false, message };
     const label = rateLimitPlatformLabel(platform);
+    // 2026-10-27: chặn chống bot ("Sign in to confirm you’re not a bot") đi chung cổng chờ với HTTP 429 nhưng nói đúng
+    // nguyên nhân — và nói rõ cookies vẫn tốt, để người dùng không xuất cookie mới vô ích.
+    const botCheck = details?.rateLimitReason === 'bot_check';
+    const reason = botCheck
+      ? 'đang tạm chặn vì nghi tải tự động (yêu cầu xác minh "không phải bot")'
+      : 'đang giới hạn số yêu cầu (HTTP 429)';
+    const reasonStill = botCheck ? 'vẫn tạm chặn vì nghi tải tự động' : 'vẫn giới hạn số yêu cầu (HTTP 429)';
+    const cookieNote = botCheck
+      ? ' Đây là giới hạn theo lượng tải từ máy bạn, không phải cookies hỏng — không cần xuất cookies mới.'
+      : '';
     const now = Date.now();
     const outcome = this.rateLimits.recordHit(platform, this.active.get(job.id)?.startedAtMs ?? now, now);
     if (outcome.kind === 'stopped') {
       const stoppedMessage =
-        `${label} vẫn giới hạn số yêu cầu (HTTP 429) dù Tubmedia đã tự nghỉ và thử lại ${RATE_LIMIT_MAX_AUTO_ROUNDS} lần. ` +
+        `${label} ${reasonStill} dù Tubmedia đã tự nghỉ và thử lại ${RATE_LIMIT_MAX_AUTO_ROUNDS} lần. ` +
         `Tubmedia đã dừng hẳn để không gửi thêm yêu cầu. Hãy mở video trong trình duyệt bình thường, hoàn tất xác minh nếu ` +
         `${label} yêu cầu, rồi nhấn Tiếp tục ở danh sách.`;
       this.logger.warn('queue', 'RATE_LIMIT_STOPPED', stoppedMessage, {
@@ -1237,9 +1252,9 @@ export class QueueManager {
     const resumeAt = outcome.kind === 'cooldown' ? outcome.resumeAt : (this.rateLimits.snapshot(now).find((x) => x.platform === platform)?.resumeAt ?? now);
     const resumeClock = new Date(resumeAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
     const waitingMessage =
-      `${label} đang giới hạn số yêu cầu (HTTP 429). Tubmedia tạm ngừng bắt đầu video mới của ${label} ở mọi danh sách ` +
+      `${label} ${reason}. Tubmedia tạm ngừng bắt đầu video mới của ${label} ở mọi danh sách ` +
       `(video đang tải dở vẫn chạy tiếp) và sẽ tự tiếp tục lúc ${resumeClock} (${formatAutoResumeEta(resumeAt, now)}), ` +
-      `lúc đầu từng video một rồi tăng dần. Không cần bấm thử lại.`;
+      `lúc đầu từng video một rồi tăng dần. Không cần bấm thử lại.${cookieNote}`;
     const current = this.repo.get(job.id);
     if (current && RUNNING_STATUSES.has(current.status)) this.repo.update(job.id, { status: 'retrying' });
     this.emitProgress(
@@ -1253,7 +1268,7 @@ export class QueueManager {
       this.logger.warn('queue', 'RATE_LIMIT_COOLDOWN_STARTED', waitingMessage, {
         jobId: job.id,
         ...(job.projectId ? { projectId: job.projectId } : {}),
-        metadata: { platform, strikes: outcome.strikes, waitMs: outcome.resumeAt - now }
+        metadata: { platform, strikes: outcome.strikes, waitMs: outcome.resumeAt - now, reason: botCheck ? 'bot_check' : 'http_429' }
       });
       this.notifyPlatformRateLimit(platform, label, waitingMessage);
     }
@@ -2308,7 +2323,7 @@ export class QueueManager {
           this.repeatedFailures.delete(job.projectId);
         }
         if (code === 'SOURCE_RATE_LIMITED' && job.type === 'download') {
-          const rateLimited = this.handleSourceRateLimited(job, message);
+          const rateLimited = this.handleSourceRateLimited(job, message, appError.details);
           if (rateLimited.handled) return;
           message = rateLimited.message;
         }

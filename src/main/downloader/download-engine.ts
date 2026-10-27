@@ -1467,11 +1467,14 @@ export class DownloadEngine {
         onStdoutLine: parseLine,
         onStderrLine: parseLine
       });
+      // 2026-10-27: chặn chống bot ("not a bot") KHÔNG phải lỗi cookie → vẫn ghi ngược cookie YouTube vừa xoay vòng trong lượt
+      // này. Trước đây bỏ bản xoay vòng đi, lượt sau dùng bản cũ — dễ khiến YouTube thu hồi phiên thật.
+      const runFailure = result.code === 0 ? null : classifyYtDlpFailure(`${result.stderrTail}\n${result.stdoutTail}`);
       cookieOutcome = signal.aborted
         ? 'aborted'
         : result.code === 0
           ? 'success'
-          : classifyYtDlpFailure(`${result.stderrTail}\n${result.stdoutTail}`).category === 'authentication'
+          : runFailure?.category === 'authentication' && runFailure.subtype !== 'bot_check'
             ? 'cookie-failure'
             : 'other-failure';
     } finally {
@@ -1594,9 +1597,23 @@ export class DownloadEngine {
         }
 
         if (failure.category === 'authentication') {
+          // 2026-10-27: ghi nguyên văn câu của nền tảng (đã che bí mật) — trước đây lỗi xác thực không để lại câu gốc nào trong
+          // nhật ký, nên không phân biệt được "cookie hỏng thật" với "YouTube chặn tạm".
+          this.logger.warn('download', 'YTDLP_AUTHENTICATION_FAILURE', ytDlpFailureLogMessage(failure.subtype), {
+            jobId: job.id,
+            projectId: project.id,
+            metadata: { ...failureDetails, cookiesAttached: attachConfiguredCookies }
+          });
           this.cookieRequiredJobs.add(job.id);
           if (!attachConfiguredCookies && hasConfiguredCookies(appSettings)) {
             throw new RetryWithConfiguredCookiesError(failureDetails);
+          }
+          // 2026-10-27 (điều tra "cookie hỏng sau vài phút"): đã gắn cookie mà YouTube vẫn đòi xác minh "không phải bot" là
+          // YouTube chặn tạm theo lượng yêu cầu (nhật ký 27/10: video KHÔNG gắn cookie cũng dính, vài phút sau tự hết) — cookie
+          // vẫn tốt. Cho vào cổng chờ giới hạn nền tảng như HTTP 429 (cả app nghỉ với YouTube, đếm ngược, tự tiếp tục) thay
+          // vì báo "cookie hết hạn" rồi dồn dập thử hết video còn lại. Chưa cấu hình cookie cũng chờ như vậy.
+          if (failure.subtype === 'bot_check') {
+            throw new SourceRateLimitedError({ ...failureDetails, rateLimitReason: 'bot_check' });
           }
           if (attachConfiguredCookies) {
             throw new CookiesExpiredError(failureDetails);
