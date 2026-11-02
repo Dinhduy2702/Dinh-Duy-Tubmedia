@@ -104,12 +104,27 @@ export function isFinalDownloadForLinkTag(fileName: string, linkTag: string): bo
   return new RegExp(`\\[${escaped}\\]\\.(?:mp4|mkv|webm|mov|m4v)$`, 'i').test(fileName);
 }
 
+/** Bản dựng CapCut Tubmedia tạo cạnh video gốc: "<tên gốc>.capcut-edit-<thời điểm>.mp4". */
+export function isCapCutEditCopy(path: string): boolean {
+  return /\.capcut-edit-\d+\.mp4$/i.test(path);
+}
+
+/**
+ * 2026-11-02: Tải danh sách ghi nhớ video GỐC thay vì bản dựng CapCut vừa tạo từ nó. Quy trình ghép giữ như cũ (đầu vào ghép
+ * đọc qua chính bản ghi này — đổi sẽ đổi thành phẩm ghép).
+ */
+function recordsMasterNotEditCopy(workflow: DownloadWorkflow, master: string, prepared: string): boolean {
+  return workflow === 'download-only' && prepared !== master && isCapCutEditCopy(prepared) && !isCapCutEditCopy(master);
+}
+
 export class DownloadEngine {
   private readonly cookieRequiredJobs = new Set<string>();
   /** S2: tác vụ đã gặp tệp có sẵn đang được danh sách khác dùng — lượt tải lại phải ghi ra tệp mới tên khác. */
   private readonly sharedFileKeptJobs = new Set<string>();
   /** Số lần yt-dlp báo đường dẫn quá dài cho từng tác vụ — lượt thử lại đặt tên ngắn hơn (xem planDownloadName). */
   private readonly pathTooLongStrikes = new Map<string, number>();
+  /** Tác vụ đang chạy lại sau khi tìm lại được video trong thư mục (tệp đã ghi nhớ bị mất) — chặn lặp vô hạn. */
+  private readonly rediscoveringJobs = new Set<string>();
   private cookieJar: CookieJarStore | null = null;
 
   /** yt-dlp nhận bản sao tạm của tệp cookies cho mỗi lượt (xem cookie-jar-store.ts). */
@@ -423,7 +438,7 @@ export class DownloadEngine {
         : { ...appSettings, downloadCompatibilityMode: requestedEditMode };
     const plan = planCapCutCompatibility(editSettings, info);
     if (!plan.active || !plan.maxHeight) return input;
-    if (!forceFaststart && /\.capcut-edit-\d+\.mp4$/i.test(input)) return input;
+    if (!forceFaststart && isCapCutEditCopy(input)) return input;
 
     const ffmpeg = this.tools.get('ffmpeg');
     if (!ffmpeg.available || !ffmpeg.executablePath) {
@@ -846,6 +861,45 @@ export class DownloadEngine {
       });
   }
 
+  /**
+   * Tìm video đã tải sẵn trong thư mục của danh sách (theo mã link, rồi theo mã video) và ghi nhận làm nguồn theo chính sách
+   * hiện tại. Trả bản ghi nguồn mới, hoặc null nếu không thấy.
+   */
+  private async discoverExistingDownload(
+    source: NonNullable<ReturnType<MediaSourceRepository['get']>>,
+    project: NonNullable<ReturnType<ProjectRepository['get']>>,
+    job: QueueJob,
+    workflow: DownloadWorkflow,
+    linkTag: string,
+    downloadPolicy: string
+  ): Promise<NonNullable<ReturnType<MediaSourceRepository['get']>> | null> {
+    const discoveredByLink = await this.findExistingByLinkTag(project.sourceFolder, linkTag, job, workflow);
+    const discovered =
+      discoveredByLink ?? (await this.findExistingByMediaId(project.sourceFolder, source.mediaId, job, workflow));
+    if (!discovered) return null;
+    const discoveredInfo = await this.analyzer.analyze(discovered, job.id);
+    // S1 (2026-10-10): ghi nhận theo ĐÚNG chính sách hiện tại để đi tiếp vào nhánh dùng lại bên dưới (kiểm tra đầy đủ
+    // + kiểm tra chất lượng). Trước đây ghi chính sách null → nhánh "bản cũ" lập tức dời tệp vào khu cách ly và tải lại
+    // (102/102 lần trong nhật ký thật), kể cả khi tệp đang là nguồn của danh sách khác cùng thư mục → ghép báo ENOENT.
+    this.sources.setFile(source.id, discovered, discoveredInfo, 'valid', downloadPolicy);
+    this.logger.info(
+      'download',
+      'EXISTING_DOWNLOAD_DISCOVERED',
+      `Đã nhận diện tệp có sẵn theo ${discoveredByLink ? `link ${linkTag}` : 'ID nguồn'} và sẽ kiểm tra để bỏ qua tải lại: ${basename(discovered)}.`,
+      {
+        jobId: job.id,
+        projectId: project.id,
+        metadata: {
+          path: discovered,
+          mediaId: source.mediaId,
+          linkTag,
+          matchedBy: discoveredByLink ? 'link' : 'media-id'
+        }
+      }
+    );
+    return this.sources.get(source.id) ?? null;
+  }
+
   public async run(
     job: QueueJob,
     resource: ResourceProfile,
@@ -875,34 +929,10 @@ export class DownloadEngine {
       : appSettings.verificationLevel;
 
     if (!source.sourceFile) {
-      const discoveredByLink = await this.findExistingByLinkTag(project.sourceFolder, linkTag, job, workflow);
-      const discovered =
-        discoveredByLink ??
-        (await this.findExistingByMediaId(project.sourceFolder, source.mediaId, job, workflow));
-      if (discovered) {
-        const discoveredInfo = await this.analyzer.analyze(discovered, job.id);
-        // S1 (2026-10-10): ghi nhận theo ĐÚNG chính sách hiện tại để đi tiếp vào nhánh dùng lại bên dưới (kiểm tra đầy đủ
-        // + kiểm tra chất lượng). Trước đây ghi chính sách null → nhánh "bản cũ" lập tức dời tệp vào khu cách ly và tải lại
-        // (102/102 lần trong nhật ký thật), kể cả khi tệp đang là nguồn của danh sách khác cùng thư mục → ghép báo ENOENT.
-        this.sources.setFile(source.id, discovered, discoveredInfo, 'valid', downloadPolicy);
-        source = this.sources.get(source.id) ?? source;
-        this.logger.info(
-          'download',
-          'EXISTING_DOWNLOAD_DISCOVERED',
-          `Đã nhận diện tệp có sẵn theo ${discoveredByLink ? `link ${linkTag}` : 'ID nguồn'} và sẽ kiểm tra để bỏ qua tải lại: ${basename(discovered)}.`,
-          {
-            jobId: job.id,
-            projectId: project.id,
-            metadata: {
-              path: discovered,
-              mediaId: source.mediaId,
-              linkTag,
-              matchedBy: discoveredByLink ? 'link' : 'media-id'
-            }
-          }
-        );
-      }
+      source = (await this.discoverExistingDownload(source, project, job, workflow, linkTag, downloadPolicy)) ?? source;
     }
+    /** 2026-11-02: tệp đã ghi nhớ không còn trên ổ — phải tìm lại trong thư mục trước khi tải lại. */
+    let rememberedFileMissing = false;
 
     const cachePolicyMatches = source.downloadPolicy === downloadPolicy;
     if (source.sourceFile && !cachePolicyMatches) {
@@ -915,7 +945,7 @@ export class DownloadEngine {
         this.logger.info(
           'download',
           'SOURCE_CACHE_MISSING',
-          'Tệp cache của chính sách cũ không còn trên ổ đĩa. Tubmedia đã xóa tham chiếu cũ và sẽ tải lại theo chính sách hiện tại.',
+          'Tệp cache của chính sách cũ không còn trên ổ đĩa. Tubmedia đã xóa tham chiếu cũ; sẽ tìm lại video trong thư mục của danh sách trước khi tải lại theo chính sách hiện tại.',
           {
             jobId: job.id,
             projectId: project.id,
@@ -928,6 +958,7 @@ export class DownloadEngine {
           }
         );
         this.sources.clearFileCache(source.id);
+        rememberedFileMissing = true;
       } else {
         this.logger.info(
           'download',
@@ -1018,7 +1049,15 @@ export class DownloadEngine {
           }
 
           if (beforeRemux === cachedPath) {
-            this.sources.setFile(source.id, readyPath, finalInfo, 'valid', downloadPolicy);
+            // 2026-11-02: Tải danh sách nhớ video GỐC, không nhớ bản dựng CapCut (người dùng hay xoá/chuyển bản CapCut đi).
+            const rememberMaster = recordsMasterNotEditCopy(workflow, beforeRemux, readyPath);
+            this.sources.setFile(
+              source.id,
+              rememberMaster ? beforeRemux : readyPath,
+              rememberMaster ? cachedInfo : finalInfo,
+              'valid',
+              downloadPolicy
+            );
           }
           this.logger.info(
             'download',
@@ -1082,13 +1121,14 @@ export class DownloadEngine {
           this.logger.info(
             'download',
             'SOURCE_CACHE_MISSING',
-            'Tệp tải trước đó không còn trên ổ đĩa. Tubmedia đã xóa tham chiếu cache cũ và sẽ tải lại sạch.',
+            'Tệp tải trước đó không còn trên ổ đĩa. Tubmedia đã xóa tham chiếu cũ; sẽ tìm lại video trong thư mục của danh sách trước khi tải lại.',
             {
               jobId: job.id,
               projectId: project.id,
               metadata: { path: cachedPath, recovery: 'clear-cache-and-redownload' }
             }
           );
+          rememberedFileMissing = true;
         } else {
           this.logger.warn(
             'download',
@@ -1122,6 +1162,21 @@ export class DownloadEngine {
       if (source.sourceFile) {
         this.sources.invalidate(source.id);
         source = this.sources.get(source.id) ?? source;
+      }
+    }
+
+    // 2026-11-02 (người dùng báo: dán lại link sau một ngày thì app tải lại dù video vẫn trong thư mục): tệp đã ghi nhớ mất
+    // (thường là bản dựng CapCut bị xoá/chuyển đi, còn video gốc vẫn nằm đó) → tìm lại theo mã link / mã video trước; thấy thì
+    // chạy lại từ đầu để đi nhánh dùng lại (kiểm tra đầy đủ + chất lượng). Chỉ một lần cho mỗi lượt để không lặp.
+    if (rememberedFileMissing && !source.sourceFile && !this.rediscoveringJobs.has(job.id)) {
+      const rediscovered = await this.discoverExistingDownload(source, project, job, workflow, linkTag, downloadPolicy);
+      if (rediscovered) {
+        this.rediscoveringJobs.add(job.id);
+        try {
+          return await this.run(job, resource, signal, onProgress, pacing);
+        } finally {
+          this.rediscoveringJobs.delete(job.id);
+        }
       }
     }
 
@@ -1711,6 +1766,7 @@ export class DownloadEngine {
       throw new DownloadFailedError(`Tệp tải xong không hợp lệ và đã chuyển vào khu cách ly: ${quarantined}`, false, { failureSubtype: 'file_invalid' });
     }
 
+    const downloadedPath = finalPath;
     finalPath = await this.prepareDownloadedFile(
       job,
       finalPath,
@@ -1867,7 +1923,18 @@ export class DownloadEngine {
     });
 
     this.cookieRequiredJobs.delete(job.id);
-    this.sources.setFile(source.id, finalPath, info, 'valid', downloadPolicy);
+    // 2026-11-02: Tải danh sách nhớ video GỐC (bản dựng CapCut vẫn là kết quả trả cho người dùng). Trước đây nhớ bản CapCut:
+    // người dùng xoá/chuyển bản CapCut đi rồi dán lại link → "tệp đã nhớ không còn" → tải lại dù video gốc vẫn trong thư mục.
+    const rememberMaster =
+      recordsMasterNotEditCopy(workflow, downloadedPath, finalPath) &&
+      (await stat(downloadedPath).then((entry) => entry.isFile()).catch(() => false));
+    this.sources.setFile(
+      source.id,
+      rememberMaster ? downloadedPath : finalPath,
+      rememberMaster ? await this.analyzer.analyze(downloadedPath, job.id) : info,
+      'valid',
+      downloadPolicy
+    );
     this.sources.setMetadata(source.id, { title, uploader });
     if (resolvedId) this.sources.promoteIdentity(source.id, resolvedId);
     this.logger.info(
