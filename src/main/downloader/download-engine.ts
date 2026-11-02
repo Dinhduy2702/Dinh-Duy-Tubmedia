@@ -419,6 +419,44 @@ export class DownloadEngine {
     return committedOutput;
   }
 
+  /**
+   * 2026-11-02: bản dựng CapCut đã có sẵn cạnh video gốc ("<gốc>.capcut-edit-<thời điểm>.mp4") còn dùng được cho cài đặt
+   * hiện tại → trả đường dẫn (mới nhất trước). Dùng được = đọc được, đúng thời lượng gốc, H.264 yuv420p SDR, ≤ 60 FPS và đúng
+   * kích thước bước thu nhỏ sẽ tạo ra (đổi 1080p ↔ 2K thì bản cũ không khớp → tạo mới).
+   */
+  private async reusableEditCopy(job: QueueJob, master: string, info: MediaInfo, maxHeight: number): Promise<string | null> {
+    const folder = dirname(master);
+    const extension = extname(master);
+    const prefix = `${basename(master, extension)}.capcut-edit-`;
+    const entries = await readdir(folder, { withFileTypes: true }).catch(() => []);
+    const candidates = entries
+      .filter((entry) => entry.isFile() && entry.name.startsWith(prefix) && isCapCutEditCopy(entry.name))
+      .map((entry) => entry.name)
+      .sort((left, right) => right.localeCompare(left, 'en', { numeric: true }));
+    const maxWidth = maxHeight === 1440 ? 2560 : 1920;
+    const scale = info.height > maxHeight + 2 ? Math.min(1, maxWidth / info.width, maxHeight / info.height) : 1;
+    const expectedHeight = Math.round(info.height * scale);
+    for (const name of candidates) {
+      const candidate = join(folder, name);
+      const checked = await this.verifier.verify(candidate, 'fast', undefined, { jobId: job.id, projectId: job.projectId });
+      if (!checked.ok) continue;
+      const edit = await this.analyzer.analyze(candidate, job.id).catch(() => null);
+      if (!edit) continue;
+      const durationOk = Math.abs(edit.duration - info.duration) <= Math.max(1, info.duration * 0.005);
+      const formatOk =
+        edit.videoCodec.toLowerCase() === 'h264' && edit.pixelFormat.toLowerCase() === 'yuv420p' && !edit.hdr && edit.fps <= 60.5;
+      if (!durationOk || !formatOk || Math.abs(edit.height - expectedHeight) > 4) continue;
+      this.logger.info(
+        'download',
+        'CAPCUT_EDIT_COPY_REUSED',
+        `Dùng lại bản dựng CapCut đã có: ${name} (không mã hoá lại).`,
+        { jobId: job.id, ...(job.projectId ? { projectId: job.projectId } : {}), metadata: { master, editCopy: candidate } }
+      );
+      return candidate;
+    }
+    return null;
+  }
+
   private async makeCapCutCompatible(
     job: QueueJob,
     input: string,
@@ -439,6 +477,12 @@ export class DownloadEngine {
     const plan = planCapCutCompatibility(editSettings, info);
     if (!plan.active || !plan.maxHeight) return input;
     if (!forceFaststart && isCapCutEditCopy(input)) return input;
+    // 2026-11-02: dán lại link đã tải → trước đây mã hoá lại bản CapCut từ đầu (vài phút, thêm một tệp ~1 GB mỗi lần) dù bản
+    // cũ còn nguyên. Tệp vừa tải mới (forceFaststart) không dùng lại — bản CapCut cạnh nó có thể làm từ bản gốc cũ.
+    if (!forceFaststart) {
+      const reusable = await this.reusableEditCopy(job, input, info, plan.maxHeight);
+      if (reusable) return reusable;
+    }
 
     const ffmpeg = this.tools.get('ffmpeg');
     if (!ffmpeg.available || !ffmpeg.executablePath) {

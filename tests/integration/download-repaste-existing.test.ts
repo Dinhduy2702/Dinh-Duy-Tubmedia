@@ -344,3 +344,53 @@ describe('Phần 1 — nhớ video GỐC; tệp đã nhớ mất thì tìm lại
     expect(again.skipped).toBe(false);
   });
 });
+
+describe('Phần 2 — đã có bản CapCut cho đúng video gốc thì dùng lại, không mã hoá lại', () => {
+  const encodes = (): number => ffmpegCalls.filter((args) => args.some((arg) => arg.includes('.capcut-edit-'))).length;
+
+  it('danh sách khác dán lại link (cùng thư mục) → dùng lại bản CapCut có sẵn, không chạy FFmpeg, không thêm tệp', async () => {
+    const { own, url, project } = capcutSetup('TA911', 'REPASTE0011');
+    const first = insertSource(project.id, url, 'youtube', 'REPASTE0011');
+    const firstResult = await run(jobFor(project.id, first, 'download-only'));
+    const encodesAfterFirst = encodes();
+    const other = makeProject('Danh sách hôm sau', own);
+    const second = insertSource(other.id, url, 'youtube', 'REPASTE0011');
+
+    const result = await run(jobFor(other.id, second, 'download-only'));
+
+    expect(encodes() - encodesAfterFirst, 'không mã hoá lại bản CapCut').toBe(0);
+    expect(result).toMatchObject({ skipped: true, outputPath: firstResult.outputPath });
+    expect(editsIn(own)).toHaveLength(1);
+    expect(ytdlpOutputTemplates).toHaveLength(1);
+  });
+
+  it('cùng danh sách dán lại link → dùng lại bản CapCut có sẵn', async () => {
+    const { own, url, project } = capcutSetup('TA912', 'REPASTE0012');
+    const sourceId = insertSource(project.id, url, 'youtube', 'REPASTE0012');
+    const firstResult = await run(jobFor(project.id, sourceId, 'download-only'));
+    const encodesAfterFirst = encodes();
+
+    const result = await run(jobFor(project.id, sourceId, 'download-only'));
+
+    expect(encodes() - encodesAfterFirst).toBe(0);
+    expect(result).toMatchObject({ skipped: true, outputPath: firstResult.outputPath });
+    expect(editsIn(own)).toHaveLength(1);
+  });
+
+  it('đối chứng: bản CapCut có sẵn bị hỏng → bỏ qua nó, tạo bản mới từ video gốc (không tải lại)', async () => {
+    const { own, url, project } = capcutSetup('TA913', 'REPASTE0013');
+    const sourceId = insertSource(project.id, url, 'youtube', 'REPASTE0013');
+    await run(jobFor(project.id, sourceId, 'download-only'));
+    const oldEdit = join(own, editsIn(own)[0]!);
+    brokenFiles.add(oldEdit);
+    const encodesAfterFirst = encodes();
+    const other = makeProject('Danh sách khác', own);
+    const second = insertSource(other.id, url, 'youtube', 'REPASTE0013');
+
+    const result = await run(jobFor(other.id, second, 'download-only'));
+
+    expect(encodes() - encodesAfterFirst).toBe(1);
+    expect(result.outputPath).not.toBe(oldEdit);
+    expect(ytdlpOutputTemplates).toHaveLength(1);
+  });
+});
