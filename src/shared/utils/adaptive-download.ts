@@ -21,6 +21,11 @@ export const ADAPTIVE_MIN_GAIN = 1.05;
 export const ADAPTIVE_DISK_BUSY_PERCENT = 85;
 /** Sau khi lùi vì không tăng được / ổ bận: chờ chừng này mới thử tăng lại quá mức đã chạm. */
 export const ADAPTIVE_CEILING_RESET_MS = 5 * 60_000;
+/**
+ * 2026-11-02: ổ lại nghẽn ngay sau lần thử tăng → lần chờ sau gấp đôi (5 → 10 → 20 → 40 → 60 phút). Ca thật trên ổ HDD: cứ
+ * 5 phút lại thử 4/4 rồi lùi, mỗi lần máy khựng. Nghỉ tải đủ lâu thì về lại mức đầu.
+ */
+export const ADAPTIVE_CEILING_RESET_MAX_MS = 60 * 60_000;
 /** Sau 429/403: không tăng lại trong chừng này. */
 export const ADAPTIVE_THROTTLE_COOLDOWN_MS = 5 * 60_000;
 /** Không còn video nào tải chừng này → về bậc 0 (lượt tải sau bắt đầu thận trọng lại). */
@@ -36,6 +41,11 @@ export interface AdaptiveSample {
   demand: boolean;
   /** Độ bận cao nhất (%) trong các ổ mà video đang ghi; null = không đo được (máy không phải Windows, ổ mạng…). */
   diskBusyPercent: number | null;
+  /**
+   * 2026-11-02: ngưỡng "ổ bận" theo loại ổ thật của các ổ đang ghi (disk-load.ts — HDD thấp hơn SSD). Không truyền → mức cũ
+   * ADAPTIVE_DISK_BUSY_PERCENT.
+   */
+  diskBusyThresholdPercent?: number;
 }
 
 export type AdaptiveReason = 'probe' | 'no_gain' | 'disk_busy' | 'throttled' | 'idle_reset';
@@ -59,6 +69,8 @@ export class AdaptiveDownloadController {
   private samples: AdaptiveSample[] = [];
   private lastActiveAt: number | null = null;
   private throttledInWindow = false;
+  /** Số lần liên tiếp phải lùi vì ổ bận (giãn thời gian chờ thử lại); về 0 khi nghỉ tải đủ lâu. */
+  private diskBusyStreak = 0;
 
   public get level(): number {
     return this.levelValue;
@@ -82,6 +94,7 @@ export class AdaptiveDownloadController {
       this.previousThroughput = null;
       this.ceiling = ADAPTIVE_MAX_LEVEL;
       this.ceilingResetAt = 0;
+      this.diskBusyStreak = 0;
       if (this.levelValue > 0) reset = this.move(0, 'idle_reset', 0, null, false);
       this.lastAction = 'hold';
     }
@@ -112,6 +125,10 @@ export class AdaptiveDownloadController {
     const throughput = average(window.map((item) => Math.max(0, item.bytesPerSecond)));
     const busyValues = window.map((item) => item.diskBusyPercent).filter((value): value is number => value !== null);
     const diskBusy = busyValues.length ? average(busyValues) : null;
+    const busyThreshold = Math.min(
+      ADAPTIVE_DISK_BUSY_PERCENT,
+      ...window.map((item) => item.diskBusyThresholdPercent ?? ADAPTIVE_DISK_BUSY_PERCENT)
+    );
     const demand = window.some((item) => item.demand);
     const previous = this.previousThroughput;
     this.previousThroughput = throughput;
@@ -120,10 +137,12 @@ export class AdaptiveDownloadController {
       this.lastAction = 'hold';
       return null; // đã lùi ngay lúc noteThrottled
     }
-    if (diskBusy !== null && diskBusy >= ADAPTIVE_DISK_BUSY_PERCENT) {
+    if (diskBusy !== null && diskBusy >= busyThreshold) {
       if (this.levelValue === 0) return null;
+      this.diskBusyStreak += 1;
       this.ceiling = this.levelValue - 1;
-      this.ceilingResetAt = now + ADAPTIVE_CEILING_RESET_MS;
+      this.ceilingResetAt =
+        now + Math.min(ADAPTIVE_CEILING_RESET_MAX_MS, ADAPTIVE_CEILING_RESET_MS * 2 ** (this.diskBusyStreak - 1));
       return this.move(this.levelValue - 1, 'disk_busy', throughput, diskBusy, true);
     }
     if (this.lastAction === 'up' && previous !== null && throughput < previous * ADAPTIVE_MIN_GAIN) {

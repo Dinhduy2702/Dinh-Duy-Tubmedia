@@ -13,9 +13,12 @@ import {
   DownloadFailedError,
   SourceRateLimitedError,
   ToolNotFoundError,
-  SourceRemovedError
+  SourceRemovedError,
+  ProcessCancelledError
 } from '@shared/errors/app-errors.js';
-import type { AppSettings, MediaInfo, QueueJob, ResourceProfile, VerificationLevel } from '@shared/types/domain.js';
+import type { AppSettings, MediaInfo, ProcessPriority, QueueJob, ResourceProfile, VerificationLevel } from '@shared/types/domain.js';
+import { driveLetterOf } from '@shared/utils/adaptive-download.js';
+import { ConcurrencyGate, editEncodeConcurrency, type DiskKind } from '@shared/utils/disk-load.js';
 import { audioIssueFor, audioIssueNote, audioNeedsAacForMp4, formatPromisesAudio, type AudioIssue } from '@shared/utils/audio-presence.js';
 import {
   downloadPolicyForWorkflow,
@@ -117,6 +120,14 @@ function recordsMasterNotEditCopy(workflow: DownloadWorkflow, master: string, pr
   return workflow === 'download-only' && prepared !== master && isCapCutEditCopy(prepared) && !isCapCutEditCopy(master);
 }
 
+/**
+ * 2026-11-02 (chống lag): mã hoá bản dựng CapCut là việc nền nặng — chạy dưới mức thường để máy luôn ưu tiên việc người dùng
+ * đang làm; hồ sơ đã đặt thấp hơn (idle) thì giữ.
+ */
+export function backgroundEncodePriority(priority: ProcessPriority): ProcessPriority {
+  return priority === 'idle' ? 'idle' : 'below_normal';
+}
+
 export class DownloadEngine {
   private readonly cookieRequiredJobs = new Set<string>();
   /** S2: tác vụ đã gặp tệp có sẵn đang được danh sách khác dùng — lượt tải lại phải ghi ra tệp mới tên khác. */
@@ -125,6 +136,43 @@ export class DownloadEngine {
   private readonly pathTooLongStrikes = new Map<string, number>();
   /** Tác vụ đang chạy lại sau khi tìm lại được video trong thư mục (tệp đã ghi nhớ bị mất) — chặn lặp vô hạn. */
   private readonly rediscoveringJobs = new Set<string>();
+  /** 2026-11-02 (chống lag): lượt mã hoá bản dựng CapCut theo ổ; giới hạn tự dò theo loại ổ thật + số nhân CPU. */
+  private readonly editEncodeGate = new ConcurrencyGate();
+  private diskKindOf: ((letter: string) => DiskKind) | null = null;
+
+  /** Loại ổ thật theo ký tự ổ. Chưa đặt (bài kiểm, công cụ khác) → không xếp lượt, như trước. */
+  public setDiskKindLookup(lookup: (letter: string) => DiskKind): void {
+    this.diskKindOf = lookup;
+  }
+
+  private async acquireEditEncodeSlot(
+    master: string,
+    signal: AbortSignal,
+    onProgress: (progress: DownloadProgress) => void,
+    stageLabel: string
+  ): Promise<() => void> {
+    const letter = driveLetterOf(master);
+    if (!this.diskKindOf || !letter) return () => undefined;
+    const limit = editEncodeConcurrency(this.diskKindOf(letter), cpus().length);
+    const waiting = setTimeout(() => {
+      onProgress({
+        percent: 0,
+        speed: null,
+        etaSeconds: null,
+        stage: 'processing',
+        stageLabel: `${stageLabel} — đang chờ lượt (ổ ${letter}: mỗi lúc ${limit} bản để máy không bị lag)`,
+        elapsedSeconds: 0
+      });
+    }, 500);
+    try {
+      return await this.editEncodeGate.acquire(letter, limit, signal);
+    } catch (error) {
+      if (signal.aborted) throw new ProcessCancelledError();
+      throw error;
+    } finally {
+      clearTimeout(waiting);
+    }
+  }
   private cookieJar: CookieJarStore | null = null;
 
   /** yt-dlp nhận bản sao tạm của tệp cookies cho mỗi lượt (xem cookie-jar-store.ts). */
@@ -576,113 +624,119 @@ export class DownloadEngine {
     let completed = false;
     let usedEncoder = '';
     let lastError = '';
-    for (const encoder of encoderCandidates) {
-      await rm(pending, { force: true });
-      const args = [
-        '-hide_banner',
-        '-y',
-        '-i',
-        input,
-        '-map',
-        '0:v:0',
-        '-map',
-        '0:a:0?',
-        '-vf',
-        filters.join(','),
-        '-c:v',
-        encoder
-      ];
-      if (encoder === 'h264_nvenc') {
-        args.push('-preset', 'p5', '-cq', '17', '-b:v', '0');
-      } else if (encoder === 'h264_qsv') {
-        args.push('-preset', 'medium', '-global_quality', '17');
-      } else if (encoder === 'h264_amf') {
-        args.push('-quality', 'quality', '-qp_i', '17', '-qp_p', '19');
-      } else {
-        args.push('-preset', 'veryfast', '-crf', '17');
-      }
-      args.push(
-        '-profile:v',
-        'high',
-        '-pix_fmt',
-        'yuv420p',
-        '-tag:v',
-        'avc1',
-        '-fps_mode',
-        'cfr',
-        '-force_key_frames',
-        'expr:gte(t,n_forced*1)',
-        '-threads',
-        String(resource.ffmpegThreads),
-        '-filter_threads',
-        String(resource.filterThreads),
-        '-filter_complex_threads',
-        String(resource.filterComplexThreads)
-      );
-      if (!info.audioCodec) {
-        args.push('-an');
-      } else {
-        args.push('-c:a', 'aac', '-b:a', '256k', '-ar', '48000');
-        if ((info.channels ?? 2) > 2) args.push('-ac', '2');
-      }
-      args.push(
-        '-color_primaries',
-        'bt709',
-        '-color_trc',
-        'bt709',
-        '-colorspace',
-        'bt709',
-        '-color_range',
-        'tv',
-        '-movflags',
-        '+faststart',
-        '-max_muxing_queue_size',
-        '2048',
-        '-progress',
-        'pipe:1',
-        '-nostats',
-        pending
-      );
+    // 2026-11-02 (chống lag): xếp lượt mã hoá theo ổ — HDD/ổ không rõ loại mỗi lúc 1 bản, SSD theo số nhân CPU (disk-load.ts).
+    const release = await this.acquireEditEncodeSlot(input, signal, onProgress, stageLabel);
+    try {
+      for (const encoder of encoderCandidates) {
+        await rm(pending, { force: true });
+        const args = [
+          '-hide_banner',
+          '-y',
+          '-i',
+          input,
+          '-map',
+          '0:v:0',
+          '-map',
+          '0:a:0?',
+          '-vf',
+          filters.join(','),
+          '-c:v',
+          encoder
+        ];
+        if (encoder === 'h264_nvenc') {
+          args.push('-preset', 'p5', '-cq', '17', '-b:v', '0');
+        } else if (encoder === 'h264_qsv') {
+          args.push('-preset', 'medium', '-global_quality', '17');
+        } else if (encoder === 'h264_amf') {
+          args.push('-quality', 'quality', '-qp_i', '17', '-qp_p', '19');
+        } else {
+          args.push('-preset', 'veryfast', '-crf', '17');
+        }
+        args.push(
+          '-profile:v',
+          'high',
+          '-pix_fmt',
+          'yuv420p',
+          '-tag:v',
+          'avc1',
+          '-fps_mode',
+          'cfr',
+          '-force_key_frames',
+          'expr:gte(t,n_forced*1)',
+          '-threads',
+          String(resource.ffmpegThreads),
+          '-filter_threads',
+          String(resource.filterThreads),
+          '-filter_complex_threads',
+          String(resource.filterComplexThreads)
+        );
+        if (!info.audioCodec) {
+          args.push('-an');
+        } else {
+          args.push('-c:a', 'aac', '-b:a', '256k', '-ar', '48000');
+          if ((info.channels ?? 2) > 2) args.push('-ac', '2');
+        }
+        args.push(
+          '-color_primaries',
+          'bt709',
+          '-color_trc',
+          'bt709',
+          '-colorspace',
+          'bt709',
+          '-color_range',
+          'tv',
+          '-movflags',
+          '+faststart',
+          '-max_muxing_queue_size',
+          '2048',
+          '-progress',
+          'pipe:1',
+          '-nostats',
+          pending
+        );
 
-      const tracker = new FfmpegProgressTracker(info.duration);
-      const result = await this.processes.run({
-        jobId: job.id,
-        projectId: job.projectId,
-        tool: 'ffmpeg',
-        executablePath: ffmpeg.executablePath,
-        args,
-        priority: resource.processPriority,
-        signal,
-        timeoutMs: 48 * 60 * 60 * 1000,
-        onStdoutLine: (line) => {
-          const snapshot = tracker.update(line);
-          if (!snapshot) return;
-          onProgress({
-            percent: snapshot.percent,
-            speed: snapshot.speed,
-            etaSeconds: snapshot.etaSeconds,
-            stage: 'processing',
-            stageLabel,
-            elapsedSeconds: snapshot.elapsedSeconds
-          });
-        }
-      });
-      if (result.code === 0) {
-        completed = true;
-        usedEncoder = encoder;
-        break;
-      }
-      lastError = result.stderrTail || `FFmpeg encoder ${encoder} thất bại.`;
-      this.logger.warn(
-        'download',
-        'CAPCUT_ENCODER_ATTEMPT_FAILED',
-        `Bộ mã hóa ${encoder} không khởi động được; Tubmedia sẽ tự thử bộ mã hóa tiếp theo.`,
-        {
+        const tracker = new FfmpegProgressTracker(info.duration);
+        const result = await this.processes.run({
           jobId: job.id,
-          ...(job.projectId ? { projectId: job.projectId } : {}),
-          metadata: { encoder, master: input }
+          projectId: job.projectId,
+          tool: 'ffmpeg',
+          executablePath: ffmpeg.executablePath,
+          args,
+          priority: backgroundEncodePriority(resource.processPriority),
+          signal,
+          timeoutMs: 48 * 60 * 60 * 1000,
+          onStdoutLine: (line) => {
+            const snapshot = tracker.update(line);
+            if (!snapshot) return;
+            onProgress({
+              percent: snapshot.percent,
+              speed: snapshot.speed,
+              etaSeconds: snapshot.etaSeconds,
+              stage: 'processing',
+              stageLabel,
+              elapsedSeconds: snapshot.elapsedSeconds
+            });
+          }
+        });
+        if (result.code === 0) {
+          completed = true;
+          usedEncoder = encoder;
+          break;
         }
-      );
+        lastError = result.stderrTail || `FFmpeg encoder ${encoder} thất bại.`;
+        this.logger.warn(
+          'download',
+          'CAPCUT_ENCODER_ATTEMPT_FAILED',
+          `Bộ mã hóa ${encoder} không khởi động được; Tubmedia sẽ tự thử bộ mã hóa tiếp theo.`,
+          {
+            jobId: job.id,
+            ...(job.projectId ? { projectId: job.projectId } : {}),
+            metadata: { encoder, master: input }
+          }
+        );
+      }
+    } finally {
+      release();
     }
     if (!completed) {
       await rm(pending, { force: true });

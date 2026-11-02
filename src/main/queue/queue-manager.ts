@@ -42,6 +42,7 @@ import {
   type AdaptiveDecision,
   type AdaptiveReason
 } from '@shared/utils/adaptive-download.js';
+import { diskBusyThresholdForDrives, type DiskKind } from '@shared/utils/disk-load.js';
 import { DiskBusyMonitor } from './disk-busy-monitor.js';
 import type { QueueRepository } from '../database/repositories/queue-repository.js';
 import type { ProjectRepository } from '../database/repositories/project-repository.js';
@@ -294,6 +295,12 @@ export class QueueManager {
   /** Trạng thái tệp cookies (số thế hệ lưu qua app, hash app ghi lần cuối) để biết cookies có THẬT SỰ đổi. */
   public setCookieJar(jar: CookieJarStore): void {
     this.cookieJar = jar;
+  }
+
+  /** 2026-11-02: loại ổ thật theo ký tự ổ (HDD/SSD) cho ngưỡng "ổ bận" của bộ tự tăng tốc; mặc định không rõ = mức cũ. */
+  private diskKindOf: (letter: string) => DiskKind = () => 'unknown';
+  public setDiskKindLookup(lookup: (letter: string) => DiskKind): void {
+    this.diskKindOf = lookup;
   }
   // TUBMEDIA DISK SPACE AUTO RECOVERY R28
   private readonly diskRecoveryChecks = new Map<string, number>();
@@ -1170,7 +1177,9 @@ export class QueueManager {
       bytesPerSecond,
       activeDownloads: downloads.length,
       demand,
-      diskBusyPercent: this.diskBusy.busiestOf(letters, now)
+      diskBusyPercent: this.diskBusy.busiestOf(letters, now),
+      // 2026-11-02: ổ HDD nghẽn sớm hơn SSD — ngưỡng theo loại ổ thật của các ổ đang ghi.
+      diskBusyThresholdPercent: diskBusyThresholdForDrives(letters, this.diskKindOf)
     });
     if (decision) this.logAdaptiveDecision(decision);
   }

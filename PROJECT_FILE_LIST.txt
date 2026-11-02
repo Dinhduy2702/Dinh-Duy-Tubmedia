@@ -335,6 +335,7 @@ src/main/security/open-path-policy.ts
 src/main/security/sender-validator.ts
 src/main/security/settings-policy.ts
 src/main/settings/defaults.ts
+src/main/settings/disk-kind-lookup.ts
 src/main/settings/hardware-service.ts
 src/main/settings/settings-service.ts
 src/main/storage/path-service.ts
@@ -466,6 +467,7 @@ src/shared/utils/concat-compatibility.ts
 src/shared/utils/cookie-policy.ts
 src/shared/utils/csv.ts
 src/shared/utils/diagnostic-policy.ts
+src/shared/utils/disk-load.ts
 src/shared/utils/disk-shortfall-format.ts
 src/shared/utils/download-failure.ts
 src/shared/utils/download-pacing.ts
@@ -618,6 +620,8 @@ tests/unit/fix6-diagnostics-ui.test.ts
 tests/unit/gitignore-secrets.test.ts
 tests/unit/hardware-cpu-count.test.ts
 tests/unit/hardware-recommendation.test.ts
+tests/unit/hdd-anti-lag-wiring.test.ts
+tests/unit/hdd-anti-lag.test.ts
 tests/unit/history-export.test.ts
 tests/unit/independent-workflow-accordion-1.3.0.test.ts
 tests/unit/inject-changelog-release-notes.test.ts
