@@ -93,7 +93,9 @@ export interface DownloadResult {
 export function isFinalDownloadForMediaId(fileName: string, mediaId: string): boolean {
   if (!/^[A-Za-z0-9_.-]{3,200}$/.test(mediaId)) return false;
   const escaped = mediaId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`\\[${escaped}\\]\\.(?:mp4|mkv|webm|mov|m4v)$`, 'i').test(fileName);
+  // 2026-11-02: tên tệp hiện nay là "<tiêu đề> [mã video] [LINK_…].mp4" — nhận cả mã liên kết đứng sau mã video (trước đây
+  // chỉ nhận "[mã video].mp4" nên cách dò dự phòng này không bao giờ khớp).
+  return new RegExp(`\\[${escaped}\\](?: \\[LINK_[A-F0-9]{12}\\])?\\.(?:mp4|mkv|webm|mov|m4v)$`, 'i').test(fileName);
 }
 
 export function isFinalDownloadForLinkTag(fileName: string, linkTag: string): boolean {
