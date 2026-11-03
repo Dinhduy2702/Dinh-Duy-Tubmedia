@@ -29,6 +29,7 @@ build-windows.bat
 build-windows.ps1
 CHANGED_FILES.md
 CHANGELOG.md
+CLAUDE.md
 DATABASE_MIGRATIONS.md
 DEVELOPMENT.md
 docs/ARCHITECTURE_DECISION.md
