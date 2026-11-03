@@ -1,3 +1,10 @@
+# Tubmedia 1.7.4
+
+- Sửa lỗi của bản 1.7.3: khi bật chế độ tương thích CapCut, danh sách tải có thể đứng yên ("cứ xoay, không tải"). Các video
+  đã tải xong phải xếp hàng tạo bản dựng CapCut từng cái một, trong lúc chờ vẫn giữ chỗ tải nên không video mới nào được tải.
+  Giờ bản dựng CapCut được tạo ngay khi video tải xong, số bản cùng lúc theo số chỗ tải tự tính theo máy của bạn; việc tạo bản
+  dựng vẫn chạy ở mức ưu tiên thấp để nhường máy cho việc bạn đang làm.
+
 # Tubmedia 1.7.3
 
 - Máy bớt lag khi tải vào ổ cứng cơ (HDD). Mọi mức đều tự dò theo máy của bạn (loại ổ thật, độ bận đo thật, số nhân CPU):
