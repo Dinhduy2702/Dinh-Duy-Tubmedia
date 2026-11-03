@@ -7,10 +7,8 @@ import {
   type AdaptiveSample
 } from '../../src/shared/utils/adaptive-download.js';
 import {
-  ConcurrencyGate,
   diskBusyThresholdForDrives,
-  diskBusyThresholdPercent,
-  editEncodeConcurrency
+  diskBusyThresholdPercent
 } from '../../src/shared/utils/disk-load.js';
 
 // 2026-11-02 (người dùng duyệt): máy lag khi Tubmedia tải vào ổ HDD — ổ E: (HDD) bận liên tục, bộ tự tăng tốc cứ ~5 phút lại
@@ -96,54 +94,5 @@ describe('ổ cứ bận lại → giãn dần thời gian chờ trước khi th
     const probes = simulate(controller, pauseEnd + 5_000, 30 * 60_000);
     expect(probes.length).toBeGreaterThanOrEqual(2);
     expect(probes[1]! - probes[0]!).toBeLessThanOrEqual(ADAPTIVE_CEILING_RESET_MS + 2 * ADAPTIVE_WINDOW_MS);
-  });
-});
-
-describe('số bản dựng CapCut mã hoá cùng lúc theo máy', () => {
-  it('ổ HDD hoặc ổ không rõ loại (ổ USB thường báo không rõ) → mỗi lúc 1 bản', () => {
-    expect(editEncodeConcurrency('hdd', 72)).toBe(1);
-    expect(editEncodeConcurrency('unknown', 72)).toBe(1);
-  });
-
-  it('SSD → theo số nhân CPU (máy yếu 1, máy nhiều nhân nhiều hơn, có trần)', () => {
-    expect(editEncodeConcurrency('ssd', 4)).toBe(1);
-    expect(editEncodeConcurrency('ssd', 8)).toBe(1);
-    expect(editEncodeConcurrency('ssd', 32)).toBe(2);
-    expect(editEncodeConcurrency('ssd', 72)).toBe(4);
-    expect(editEncodeConcurrency('ssd', 256)).toBe(4);
-  });
-});
-
-describe('ConcurrencyGate — xếp lượt theo giới hạn đổi được', () => {
-  it('giới hạn 1 → việc thứ hai chờ việc đầu xong', async () => {
-    const gate = new ConcurrencyGate();
-    const order: string[] = [];
-    const first = await gate.acquire('E', 1);
-    const secondPromise = gate.acquire('E', 1).then((release) => {
-      order.push('hai bắt đầu');
-      return release;
-    });
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(order).toEqual([]);
-    order.push('một xong');
-    first();
-    const second = await secondPromise;
-    expect(order).toEqual(['một xong', 'hai bắt đầu']);
-    second();
-  });
-
-  it('khác ổ thì không chờ nhau; hủy lúc đang chờ thì rời hàng', async () => {
-    const gate = new ConcurrencyGate();
-    const onE = await gate.acquire('E', 1);
-    const onC = await Promise.race([gate.acquire('C', 1), new Promise<null>((resolve) => setTimeout(() => resolve(null), 50))]);
-    expect(onC, 'ổ C không phải chờ ổ E').not.toBeNull();
-    const controller = new AbortController();
-    const waiting = gate.acquire('E', 1, controller.signal);
-    controller.abort();
-    await expect(waiting).rejects.toThrow();
-    onE();
-    const next = await gate.acquire('E', 1);
-    next();
-    onC?.();
   });
 });

@@ -43,6 +43,8 @@ let downloadedAudioCodec = 'aac';
 let ytdlpExt = 'mp4';
 let ffmpegCalls: string[][] = [];
 let ffmpegAvailable = false;
+/** 1.7.4: mỗi lần mã hoá bản CapCut chờ promise này trước khi xong (đo số bản chạy cùng lúc); null = xong ngay. */
+let encodeHold: (() => Promise<void>) | null = null;
 /** P4: tệp nào có luồng hình bị hụt (bộ phân tích giả trả luồng hình 468,9 s trong khi tiếng 522,3 s). */
 let shortVideo: (path: string) => boolean = () => false;
 /** P4: các dòng yt-dlp giả in ra stderr. */
@@ -170,6 +172,7 @@ beforeEach(() => {
   ytdlpExt = 'mp4';
   ffmpegCalls = [];
   ffmpegAvailable = false;
+  encodeHold = null;
   shortVideo = () => false;
   ytdlpStderrLines = [];
   toolsGet = vi.fn((name: string) =>
@@ -217,8 +220,12 @@ beforeEach(() => {
       if (options.tool === 'ffmpeg') {
         // ffmpeg giả: ghi tệp đích (tham số cuối) mang dấu AAC_MARK như thể đã chuyển tiếng sang AAC.
         ffmpegCalls.push(options.args);
-        writeFileSync(options.args.at(-1)!, Buffer.concat([Buffer.from(AAC_MARK), Buffer.alloc(4096, 5)]));
-        return Promise.resolve({ code: 0, stdoutTail: '', stderrTail: '' });
+        const finish = () => {
+          writeFileSync(options.args.at(-1)!, Buffer.concat([Buffer.from(AAC_MARK), Buffer.alloc(4096, 5)]));
+          return { code: 0, stdoutTail: '', stderrTail: '' };
+        };
+        if (encodeHold && options.args.some((arg) => arg.includes('.capcut-edit-'))) return encodeHold().then(finish);
+        return Promise.resolve(finish());
       }
       const template = options.args[options.args.indexOf('-o') + 1] ?? '';
       ytdlpOutputTemplates.push(template);
@@ -392,5 +399,36 @@ describe('Phần 2 — đã có bản CapCut cho đúng video gốc thì dùng l
     expect(encodes() - encodesAfterFirst).toBe(1);
     expect(result.outputPath).not.toBe(oldEdit);
     expect(ytdlpOutputTemplates).toHaveLength(1);
+  });
+});
+
+describe('Phần 3 (1.7.4) — tạo bản CapCut trên ổ HDD không bắt video đã tải xong phải đứng chờ', () => {
+  // Người dùng báo 2026-11-03 trên 1.7.3: app "cứ xoay, không tải". Đo thật: 3 video đã tải xong đứng chờ lượt mã hoá CapCut
+  // (HDD mỗi lúc 1 bản; bản HDR đang chạy > 14 phút), mỗi video vẫn giữ chỗ tải của danh sách → 0 lượt tải, mạng ≈ 0. Trong lúc
+  // chỉ mã hoá, ổ E: (HDD) bận 2–5% — mã hoá CapCut không phải thứ làm ổ nghẽn, nên không được xếp lượt theo ổ.
+  it('hai video tải xong trên ổ HDD → hai bản CapCut được tạo cùng lúc, không bản nào phải chờ bản kia', async () => {
+    let running = 0;
+    let peak = 0;
+    let releaseAll: () => void = () => undefined;
+    const allStarted = new Promise<void>((resolve) => (releaseAll = resolve));
+    encodeHold = async () => {
+      running += 1;
+      peak = Math.max(peak, running);
+      if (running >= 2) releaseAll();
+      await Promise.race([allStarted, new Promise((resolve) => setTimeout(resolve, 1_500))]);
+      running -= 1;
+    };
+    // App thật nối bộ tra loại ổ; giả lập ổ lưu là HDD (bản 1.7.3 dùng nó để xếp lượt mã hoá).
+    (engine as unknown as { setDiskKindLookup?: (lookup: (letter: string) => 'hdd') => void }).setDiskKindLookup?.(() => 'hdd');
+    const a = capcutSetup('HDD1', 'HDDGATE0001');
+    const b = capcutSetup('HDD2', 'HDDGATE0002');
+    const first = insertSource(a.project.id, a.url, 'youtube', 'HDDGATE0001');
+    const second = insertSource(b.project.id, b.url, 'youtube', 'HDDGATE0002');
+
+    await Promise.all([run(jobFor(a.project.id, first, 'download-only')), run(jobFor(b.project.id, second, 'download-only'))]);
+
+    expect(peak, 'hai bản CapCut chạy cùng lúc').toBe(2);
+    expect(editsIn(a.own)).toHaveLength(1);
+    expect(editsIn(b.own)).toHaveLength(1);
   });
 });
