@@ -5,7 +5,7 @@ import { cpus, freemem, totalmem } from 'node:os';
 import { rm, stat, statfs } from 'node:fs/promises';
 import { nearestExistingFolder } from '../files/disk-check-path.js';
 import { basename, dirname, join } from 'node:path';
-import type { AttentionNotice, JobType, LaneWaitState, QueueJob, RateLimitWaitState, ResourceProfile } from '@shared/types/domain.js';
+import type { AttentionNotice, JobType, LaneWaitState, MediaSource, Project, QueueJob, RateLimitWaitState, ResourceProfile } from '@shared/types/domain.js';
 import { IPC } from '@shared/contracts/channels.js';
 import { retryDelayMs } from '@shared/utils/retry.js';
 import { hasConfiguredCookies, isCookieBlockingCode } from '@shared/utils/cookie-policy.js';
@@ -1765,10 +1765,18 @@ export class QueueManager {
    * tải. Lỗi hẳn cũng xoá: bấm Thử lại sẽ tải lại từ đầu, đổi lại thư mục tạm không phình to theo thời gian.
    */
   private async cleanupVideoDownloadTemp(jobId: string): Promise<void> {
-    const job = this.repo.get(jobId);
-    if (!job || job.type !== 'download' || !job.projectId || !TERMINAL_JOB_STATUSES.has(job.status)) return;
-    const project = this.projects.get(job.projectId);
-    const source = job.sourceId ? this.sources.get(job.sourceId) : null;
+    let job: QueueJob | null;
+    let project: Project | null;
+    let source: MediaSource | null;
+    try {
+      job = this.repo.get(jobId);
+      if (!job || job.type !== 'download' || !job.projectId || !TERMINAL_JOB_STATUSES.has(job.status)) return;
+      project = this.projects.get(job.projectId);
+      source = job.sourceId ? this.sources.get(job.sourceId) : null;
+    } catch {
+      // Chạy nền sau khi tác vụ kết thúc: CSDL có thể vừa đóng (tắt app). Dọn tệp tạm chỉ là việc phụ — lần quét sau sẽ dọn.
+      return;
+    }
     if (!project || !source) return;
     let linkTag: string;
     try {

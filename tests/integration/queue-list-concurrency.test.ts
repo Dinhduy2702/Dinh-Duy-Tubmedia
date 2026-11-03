@@ -438,3 +438,14 @@ describe('Đề xuất A — tự tận dụng phần trống', () => {
     expect(stub.noteThrottled).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('dọn tệp tạm của video khi CSDL đã đóng (lượt Publish 1.7.4 trượt vì lỗi lọt ra ngoài)', () => {
+  // Tác vụ kết thúc → dọn tệp tạm chạy nền (void). Nếu lúc đó CSDL vừa đóng (tắt app, hoặc bài kiểm đã dọn dẹp — máy GitHub
+  // chậm nên lộ ra), bước đọc tác vụ đầu hàm ném "database is not open" thành lỗi không ai bắt.
+  it('CSDL đã đóng → dọn tệp tạm bỏ qua êm, không ném lỗi', async () => {
+    const cleanup = (manager as unknown as { cleanupVideoDownloadTemp: (jobId: string) => Promise<void> }).cleanupVideoDownloadTemp.bind(manager);
+    database.close();
+    await expect(cleanup('tac-vu-bat-ky')).resolves.toBeUndefined();
+    database = new AppDatabase(join(folder, 'reopen.sqlite'));
+  });
+});
