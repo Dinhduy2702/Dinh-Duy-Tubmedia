@@ -75,6 +75,28 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - Do not kill CapCut, Chrome, or yt-dlp by name. Do not delete user files without an explicit choice. Ask before taking
   real mouse/keyboard control.
 
+## 6. Required format for EVERY change (user-approved 2026-11-03)
+
+Applies to code, files on disk, settings — anything.
+1. **Check first, read-only.** Measure or dry-run; list exactly what will be touched (count, size, which items).
+2. **Protect automatically.** Keep anything still in use (e.g. files referenced by CapCut drafts). If a safety condition
+   fails (Tubmedia or CapCut open, disk busy), stop and say so — never force.
+3. **Confirm.** Anything hard to undo needs the user's own typed confirmation. Prefer reversible actions (Recycle Bin).
+4. **Do it, then re-verify.** Re-run the same check afterwards (0 left / tests green / measurement passes).
+5. **Report** in short plain Vietnamese: result in numbers, what was kept and why, caveats, next step. Record in
+   `C:\Users\Hi\Tubmedia-anh-so-sanh\TIEN_DO.md`.
+
+For code: audit + measure the whole pipeline → plan with success criteria → failing test → fix → full check →
+weak-machine e2e → live measurement → report. No piecemeal fixes.
+
+### Before asking the user to confirm a release, measure on the user's machine and report all of:
+- While 2 download lists run and CapCut copies are being made, measured together: CPU, disk busy %, download speed, GPU
+  memory, number of active downloads.
+- Pass only if: average CPU < 60 %, downloads keep running while encoding, no disk stuck at 100 % for long.
+- Any change to video encoding: SSIM ≥ 0.98 vs the previous output on an HDR, an SDR, a fast-motion and a dark clip, plus a
+  visual check.
+- Never call YouTube manually while the machine is rate-limited (429 / bot check); use saved data or wait.
+
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
