@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -45,6 +45,8 @@ let ffmpegCalls: string[][] = [];
 let ffmpegAvailable = false;
 /** 1.7.4: mỗi lần mã hoá bản CapCut chờ promise này trước khi xong (đo số bản chạy cùng lúc); null = xong ngay. */
 let encodeHold: (() => Promise<void>) | null = null;
+/** 1.7.5: thông số hình của tệp yt-dlp giả tải về (tệp ffmpeg giả mã hoá ra luôn là H.264 1080p chuẩn). null = H.264 1080p. */
+let downloadedVideo: Partial<MediaInfo> | null = null;
 /** P4: tệp nào có luồng hình bị hụt (bộ phân tích giả trả luồng hình 468,9 s trong khi tiếng 522,3 s). */
 let shortVideo: (path: string) => boolean = () => false;
 /** P4: các dòng yt-dlp giả in ra stderr. */
@@ -173,6 +175,7 @@ beforeEach(() => {
   ffmpegCalls = [];
   ffmpegAvailable = false;
   encodeHold = null;
+  downloadedVideo = null;
   shortVideo = () => false;
   ytdlpStderrLines = [];
   toolsGet = vi.fn((name: string) =>
@@ -194,6 +197,9 @@ beforeEach(() => {
           ? { ...mediaInfo(4096), audioCodec: null, audioBitrate: null, sampleRate: null, channels: null, channelLayout: null }
           : {
               ...mediaInfo(4096),
+              ...(downloadedVideo && !(existsSync(path) && readFileSync(path).subarray(0, 4).toString() === AAC_MARK)
+                ? downloadedVideo
+                : {}),
               audioCodec: audioCodecOf(path),
               videoStreamDuration: shortVideo(path) ? 468.9 : 522.2,
               audioStreamDuration: 522.3
@@ -430,5 +436,93 @@ describe('Phần 3 (1.7.4) — tạo bản CapCut trên ổ HDD không bắt vid
     expect(peak, 'hai bản CapCut chạy cùng lúc').toBe(2);
     expect(editsIn(a.own)).toHaveLength(1);
     expect(editsIn(b.own)).toHaveLength(1);
+  });
+});
+
+describe('Phần 4 (1.7.5) — "CapCut trực tiếp": mỗi video MỘT tệp', () => {
+  // Người dùng 2026-11-03: "TÔI KHÔNG MUỐN CÓ 1 LÚC 2 VIDEO GIỐNG NHAU ĐỂ NÓ CHIẾM DUNG LƯỢNG Ổ MÁY TÔI". Chọn "Tải thẳng bản
+  // CapCut": tệp tải về đạt chuẩn thì giữ nguyên (không mã hoá), chưa đạt thì mã hoá một lần rồi THAY tệp gốc.
+  const encodes = (): string[][] => ffmpegCalls.filter((args) => args.some((arg) => arg.includes('.capcut-edit-')));
+  const oneFileSetup = (name: string, id: string) => {
+    const setup = capcutSetup(name, id);
+    settings = { ...settings, downloadCompatibilityMode: 'capcut_sdr_1080p', downloadEditCopyMode: 'off' };
+    return setup;
+  };
+
+  it('tải về đã là H.264 1080p SDR → không mã hoá, chỉ 1 tệp', async () => {
+    const { own, url, project } = oneFileSetup('ONE1', 'ONEFILE0001');
+    const sourceId = insertSource(project.id, url, 'youtube', 'ONEFILE0001');
+
+    const result = await run(jobFor(project.id, sourceId, 'download-only'));
+
+    expect(encodes(), 'không mã hoá lại hình').toHaveLength(0);
+    expect(mp4s(own)).toHaveLength(1);
+    expect(editsIn(own)).toHaveLength(0);
+    expect(result.outputPath).toBe(join(own, mp4s(own)[0]!));
+  });
+
+  it('tải về là VP9 4K → mã hoá MỘT lần rồi thay tệp gốc: vẫn chỉ 1 tệp, đúng tên gốc', async () => {
+    downloadedVideo = { videoCodec: 'vp9', width: 3840, height: 2160, pixelFormat: 'yuv420p' };
+    const { own, url, project } = oneFileSetup('ONE2', 'ONEFILE0002');
+    const sourceId = insertSource(project.id, url, 'youtube', 'ONEFILE0002');
+
+    const result = await run(jobFor(project.id, sourceId, 'download-only'));
+
+    expect(encodes()).toHaveLength(1);
+    expect(readdirSync(own).filter((name) => /.(mp4|mkv|webm)$/i.test(name)), 'không còn bản thứ hai, không còn tệp dở').toHaveLength(1);
+    expect(editsIn(own)).toHaveLength(0);
+    expect(basename(result.outputPath)).toMatch(/[ID_TAI_LAI].*.mp4$/);
+    const args = encodes()[0]!;
+    expect(args.indexOf('-threads'), 'giới hạn luồng giải mã đặt trước -i').toBeLessThan(args.indexOf('-i'));
+    expect(sources.get(sourceId)?.sourceFile).toBe(result.outputPath);
+  });
+
+  it('tải về là MKV (VP9) → còn đúng 1 tệp .mp4, tệp .mkv gốc được bỏ', async () => {
+    downloadedVideo = { videoCodec: 'vp9', width: 3840, height: 2160, formatName: 'matroska,webm' };
+    ytdlpExt = 'mkv';
+    const { own, url, project } = oneFileSetup('ONE3', 'ONEFILE0003');
+    const sourceId = insertSource(project.id, url, 'youtube', 'ONEFILE0003');
+
+    await run(jobFor(project.id, sourceId, 'download-only'));
+
+    const videos = readdirSync(own).filter((name) => /.(mp4|mkv|webm)$/i.test(name));
+    expect(videos).toHaveLength(1);
+    expect(videos[0]).toMatch(/.mp4$/);
+  });
+
+  it('dọn tệp mã hoá dở cũ (app tắt giữa chừng) cạnh video; tệp đang được ghi (mới) thì giữ', async () => {
+    const { own } = oneFileSetup('ONE4', 'ONEFILE0004');
+    const master = join(own, 'Video [ONEFILE0004] [LINK_AAAAAAAAAAAA].mp4');
+    writeVideo(master);
+    const stale = join(own, 'Video [ONEFILE0004] [LINK_AAAAAAAAAAAA].capcut-edit-1793585085879.pending.mp4');
+    const fresh = join(own, 'Video [ONEFILE0004] [LINK_AAAAAAAAAAAA].capcut-edit-1793689010422.pending.mp4');
+    writeVideo(stale);
+    writeVideo(fresh);
+    const old = new Date(Date.now() - 60 * 60 * 1000);
+    utimesSync(stale, old, old);
+
+    await (engine as unknown as { removeStalePendingEditCopies: (input: string, job: QueueJob) => Promise<void> }).removeStalePendingEditCopies(
+      master,
+      jobFor('p', 's', 'download-only')
+    );
+
+    expect(existsSync(stale)).toBe(false);
+    expect(existsSync(fresh)).toBe(true);
+    expect(existsSync(master)).toBe(true);
+  });
+
+  it('chế độ 2 tệp: bản gốc đã bị dọn, chỉ còn bản CapCut → dán lại link (danh sách khác) KHÔNG tải lại', async () => {
+    const { own, url, project } = capcutSetup('TWO1', 'TWOFILE0001');
+    const first = insertSource(project.id, url, 'youtube', 'TWOFILE0001');
+    await run(jobFor(project.id, first, 'download-only'));
+    for (const name of mastersIn(own)) rmSync(join(own, name));
+    const edit = join(own, editsIn(own)[0]!);
+    const other = makeProject('Danh sách dán lại', own);
+    const second = insertSource(other.id, url, 'youtube', 'TWOFILE0001');
+
+    const result = await run(jobFor(other.id, second, 'download-only'));
+
+    expect(ytdlpOutputTemplates, 'không gọi yt-dlp lần hai').toHaveLength(1);
+    expect(result).toMatchObject({ skipped: true, outputPath: edit });
   });
 });

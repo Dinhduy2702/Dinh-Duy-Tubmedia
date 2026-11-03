@@ -33,9 +33,25 @@ check(
 check(method.includes("'-fps_mode'") && method.includes("'cfr'"), 'CapCut edit copy uses constant frame rate');
 check(method.includes("'-force_key_frames'") && method.includes('n_forced*1'), 'CapCut edit copy uses one-second seek-friendly GOPs');
 check(method.includes("'yuv420p'") && method.includes("'avc1'"), 'CapCut edit copy uses H.264 8-bit compatibility tags');
-check(method.includes('requiresHdrToneMap') && method.includes('tonemap=hable'), 'HDR is tone-mapped only in the SDR edit copy');
-check(!/await\s+rm\(input\b/.test(method), 'CapCut method never deletes the master input');
-check(!/await\s+rename\(input\b/.test(method), 'CapCut method never replaces the master input');
+// 1.7.5: chuỗi lọc nằm trong capcut-encode.ts (HDR thu nhỏ trước khi chuyển màu); hàm tạo bản CapCut dùng nó.
+const capcutEncode = text('src/shared/utils/capcut-encode.ts');
+check(
+  method.includes('capCutFilterChain(plan, info)') &&
+    capcutEncode.includes('requiresHdrToneMap') &&
+    capcutEncode.includes('tonemap=hable'),
+  'HDR is tone-mapped only in the SDR edit copy'
+);
+// 1.7.5 (người dùng chọn "mỗi video một tệp" 2026-11-03): CHỈ nhánh một tệp — và chỉ khi tệp gốc không là nguồn của danh sách
+// khác — được thay tệp gốc. Chế độ 2 tệp (bản gốc + bản CapCut) vẫn không bao giờ xoá/thay bản gốc.
+const oneFileStart = method.indexOf('if (oneFile && !sharedWithOtherList) {');
+const oneFileEnd = oneFileStart >= 0 ? method.indexOf('return committed;', oneFileStart) : -1;
+const outsideOneFile = oneFileStart >= 0 && oneFileEnd > oneFileStart ? method.slice(0, oneFileStart) + method.slice(oneFileEnd) : method;
+check(!/await\s+rm\(input\b/.test(outsideOneFile), 'CapCut method never deletes the master input');
+check(!/await\s+rename\(input\b/.test(outsideOneFile), 'CapCut method never replaces the master input');
+check(
+  oneFileStart < 0 || method.includes('this.sources.othersUsingFile(input, job.sourceId)'),
+  'one-file mode never replaces a master that another list uses'
+);
 check(method.includes('ADAPTIVE_SETTINGS_HOTFIX8_EDIT_PLAN'), 'edit policy is independent from source selection');
 check(
   defaults.includes("downloadCompatibilityMode: 'source'") &&

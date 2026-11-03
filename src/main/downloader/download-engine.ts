@@ -48,6 +48,7 @@ import type { ProjectRepository } from '../database/repositories/project-reposit
 import type { Logger } from '../logging/logger.js';
 import { ensureDirectory } from '../files/ensure-directory.js';
 import { commitFileWithoutOverwrite, nonConflictingPath } from '../files/non-conflicting-path.js';
+import { capCutFilterChain, isCapCutOneFileMode } from '@shared/utils/capcut-encode.js';
 import { ensureTubmediaOwnedDirectory, isReservedTubmediaDirectory } from '../files/file-ownership.js';
 import type { FileVerifier } from '../media/file-verifier.js';
 import type { MediaAnalyzer } from '../media/media-analyzer.js';
@@ -95,13 +96,17 @@ export function isFinalDownloadForMediaId(fileName: string, mediaId: string): bo
   const escaped = mediaId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   // 2026-11-02: tên tệp hiện nay là "<tiêu đề> [mã video] [LINK_…].mp4" — nhận cả mã liên kết đứng sau mã video (trước đây
   // chỉ nhận "[mã video].mp4" nên cách dò dự phòng này không bao giờ khớp).
-  return new RegExp(`\\[${escaped}\\](?: \\[LINK_[A-F0-9]{12}\\])?\\.(?:mp4|mkv|webm|mov|m4v)$`, 'i').test(fileName);
+  // 1.7.5: nhận cả bản CapCut "….capcut-edit-<thời điểm>.mp4" — sau khi dọn bản gốc trùng chỉ còn bản này, dán lại link không
+  // được tải lại. Bản gốc còn thì vẫn được chọn trước (điểm xếp hạng trong findExisting…).
+  return new RegExp(`\\[${escaped}\\](?: \\[LINK_[A-F0-9]{12}\\])?(?:\\.capcut-edit-\\d+)?\\.(?:mp4|mkv|webm|mov|m4v)$`, 'i').test(
+    fileName
+  );
 }
 
 export function isFinalDownloadForLinkTag(fileName: string, linkTag: string): boolean {
   if (!/^LINK_[A-F0-9]{12}$/.test(linkTag)) return false;
   const escaped = linkTag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`\\[${escaped}\\]\\.(?:mp4|mkv|webm|mov|m4v)$`, 'i').test(fileName);
+  return new RegExp(`\\[${escaped}\\](?:\\.capcut-edit-\\d+)?\\.(?:mp4|mkv|webm|mov|m4v)$`, 'i').test(fileName);
 }
 
 /** Bản dựng CapCut Tubmedia tạo cạnh video gốc: "<tên gốc>.capcut-edit-<thời điểm>.mp4". */
@@ -125,6 +130,17 @@ export function backgroundEncodePriority(priority: ProcessPriority): ProcessPrio
   return priority === 'idle' ? 'idle' : 'below_normal';
 }
 
+/** 1.7.5: hàng đợi cấp lượt mã hoá CapCut — trả chỗ tải ngay, chờ tới khi dưới trần theo CPU; trả về hàm nhả lượt. */
+export type EncodeSlotProvider = (
+  job: QueueJob,
+  threadsPerEncode: number,
+  signal: AbortSignal,
+  onWaiting: () => void
+) => Promise<() => void>;
+
+/** Tệp mã hoá dở bị bỏ lại quá lâu (app tắt/khởi động lại giữa chừng) — đang mã hoá thì tệp luôn được ghi tiếp. */
+const STALE_PENDING_EDIT_MS = 10 * 60 * 1000;
+
 export class DownloadEngine {
   private readonly cookieRequiredJobs = new Set<string>();
   /** S2: tác vụ đã gặp tệp có sẵn đang được danh sách khác dùng — lượt tải lại phải ghi ra tệp mới tên khác. */
@@ -136,6 +152,41 @@ export class DownloadEngine {
   private cookieJar: CookieJarStore | null = null;
 
   /** yt-dlp nhận bản sao tạm của tệp cookies cho mỗi lượt (xem cookie-jar-store.ts). */
+  private encodeSlotProvider: EncodeSlotProvider | null = null;
+
+  /** Chưa đặt (bài kiểm, công cụ khác) → mã hoá ngay như trước. */
+  public setEncodeSlotProvider(provider: EncodeSlotProvider): void {
+    this.encodeSlotProvider = provider;
+  }
+
+  /**
+   * 1.7.5: xoá tệp mã hoá dở "<tên>.capcut-edit-<thời điểm>.pending.mp4" cạnh video mà lần trước bỏ lại (app tắt hoặc khởi
+   * động lại giữa lúc mã hoá — đo thật 2026-11-03: 15 tệp, 10,4 GB). Chỉ xoá tệp không được ghi trong 10 phút gần đây.
+   */
+  private async removeStalePendingEditCopies(input: string, job: QueueJob): Promise<void> {
+    const folder = dirname(input);
+    const extension = extname(input);
+    const prefix = `${basename(input, extension)}.capcut-edit-`;
+    let entries;
+    try {
+      entries = await readdir(folder, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.startsWith(prefix) || !/\.capcut-edit-\d+\.pending\.mp4$/i.test(entry.name)) continue;
+      const path = join(folder, entry.name);
+      const modified = await stat(path).then((value) => value.mtimeMs).catch(() => Date.now());
+      if (Date.now() - modified < STALE_PENDING_EDIT_MS) continue;
+      await rm(path, { force: true }).catch(() => undefined);
+      this.logger.info('cleanup', 'CAPCUT_STALE_PENDING_REMOVED', `Đã xoá tệp mã hoá dở bị bỏ lại: ${entry.name}.`, {
+        jobId: job.id,
+        ...(job.projectId ? { projectId: job.projectId } : {}),
+        metadata: { path }
+      });
+    }
+  }
+
   public setCookieJar(jar: CookieJarStore): void {
     this.cookieJar = jar;
   }
@@ -472,7 +523,8 @@ export class DownloadEngine {
     resource: ResourceProfile,
     signal: AbortSignal,
     onProgress: (progress: DownloadProgress) => void,
-    forceFaststart: boolean
+    forceFaststart: boolean,
+    freshDownload = false
   ): Promise<string> {
     // HDR_CAPCUT_HOTFIX7_MASTER_PRESERVED
     const info = await this.analyzer.analyze(input, job.id);
@@ -485,6 +537,20 @@ export class DownloadEngine {
     const plan = planCapCutCompatibility(editSettings, info);
     if (!plan.active || !plan.maxHeight) return input;
     if (!forceFaststart && isCapCutEditCopy(input)) return input;
+    // 1.7.5 (người dùng chọn 2026-11-03): "CapCut trực tiếp" = MỘT tệp. Tệp tải về đã đạt (H.264, yuv420p, SDR, trong khung,
+    // ≤ 60 FPS) thì không mã hoá lại hình — chỉ đóng gói MP4 / đổi tiếng sang AAC khi cần (nhẹ, hình giữ nguyên).
+    const oneFile = isCapCutOneFileMode(appSettings);
+    if (oneFile && !plan.needsVideoTranscode) {
+      return this.remuxToPreferredContainer(
+        job,
+        input,
+        { ...appSettings, downloadContainerPreference: 'mp4' },
+        resource,
+        signal,
+        onProgress,
+        freshDownload
+      );
+    }
     // 2026-11-02: dán lại link đã tải → trước đây mã hoá lại bản CapCut từ đầu (vài phút, thêm một tệp ~1 GB mỗi lần) dù bản
     // cũ còn nguyên. Tệp vừa tải mới (forceFaststart) không dùng lại — bản CapCut cạnh nó có thể làm từ bản gốc cũ.
     if (!forceFaststart) {
@@ -531,28 +597,14 @@ export class DownloadEngine {
     const output = `${stem}.capcut-edit-${Date.now()}.mp4`;
     const pending = output.replace(/\.mp4$/i, '.pending.mp4');
     await rm(pending, { force: true });
+    await this.removeStalePendingEditCopies(input, job);
 
-    const filters: string[] = [];
-    if (plan.requiresHdrToneMap) {
-      filters.push(
-        'zscale=t=linear:npl=100',
-        'format=gbrpf32le',
-        'tonemap=hable:desat=0',
-        'zscale=p=bt709:t=bt709:m=bt709:r=tv'
-      );
-    } else if (plan.requiresColorConversion) {
-      filters.push('zscale=p=bt709:t=bt709:m=bt709:r=tv');
-    }
-    if (info.height > plan.maxHeight + 2) {
-      const maxWidth = plan.maxHeight === 1440 ? 2560 : 1920;
-      filters.push(
-        `scale=w='min(iw,${maxWidth})':h='min(ih,${plan.maxHeight})':force_original_aspect_ratio=decrease:force_divisible_by=2`
-      );
-    }
-    if (info.fps > 60.5) filters.push('fps=60');
-    filters.push('setsar=1', 'format=yuv420p');
+    // 1.7.5: HDR cần thu nhỏ thì thu nhỏ trước khi chuyển màu (nhanh ~3 lần, SSIM 0,993); SDR giữ chuỗi cũ.
+    const filters = capCutFilterChain(plan, info);
 
-    const stageLabel = plan.requiresHdrToneMap
+    const stageLabel = oneFile
+      ? 'Đang chuyển video sang chuẩn CapCut (H.264, SDR) — vẫn chỉ giữ một tệp'
+      : plan.requiresHdrToneMap
       ? 'Đang giữ bản master HDR và tạo bản edit SDR BT.709 mượt cho CapCut'
       : 'Đang giữ bản master và tạo bản edit H.264 CFR mượt cho CapCut';
     onProgress({
@@ -584,13 +636,28 @@ export class DownloadEngine {
     let completed = false;
     let usedEncoder = '';
     let lastError = '';
-    // 1.7.4: không xếp lượt mã hoá theo ổ. Video chờ lượt vẫn giữ chỗ tải của danh sách → danh sách đứng (ca thật 2026-11-03);
-    // đo thật: chỉ mã hoá thì ổ HDD bận 2–5%. Số bản cùng lúc đã bị giới hạn bởi số chỗ tải; FFmpeg chạy ưu tiên thấp.
+    // 1.7.5: xin lượt mã hoá từ hàng đợi — trả chỗ tải cho video khác, trần số bản theo CPU máy đang chạy (queue-manager).
+    const release = this.encodeSlotProvider
+      ? await this.encodeSlotProvider(job, resource.ffmpegThreads, signal, () =>
+          onProgress({
+            percent: 0,
+            speed: null,
+            etaSeconds: null,
+            stage: 'processing',
+            stageLabel: `${stageLabel} — đang chờ lượt (máy chỉ mã hoá vài video cùng lúc để không bị lag)`,
+            elapsedSeconds: 0
+          })
+        )
+      : () => undefined;
+    try {
     for (const encoder of encoderCandidates) {
       await rm(pending, { force: true });
       const args = [
         '-hide_banner',
         '-y',
+        // 1.7.5: giới hạn luồng GIẢI MÃ (trước đây tự dùng mọi nhân — AV1 4K ăn 12+ nhân); đo thật: tốc độ như cũ.
+        '-threads',
+        String(resource.ffmpegThreads),
         '-i',
         input,
         '-map',
@@ -694,6 +761,12 @@ export class DownloadEngine {
         }
       );
     }
+    } catch (error) {
+      await rm(pending, { force: true });
+      throw error;
+    } finally {
+      release();
+    }
     if (!completed) {
       await rm(pending, { force: true });
       throw new DownloadFailedError(
@@ -715,6 +788,40 @@ export class DownloadEngine {
         false,
         { failureSubtype: 'edit_copy_failed' }
       );
+    }
+
+    // 1.7.5: một tệp — bản đạt chuẩn THAY tệp gốc (cùng tên, đuôi .mp4). Tệp gốc đang là nguồn của danh sách khác thì giữ
+    // (không làm hỏng danh sách đó) và để bản CapCut cạnh nó như chế độ 2 tệp.
+    const sharedWithOtherList = job.sourceId ? this.sources.othersUsingFile(input, job.sourceId).length > 0 : false;
+    if (oneFile && !sharedWithOtherList) {
+      const target = `${stem}.mp4`;
+      let committed: string;
+      if (resolve(target) === resolve(input)) {
+        const original = `${stem}.tubmedia-${job.id}.original${extension}`;
+        await rename(input, original);
+        try {
+          await rename(pending, input);
+        } catch (error) {
+          await rename(original, input);
+          throw error;
+        }
+        await rm(original, { force: true });
+        committed = input;
+      } else {
+        committed = await commitFileWithoutOverwrite(pending, target);
+        await rm(input, { force: true });
+      }
+      this.logger.info(
+        'download',
+        'CAPCUT_ONE_FILE_REPLACED',
+        `Đã chuyển ${basename(input)} sang chuẩn CapCut bằng ${usedEncoder} và chỉ giữ một tệp: ${basename(committed)}.`,
+        {
+          jobId: job.id,
+          ...(job.projectId ? { projectId: job.projectId } : {}),
+          metadata: { input, output: committed, encoder: usedEncoder, mode: plan.mode, reasons: plan.reasons }
+        }
+      );
+      return committed;
     }
 
     await rename(pending, output);
@@ -747,7 +854,7 @@ export class DownloadEngine {
       isCapCutDownloadMode(appSettings.downloadCompatibilityMode) ||
       (appSettings.downloadEditCopyMode ?? 'off') !== 'off'
     ) {
-      return this.makeCapCutCompatible(job, input, appSettings, resource, signal, onProgress, forceFaststart);
+      return this.makeCapCutCompatible(job, input, appSettings, resource, signal, onProgress, forceFaststart, freshDownload);
     }
     return this.remuxToPreferredContainer(job, input, appSettings, resource, signal, onProgress, freshDownload);
   }
@@ -807,7 +914,7 @@ export class DownloadEngine {
       .map((entry) => join(folder, entry.name))
       .sort((left, right) => {
         const score = (path: string): number =>
-          path.toLowerCase().endsWith('.mp4') ? 3 : path.toLowerCase().endsWith('.mkv') ? 2 : 1;
+          isCapCutEditCopy(path) ? 0 : path.toLowerCase().endsWith('.mp4') ? 3 : path.toLowerCase().endsWith('.mkv') ? 2 : 1;
         return score(right) - score(left);
       });
 
@@ -852,7 +959,7 @@ export class DownloadEngine {
       .map((entry) => join(folder, entry.name))
       .sort((left, right) => {
         const score = (path: string): number =>
-          path.toLowerCase().endsWith('.mp4') ? 3 : path.toLowerCase().endsWith('.mkv') ? 2 : 1;
+          isCapCutEditCopy(path) ? 0 : path.toLowerCase().endsWith('.mp4') ? 3 : path.toLowerCase().endsWith('.mkv') ? 2 : 1;
         return score(right) - score(left);
       });
 

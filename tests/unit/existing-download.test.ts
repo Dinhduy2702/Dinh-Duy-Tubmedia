@@ -14,11 +14,15 @@ describe('nhận diện video đã tải theo ID nguồn', () => {
 
   // 2026-11-02 (người dùng báo dán lại link bị tải lại): tên tệp hiện nay là "<tiêu đề> [mã video] [LINK_…].mp4" — cách dò dự
   // phòng theo mã video (dùng khi mã link khác, ví dụ link dán dạng khác) trước đây KHÔNG BAO GIỜ khớp tên này.
-  it('nhận tên tệp hiện tại "[mã video] [LINK_…].mp4"; không nhận bản CapCut hay tệp tạm', () => {
+  it('nhận tên tệp hiện tại "[mã video] [LINK_…].mp4" và bản CapCut (1.7.5); không nhận tệp tạm hay bản CapCut làm dở', () => {
     expect(isFinalDownloadForMediaId('Video [REPASTE0001] [LINK_2860A8CE4CE0].mp4', 'REPASTE0001')).toBe(true);
     expect(isFinalDownloadForMediaId('Video [REPASTE0001] [LINK_2860A8CE4CE0].mkv', 'REPASTE0001')).toBe(true);
     expect(isFinalDownloadForMediaId('Video [REPASTE0001] [LINK_2860A8CE4CE0].mp4', 'OTHER000001')).toBe(false);
-    expect(isFinalDownloadForMediaId('Video [REPASTE0001] [LINK_2860A8CE4CE0].capcut-edit-1793589429019.mp4', 'REPASTE0001')).toBe(false);
+    // 1.7.5 (người dùng duyệt dọn bản gốc trùng 2026-11-03): chỉ còn bản CapCut thì vẫn là video đã có — không tải lại.
+    expect(isFinalDownloadForMediaId('Video [REPASTE0001] [LINK_2860A8CE4CE0].capcut-edit-1793589429019.mp4', 'REPASTE0001')).toBe(true);
+    expect(
+      isFinalDownloadForMediaId('Video [REPASTE0001] [LINK_2860A8CE4CE0].capcut-edit-1793589429019.pending.mp4', 'REPASTE0001')
+    ).toBe(false);
     expect(isFinalDownloadForMediaId('Video [REPASTE0001] [LINK_2860A8CE4CE0].f270.mp4.part', 'REPASTE0001')).toBe(false);
     expect(isFinalDownloadForMediaId('Video [REPASTE0001] [ghi chú].mp4', 'REPASTE0001')).toBe(false);
   });

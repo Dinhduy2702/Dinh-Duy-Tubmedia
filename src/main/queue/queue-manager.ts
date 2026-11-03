@@ -59,7 +59,8 @@ import {
   DEFAULT_LOAD_GOVERNOR_SUSTAINED_MS,
   defaultLowPercentFor
 } from './system-load-governor.js';
-import { InvalidInputError, ProcessingFailedError, type AppError } from '@shared/errors/app-errors.js';
+import { InvalidInputError, ProcessCancelledError, ProcessingFailedError, type AppError } from '@shared/errors/app-errors.js';
+import { editEncodeLimit } from '@shared/utils/capcut-encode.js';
 import { buildCleanupProtection } from '../files/cleanup-protection.js';
 import { cleanupTemporaryArtifacts } from '../files/temporary-cleanup.js';
 import { sanitizeNullableSeconds, sanitizeProgress } from '@shared/utils/progress-policy.js';
@@ -248,6 +249,9 @@ function progressPhases(
 
   return [...map.values()].sort((a, b) => PHASE_ORDER.indexOf(a.key) - PHASE_ORDER.indexOf(b.key)).slice(-9);
 }
+/** 1.7.5: chỉ mở thêm bản mã hoá CapCut khi CPU toàn máy dưới mức này (người dùng còn chỗ làm việc). */
+const ENCODE_START_CPU_MAX_PERCENT = 50;
+
 export class QueueManager {
   private readonly active = new Map<string, ActiveJob>();
   private readonly sourceLocks = new Set<string>();
@@ -282,6 +286,16 @@ export class QueueManager {
   private adaptiveSampleAt = 0;
   private tempSweepTimer: NodeJS.Timeout | null = null;
   private globalDownloadCapOverride: number | null = null;
+  /**
+   * 1.7.5 (đo thật 2026-11-03): tác vụ tải đã sang bước mã hoá bản CapCut — KHÔNG còn giữ chỗ tải (trước đây giữ → mọi chỗ đang
+   * mã hoá thì 0 lượt tải). Số bản mã hoá cùng lúc có trần theo CPU máy đang chạy (editEncodeLimit) và chỉ mở thêm khi CPU còn
+   * rảnh (người dùng không đang dùng máy nặng).
+   */
+  private readonly encodingJobs = new Set<string>();
+  private readonly encodeWaiters: string[] = [];
+  private encodesRunning = 0;
+  private editEncodeLimitOverride: number | null = null;
+  private lastCpuPercent = 0;
   private startupReadyResolve: (() => void) | null = null;
   private readonly startupReady = new Promise<void>((resolve) => {
     this.startupReadyResolve = resolve;
@@ -326,7 +340,53 @@ export class QueueManager {
     private readonly processes: ProcessManager,
     private readonly logger: Logger,
     private readonly canExecute: () => boolean = () => true
-  ) {}
+  ) {
+    // Bộ tải giả trong bài kiểm khác không có hàm này → giữ cách chạy cũ.
+    (this.downloader as Partial<Pick<DownloadEngine, 'setEncodeSlotProvider'>>).setEncodeSlotProvider?.(
+      (job, threads, signal, onWaiting) => this.acquireEncodeSlot(job, threads, signal, onWaiting)
+    );
+  }
+
+  /** Tác vụ tải đang giữ chỗ tải (đã sang bước mã hoá CapCut thì không). */
+  private holdsDownloadSlot(job: QueueJob): boolean {
+    return job.type === 'download' && !this.encodingJobs.has(job.id);
+  }
+
+  /** 1.7.5: xin lượt mã hoá bản CapCut — trả chỗ tải ngay, chờ theo thứ tự tới khi dưới trần và CPU còn rảnh. */
+  private async acquireEncodeSlot(
+    job: QueueJob,
+    threadsPerEncode: number,
+    signal: AbortSignal,
+    onWaiting: () => void
+  ): Promise<() => void> {
+    this.encodingJobs.add(job.id);
+    this.encodeWaiters.push(job.id);
+    this.scheduleTick(0);
+    let notified = false;
+    try {
+      for (;;) {
+        if (signal.aborted) throw new ProcessCancelledError();
+        const limit = this.editEncodeLimitOverride ?? editEncodeLimit(cpus().length, threadsPerEncode);
+        const cpuRoom = this.encodesRunning === 0 || this.lastCpuPercent < ENCODE_START_CPU_MAX_PERCENT;
+        if (this.encodeWaiters[0] === job.id && this.encodesRunning < limit && cpuRoom) break;
+        if (!notified) {
+          notified = true;
+          onWaiting();
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    } finally {
+      const index = this.encodeWaiters.indexOf(job.id);
+      if (index >= 0) this.encodeWaiters.splice(index, 1);
+    }
+    this.encodesRunning += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.encodesRunning = Math.max(0, this.encodesRunning - 1);
+    };
+  }
   /**
    * Chụp danh sách tác vụ ĐÃ CÓ lúc mở app (AppContext.initialize — trước khi đăng ký IPC, nên giao diện chưa tạo được tác
    * vụ nào). Phát hiện 2026-10-09 (Đợt 5): start() chỉ chạy sau khi kết nối xong công cụ (vài giây, giao diện đã dùng
@@ -1135,7 +1195,7 @@ export class QueueManager {
     if (!settings.downloadAdaptiveBoost || settings.downloadFragmentsAuto === false) return undefined;
     const base = recommendedConcurrentFragments(cpus().length, totalmem());
     let downloads = 0;
-    for (const entry of this.active.values()) if (entry.job.type === 'download') downloads += 1;
+    for (const entry of this.active.values()) if (this.holdsDownloadSlot(entry.job)) downloads += 1;
     if (!this.active.has(job.id)) downloads += 1;
     return adaptiveFragments(base, adaptiveConnectionBudget(this.autoGlobalDownloadCap(), base), downloads, this.adaptive.level);
   }
@@ -1154,7 +1214,7 @@ export class QueueManager {
    * khiển; bậc đổi thì ghi nhật ký để sau này tra được vì sao tăng/lùi.
    */
   private sampleAdaptive(now: number, demand: boolean): void {
-    const downloads = [...this.active.values()].filter((entry) => entry.job.type === 'download');
+    const downloads = [...this.active.values()].filter((entry) => this.holdsDownloadSlot(entry.job));
     const adaptiveOn = this.settings.get().downloadAdaptiveBoost;
     // Hết video tải hoặc đã tắt → dừng đo ổ ngay (không chờ tới lượt đo kế tiếp).
     if (!downloads.length || !adaptiveOn) this.diskBusy.stop();
@@ -1216,7 +1276,7 @@ export class QueueManager {
     if (!platform) return { samePlatformActive: 1, rateLimitStrikes: 0 };
     let samePlatformActive = 0;
     for (const entry of this.active.values()) {
-      if (entry.job.type === 'download' && this.downloadPlatformOf(entry.job) === platform) samePlatformActive += 1;
+      if (this.holdsDownloadSlot(entry.job) && this.downloadPlatformOf(entry.job) === platform) samePlatformActive += 1;
     }
     if (!this.active.has(job.id)) samePlatformActive += 1;
     return { samePlatformActive: Math.max(1, samePlatformActive), rateLimitStrikes: this.rateLimits.strikesOf(platform) };
@@ -1392,6 +1452,7 @@ export class QueueManager {
     let all = this.repo.listUnfinished();
     if (await this.recoverDiskFullProjects(all)) all = this.repo.listUnfinished();
     const cpuPercent = this.cpuPercent();
+    this.lastCpuPercent = cpuPercent;
     // VẤN ĐỀ 2 mục 1 (2026-09-22): lấy mẫu bộ điều tiết CHO MỌI HỒ SƠ đang có tác vụ hoạt động, MỖI LƯỢT
     // tick — không chỉ khi có tác vụ đang CHỜ được xét (resourcesAllow). Nếu chỉ lấy mẫu lúc xét tác vụ
     // chờ, một hàng đợi có tác vụ chờ luôn bị chặn bởi giới hạn SỐ WORKER (không phải CPU) sẽ không bao
@@ -1472,9 +1533,11 @@ export class QueueManager {
       // Lag bước 2: hết suất bắt đầu của cửa sổ 350 ms này thì để lượt sau (vẫn xét làn ở trên để báo đúng danh sách chờ lượt).
       if (startsLeft <= 0) continue;
       const profile = this.profileFor(job);
-      const activeOfType = [...this.active.values()].filter((x) => x.job.type === job.type).length;
+      // 1.7.5: tác vụ tải đang mã hoá CapCut không còn tính vào chỗ tải.
+      const sameSlot = (x: QueueJob): boolean => (job.type === 'download' ? this.holdsDownloadSlot(x) : x.type === job.type);
+      const activeOfType = [...this.active.values()].filter((x) => sameSlot(x.job)).length;
       const activeOfProjectType = [...this.active.values()].filter(
-        (x) => x.job.type === job.type && x.job.projectId === job.projectId
+        (x) => sameSlot(x.job) && x.job.projectId === job.projectId
       ).length;
       if (job.type === 'download') {
         // 2026-10-24: trần tổng theo máy (2 × số danh sách tự động: máy yếu 2 … rất mạnh 12) — thay ô "Tổng video tải đồng
@@ -1483,7 +1546,7 @@ export class QueueManager {
         const platform = this.downloadPlatformOf(job);
         const activeOfPlatform = (): number =>
           [...this.active.values()].filter(
-            (entry) => entry.job.type === 'download' && this.downloadPlatformOf(entry.job) === platform
+            (entry) => this.holdsDownloadSlot(entry.job) && this.downloadPlatformOf(entry.job) === platform
           ).length;
         // Hướng A 429: trần riêng theo nền tảng trên toàn ứng dụng (YouTube 6), cả làn ghép.
         const platformCap = platformDownloadCap(platform);
@@ -1533,6 +1596,7 @@ export class QueueManager {
       .catch((error: unknown) => this.handleExecutorCrash(job, error))
       .finally(() => {
         this.active.delete(job.id);
+        this.encodingJobs.delete(job.id);
         this.progressUpdates.delete(job.id);
         this.downloadSpeeds.delete(job.id);
         // 2026-10-24: video tải xong / lỗi hẳn / bị huỷ → xoá tệp tạm của riêng video đó (tạm dừng / chờ thử lại thì giữ).
