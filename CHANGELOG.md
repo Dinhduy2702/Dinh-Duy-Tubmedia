@@ -1,3 +1,28 @@
+# Tubmedia 1.7.3
+
+- Máy bớt lag khi tải vào ổ cứng cơ (HDD). Mọi mức đều tự dò theo máy của bạn (loại ổ thật, độ bận đo thật, số nhân CPU):
+  - Ổ HDD được coi là "bận" sớm hơn SSD, nên Tubmedia giảm số video tải cùng lúc trước khi máy bắt đầu khựng.
+  - Ổ cứ bận lại sau mỗi lần thử tăng tốc thì lần thử sau chờ lâu hơn (5, 10, 20, 40, tối đa 60 phút) thay vì 5 phút một lần.
+  - Bản dựng cho CapCut chỉ tạo 1 bản mỗi lúc trên ổ HDD (SSD theo số nhân CPU, tối đa 4), video đang chờ hiện "đang chờ
+    lượt"; việc tạo bản dựng chạy ở mức ưu tiên thấp để nhường máy cho việc bạn đang làm.
+- Dán lại link đã tải không còn tải lại:
+  - Tubmedia nhận ra video có sẵn theo mã video trong tên tệp hiện tại ("[mã video] [LINK_…].mp4").
+  - Tải danh sách nhớ video gốc thay vì bản dựng CapCut; tệp đã nhớ bị xoá hoặc dời đi thì Tubmedia tìm lại trong thư mục
+    lưu trước, chỉ tải lại khi thật sự không còn.
+  - Bản dựng CapCut có sẵn và còn hợp lệ thì được dùng lại, không mã hoá lại và không sinh thêm tệp lớn.
+- Thông báo lỗi nói rõ nguyên nhân hơn:
+  - "Video đã bị xoá khỏi YouTube", video giới hạn độ tuổi (cần đăng nhập), video đang phát trực tiếp, định dạng không có,
+    lỗi ghi tệp, lỗi kết nối bảo mật… thay vì "chưa xác định". Nhiều video lỗi thì gộp theo lý do chung.
+  - "Sign in to confirm you're not a bot" là YouTube chặn tạm theo lượng tải: Tubmedia chờ rồi tự tiếp tục, không còn báo
+    nhầm "cookie hết hạn".
+- Cookies:
+  - Kiểm cookie YouTube ngay lúc thêm: "Cookie hoạt động / không hoạt động" kèm lý do, tên tài khoản/kênh và ngày hết hạn.
+  - Nhiều video tải song song không còn ghi đè cookie của nhau; cookie mới bạn vừa lưu không bị video vừa tải xong ghi đè.
+  - Tệp cookie được ghi an toàn, tắt máy đột ngột không làm hỏng tệp.
+- Bớt thông báo bật lên trùng lặp: "Đã giữ bản cũ" chỉ hiện một lần cho mỗi danh sách trong 30 phút; bỏ thông báo "Cookies
+  đã được lưu" và "Có video không có tiếng" (vẫn có huy hiệu trên từng video ở trang Hàng đợi).
+- Tải nhanh không còn bị kẹt chờ lượt sau khi một lượt vừa kết thúc.
+
 # Tubmedia 1.7.2
 
 - Video có tên dài (thường gặp ở Facebook) không còn bị lỗi "không lưu được tệp". Trước đây đường dẫn tệp vượt giới hạn 260
