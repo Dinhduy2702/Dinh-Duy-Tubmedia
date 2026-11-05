@@ -32,6 +32,24 @@ export type CookieFingerprint =
   | { mode: 'file-missing'; path: string }
   | { mode: 'browser'; browser: string; profile: string };
 
+/**
+ * 2026-11-05: "cookies người dùng đã cấu hình" cho việc chặn trùng thông báo cookies — chỉ đổi khi NGƯỜI DÙNG lưu cookies mới
+ * (generation) hoặc đổi tệp / trình duyệt / hồ sơ. Không dùng mtime/sha256: yt-dlp tự ghi lại tệp sau mỗi lần chạy.
+ */
+export function cookieNoticeIdentityOf(fingerprint: CookieFingerprint | null): string {
+  if (!fingerprint) return 'unknown';
+  switch (fingerprint.mode) {
+    case 'file':
+      return `file:${fingerprint.path}:${fingerprint.generation}`;
+    case 'file-missing':
+      return `file-missing:${fingerprint.path}`;
+    case 'browser':
+      return `browser:${fingerprint.browser}:${fingerprint.profile}`;
+    default:
+      return 'none';
+  }
+}
+
 /** Lý do gọi so sánh: lúc mở app, hay ngay sau khi người dùng chủ động lưu cấu hình cookies. */
 export type CookieResumeTrigger = 'startup' | 'cookies-saved';
 

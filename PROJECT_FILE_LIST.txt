@@ -525,6 +525,7 @@ tests/integration/cookie-jar-concurrent-rotation.test.ts
 tests/integration/cookie-jar-safety.test.ts
 tests/integration/cookie-jar-stale-cleanup.test.ts
 tests/integration/cookie-jar-store.test.ts
+tests/integration/cookie-notice-spam.test.ts
 tests/integration/cookie-resume-fingerprint.test.ts
 tests/integration/database.test.ts
 tests/integration/download-bot-check.test.ts

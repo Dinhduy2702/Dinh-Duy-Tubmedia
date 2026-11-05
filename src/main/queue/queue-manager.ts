@@ -11,7 +11,9 @@ import { retryDelayMs } from '@shared/utils/retry.js';
 import { hasConfiguredCookies, isCookieBlockingCode } from '@shared/utils/cookie-policy.js';
 import {
   computeCookieFingerprint,
+  cookieNoticeIdentityOf,
   cookiesChangedSinceBlock,
+  type CookieFingerprint,
   type CookieResumeTrigger
 } from '../cookies/cookie-fingerprint.js';
 import type { CookieJarStore } from '../cookies/cookie-jar-store.js';
@@ -282,6 +284,8 @@ export class QueueManager {
   private readonly repeatedFailures = new Map<string, number[]>();
   private readonly cleanupInProgress = new Set<string>();
   private readonly blockingNoticeKeys = new Set<string>();
+  /** Cookies (theo cấu hình người dùng) lúc đã hiện thông báo cookies; null = chưa hiện / người dùng vừa cho chạy lại. */
+  private cookieNoticeIdentity: string | null = null;
   private readonly keptOldVersionCounts = new Map<string, number>();
   private readonly keptOldVersionNoticeAt = new Map<string, number>();
   /** Hướng B 429: nghỉ theo NỀN TẢNG trên toàn ứng dụng khi dính HTTP 429 (xem PlatformRateLimitGate). */
@@ -607,7 +611,7 @@ export class QueueManager {
       if (job.projectId) projects.add(job.projectId);
     }
     for (const projectId of projects) {
-      this.clearBlockingNoticeKeys(projectId);
+      this.clearBlockingNoticeKeys(projectId, true);
       this.projects.setStatus(projectId, 'active');
     }
     if (resumed > 0) {
@@ -2220,18 +2224,33 @@ export class QueueManager {
     return true;
   }
 
-  private clearBlockingNoticeKeys(projectId?: string | null): void {
+  /**
+   * `includeCookies`: chỉ khi NGƯỜI DÙNG chủ động cho chạy lại (Tiếp tục / Thử lại / lưu cookies) — thông báo cookies là MỘT cho
+   * cả app (2026-11-05), không xoá khi app tự chạy lại hay khi bắt đầu danh sách mới.
+   */
+  private clearBlockingNoticeKeys(projectId?: string | null, includeCookies = false): void {
+    if (includeCookies) this.cookieNoticeIdentity = null;
     if (!projectId) return;
     for (const key of this.blockingNoticeKeys) {
       if (key.startsWith(`${projectId}:`)) this.blockingNoticeKeys.delete(key);
     }
   }
 
-  private notifyBlockingError(code: string, message: string, job?: QueueJob): void {
+  private notifyBlockingError(code: string, message: string, job?: QueueJob, cookies?: CookieFingerprint | null): void {
+    // 2026-11-05 (người dùng báo "cứ có link nào cần cookies nó lại spam thông báo"): trước đây chặn trùng theo (danh sách, mã)
+    // — 3 mã cookie × mỗi danh sách, mỗi lần đều kéo cửa sổ lên. Giờ: MỘT thông báo cookies cho cả app, chỉ báo lại khi cookies
+    // người dùng cấu hình đổi (lưu mới / đổi trình duyệt — không tính yt-dlp tự ghi lại tệp) hoặc người dùng chủ động chạy lại.
+    if (isCookieBlockingCode(code)) {
+      const identity = cookieNoticeIdentityOf(cookies ?? null);
+      if (this.cookieNoticeIdentity === identity) return;
+      this.cookieNoticeIdentity = identity;
+    } else {
+      const scope = job?.projectId ?? job?.id ?? 'global';
+      const noticeKey = `${scope}:${code}`;
+      if (this.blockingNoticeKeys.has(noticeKey)) return;
+      this.blockingNoticeKeys.add(noticeKey);
+    }
     const scope = job?.projectId ?? job?.id ?? 'global';
-    const noticeKey = `${scope}:${code}`;
-    if (this.blockingNoticeKeys.has(noticeKey)) return;
-    this.blockingNoticeKeys.add(noticeKey);
     const title =
       code === 'COOKIES_EXPIRED'
         ? 'Cookies đã hết hạn hoặc không còn hợp lệ'
@@ -2568,7 +2587,7 @@ export class QueueManager {
         );
         if (!cookieBlocking) await this.pauseProjectForBlockingError(job, code, message);
         this.emitProgress(paused);
-        this.notifyBlockingError(code, pausedMessage, job);
+        this.notifyBlockingError(code, pausedMessage, job, cookieFingerprint);
         this.logger.warn('queue', code, pausedMessage, {
           jobId: job.id,
           ...(job.projectId ? { projectId: job.projectId } : {})
@@ -3213,7 +3232,7 @@ export class QueueManager {
         );
       }
     }
-    this.clearBlockingNoticeKeys(projectId);
+    this.clearBlockingNoticeKeys(projectId, true);
     this.repeatedFailures.delete(projectId);
     // Hướng B 429: người dùng đã xác minh và bấm Tiếp tục sau khi Tubmedia dừng hẳn → bỏ trạng thái dừng của nền tảng.
     for (const job of projectJobs) {
@@ -3363,7 +3382,7 @@ export class QueueManager {
     if (!['paused', 'interrupted'].includes(current.status)) {
       throw new InvalidInputError(`Không thể tiếp tục tác vụ ở trạng thái ${current.status}.`);
     }
-    this.clearBlockingNoticeKeys(current.projectId);
+    this.clearBlockingNoticeKeys(current.projectId, true);
     const preserveCookieMarker = isCookieBlockingCode(current.errorCode);
     if (active) {
       await this.resumeActiveJobState(current, active, preserveCookieMarker);
@@ -3431,7 +3450,7 @@ export class QueueManager {
       if (job.projectId) resumedProjects.add(job.projectId);
     }
     for (const projectId of resumedProjects) {
-      this.clearBlockingNoticeKeys(projectId);
+      this.clearBlockingNoticeKeys(projectId, true);
       this.repeatedFailures.delete(projectId);
       // Lúc mở app, bước giữ tác vụ trong start() tự đặt trạng thái danh sách.
       if (trigger === 'cookies-saved') this.projects.setStatus(projectId, 'active');
@@ -3492,7 +3511,7 @@ export class QueueManager {
     this.claimBeforeStartup(
       this.repo.list(projectId).filter((job) => job.status === 'failed').map((job) => job.id)
     );
-    this.clearBlockingNoticeKeys(projectId);
+    this.clearBlockingNoticeKeys(projectId, true);
     const count = this.repo.retryFailed(projectId);
     this.emit();
     return count;
