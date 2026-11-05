@@ -93,6 +93,11 @@ weak-machine e2e → live measurement → report. No piecemeal fixes.
 - While 2 download lists run and CapCut copies are being made, measured together: CPU, disk busy %, download speed, GPU
   memory, number of active downloads.
 - Pass only if: average CPU < 60 %, downloads keep running while encoding, no disk stuck at 100 % for long.
+- CPU must be measured for the WHOLE machine and the counter validated before its numbers are trusted. On machines with
+  > 64 logical CPUs `\Processor(_Total)` covers only processor group 0 (2026-11-05: 36 of 72) — use
+  `\Processor Information(_Total)`, cross-check against a second counter (e.g. `\Process(_Total)` − `\Process(Idle)`)
+  under synthetic load on all threads (deviation < 3 points), and also report ffmpeg's own CPU (sum / logical CPUs).
+  Report CPU over the samples where encoding was actually running, not including idle time.
 - Any change to video encoding: SSIM ≥ 0.98 vs the previous output on an HDR, an SDR, a fast-motion and a dark clip, plus a
   visual check.
 - Never call YouTube manually while the machine is rate-limited (429 / bot check); use saved data or wait.
