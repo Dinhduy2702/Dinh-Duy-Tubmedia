@@ -225,6 +225,15 @@ export class ProcessManager {
   public isToolActive(tool: string): boolean {
     return [...this.active.values()].some((item) => item.tool === tool);
   }
+  /** 2026-11-05 (sửa B): PID các tiến trình `tool` của những tác vụ này đang chạy ở mức ưu tiên thấp (việc nền của app). */
+  public lowPriorityPids(jobIds: ReadonlySet<string>, tool: string): number[] {
+    const pids: number[] = [];
+    for (const item of this.active.values()) {
+      if (item.tool !== tool || !jobIds.has(item.jobId) || !item.process.pid) continue;
+      if (item.priority === 'below_normal' || item.priority === 'idle') pids.push(item.process.pid);
+    }
+    return pids;
+  }
   public async run(options: ProcessRunOptions): Promise<ProcessResult> {
     const id = randomUUID();
     const startedAt = Date.now();

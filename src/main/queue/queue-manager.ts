@@ -53,6 +53,8 @@ import type { DownloadEngine, DownloadProgress } from '../downloader/download-en
 import type { ClipEngine } from '../clips/clip-engine.js';
 import type { MergeEngine } from '../merge/merge-engine.js';
 import type { ProcessManager } from '../processes/process-manager.js';
+import { withMachineFfmpegThreads } from '../settings/resource-machine-threads.js';
+import { EncodeCpuMonitor } from './encode-cpu-monitor.js';
 import type { Logger } from '../logging/logger.js';
 import {
   SystemLoadGovernor,
@@ -251,6 +253,14 @@ function progressPhases(
 }
 /** 1.7.5: chỉ mở thêm bản mã hoá CapCut khi CPU toàn máy dưới mức này (người dùng còn chỗ làm việc). */
 const ENCODE_START_CPU_MAX_PERCENT = 50;
+/** 2026-11-05: ghi lý do chặn bắt đầu việc mới tối đa 1 dòng / khoảng này cho mỗi (loại chặn, loại việc) — nhịp tick 350 ms. */
+const START_BLOCK_LOG_INTERVAL_MS = 30_000;
+/**
+ * 2026-11-05 (người dùng duyệt, bảo đảm sống): còn video chờ mà không video nào đang tải liên tục chừng này → cho 1 video bắt đầu
+ * bất kể CPU (và lượt danh sách). 30 s: đủ dài để lượt chuyển bình thường (video xong → video sau bắt đầu ngay lượt tick kế) không
+ * bao giờ chạm tới, đủ ngắn để không có khoảng nào quá 2 phút không tải. Không vượt giới hạn 429 / trần nền tảng / ổ đầy.
+ */
+const DOWNLOAD_LIVENESS_MS = 30_000;
 
 export class QueueManager {
   private readonly active = new Map<string, ActiveJob>();
@@ -296,6 +306,12 @@ export class QueueManager {
   private encodesRunning = 0;
   private editEncodeLimitOverride: number | null = null;
   private lastCpuPercent = 0;
+  private readonly startBlockLoggedAt = new Map<string, number>();
+  /** Sửa B: tác vụ đang GIỮ lượt mã hoá (ffmpeg mã hoá nền đang chạy) + đo CPU riêng của chúng. */
+  private readonly encodeHolders = new Set<string>();
+  private readonly encodeCpu = new EncodeCpuMonitor();
+  private downloadStarvedSince: number | null = null;
+  private lastBackgroundEncodeCpu = 0;
   private startupReadyResolve: (() => void) | null = null;
   private readonly startupReady = new Promise<void>((resolve) => {
     this.startupReadyResolve = resolve;
@@ -380,11 +396,13 @@ export class QueueManager {
       if (index >= 0) this.encodeWaiters.splice(index, 1);
     }
     this.encodesRunning += 1;
+    this.encodeHolders.add(job.id);
     let released = false;
     return () => {
       if (released) return;
       released = true;
       this.encodesRunning = Math.max(0, this.encodesRunning - 1);
+      this.encodeHolders.delete(job.id);
     };
   }
   /**
@@ -711,7 +729,8 @@ export class QueueManager {
   private profileFor(job: QueueJob): ResourceProfile {
     const profiles = this.settings.profiles().resources;
     const project = job.projectId ? this.projects.get(job.projectId) : null;
-    return profiles.find((x) => x.id === project?.resourceProfileId) ?? profiles[0]!;
+    // 2026-11-05 (sửa A): luồng ffmpeg của hồ sơ có sẵn tự theo số luồng máy đang chạy.
+    return withMachineFfmpegThreads(profiles.find((x) => x.id === project?.resourceProfileId) ?? profiles[0]!, cpus().length);
   }
   private limitFor(type: JobType, profile: ResourceProfile): number {
     if (type === 'download') return profile.downloadWorkers;
@@ -1108,15 +1127,17 @@ export class QueueManager {
   // VẤN ĐỀ 2 mục 1 (2026-09-22): lấy (hoặc tạo mới) bộ điều tiết CPU riêng cho từng hồ sơ tài nguyên —
   // ngưỡng cao = cpuSoftLimitPercent của chính hồ sơ (tôn trọng giá trị người dùng đã đặt/đề xuất theo
   // máy), ngưỡng thấp thấp hơn một khoảng an toàn để tạo độ trễ (hysteresis), tránh nhấp nháy bật/tắt.
-  private loadGovernorFor(profile: ResourceProfile): SystemLoadGovernor {
-    const existing = this.loadGovernors.get(profile.id);
+  // 2026-11-05 (sửa B): bộ điều tiết RIÊNG cho việc tải — nhận CPU đã trừ phần của các bản mã hoá nền do chính app chạy.
+  private loadGovernorFor(profile: ResourceProfile, lane: 'download' | 'other' = 'other'): SystemLoadGovernor {
+    const key = lane === 'download' ? `${profile.id}:download` : profile.id;
+    const existing = this.loadGovernors.get(key);
     if (existing) return existing;
     const governor = new SystemLoadGovernor({
       highPercent: profile.cpuSoftLimitPercent,
       lowPercent: defaultLowPercentFor(profile.cpuSoftLimitPercent),
       sustainedMs: DEFAULT_LOAD_GOVERNOR_SUSTAINED_MS
     });
-    this.loadGovernors.set(profile.id, governor);
+    this.loadGovernors.set(key, governor);
     return governor;
   }
 
@@ -1377,13 +1398,51 @@ export class QueueManager {
     this.window.webContents.send(IPC.events.attention, notice);
   }
 
+  /**
+   * 2026-11-05 (người dùng duyệt, sửa B): % CPU toàn máy của các ffmpeg mã hoá nền đang giữ lượt mã hoá (ưu tiên thấp, do chính
+   * app chạy). Không có bản mã hoá → dừng đo, 0.
+   */
+  private backgroundEncodeCpuPercent(): number {
+    if (!this.encodeHolders.size) {
+      this.encodeCpu.stop();
+      return 0;
+    }
+    this.encodeCpu.ensureRunning();
+    const pids =
+      (this.processes as Partial<Pick<ProcessManager, 'lowPriorityPids'>>).lowPriorityPids?.(this.encodeHolders, 'ffmpeg') ?? [];
+    return this.encodeCpu.machinePercentOf(pids, cpus().length);
+  }
+
+  /**
+   * 2026-11-05 (đo giả lập máy 4 luồng: không video nào tải suốt 18 phút, nhật ký không ghi vì sao): ghi lý do mỗi lần chặn
+   * bắt đầu việc mới — loại chặn, ngưỡng, giá trị đọc được — để xác minh bằng nhật ký, không đoán.
+   */
+  private logStartBlocked(job: QueueJob, gate: string, metadata: Record<string, unknown>): void {
+    const key = `${gate}:${job.type}`;
+    const now = Date.now();
+    const last = this.startBlockLoggedAt.get(key);
+    if (last !== undefined && now - last < START_BLOCK_LOG_INTERVAL_MS) return;
+    this.startBlockLoggedAt.set(key, now);
+    this.logger.info('queue', 'QUEUE_START_BLOCKED', `Chưa bắt đầu tác vụ ${job.type} mới — chặn bởi ${gate}.`, {
+      jobId: job.id,
+      ...(job.projectId ? { projectId: job.projectId } : {}),
+      metadata: { gate, ...metadata }
+    });
+  }
+
   private async resourcesAllow(
     job: QueueJob,
     profile: ResourceProfile,
-    cpuPercent: number
+    cpuPercent: number,
+    /** Bảo đảm sống (DOWNLOAD_LIVENESS_MS): bỏ qua bộ điều tiết CPU cho đúng 1 video tải. */
+    bypassCpu = false
   ): Promise<boolean> {
     const memoryReserve = effectiveMemoryReserveBytes(profile.memoryFreeMinimumBytes, totalmem());
-    if (freemem() < memoryReserve) return false;
+    const freeMemory = freemem();
+    if (freeMemory < memoryReserve) {
+      this.logStartBlocked(job, 'memory', { freeBytes: freeMemory, reserveBytes: memoryReserve });
+      return false;
+    }
     // VẤN ĐỀ 2 mục 1 (2026-09-22): thay kiểm tra tức thời (cpuPercent > cpuSoftLimitPercent, dễ nhấp
     // nháy bật/tắt khi CPU dao động quanh ngưỡng) bằng bộ điều tiết có độ trễ hai chiều, dùng ĐÚNG ngưỡng
     // cpuSoftLimitPercent của hồ sơ làm ngưỡng cao (không đổi hành vi với cấu hình người dùng đã đặt).
@@ -1393,8 +1452,19 @@ export class QueueManager {
     // ra Tubmedia chưa làm gì cả.
     const cpuTypeGated = ['download', 'clip', 'normalize', 'merge'].includes(job.type);
     if (cpuTypeGated && this.active.size > 0) {
-      const throttled = this.loadGovernorFor(profile).sample(cpuPercent, Date.now());
-      if (throttled) return false;
+      const throttled = this.loadGovernorFor(profile, job.type === 'download' ? 'download' : 'other').sample(cpuPercent, Date.now());
+      if (throttled && !bypassCpu) {
+        this.logStartBlocked(job, 'cpu-governor', {
+          cpuPercent: Math.round(cpuPercent),
+          highPercent: profile.cpuSoftLimitPercent,
+          lowPercent: defaultLowPercentFor(profile.cpuSoftLimitPercent),
+          sustainedMs: DEFAULT_LOAD_GOVERNOR_SUSTAINED_MS,
+          activeJobs: this.active.size,
+          encodesRunning: this.encodesRunning,
+          ...(job.type === 'download' ? { backgroundEncodeCpuPercent: Math.round(this.lastBackgroundEncodeCpu) } : {})
+        });
+        return false;
+      }
     }
     if (job.projectId) {
       for (const targetFolder of this.diskFoldersForJob(job)) {
@@ -1453,6 +1523,9 @@ export class QueueManager {
     if (await this.recoverDiskFullProjects(all)) all = this.repo.listUnfinished();
     const cpuPercent = this.cpuPercent();
     this.lastCpuPercent = cpuPercent;
+    // Sửa B: việc tải chỉ xét phần CPU KHÔNG phải của bản mã hoá nền (vẫn chặn nếu phần còn lại cao).
+    this.lastBackgroundEncodeCpu = Math.min(cpuPercent, Math.max(0, this.backgroundEncodeCpuPercent()));
+    const downloadCpuPercent = cpuPercent - this.lastBackgroundEncodeCpu;
     // VẤN ĐỀ 2 mục 1 (2026-09-22): lấy mẫu bộ điều tiết CHO MỌI HỒ SƠ đang có tác vụ hoạt động, MỖI LƯỢT
     // tick — không chỉ khi có tác vụ đang CHỜ được xét (resourcesAllow). Nếu chỉ lấy mẫu lúc xét tác vụ
     // chờ, một hàng đợi có tác vụ chờ luôn bị chặn bởi giới hạn SỐ WORKER (không phải CPU) sẽ không bao
@@ -1464,9 +1537,10 @@ export class QueueManager {
     for (const activeJob of this.active.values()) {
       if (!['download', 'clip', 'normalize', 'merge'].includes(activeJob.job.type)) continue;
       const activeProfile = this.profileFor(activeJob.job);
-      if (sampledProfileIds.has(activeProfile.id)) continue;
-      sampledProfileIds.add(activeProfile.id);
-      this.loadGovernorFor(activeProfile).sample(cpuPercent, nowForSampling);
+      const lane = activeJob.job.type === 'download' ? 'download' : 'other';
+      if (sampledProfileIds.has(`${activeProfile.id}:${lane}`)) continue;
+      sampledProfileIds.add(`${activeProfile.id}:${lane}`);
+      this.loadGovernorFor(activeProfile, lane).sample(lane === 'download' ? downloadCpuPercent : cpuPercent, nowForSampling);
     }
     const pending: QueueJob[] = [];
     let stateChanged = false;
@@ -1517,6 +1591,14 @@ export class QueueManager {
     const mergeWorkflowCap = Math.max(1, Math.min(4, this.settings.get().maxGlobalMergeJobs));
     this.jobStartTimes = recentJobStarts(this.jobStartTimes, Date.now());
     let startsLeft = MAX_JOB_STARTS_PER_WINDOW - this.jobStartTimes.length;
+    // Bảo đảm sống (người dùng duyệt 2026-11-05): còn video chờ mà không video nào giữ chỗ tải liên tục DOWNLOAD_LIVENESS_MS →
+    // lượt này cho đúng 1 video bắt đầu, bỏ qua bộ điều tiết CPU và lượt danh sách (danh sách khác chỉ còn mã hoá vẫn giữ lượt).
+    const tickNow = Date.now();
+    const downloadWaiting = pendingDownloads.some((job) => !this.active.has(job.id));
+    const downloadSlotHeld = [...this.active.values()].some((entry) => this.holdsDownloadSlot(entry.job));
+    if (!downloadWaiting || downloadSlotHeld) this.downloadStarvedSince = null;
+    else this.downloadStarvedSince ??= tickNow;
+    let livenessStart = this.downloadStarvedSince !== null && tickNow - this.downloadStarvedSince >= DOWNLOAD_LIVENESS_MS;
     for (const job of fairPending) {
       if (!this.schedulerRunning) break;
       if (this.active.has(job.id)) continue;
@@ -1524,7 +1606,15 @@ export class QueueManager {
       const executionLane = queueExecutionLane(job);
       if (job.projectId && (executionLane === 'download-list' || executionLane === 'merge-workflow')) {
         const cap = executionLane === 'download-list' ? downloadListCap : mergeWorkflowCap;
-        if (!laneSlotAvailable(job.projectId, this.laneHolders(executionLane), cap)) {
+        const holders = this.laneHolders(executionLane);
+        const livenessBypass = livenessStart && job.type === 'download';
+        if (!livenessBypass && !laneSlotAvailable(job.projectId, holders, cap)) {
+          this.logStartBlocked(job, `${executionLane}-lane`, {
+            cap,
+            holders: holders.size,
+            activeDownloadSlots: [...this.active.values()].filter((entry) => this.holdsDownloadSlot(entry.job)).length,
+            encodesRunning: this.encodesRunning
+          });
           const waiting = executionLane === 'download-list' ? waitingDownloadLists : waitingMergeWorkflows;
           if (!waiting.includes(job.projectId)) waiting.push(job.projectId);
           continue;
@@ -1575,9 +1665,20 @@ export class QueueManager {
         if (activeOfProjectType >= 1 || activeOfType >= globalMergeLimit) continue;
       } else if (activeOfType >= this.limitFor(job.type, profile)) continue;
       if (job.sourceId && this.sourceLocks.has(job.sourceId)) continue;
-      if (!(await this.resourcesAllow(job, profile, cpuPercent))) {
+      const liveness = livenessStart && job.type === 'download';
+      if (!(await this.resourcesAllow(job, profile, job.type === 'download' ? downloadCpuPercent : cpuPercent, liveness))) {
         if (this.repo.get(job.id)?.status !== 'pending') stateChanged = true;
         continue;
+      }
+      if (liveness) {
+        livenessStart = false;
+        this.downloadStarvedSince = null;
+        this.logger.info(
+          'queue',
+          'QUEUE_DOWNLOAD_LIVENESS_START',
+          `Đã ${DOWNLOAD_LIVENESS_MS / 1000} s không video nào tải dù còn video chờ — cho 1 video bắt đầu bất kể CPU.`,
+          { jobId: job.id, ...(job.projectId ? { projectId: job.projectId } : {}), metadata: { cpuPercent: Math.round(cpuPercent) } }
+        );
       }
       this.runJob(job, profile); // intentionally detached; state is retained in active map
       this.jobStartTimes.push(Date.now());

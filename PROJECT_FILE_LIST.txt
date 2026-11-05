@@ -327,6 +327,7 @@ src/main/processes/process-manager.ts
 src/main/processes/ytdlp-runtime-temp.ts
 src/main/projects/project-service.ts
 src/main/queue/disk-busy-monitor.ts
+src/main/queue/encode-cpu-monitor.ts
 src/main/queue/platform-rate-limit-gate.ts
 src/main/queue/queue-manager.ts
 src/main/queue/system-load-governor.ts
@@ -338,6 +339,7 @@ src/main/security/settings-policy.ts
 src/main/settings/defaults.ts
 src/main/settings/disk-kind-lookup.ts
 src/main/settings/hardware-service.ts
+src/main/settings/resource-machine-threads.ts
 src/main/settings/settings-service.ts
 src/main/storage/path-service.ts
 src/main/storage/workbench-storage.ts
@@ -545,6 +547,7 @@ tests/integration/quarantine-service.test.ts
 tests/integration/queue-attempts.test.ts
 tests/integration/queue-audio-issue.test.ts
 tests/integration/queue-disk-temp-folder.test.ts
+tests/integration/queue-download-liveness.test.ts
 tests/integration/queue-encode-lane.test.ts
 tests/integration/queue-failure-reason-notice.test.ts
 tests/integration/queue-ipc-coalesce.test.ts
@@ -610,6 +613,7 @@ tests/unit/e2e-global-download-cap-env.test.ts
 tests/unit/e2e-sandbox-cleanup.test.ts
 tests/unit/editor-workflows-1.3.0.test.ts
 tests/unit/electron-fuses.test.ts
+tests/unit/encode-cpu-monitor.test.ts
 tests/unit/encoder-selection.test.ts
 tests/unit/existing-download.test.ts
 tests/unit/failure-reason-coverage.test.ts
@@ -702,6 +706,7 @@ tests/unit/quick-download-video-only.test.ts
 tests/unit/quick-download.test.ts
 tests/unit/rate-limit-backoff.test.ts
 tests/unit/release-update-system.test.ts
+tests/unit/resource-machine-threads.test.ts
 tests/unit/resource-memory-r56.test.ts
 tests/unit/retry.test.ts
 tests/unit/runtime-performance-policy.test.ts
