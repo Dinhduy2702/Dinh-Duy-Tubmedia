@@ -1,3 +1,30 @@
+# Tubmedia 1.7.5
+
+- Mỗi video chỉ một tệp với chế độ "CapCut trực tiếp" (Cài đặt › Tải danh sách › Chế độ tương thích video), không còn hai
+  video giống nhau chiếm ổ:
+  - Tệp tải về đã dùng được trong CapCut (H.264, SDR, tối đa 1080p/2K, tối đa 60 FPS) thì giữ nguyên, không mã hoá lại — nhanh
+    và gần như không tốn CPU.
+  - Tệp chưa dùng được (ví dụ VP9/AV1, HDR, 4K) thì được chuyển một lần rồi thay luôn tệp gốc.
+  - Chế độ giữ bản gốc kèm thêm bản CapCut vẫn còn cho ai cần cả hai.
+- Máy bớt lag và danh sách không còn đứng khi tạo bản CapCut:
+  - Video tải xong đang chờ tạo bản CapCut không còn giữ chỗ tải — video khác vẫn tải tiếp.
+  - Số bản CapCut tạo cùng lúc tự tính theo số nhân CPU của máy (chỉ dùng khoảng một nửa máy) và chỉ mở thêm khi máy còn rảnh.
+  - Số luồng xử lý video tự theo máy (tối đa một nửa số luồng của máy), không còn cố định 6 luồng cho mọi máy. Nếu bạn đã tự
+    chỉnh số luồng trong hồ sơ thì giữ nguyên số bạn chọn.
+  - Máy ít nhân: việc tạo bản CapCut chạy nền không còn làm dừng việc tải — trước đây có lúc 18 phút không video nào tải; giờ
+    nếu còn video chờ mà không video nào đang tải thì sau tối đa 30 giây sẽ có 1 video bắt đầu.
+  - Video HDR tạo bản CapCut nhanh hơn khoảng 2,5–4 lần (đo trên 2 clip HDR mẫu), hình gần như không đổi so với cách cũ.
+- Thông báo "Cần thêm Cookies" chỉ hiện 1 lần cho cả app, không còn bật lên lặp lại theo từng danh sách và kéo cửa sổ lên liên
+  tục. Thông báo hiện lại khi bạn lưu cookies mới hoặc tự bấm Tiếp tục mà vẫn cần cookies.
+- Tệp tạo dở bị bỏ lại khi tắt app giữa chừng (….pending.mp4) được tự dọn.
+- Tải nhanh: lỗi khi lưu trạng thái (ví dụ thư mục trạng thái vừa bị xoá) chỉ ghi vào nhật ký, không còn thành lỗi không ai xử lý.
+- Dán lại link của video mà chỉ còn bản CapCut (bản gốc đã xoá) không còn bị tải lại.
+
+Giới hạn đã biết của 1.7.5:
+- Trên máy ít nhân (đo giả lập máy 2 và 4 luồng), khi đang tạo bản CapCut, CPU vẫn bận khoảng 83–84% (mục tiêu dưới 60% chưa
+  đạt). Việc này chạy ở mức ưu tiên thấp để nhường máy cho việc bạn đang làm, nhưng độ mượt thật trên máy yếu chưa đo được.
+  Máy 6–16 luồng chưa đo. Sẽ giảm tiếp ở bản 1.7.6.
+
 # Tubmedia 1.7.4
 
 - Sửa lỗi của bản 1.7.3: khi bật chế độ tương thích CapCut, danh sách tải có thể đứng yên ("cứ xoay, không tải"). Các video
