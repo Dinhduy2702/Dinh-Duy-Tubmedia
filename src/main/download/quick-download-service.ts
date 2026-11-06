@@ -1216,7 +1216,9 @@ export class QuickDownloadService {
   private publish(active: ActiveQuickTask): void {
     this.statuses.set(active.status.taskId, cloneStatus(active.status));
     this.pruneStatuses();
-    void this.persist();
+    // 2026-11-06: persist() đã ghi nhật ký QUICK_DOWNLOAD_STATE_WRITE_FAILED khi lỗi (persistTail) nhưng vẫn ném lại — ở đây
+    // không ai chờ nên phải bắt, không thì thành unhandled rejection (kiểm đầy đủ trước phát hành 1.7.5 trượt vì việc này).
+    void this.persist().catch(() => undefined);
   }
 
   private async cleanupActive(active: ActiveQuickTask, removeTemp: boolean): Promise<void> {
