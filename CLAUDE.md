@@ -88,6 +88,8 @@ Applies to code, files on disk, settings — anything.
 
 For code: audit + measure the whole pipeline → plan with success criteria → failing test → fix → full check →
 weak-machine e2e → live measurement → report. No piecemeal fixes.
+Before EVERY commit (including amends and test-only commits): `npm.cmd run lint` and `npm.cmd run typecheck` must be clean
+(2026-11-06: a test-only commit skipped lint and failed the full release check).
 
 ### Before asking the user to confirm a release, measure on the user's machine and report all of:
 - While 2 download lists run and CapCut copies are being made, measured together: CPU, disk busy %, download speed, GPU
