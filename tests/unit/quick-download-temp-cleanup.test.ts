@@ -57,7 +57,9 @@ describe('Tải nhanh — dọn thư mục tạm còn sót', () => {
     const genericFailure = source.indexOf("this.failTask(active, error instanceof Error ? error.message : String(error), null);");
     expect(genericFailure).toBeGreaterThan(0);
     expect(source.slice(genericFailure, genericFailure + 300)).toContain('await this.cleanupActive(active, true);');
-    const cookieFailure = source.indexOf('this.failTask(active, cookieFailureMessage(cookieCode), cookieCode);');
+    // 1.7.6 việc B: câu lỗi cookie lấy từ quickCookieFailureMessage (nói rõ khi cookie bị trình duyệt xoay).
+    const cookieFailure = source.indexOf('this.failTask(active, quickCookieFailureMessage(cookieCode, active.recentLines), cookieCode);');
+    expect(cookieFailure).toBeGreaterThan(0);
     expect(source.slice(cookieFailure, cookieFailure + 300)).toContain('await this.cleanupActive(active, true);');
   });
 });

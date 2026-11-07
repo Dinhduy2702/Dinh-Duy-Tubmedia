@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import type { BrowserProfileOption, CookieCheckResult, CookieConfigurationStatus } from '@shared/types/domain';
 import { COOKIE_BLOCKING_CODES } from '@shared/utils/cookie-policy';
+import { COOKIE_INCOGNITO_HINT } from '@shared/utils/cookie-guidance';
 import { useAppStore } from '../stores/app-store';
 import { InfoHint } from './InfoHint';
 
@@ -378,6 +379,7 @@ export function CookieManagerDialog({ open, onClose, onConfigured }: Props): Rea
               Dán cookies.txt, JSON hoặc chuỗi Cookie.
               <InfoHint text="Có thể dán Netscape cookies.txt, JSON xuất từ trình duyệt hoặc chuỗi Cookie dạng name=value; name2=value2. Ứng dụng tự chuyển đổi và không hiển thị lại nội dung." />
             </p>
+            <p className="mb-3 text-xs leading-5" style={{ color: 'var(--muted)' }} data-cookie-incognito-guide>{COOKIE_INCOGNITO_HINT}</p>
             <textarea
               className="textarea cookie-textarea font-mono text-xs"
               value={text}
@@ -403,6 +405,7 @@ export function CookieManagerDialog({ open, onClose, onConfigured }: Props): Rea
               Chọn tệp cookies.txt (Netscape) hoặc JSON.
               <InfoHint text="Chọn tệp cookies.txt dạng Netscape hoặc tệp JSON đã xuất từ trình duyệt. Ứng dụng kiểm tra và chuyển đổi an toàn trước khi sử dụng." />
             </p>
+            <p className="mt-2 text-xs leading-5" style={{ color: 'var(--muted)' }} data-cookie-incognito-guide>{COOKIE_INCOGNITO_HINT}</p>
             <button className="btn btn-primary mt-4" disabled={busy} onClick={() => void chooseFile()}>
               {busy ? <LoaderCircle className="animate-spin" size={17} /> : <FileText size={17} />}Chọn tệp
               cookies

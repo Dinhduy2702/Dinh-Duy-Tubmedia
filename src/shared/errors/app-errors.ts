@@ -1,3 +1,5 @@
+import { cookieRotatedMessage } from '../utils/cookie-guidance.js';
+
 export class AppError extends Error {
   public constructor(
     public readonly code: string,
@@ -33,8 +35,11 @@ export class CookiesExpiredError extends AppError {
   public constructor(details?: Record<string, unknown>) {
     super(
       'COOKIES_EXPIRED',
-      'Cookies đã cấu hình không còn được nền tảng chấp nhận, có thể đã hết hạn hoặc phiên đăng nhập đã bị thu hồi. ' +
-        'Video liên quan đã được tạm dừng an toàn; hãy đăng nhập lại và lưu cookies mới. Ứng dụng sẽ tự tiếp tục ngay sau khi cấu hình được cập nhật.',
+      // 1.7.6 việc B: yt-dlp nói rõ cookie bị trình duyệt xoay → nói đúng lý do + cách xuất từ cửa sổ ẩn danh.
+      details?.failureSubtype === 'cookies_invalid'
+        ? `Video liên quan đã được tạm dừng an toàn. ${cookieRotatedMessage()}`
+        : 'Cookies đã cấu hình không còn được nền tảng chấp nhận, có thể đã hết hạn hoặc phiên đăng nhập đã bị thu hồi. ' +
+            'Video liên quan đã được tạm dừng an toàn; hãy đăng nhập lại và lưu cookies mới. Ứng dụng sẽ tự tiếp tục ngay sau khi cấu hình được cập nhật.',
       false,
       details
     );

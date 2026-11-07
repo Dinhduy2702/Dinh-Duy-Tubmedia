@@ -9,6 +9,7 @@ import type { AttentionNotice, JobType, LaneWaitState, MediaSource, Project, Que
 import { IPC } from '@shared/contracts/channels.js';
 import { retryDelayMs } from '@shared/utils/retry.js';
 import { hasConfiguredCookies, isCookieBlockingCode } from '@shared/utils/cookie-policy.js';
+import { COOKIE_INCOGNITO_EXPORT_STEPS, COOKIE_ROTATED_TITLE } from '@shared/utils/cookie-guidance.js';
 import {
   computeCookieFingerprint,
   cookieNoticeIdentityOf,
@@ -2236,7 +2237,13 @@ export class QueueManager {
     }
   }
 
-  private notifyBlockingError(code: string, message: string, job?: QueueJob, cookies?: CookieFingerprint | null): void {
+  private notifyBlockingError(
+    code: string,
+    message: string,
+    job?: QueueJob,
+    cookies?: CookieFingerprint | null,
+    cookiesRotated = false
+  ): void {
     // 2026-11-05 (người dùng báo "cứ có link nào cần cookies nó lại spam thông báo"): trước đây chặn trùng theo (danh sách, mã)
     // — 3 mã cookie × mỗi danh sách, mỗi lần đều kéo cửa sổ lên. Giờ: MỘT thông báo cookies cho cả app, chỉ báo lại khi cookies
     // người dùng cấu hình đổi (lưu mới / đổi trình duyệt — không tính yt-dlp tự ghi lại tệp) hoặc người dùng chủ động chạy lại.
@@ -2251,8 +2258,11 @@ export class QueueManager {
       this.blockingNoticeKeys.add(noticeKey);
     }
     const scope = job?.projectId ?? job?.id ?? 'global';
-    const title =
-      code === 'COOKIES_EXPIRED'
+    // 1.7.6 việc B: yt-dlp nói rõ cookie bị trình duyệt xoay → nói đúng lý do + cách xuất từ cửa sổ ẩn danh.
+    const rotated = code === 'COOKIES_EXPIRED' && cookiesRotated;
+    const title = rotated
+      ? COOKIE_ROTATED_TITLE
+      : code === 'COOKIES_EXPIRED'
         ? 'Cookies đã hết hạn hoặc không còn hợp lệ'
         : code === 'AUTHENTICATION_REQUIRED' || code === 'BROWSER_COOKIE_DATABASE_LOCKED'
           ? 'Cần xác thực để tiếp tục tải'
@@ -2265,8 +2275,9 @@ export class QueueManager {
                 : code === 'NETWORK_CIRCUIT_OPEN'
                   ? 'Danh sách đã tạm dừng vì mạng không ổn định'
                   : 'Công cụ tải video chưa sẵn sàng';
-    const steps =
-      code === 'COOKIES_EXPIRED'
+    const steps = rotated
+      ? [...COOKIE_INCOGNITO_EXPORT_STEPS]
+      : code === 'COOKIES_EXPIRED'
         ? [
             'Đăng nhập lại vào tài khoản có quyền xem video.',
             'Xuất hoặc dán cookies mới trong đúng danh sách.',
@@ -2587,7 +2598,13 @@ export class QueueManager {
         );
         if (!cookieBlocking) await this.pauseProjectForBlockingError(job, code, message);
         this.emitProgress(paused);
-        this.notifyBlockingError(code, pausedMessage, job, cookieFingerprint);
+        this.notifyBlockingError(
+          code,
+          pausedMessage,
+          job,
+          cookieFingerprint,
+          appError.details?.failureSubtype === 'cookies_invalid'
+        );
         this.logger.warn('queue', code, pausedMessage, {
           jobId: job.id,
           ...(job.projectId ? { projectId: job.projectId } : {})

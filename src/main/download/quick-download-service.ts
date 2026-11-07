@@ -26,7 +26,8 @@ import { buildQuickDownloadArguments } from './quick-download-command.js';
 import { acceptPathInside } from '../files/path-containment.js';
 import type { CookieJarStore, CookieRunOutcome } from '../cookies/cookie-jar-store.js';
 
-import { isExplicitlyRemovedYoutubeSource } from '@shared/utils/download-failure.js';
+import { isCookieRotationText, isExplicitlyRemovedYoutubeSource } from '@shared/utils/download-failure.js';
+import { cookieRotatedMessage } from '@shared/utils/cookie-guidance.js';
 
 interface PersistedQuickDownloadState {
   version: 1;
@@ -118,6 +119,14 @@ function classifyCookieFailure(lines: string[], cookiesAttached: boolean): Quick
   }
 
   return null;
+}
+
+/** 1.7.6 việc B: `lines` là các dòng yt-dlp vừa in — có câu "cookie bị xoay" thì nói đúng lý do + cách xuất từ cửa sổ ẩn danh. */
+export function quickCookieFailureMessage(code: QuickDownloadErrorCode, lines: readonly string[]): string {
+  if (code === 'COOKIES_EXPIRED' && isCookieRotationText(lines.join('\n'))) {
+    return `${cookieRotatedMessage()} Tải nhanh sẽ tự tiếp tục tác vụ này sau khi bạn lưu cookies mới.`;
+  }
+  return cookieFailureMessage(code);
 }
 
 function cookieFailureMessage(code: QuickDownloadErrorCode): string {
@@ -663,7 +672,7 @@ export class QuickDownloadService {
 
           if (cookieCode) {
             this.cookieBlockedRequest = active.request;
-            this.failTask(active, cookieFailureMessage(cookieCode), cookieCode);
+            this.failTask(active, quickCookieFailureMessage(cookieCode, active.recentLines), cookieCode);
             // 2026-10-24: thử lại bằng cookies là một lượt Tải nhanh MỚI (thư mục tạm mới) → tệp tạm lượt này không dùng lại.
             await this.cleanupActive(active, true);
             return;

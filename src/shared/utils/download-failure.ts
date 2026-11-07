@@ -251,6 +251,18 @@ export function unsupportedSourceUrlMessage(): string {
   );
 }
 
+/** Câu yt-dlp báo cookie YouTube đã bị trình duyệt xoay/thu hồi (chữ thường). Dùng chung cho hàng đợi và Tải nhanh (1.7.6 việc B). */
+export const COOKIE_ROTATION_PHRASES: readonly string[] = [
+  'cookies are no longer valid',
+  'account cookies are no longer valid',
+  'have likely been rotated',
+  'cookies have been rotated'
+];
+
+export function isCookieRotationText(text: string): boolean {
+  return includesAny(text.toLowerCase(), COOKIE_ROTATION_PHRASES);
+}
+
 function includesAny(text: string, needles: readonly string[]): boolean {
   return needles.some((needle) => text.includes(needle));
 }
@@ -332,14 +344,7 @@ export function classifyYtDlpFailure(text: string): YtDlpFailureDetail {
 
   // 2026-10-27 (điều tra "cookie hỏng sau vài phút"): yt-dlp nói RÕ cookie YouTube không còn hợp lệ (bị xoay/thu hồi) — đây
   // mới là dấu hiệu cookie hỏng thật. Kiểm trước 429 vì câu này chắc chắn hơn mọi lỗi khác cùng lượt.
-  if (
-    includesAny(lower, [
-      'cookies are no longer valid',
-      'account cookies are no longer valid',
-      'have likely been rotated',
-      'cookies have been rotated'
-    ])
-  ) {
+  if (includesAny(lower, COOKIE_ROTATION_PHRASES)) {
     return { category: 'authentication', subtype: 'cookies_invalid', httpStatus: null, retryable: false };
   }
 
