@@ -33,13 +33,20 @@ check(settings.includes('ADAPTIVE_SETTINGS_HOTFIX8_MIGRATION'), 'existing instal
 check(!settings.includes('capcut_master_edit_copy_v131_hotfix7'), 'old forced CapCut migration is removed');
 check(engine.includes('ADAPTIVE_SETTINGS_HOTFIX8_EDIT_PLAN'), 'master selection and edit-copy planning are independent');
 check(engine.includes('ADAPTIVE_SETTINGS_HOTFIX8_PREPARE'), 'accepted edit-copy recommendation reaches download post-processing');
-check(page.includes('ADAPTIVE_SETTINGS_HOTFIX8_RECOMMENDATION'), 'hardware recommendation controls resource and edit-copy settings');
-check(page.includes("downloadCompatibilityMode: 'source'") && page.includes('downloadEditCopyMode: recommendedEditMode'), 'recommendation preserves master quality and chooses an edit resolution');
-check(page.includes('base.gpuJobs >= 2') && page.includes('recommendedConcurrentFragments >= 4') && page.includes('recommendedAria2Connections >= 24'), '2K edit copies require a strong GPU/resource recommendation');
+// 1.7.6 việc E (người dùng duyệt 2026-11-07): "Theo máy" chỉ chỉnh tốc độ; không nút mẫu nào đổi chế độ CapCut
+// (trước đây "Theo máy" bật "tạo thêm bản CapCut" + tắt "CapCut trực tiếp" — ô tạo thêm bản tự bật lại).
+check(page.includes('machineRecommendationPatch('), '"Theo máy" only applies the speed-only recommendation patch');
 check(
-  page.includes('ADAPTIVE_SETTINGS_HOTFIX10_QUALITY_LABEL') &&
-    page.includes("Chọn 'Theo máy' để tạo bản edit CapCut phù hợp"),
-  'UI explains the highest-source default and the explicit acceptance step'
+  !page.includes('downloadEditCopyMode: recommendedEditMode') && !page.includes("downloadCompatibilityMode: 'source'"),
+  'download workbench buttons never change the CapCut mode'
+);
+check(
+  fs.existsSync(path.join(root, 'tests/unit/download-presets.test.ts')),
+  'preset patches are covered by a unit test that forbids CapCut-mode keys'
+);
+check(
+  page.includes('ADAPTIVE_SETTINGS_HOTFIX10_QUALITY_LABEL') && !page.includes("Chọn 'Theo máy' để tạo bản edit CapCut"),
+  'UI no longer tells users to press "Theo máy" to create a CapCut copy'
 );
 check(page.includes('Theo máy') && page.includes('Đã áp dụng đề xuất theo máy'), 'UI keeps one clear acceptance action and confirms the selected policy');
 check(qualityTests.includes("downloadCompatibilityMode: 'source'"), 'legacy source-quality contract remains covered by unit tests');

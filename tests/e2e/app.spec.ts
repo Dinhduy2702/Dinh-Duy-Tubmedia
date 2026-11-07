@@ -6386,3 +6386,88 @@ test('Lịch sử: video lỗi hiện lý do cụ thể trên bảng và CSV có
     await removeSandbox(sandbox);
   }
 });
+
+/**
+ * 1.7.6 việc E (người dùng 2026-11-07): ô "tạo thêm bản CapCut" tự bật lại dù người dùng chỉ muốn MỘT tệp mỗi video. Gốc: nút
+ * "Theo máy" đặt downloadEditCopyMode = capcut_sdr_1080p/2k + downloadCompatibilityMode = 'source'; "Chuẩn 1080p" và 3 mẫu
+ * chất lượng ở Cài đặt cũng đặt 'source' (tắt "CapCut trực tiếp"). Bấm từng nút trên giao diện thật → chế độ CapCut không đổi.
+ */
+test('Việc E 1.7.6: "Theo máy", "Chuẩn 1080p" và các mẫu chất lượng không bao giờ đổi chế độ CapCut', async () => {
+  test.setTimeout(150_000);
+  const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-capcut-mode-'));
+  const userDataDirectory = path.join(sandbox, 'userdata');
+  fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
+  interface CapCutModeSettings {
+    downloadCompatibilityMode: string;
+    downloadEditCopyMode?: string;
+  }
+  interface DesktopModeApi {
+    settings: {
+      get: () => Promise<CapCutModeSettings>;
+      update: (patch: Record<string, unknown>) => Promise<CapCutModeSettings>;
+    };
+  }
+  const readMode = async (): Promise<{ compat: string; editCopy: string }> => {
+    const current = await shellWindow!.evaluate(() => (window as unknown as { desktop: DesktopModeApi }).desktop.settings.get());
+    return { compat: current.downloadCompatibilityMode, editCopy: current.downloadEditCopyMode ?? 'off' };
+  };
+  const expected = { compat: 'capcut_sdr_1080p', editCopy: 'off' };
+  try {
+    electronApplication = await electron.launch({
+      args: [mainEntry],
+      cwd: projectRoot,
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+        ),
+        NODE_ENV: 'test',
+        TUBMEDIA_E2E: '1',
+        TUBMEDIA_E2E_USER_DATA: userDataDirectory,
+        PLAYWRIGHT_TEST: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      },
+      timeout: 45_000
+    });
+    mainProcessId = electronApplication.process().pid;
+    shellWindow = await electronApplication.firstWindow({ timeout: 30_000 });
+    await shellWindow.waitForSelector('.app-sidebar', { timeout: 30_000 });
+    await blockRealMouse(electronApplication);
+
+    // Người dùng chọn "CapCut trực tiếp", một tệp mỗi video.
+    await shellWindow.evaluate(
+      (patch) => (window as unknown as { desktop: DesktopModeApi }).desktop.settings.update(patch),
+      { downloadCompatibilityMode: expected.compat, downloadEditCopyMode: expected.editCopy }
+    );
+    expect(await readMode()).toEqual(expected);
+
+    const nav = shellWindow.getByRole('navigation', { name: 'Điều hướng chính' });
+    await nav.getByRole('button', { name: 'Tải danh sách', exact: true }).click();
+
+    // "Theo máy" (chỉnh tốc độ theo máy) — chờ nút hết bận rồi đọc lại cài đặt đã lưu.
+    const byMachine = shellWindow.getByRole('button', { name: 'Theo máy', exact: true });
+    await byMachine.click({ timeout: 20_000 });
+    await expect(byMachine).toBeEnabled({ timeout: 60_000 });
+    await expect.poll(readMode, { timeout: 5_000 }).toEqual(expected);
+    expect(await readMode(), '"Theo máy" không được đổi chế độ CapCut').toEqual(expected);
+
+    await shellWindow.getByRole('button', { name: 'Chuẩn 1080p', exact: true }).click();
+    await shellWindow.waitForTimeout(1_500);
+    expect(await readMode(), '"Chuẩn 1080p" không được tắt "CapCut trực tiếp"').toEqual(expected);
+
+    // Cài đặt › Tải danh sách: bấm "Áp dụng" ở từng mẫu chất lượng rồi Lưu cài đặt.
+    await nav.getByRole('button', { name: 'Cài đặt', exact: true }).click({ timeout: 20_000 });
+    await shellWindow.locator('.settings-nav').getByRole('button', { name: 'Tải danh sách', exact: true }).click();
+    const presets = shellWindow.locator('.download-source-preset');
+    await expect(presets).toHaveCount(3);
+    for (let index = 0; index < 3; index += 1) {
+      const button = presets.nth(index).getByRole('button');
+      if (await button.isEnabled()) await button.click();
+      await shellWindow.getByRole('button', { name: 'Lưu cài đặt' }).click();
+      await shellWindow.waitForTimeout(1_000);
+      expect(await readMode(), `mẫu chất lượng thứ ${index + 1} không được đổi chế độ CapCut`).toEqual(expected);
+    }
+  } finally {
+    await closeElectronApplication();
+    await removeSandbox(sandbox);
+  }
+});

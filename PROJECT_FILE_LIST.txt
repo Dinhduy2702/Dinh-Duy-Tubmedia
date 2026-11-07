@@ -476,6 +476,7 @@ src/shared/utils/disk-shortfall-format.ts
 src/shared/utils/download-failure.ts
 src/shared/utils/download-pacing.ts
 src/shared/utils/download-path-budget.ts
+src/shared/utils/download-presets.ts
 src/shared/utils/download-quality.ts
 src/shared/utils/encoder-selection.ts
 src/shared/utils/failure-reason.ts
@@ -606,6 +607,7 @@ tests/unit/disk-shortfall-format.test.ts
 tests/unit/download-pacing.test.ts
 tests/unit/download-path-budget.test.ts
 tests/unit/download-performance.test.ts
+tests/unit/download-presets.test.ts
 tests/unit/download-quality.test.ts
 tests/unit/download-recovery-policy.test.ts
 tests/unit/download-recovery-r49.test.ts

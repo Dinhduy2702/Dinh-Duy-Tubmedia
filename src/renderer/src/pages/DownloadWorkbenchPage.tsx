@@ -36,6 +36,8 @@ import { planForListCount, recommendDownloadConcurrency } from '@shared/utils/ha
 import { shouldShowInlineBlockingIssue } from '@shared/utils/notification-policy';
 import { activeDownloadWorkersLabel } from '@shared/utils/active-download-workers-label';
 import { planApplyTempFolderToAll } from '@shared/utils/apply-temp-folder';
+import { machineRecommendationPatch, reference1080Patch } from '@shared/utils/download-presets';
+import { isCapCutDownloadMode } from '@shared/utils/download-quality';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CookieManagerDialog } from '../components/CookieManagerDialog';
 import { InfoDisclosure } from '../components/InfoDisclosure';
@@ -141,7 +143,8 @@ function qualityLabel(settings: AppSettings | null): string {
   const editCopyMode = settings.downloadEditCopyMode ?? 'off';
   if (settings.downloadCompatibilityMode === 'source') {
     if (editCopyMode === 'off') {
-      return "Master cao nhất theo nguồn · Chọn 'Theo máy' để tạo bản edit CapCut phù hợp";
+      // 1.7.6 việc E: không còn mời bấm "Theo máy" để tạo bản CapCut — nút đó chỉ chỉnh tốc độ.
+      return 'Master cao nhất theo nguồn · không tạo bản CapCut';
     }
     const editResolution = editCopyMode === 'capcut_sdr_2k' ? '2K' : '1080p';
     return `Master cao nhất theo nguồn + bản edit CapCut SDR ${editResolution}`;
@@ -561,36 +564,14 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
       const recommendation = recommendDownloadConcurrency(detected);
       const plan = planForListCount(recommendation, laneCount, settings?.downloadVerifyEntireFile ?? false);
       const base = await window.desktop.settings.recommend();
-      // ADAPTIVE_SETTINGS_HOTFIX8_RECOMMENDATION
-      const recommendedEditMode: AppSettings['downloadEditCopyMode'] =
-        base.gpuJobs >= 2 &&
-        recommendation.recommendedConcurrentFragments >= 4 &&
-        recommendation.recommendedAria2Connections >= 24
-          ? 'capcut_sdr_2k'
-          : 'capcut_sdr_1080p';
       const saved = await window.desktop.settings.saveResourceProfile({
         ...base,
         downloadWorkers: plan.workersPerList,
         builtIn: false
       });
-      const nextSettings = await window.desktop.settings.update({
-        defaultResourceProfileId: saved.id,
-        downloadCompatibilityMode: 'source',
-        downloadEditCopyMode: recommendedEditMode,
-        downloadMinHeight: 0,
-        downloadMaxHeight: 0,
-        downloadMinFps: 0,
-        downloadMaxFps: 0,
-        downloadCodecPreference: 'auto',
-        downloadContainerPreference: 'auto',
-        downloadMinVideoBitrateKbps: 0,
-        downloadVideoBitrateKbps: 0,
-        downloadMinAudioBitrateKbps: 0,
-        downloadAudioBitrateKbps: 0,
-        downloadAllowBelowMinimum: false,
-        // 2026-10-24: số mảnh mỗi video và trần tổng video tự dò theo máy, không ghi cứng số của lần quét này.
-        downloadFragmentsAuto: true
-      });
+      // 1.7.6 việc E: "Theo máy" CHỈ chỉnh tốc độ — trước đây còn đặt chất lượng nguồn cao nhất + bật "tạo thêm bản CapCut" +
+      // tắt "CapCut trực tiếp" (ô tạo thêm bản tự bật lại dù người dùng chỉ muốn một tệp mỗi video).
+      const nextSettings = await window.desktop.settings.update(machineRecommendationPatch(saved.id));
       useAppStore.setState((current) => ({
         hardware: detected,
         settings: nextSettings,
@@ -609,7 +590,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
       );
       notify(
         'Đã áp dụng đề xuất theo máy',
-        `Giữ master cao nhất theo nguồn + tạo bản edit CapCut ${recommendedEditMode === 'capcut_sdr_2k' ? '2K' : '1080p'}; ${plan.workersPerList} luồng/danh sách; tổng video tải cùng lúc tự theo máy (hiện tối đa ${recommendation.maximumSafeGlobalWorkers}).`
+        `${plan.workersPerList} luồng/danh sách; tổng video tải cùng lúc tự theo máy (hiện tối đa ${recommendation.maximumSafeGlobalWorkers}). Chất lượng và chế độ CapCut giữ nguyên.`
       );
     } catch (error) {
       setError(messageOf(error));
@@ -620,27 +601,14 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
 
   const applyReferenceQuality = async (): Promise<void> => {
     try {
-      const next = await window.desktop.settings.update({
-        downloadCompatibilityMode: 'source',
-        // ADAPTIVE_SETTINGS_HOTFIX8_REFERENCE_OFF
-        downloadEditCopyMode: 'off',
-        downloadMinHeight: 720,
-        downloadMaxHeight: 1080,
-        downloadMinFps: 0,
-        downloadMaxFps: 0,
-        downloadCodecPreference: 'h264',
-        downloadContainerPreference: 'mp4',
-        downloadMinVideoBitrateKbps: 0,
-        downloadVideoBitrateKbps: 0,
-        downloadMinAudioBitrateKbps: 0,
-        downloadAudioBitrateKbps: 0,
-        downloadAllowBelowMinimum: true,
-        downloadFragmentsAuto: true
-      });
+      // 1.7.6 việc E: không đổi chế độ CapCut (trước đây đặt 'source' → tắt "CapCut trực tiếp").
+      const next = await window.desktop.settings.update(reference1080Patch());
       setSettings(next);
       notify(
         'Đã áp dụng chuẩn đa nền tảng 1080p',
-        'H.264/MP4, 720p–1080p, fallback thông minh, số mảnh tải mỗi video tự theo máy; mỗi danh sách vẫn chạy độc lập.'
+        isCapCutDownloadMode(next.downloadCompatibilityMode)
+          ? 'Đang dùng "CapCut trực tiếp" (đã là H.264 tối đa 1080p) nên giữ nguyên chế độ này; mẫu 720p–1080p chỉ có tác dụng khi chọn "Theo nguồn" trong Cài đặt.'
+          : 'H.264/MP4, 720p–1080p, fallback thông minh, số mảnh tải mỗi video tự theo máy; mỗi danh sách vẫn chạy độc lập.'
       );
     } catch (error) {
       setError(messageOf(error));

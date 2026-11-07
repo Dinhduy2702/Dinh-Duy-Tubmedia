@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import type { AppSettings, QualityProfile, ResourceProfile } from '@shared/types/domain';
 import { planForListCount, recommendDownloadConcurrency, recommendedConcurrentFragments } from '@shared/utils/hardware-recommendation';
+import { highestSourcePatch, light720Patch, reference1080Patch, type DownloadPresetPatch } from '@shared/utils/download-presets';
 import { CookieManagerDialog } from '../components/CookieManagerDialog';
 import { FolderField } from '../components/FolderField';
 import { InfoDisclosure } from '../components/InfoDisclosure';
@@ -247,49 +248,13 @@ function DownloadSettings({ settings, patch, setError }: { settings: AppSettings
     settings.downloadMaxHeight === 720 &&
     settings.downloadCodecPreference === 'h264' &&
     settings.downloadContainerPreference === 'mp4';
-  const useHighestSource = (): void => {
-    patch('downloadCompatibilityMode', 'source');
-    patch('downloadMinHeight', 0);
-    patch('downloadMaxHeight', 0);
-    patch('downloadMinFps', 0);
-    patch('downloadMaxFps', 0);
-    patch('downloadCodecPreference', 'auto');
-    patch('downloadMinVideoBitrateKbps', 0);
-    patch('downloadVideoBitrateKbps', 0);
-    patch('downloadMinAudioBitrateKbps', 0);
-    patch('downloadAudioBitrateKbps', 0);
-    patch('downloadAllowBelowMinimum', false);
+  // 1.7.6 việc E: mẫu chất lượng không đổi chế độ CapCut (trước đây đặt 'source' → tắt "CapCut trực tiếp").
+  const applyPreset = (values: DownloadPresetPatch): void => {
+    for (const [key, value] of Object.entries(values)) patch(key as keyof AppSettings, value as never);
   };
-  const useReference1080 = (): void => {
-    patch('downloadCompatibilityMode', 'source');
-    patch('downloadMinHeight', 720);
-    patch('downloadMaxHeight', 1080);
-    patch('downloadMinFps', 0);
-    patch('downloadMaxFps', 0);
-    patch('downloadCodecPreference', 'h264');
-    patch('downloadContainerPreference', 'mp4');
-    patch('downloadMinVideoBitrateKbps', 0);
-    patch('downloadVideoBitrateKbps', 0);
-    patch('downloadMinAudioBitrateKbps', 0);
-    patch('downloadAudioBitrateKbps', 0);
-    patch('downloadAllowBelowMinimum', true);
-    // 2026-10-24: trước đây ép 16 kết nối aria2c (không dùng) + 2 mảnh + "2 video toàn app" (không dùng) cho mọi máy.
-    patch('downloadFragmentsAuto', true);
-  };
-  const useLight720 = (): void => {
-    patch('downloadCompatibilityMode', 'source');
-    patch('downloadMinHeight', 0);
-    patch('downloadMaxHeight', 720);
-    patch('downloadMinFps', 0);
-    patch('downloadMaxFps', 30);
-    patch('downloadCodecPreference', 'h264');
-    patch('downloadContainerPreference', 'mp4');
-    patch('downloadMinVideoBitrateKbps', 0);
-    patch('downloadVideoBitrateKbps', 0);
-    patch('downloadMinAudioBitrateKbps', 0);
-    patch('downloadAudioBitrateKbps', 0);
-    patch('downloadAllowBelowMinimum', true);
-  };
+  const useHighestSource = (): void => applyPreset(highestSourcePatch());
+  const useReference1080 = (): void => applyPreset(reference1080Patch());
+  const useLight720 = (): void => applyPreset(light720Patch());
   return <Block title="Tải danh sách video · đầu ra riêng" icon={Download}>
     <InfoDisclosure className="settings-scope-disclosure mb-5" icon={Download} title="Phạm vi: Tải danh sách" summary="Không tác động nguồn hoặc thành phẩm của Tải & Ghép." status="ĐỘC LẬP" tone="info">
       <p className="settings-detail-copy">Thiết lập này chỉ áp dụng cho Tải danh sách. yt-dlp tự xử lý YouTube, Google Drive, TikTok, Facebook, Instagram, X, Vimeo, Reddit, Dailymotion và những nền tảng được hỗ trợ khác; Cookies, mạng và công cụ là hạ tầng dùng chung.</p>
@@ -309,6 +274,7 @@ function DownloadSettings({ settings, patch, setError }: { settings: AppSettings
         <button className="btn" type="button" disabled={light720Active} onClick={useLight720}>{light720Active ? 'Đang dùng' : 'Áp dụng'}</button>
       </div>
     </div>
+    {capCutMode && <p className="mb-3 text-sm" style={{ color: 'var(--muted)' }}>Đang dùng &quot;CapCut trực tiếp&quot;: các mẫu chất lượng trên được lưu nhưng chỉ có tác dụng khi chọn &quot;Theo nguồn&quot; ở ô bên dưới. Áp dụng mẫu không đổi chế độ CapCut.</p>}
     <Select label="Chế độ tương thích video" value={settings.downloadCompatibilityMode} onChange={(value) => patch('downloadCompatibilityMode', value as AppSettings['downloadCompatibilityMode'])} options={[["source","Theo nguồn · dùng thiết lập thủ công"],["capcut_sdr_1080p","CapCut trực tiếp · SDR 1080p"],["capcut_sdr_2k","CapCut trực tiếp · SDR 1080p–2K (1440p)"]]}/>
     {capCutMode
       ? <div className="my-4 rounded-xl border p-4 text-sm leading-6" style={{ borderColor: 'var(--good)', background: 'color-mix(in srgb,var(--good) 7%,var(--panel2))' }}>
