@@ -20,6 +20,7 @@ import { decideCloseAction, decideMinimizeAction } from './app/window-close-poli
 import { runShutdownSequence, type ShutdownStep } from './app/shutdown-sequence.js';
 import { registerIpc } from './ipc/register-ipc.js';
 import { createMainWindow } from './windows/main-window.js';
+import { runDetached } from './app/detached-task.js';
 import { readDevelopmentEnvironment } from './runtime/development-environment.js';
 import { REQUIRED_TOOL_NAMES } from './tools/tool-manager.js';
 
@@ -125,6 +126,11 @@ function ensureTray(): void {
   tray.on('double-click', showMainWindow);
 }
 
+/** 1.7.6 việc D: nạp giao diện lỗi → ghi nhật ký (trước đây `void window.loadURL/loadFile` thành unhandled rejection). */
+function logRendererLoadFailure(error: unknown): void {
+  context?.logger.warn('app', 'RENDERER_LOAD_FAILED', error instanceof Error ? error.message : String(error));
+}
+
 async function requestClose(window: BrowserWindow): Promise<void> {
   if (!context || allowWindowClose) return;
   const settings = context.settings.get();
@@ -178,7 +184,17 @@ function wireWindow(window: BrowserWindow): void {
   window.on('close', (event: ElectronEvent) => {
     if (allowWindowClose) return;
     event.preventDefault();
-    void requestClose(window);
+    // 1.7.6 việc D: requestClose đọc cài đặt/hàng đợi và mở hộp hỏi — lỗi ở đó trước đây thành unhandled rejection và cửa
+    // sổ không đóng được. Giờ ghi nhật ký rồi vẫn thoát an toàn (giữ tác vụ để lần mở sau tiếp tục) vì người dùng đã bấm X.
+    runDetached(
+      () => requestClose(window),
+      (error) => {
+        context?.logger.error('app', 'CLOSE_REQUEST_FAILED', error instanceof Error ? (error.stack ?? error.message) : String(error));
+        shutdownMode = 'preserve';
+        allowWindowClose = true;
+        app.quit();
+      }
+    );
   });
   // Nút thu nhỏ (—) để Windows thu nhỏ bình thường xuống thanh tác vụ — KHÔNG ẩn cửa sổ (ẩn từng khiến tưởng app đã
   // đóng hẳn, 2026-10-20). Công tắc khay chỉ bảo đảm có biểu tượng ở khay (kể cả khi vừa bật công tắc lúc app đang mở).
@@ -357,7 +373,7 @@ function initializeApplication(): void {
   // tự động ở nền; QueueManager chỉ khởi động sau khi ba công cụ bắt buộc đã
   // được xác định để không tạo trạng thái sẵn sàng giả.
   registerIpc(current);
-  mainWindow = createMainWindow();
+  mainWindow = createMainWindow(logRendererLoadFailure);
   wireWindow(mainWindow);
   // TUBMEDIA E2E FAKE UPDATE STATUS HOOK (2026-09-25): chỉ có tác dụng khi đặt CẢ HAI biến môi trường
   // e2e tường minh — không tồn tại trong bản phát hành thật. Cho bài kiểm thật mô phỏng ĐÚNG sự kiện
@@ -398,7 +414,7 @@ function initializeApplication(): void {
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      mainWindow = createMainWindow();
+      mainWindow = createMainWindow(logRendererLoadFailure);
       wireWindow(mainWindow);
     } else {
       showMainWindow();

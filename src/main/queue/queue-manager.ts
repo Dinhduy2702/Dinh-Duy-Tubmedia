@@ -1855,10 +1855,12 @@ export class QueueManager {
     preserveTrackedClips = false
   ): Promise<void> {
     if (this.cleanupInProgress.has(projectId)) return;
-    const project = this.projects.get(projectId);
-    if (!project) return;
     this.cleanupInProgress.add(projectId);
     try {
+      // 1.7.6 việc D: đọc dự án TRONG try — người gọi không chờ (`void`), CSDL vừa đóng lúc tắt app thì lỗi ở đây trước đây
+      // thành unhandled rejection.
+      const project = this.projects.get(projectId);
+      if (!project) return;
       const items = this.items.list(projectId);
       const trackedClips = items
         .map((item) => item.clipFile)

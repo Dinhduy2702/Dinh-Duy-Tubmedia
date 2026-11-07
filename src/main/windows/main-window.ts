@@ -2,10 +2,13 @@ import { app, BrowserWindow, nativeTheme, shell, type Event as ElectronEvent } f
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readDevelopmentEnvironment } from '../runtime/development-environment.js';
+import { runDetached } from '../app/detached-task.js';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 
-export function createMainWindow(): BrowserWindow {
+export function createMainWindow(
+  onLoadError: (error: unknown) => void = (error) => console.error('Không nạp được giao diện Tubmedia:', error)
+): BrowserWindow {
   const window = new BrowserWindow({
     width: 1500,
     height: 940,
@@ -51,12 +54,12 @@ export function createMainWindow(): BrowserWindow {
     if (url !== current) event.preventDefault();
   });
 
+  // 1.7.6 việc D: nạp giao diện bị từ chối (cửa sổ đóng giữa chừng, máy chủ dev tắt…) → ghi nhật ký, không thành unhandled.
   const { rendererUrl } = readDevelopmentEnvironment(process.env, app.isPackaged);
-  if (rendererUrl) {
-    void window.loadURL(rendererUrl);
-  } else {
-    void window.loadFile(join(currentDir, '../renderer/index.html'));
-  }
+  runDetached(
+    () => (rendererUrl ? window.loadURL(rendererUrl) : window.loadFile(join(currentDir, '../renderer/index.html'))),
+    onLoadError
+  );
 
   return window;
 }
