@@ -45,8 +45,13 @@ describe('luồng ffmpeg của hồ sơ có sẵn tự theo máy', () => {
     expect(withMachineFfmpegThreads(custom, 4).ffmpegThreads).toBe(6);
   });
 
-  it('không đổi gì khác của hồ sơ', () => {
+  it('không đổi gì khác của hồ sơ ngoài các số luồng ffmpeg (1.7.6 A0: cả luồng bộ lọc cũng theo máy)', () => {
     const result = withMachineFfmpegThreads(defaultProfile, 4);
-    expect({ ...result, ffmpegThreads: defaultProfile.ffmpegThreads }).toEqual(defaultProfile);
+    expect({
+      ...result,
+      ffmpegThreads: defaultProfile.ffmpegThreads,
+      filterThreads: defaultProfile.filterThreads,
+      filterComplexThreads: defaultProfile.filterComplexThreads
+    }).toEqual(defaultProfile);
   });
 });

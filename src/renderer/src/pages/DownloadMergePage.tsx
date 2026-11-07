@@ -46,6 +46,7 @@ import type {
 } from '@shared/types/domain';
 import type { LocalCutAspectRatio } from '@shared/local-cut';
 import { parseInputText } from '@shared/utils/input-parser';
+import { effectiveFfmpegThreads } from '@shared/utils/machine-threads';
 import { displayedAttempt } from '@shared/utils/attempt-display';
 import { redactSecrets } from '@shared/utils/secret-redaction';
 import { sanitizeFilename } from '@shared/utils/filename';
@@ -1366,6 +1367,8 @@ function MergeLaneCard({
   setError: (error: string | null) => void;
 }): React.JSX.Element {
   const dismissedSharedTemp = useAppStore((state) => state.settings?.dismissedSharedTempWarnings);
+  // 1.7.6 việc A0: hiện số luồng ffmpeg THẬT theo máy (cùng quy tắc với hàng đợi), không phải số gốc của hồ sơ.
+  const logicalCpus = useAppStore((state) => state.hardware?.logicalCpuCount ?? 0);
   const [showLogs, setShowLogs] = useState(false);
   const combinedLogs = useLaneLogs(projectId, liveLogs, logsVersion, setError);
   const [storage, setStorage] = useState<WorkbenchStorageSummary | null>(null);
@@ -1653,7 +1656,7 @@ function MergeLaneCard({
             >
               {resources.map((profile) => (
                 <option key={profile.id} value={profile.id}>
-                  {profile.name} · FFmpeg {profile.ffmpegThreads} luồng xử lý
+                  {profile.name} · FFmpeg {logicalCpus > 0 ? effectiveFfmpegThreads(profile, logicalCpus) : profile.ffmpegThreads} luồng xử lý
                 </option>
               ))}
             </select>

@@ -489,6 +489,7 @@ src/shared/utils/hardware-recommendation.ts
 src/shared/utils/history-export.ts
 src/shared/utils/input-parser.ts
 src/shared/utils/job-state-machine.ts
+src/shared/utils/machine-threads.ts
 src/shared/utils/media-info-format.ts
 src/shared/utils/merge-lane-visibility.ts
 src/shared/utils/merge-target.ts
@@ -655,6 +656,7 @@ tests/unit/local-cut.test.ts
 tests/unit/logger-resilience.test.ts
 tests/unit/logs-page-dot3.test.ts
 tests/unit/long-text-info-hint.test.ts
+tests/unit/machine-threads-a0.test.ts
 tests/unit/media-analyzer-hdr.test.ts
 tests/unit/media-duration-sanity.test.ts
 tests/unit/media-info-format.test.ts

@@ -3,6 +3,7 @@ import { arch, cpus, freemem, hostname, platform, release, totalmem } from 'node
 import { promisify } from 'node:util';
 import type { HardwareProfile, ResourceProfile } from '@shared/types/domain.js';
 import { recommendDownloadConcurrency } from '@shared/utils/hardware-recommendation.js';
+import { machineThreadCap } from '@shared/utils/machine-threads.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -198,13 +199,13 @@ export class HardwareService {
       normalizeWorkers,
       remuxWorkers: workstation ? 4 : normalizeWorkers >= 2 ? 2 : 1,
       clipWorkers: 1,
-      ffmpegThreads: low
-        ? Math.max(2, Math.floor(logical / 2))
-        : workstation
-          ? 8
-          : Math.min(6, Math.max(4, Math.floor(logical / 3))),
-      filterThreads: low ? 1 : workstation ? 4 : 3,
-      filterComplexThreads: low ? 1 : workstation ? 4 : 3,
+      // 1.7.6 việc A0: không vượt nửa số luồng của máy (trước đây máy ≤ 8 luồng tối thiểu 2 → máy 2 luồng dùng hết 2 luồng).
+      ffmpegThreads: Math.min(
+        machineThreadCap(logical),
+        low ? Math.max(1, Math.floor(logical / 2)) : workstation ? 8 : Math.min(6, Math.max(4, Math.floor(logical / 3)))
+      ),
+      filterThreads: Math.min(machineThreadCap(logical), low ? 1 : workstation ? 4 : 3),
+      filterComplexThreads: Math.min(machineThreadCap(logical), low ? 1 : workstation ? 4 : 3),
       processPriority: 'below_normal',
       cpuSoftLimitPercent: 88,
       memoryFreeMinimumBytes:
