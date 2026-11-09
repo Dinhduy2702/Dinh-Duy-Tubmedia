@@ -131,6 +131,11 @@ function logRendererLoadFailure(error: unknown): void {
   context?.logger.warn('app', 'RENDERER_LOAD_FAILED', error instanceof Error ? error.message : String(error));
 }
 
+/** 1.7.6: mở liên kết ngoài lỗi → ghi nhật ký (trước đây `void shell.openExternal` thành unhandled rejection). */
+function logOpenExternalFailure(error: unknown): void {
+  context?.logger.warn('app', 'OPEN_EXTERNAL_FAILED', error instanceof Error ? error.message : String(error));
+}
+
 async function requestClose(window: BrowserWindow): Promise<void> {
   if (!context || allowWindowClose) return;
   const settings = context.settings.get();
@@ -373,7 +378,7 @@ function initializeApplication(): void {
   // tự động ở nền; QueueManager chỉ khởi động sau khi ba công cụ bắt buộc đã
   // được xác định để không tạo trạng thái sẵn sàng giả.
   registerIpc(current);
-  mainWindow = createMainWindow(logRendererLoadFailure);
+  mainWindow = createMainWindow(logRendererLoadFailure, logOpenExternalFailure);
   wireWindow(mainWindow);
   // TUBMEDIA E2E FAKE UPDATE STATUS HOOK (2026-09-25): chỉ có tác dụng khi đặt CẢ HAI biến môi trường
   // e2e tường minh — không tồn tại trong bản phát hành thật. Cho bài kiểm thật mô phỏng ĐÚNG sự kiện
@@ -414,7 +419,7 @@ function initializeApplication(): void {
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      mainWindow = createMainWindow(logRendererLoadFailure);
+      mainWindow = createMainWindow(logRendererLoadFailure, logOpenExternalFailure);
       wireWindow(mainWindow);
     } else {
       showMainWindow();

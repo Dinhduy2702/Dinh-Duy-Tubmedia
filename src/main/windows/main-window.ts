@@ -7,7 +7,8 @@ import { runDetached } from '../app/detached-task.js';
 const currentDir = dirname(fileURLToPath(import.meta.url));
 
 export function createMainWindow(
-  onLoadError: (error: unknown) => void = (error) => console.error('Không nạp được giao diện Tubmedia:', error)
+  onLoadError: (error: unknown) => void = (error) => console.error('Không nạp được giao diện Tubmedia:', error),
+  onOpenExternalError: (error: unknown) => void = (error) => console.error('Không mở được liên kết ngoài:', error)
 ): BrowserWindow {
   const window = new BrowserWindow({
     width: 1500,
@@ -45,7 +46,8 @@ export function createMainWindow(
   });
 
   window.webContents.setWindowOpenHandler(({ url }: { url: string }) => {
-    if (url.startsWith('https://')) void shell.openExternal(url);
+    // 1.7.6: Windows không mở được link (không có trình duyệt mặc định…) → ghi lỗi, không thành unhandled rejection.
+    if (url.startsWith('https://')) runDetached(() => shell.openExternal(url), onOpenExternalError);
     return { action: 'deny' };
   });
 
