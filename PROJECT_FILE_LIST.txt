@@ -570,6 +570,7 @@ tests/integration/restore-sources-policy.test.ts
 tests/integration/settings-adapt-to-machine.test.ts
 tests/integration/settings-restore-policy.test.ts
 tests/integration/settings-rollback-compat.test.ts
+tests/integration/settings-theo-may-editcopy-v176.test.ts
 tests/integration/system-cleanup-service.test.ts
 tests/integration/visual-verify-decode-detail.test.ts
 tests/integration/workbench-draft-busy-guard.test.ts
