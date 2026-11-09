@@ -15,9 +15,9 @@ import { defaultAppSettings } from '@main/settings/defaults.js';
 import type { AppSettings } from '@shared/types/domain.js';
 
 // 1.7.6 việc E — phần nâng cấp (người dùng yêu cầu 2026-11-09): ai đã bấm "Theo máy" ở bản ≤ 1.7.5 thì cài đặt đã lưu
-// "tạo thêm bản CapCut" = bật (capcut_sdr_1080p/2k) + chế độ "Theo nguồn". Không có nút nào khác đặt được downloadEditCopyMode
-// (Cài đặt không có ô này) → giá trị khác 'off' là do nút tự đặt. Mở bản mới: đưa về "CapCut trực tiếp, một tệp" cùng độ
-// phân giải; chế độ CapCut người dùng tự chọn ở Cài đặt thì giữ nguyên; không có dấu vết của nút thì không đụng.
+// "tạo thêm bản CapCut" = bật. Chỉ gỡ khi còn DẤU VẾT RÕ của nút cũ — đúng bộ giá trị nút đã ghi một lượt (hồ sơ "Tự động theo
+// máy", "Theo nguồn", chất lượng nguồn cao nhất không giới hạn, số mảnh tự dò). Thiếu dấu vết (người dùng đã tự chỉnh sau đó,
+// hoặc bật có chủ ý theo cách khác) → giữ nguyên, không tắt mất lựa chọn của người dùng.
 
 let folder = '';
 const databases: AppDatabase[] = [];
@@ -49,38 +49,75 @@ function open(repo: SettingsRepository): AppSettings {
   return service.get();
 }
 
-describe('nâng cấp lên 1.7.6: gỡ "tạo thêm bản CapCut" do nút "Theo máy" tự bật', () => {
-  it('đã bấm "Theo máy" (1080p) → mở lên là "CapCut trực tiếp · 1080p", một tệp', () => {
-    const settings = open(oldInstall({ downloadCompatibilityMode: 'source', downloadEditCopyMode: 'capcut_sdr_1080p' }));
+/** Đúng bộ giá trị nút "Theo máy" của bản ≤ 1.7.5 ghi (DownloadWorkbenchPage applyRecommendation cũ). */
+const LEGACY_THEO_MAY: Partial<AppSettings> = {
+  defaultResourceProfileId: 'resource-auto',
+  downloadCompatibilityMode: 'source',
+  downloadEditCopyMode: 'capcut_sdr_1080p',
+  downloadMinHeight: 0,
+  downloadMaxHeight: 0,
+  downloadMinFps: 0,
+  downloadMaxFps: 0,
+  downloadCodecPreference: 'auto',
+  downloadContainerPreference: 'auto',
+  downloadMinVideoBitrateKbps: 0,
+  downloadVideoBitrateKbps: 0,
+  downloadMinAudioBitrateKbps: 0,
+  downloadAudioBitrateKbps: 0,
+  downloadAllowBelowMinimum: false,
+  downloadFragmentsAuto: true
+};
+
+describe('nâng cấp lên 1.7.6: CÓ dấu vết rõ của nút "Theo máy" cũ → gỡ bản thêm, về CapCut trực tiếp một tệp', () => {
+  it('bản 1080p → "CapCut trực tiếp · 1080p", một tệp', () => {
+    const settings = open(oldInstall(LEGACY_THEO_MAY));
     expect(settings.downloadEditCopyMode).toBe('off');
     expect(settings.downloadCompatibilityMode).toBe('capcut_sdr_1080p');
   });
 
-  it('nút đã chọn bản 2K → "CapCut trực tiếp · 2K", một tệp', () => {
-    const settings = open(oldInstall({ downloadCompatibilityMode: 'source', downloadEditCopyMode: 'capcut_sdr_2k' }));
+  it('bản 2K → "CapCut trực tiếp · 2K", một tệp', () => {
+    const settings = open(oldInstall({ ...LEGACY_THEO_MAY, downloadEditCopyMode: 'capcut_sdr_2k' }));
     expect(settings.downloadEditCopyMode).toBe('off');
     expect(settings.downloadCompatibilityMode).toBe('capcut_sdr_2k');
   });
 
-  it('sau đó người dùng tự chọn chế độ CapCut ở Cài đặt → giữ đúng chế độ đã chọn, chỉ gỡ bản thêm', () => {
-    const settings = open(oldInstall({ downloadCompatibilityMode: 'capcut_sdr_2k', downloadEditCopyMode: 'capcut_sdr_1080p' }));
-    expect(settings.downloadCompatibilityMode).toBe('capcut_sdr_2k');
+  it('hồ sơ tự động có số đuôi (resource-auto-<số>, bản cũ đổi tên) vẫn là dấu vết của nút', () => {
+    const settings = open(oldInstall({ ...LEGACY_THEO_MAY, defaultResourceProfileId: 'resource-auto-1784736276851' }));
     expect(settings.downloadEditCopyMode).toBe('off');
+    expect(settings.downloadCompatibilityMode).toBe('capcut_sdr_1080p');
   });
 
-  it('không có dấu vết của nút (không bật bản thêm) → không đụng gì, kể cả khi đang "Theo nguồn"', () => {
-    const before = { ...defaultAppSettings, downloadCompatibilityMode: 'source' as const, downloadEditCopyMode: 'off' as const, downloadMaxHeight: 1080 };
-    const settings = open(oldInstall(before));
+  it('chỉ chạy một lần: người dùng chọn lại "Theo nguồn" sau nâng cấp thì giữ', () => {
+    const repo = oldInstall(LEGACY_THEO_MAY);
+    open(repo);
+    repo.saveAppSettings({ ...repo.getAppSettings(defaultAppSettings), downloadCompatibilityMode: 'source' });
+    expect(open(repo).downloadCompatibilityMode).toBe('source');
+  });
+});
+
+describe('nâng cấp lên 1.7.6: KHÔNG có dấu vết rõ → giữ nguyên lựa chọn của người dùng', () => {
+  it('bật bản thêm nhưng chất lượng đã tự chỉnh khác nút (tối đa 1080p) → giữ bật, giữ "Theo nguồn"', () => {
+    const settings = open(oldInstall({ ...LEGACY_THEO_MAY, downloadMaxHeight: 1080 }));
+    expect(settings.downloadEditCopyMode).toBe('capcut_sdr_1080p');
     expect(settings.downloadCompatibilityMode).toBe('source');
-    expect(settings.downloadEditCopyMode).toBe('off');
     expect(settings.downloadMaxHeight).toBe(1080);
   });
 
-  it('chỉ chạy một lần: mở lại lần nữa không đổi gì thêm', () => {
-    const repo = oldInstall({ downloadCompatibilityMode: 'source', downloadEditCopyMode: 'capcut_sdr_1080p' });
-    open(repo);
-    const changed = { ...repo.getAppSettings(defaultAppSettings), downloadCompatibilityMode: 'source' as const };
-    repo.saveAppSettings(changed);
-    expect(open(repo).downloadCompatibilityMode, 'lựa chọn sau nâng cấp của người dùng được giữ').toBe('source');
+  it('bật bản thêm với hồ sơ hiệu năng tự chọn (không phải "Tự động theo máy") → giữ nguyên', () => {
+    const settings = open(oldInstall({ ...LEGACY_THEO_MAY, defaultResourceProfileId: 'resource-interactive' }));
+    expect(settings.downloadEditCopyMode).toBe('capcut_sdr_1080p');
+    expect(settings.downloadCompatibilityMode).toBe('source');
+  });
+
+  it('bật bản thêm và người dùng đã tự chọn chế độ CapCut ở Cài đặt → giữ cả hai', () => {
+    const settings = open(oldInstall({ ...LEGACY_THEO_MAY, downloadCompatibilityMode: 'capcut_sdr_2k' }));
+    expect(settings.downloadEditCopyMode).toBe('capcut_sdr_1080p');
+    expect(settings.downloadCompatibilityMode).toBe('capcut_sdr_2k');
+  });
+
+  it('bản thêm đang tắt → không đụng gì, kể cả khi đang "Theo nguồn"', () => {
+    const settings = open(oldInstall({ ...LEGACY_THEO_MAY, downloadEditCopyMode: 'off' }));
+    expect(settings.downloadEditCopyMode).toBe('off');
+    expect(settings.downloadCompatibilityMode).toBe('source');
   });
 });

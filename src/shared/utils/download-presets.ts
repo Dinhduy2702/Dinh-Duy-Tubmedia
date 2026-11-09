@@ -16,6 +16,31 @@ export function machineRecommendationPatch(resourceProfileId: string): DownloadP
   return { defaultResourceProfileId: resourceProfileId, downloadFragmentsAuto: true };
 }
 
+/**
+ * Dấu vết RÕ của nút "Theo máy" ở bản ≤ 1.7.5: một lượt bấm ghi đúng bộ giá trị này cùng lúc (hồ sơ "Tự động theo máy",
+ * "Theo nguồn", chất lượng nguồn cao nhất không giới hạn, số mảnh tự dò) + bật "tạo thêm bản CapCut". Người dùng đã tự chỉnh
+ * bất kỳ giá trị nào sau đó (hoặc bật bản thêm theo cách khác) thì không còn khớp → không coi là do nút.
+ */
+export function matchesLegacyTheoMayButton(settings: AppSettings): boolean {
+  return (
+    (settings.downloadEditCopyMode ?? 'off') !== 'off' &&
+    /^resource-auto(?:-\d+)?$/.test(settings.defaultResourceProfileId) &&
+    settings.downloadCompatibilityMode === 'source' &&
+    settings.downloadMinHeight === 0 &&
+    settings.downloadMaxHeight === 0 &&
+    settings.downloadMinFps === 0 &&
+    settings.downloadMaxFps === 0 &&
+    settings.downloadCodecPreference === 'auto' &&
+    settings.downloadContainerPreference === 'auto' &&
+    settings.downloadMinVideoBitrateKbps === 0 &&
+    settings.downloadVideoBitrateKbps === 0 &&
+    settings.downloadMinAudioBitrateKbps === 0 &&
+    settings.downloadAudioBitrateKbps === 0 &&
+    !settings.downloadAllowBelowMinimum &&
+    settings.downloadFragmentsAuto
+  );
+}
+
 /** "Chuẩn 1080p" / "Đa nền tảng 720p–1080p". */
 export function reference1080Patch(): DownloadPresetPatch {
   return {

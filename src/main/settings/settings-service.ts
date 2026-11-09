@@ -1,6 +1,7 @@
 import { app } from 'electron';
 import type { AppSettings, HardwareProfile, QualityProfile, ResourceProfile } from '@shared/types/domain.js';
 import { InvalidInputError } from '@shared/errors/app-errors.js';
+import { matchesLegacyTheoMayButton } from '@shared/utils/download-presets.js';
 import type { SettingsRepository } from '../database/repositories/settings-repository.js';
 import { builtInQualityProfiles, builtInResourceProfiles, defaultAppSettings } from './defaults.js';
 import { AUTO_RESOURCE_PROFILE_NAME, type HardwareService } from './hardware-service.js';
@@ -206,17 +207,13 @@ export class SettingsService {
       this.repo.set('adaptive_master_edit_recommendation_v131_hotfix8', true);
     }
     // 1.7.6 việc E: ở bản ≤ 1.7.5 nút "Theo máy" tự bật "tạo thêm bản CapCut" (capcut_sdr_1080p/2k) và đặt "Theo nguồn".
-    // Không chỗ nào khác trên giao diện đặt được downloadEditCopyMode → khác 'off' là do nút. Đưa về "CapCut trực tiếp, một
-    // tệp" cùng độ phân giải; chế độ CapCut người dùng tự chọn thì giữ. Chạy một lần.
+    // CHỈ gỡ khi cài đặt còn nguyên dấu vết rõ của một lượt bấm nút đó (matchesLegacyTheoMayButton); thiếu dấu vết — người
+    // dùng đã tự chỉnh sau đó hoặc bật có chủ ý — thì giữ nguyên. Đưa về "CapCut trực tiếp, một tệp" cùng độ phân giải. Một lần.
     if (!this.repo.get<boolean>('theo_may_edit_copy_reset_v176', false)) {
       const current = this.repo.getAppSettings(defaultAppSettings);
       const editCopy = current.downloadEditCopyMode ?? 'off';
-      if (editCopy !== 'off') {
-        const next: AppSettings = {
-          ...current,
-          downloadEditCopyMode: 'off',
-          downloadCompatibilityMode: current.downloadCompatibilityMode === 'source' ? editCopy : current.downloadCompatibilityMode
-        };
+      if (editCopy !== 'off' && matchesLegacyTheoMayButton(current)) {
+        const next: AppSettings = { ...current, downloadEditCopyMode: 'off', downloadCompatibilityMode: editCopy };
         this.repo.saveAppSettings(next);
         this.logger?.info(
           'settings',
