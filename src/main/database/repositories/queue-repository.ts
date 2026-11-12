@@ -210,7 +210,7 @@ export class QueueRepository {
     // cũng về 0 — nếu không, tác vụ đã thất bại 3/3 sẽ thất bại ngay ở lỗi tạm thời đầu tiên (4/3).
     const reset =
       "status='pending',error_code=NULL,error_message=NULL,progress=0,attempts=0," +
-      "input_json=json_remove(input_json,'$.startupInterruptions'),updated_at=?";
+      "input_json=json_remove(input_json,'$.startupInterruptions','$.recoverableExternalFailure'),updated_at=?";
     const sql = projectId
       ? `UPDATE queue_jobs SET ${reset} WHERE status='failed' AND project_id=?`
       : `UPDATE queue_jobs SET ${reset} WHERE status='failed'`;

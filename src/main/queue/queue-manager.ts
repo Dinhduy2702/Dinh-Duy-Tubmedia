@@ -1744,13 +1744,17 @@ export class QueueManager {
         current.status !== 'interrupted'
       ) {
         this.emitProgress(
-          this.repo.update(job.id, {
-            status: 'failed',
-            attempts: job.attempts + 1,
-            errorCode: 'UNHANDLED_ERROR',
-            errorMessage: message,
-            finishedAt: new Date().toISOString()
-          })
+          this.repo.update(
+            job.id,
+            {
+              status: 'failed',
+              attempts: job.attempts + 1,
+              errorCode: 'UNHANDLED_ERROR',
+              errorMessage: message,
+              finishedAt: new Date().toISOString()
+            },
+            { recoverableExternalFailure: false }
+          )
         );
       }
     } catch {
@@ -1922,6 +1926,19 @@ export class QueueManager {
     return this.repo.list(projectId).some((job) => !TERMINAL_JOB_STATUSES.has(job.status));
   }
 
+  /**
+   * 1.7.6 V3: tác vụ tải còn cần giữ tệp tạm .part trong _dl — hoặc chưa kết thúc, hoặc vừa lỗi do lỗi thử lại được
+   * (recoverableExternalFailure === true, đúng cùng điều kiện với thông báo queue-manager.ts:2366 hứa giữ .part).
+   */
+  private jobKeepsDownloadTemp(job: QueueJob): boolean {
+    if (!TERMINAL_JOB_STATUSES.has(job.status)) return true;
+    return job.type === 'download' && job.status === 'failed' && job.input.recoverableExternalFailure === true;
+  }
+
+  private projectHasResumableDownloadTemp(projectId: string): boolean {
+    return this.repo.list(projectId).some((job) => this.jobKeepsDownloadTemp(job));
+  }
+
   private downloadTempProtection(): DownloadTempProtection {
     return buildCleanupProtection({
       projects: this.projects.list(true),
@@ -1931,50 +1948,73 @@ export class QueueManager {
     });
   }
 
-  /**
-   * 2026-10-24 (người dùng yêu cầu): một video tải xong, lỗi hẳn hoặc bị huỷ → xoá tệp tạm (.part, mảnh, luồng riêng…) của
-   * riêng video đó trong thư mục _dl của danh sách. Đang chờ thử lại / tạm dừng / gián đoạn thì GIỮ để tải tiếp từ phần đã
-   * tải. Lỗi hẳn cũng xoá: bấm Thử lại sẽ tải lại từ đầu, đổi lại thư mục tạm không phình to theo thời gian.
-   */
-  private async cleanupVideoDownloadTemp(jobId: string): Promise<void> {
-    let job: QueueJob | null;
+  private async removeJobDownloadTempFiles(job: QueueJob): Promise<number> {
+    if (job.type !== 'download' || !job.projectId) return 0;
     let project: Project | null;
     let source: MediaSource | null;
     try {
-      job = this.repo.get(jobId);
-      if (!job || job.type !== 'download' || !job.projectId || !TERMINAL_JOB_STATUSES.has(job.status)) return;
       project = this.projects.get(job.projectId);
       source = job.sourceId ? this.sources.get(job.sourceId) : null;
     } catch {
-      // Chạy nền sau khi tác vụ kết thúc: CSDL có thể vừa đóng (tắt app). Dọn tệp tạm chỉ là việc phụ — lần quét sau sẽ dọn.
-      return;
+      return 0;
     }
-    if (!project || !source) return;
+    if (!project?.tempFolder || !source) return 0;
     let linkTag: string;
     try {
       linkTag = downloadLinkTag(source.normalizedUrl || source.originalUrl);
     } catch {
+      return 0;
+    }
+    const settings = this.settings.get();
+    const protection: DownloadTempProtection = {
+      protectedFolders: [
+        settings.defaultSourceFolder,
+        settings.defaultTempFolder,
+        settings.defaultOutputFolder,
+        ...this.projects.list(true).flatMap((item) => [item.sourceFolder, item.tempFolder, item.outputFolder])
+      ].filter((folder): folder is string => typeof folder === 'string' && folder.trim().length > 0),
+      protectedFiles: []
+    };
+    return removeVideoDownloadTemp(downloadWorkFolder(project.tempFolder, project.id), linkTag, protection);
+  }
+
+  private async cleanupClearedProjectDownloadTemp(projectId: string): Promise<void> {
+    if (this.projectHasResumableDownloadTemp(projectId)) return;
+    let project: Project | null;
+    try {
+      project = this.projects.get(projectId);
+    } catch {
+      return;
+    }
+    if (!project?.tempFolder) return;
+    await removeDownloadWorkFolder(
+      downloadWorkFolder(project.tempFolder, project.id),
+      this.downloadTempProtection()
+    ).catch(() => 0);
+  }
+
+  /**
+   * 2026-10-24 / 1.7.6 V3: một video tải xong, bị huỷ, hoặc lỗi KHÔNG thử lại được → xoá tệp tạm (.part, mảnh, luồng riêng…)
+   * của riêng video đó trong thư mục _dl của danh sách. Đang chờ thử lại / tạm dừng / gián đoạn HOẶC lỗi do lỗi thử lại được
+   * (recoverableExternalFailure) thì GIỮ để bấm Thử lại tải tiếp từ .part (quá 14 ngày không đụng tới mới tự dọn).
+   */
+  private async cleanupVideoDownloadTemp(jobId: string): Promise<void> {
+    let job: QueueJob | null;
+    try {
+      job = this.repo.get(jobId);
+      if (!job || job.type !== 'download' || !job.projectId || this.jobKeepsDownloadTemp(job)) return;
+    } catch {
+      // Chạy nền sau khi tác vụ kết thúc: CSDL có thể vừa đóng (tắt app). Dọn tệp tạm chỉ là việc phụ — lần quét sau sẽ dọn.
       return;
     }
     try {
-      // Chỉ cần thư mục người dùng chọn: tệp trong _dl\<mã> luôn là tệp tạm của yt-dlp (thành phẩm nằm ở thư mục nguồn).
-      const settings = this.settings.get();
-      const protection: DownloadTempProtection = {
-        protectedFolders: [
-          settings.defaultSourceFolder,
-          settings.defaultTempFolder,
-          settings.defaultOutputFolder,
-          ...this.projects.list(true).flatMap((item) => [item.sourceFolder, item.tempFolder, item.outputFolder])
-        ].filter((folder): folder is string => typeof folder === 'string' && folder.trim().length > 0),
-        protectedFiles: []
-      };
-      const removed = await removeVideoDownloadTemp(downloadWorkFolder(project.tempFolder, project.id), linkTag, protection);
+      const removed = await this.removeJobDownloadTempFiles(job);
       if (removed > 0) {
         this.logger.info(
           'cleanup',
           'DOWNLOAD_TEMP_CLEANED',
           `Đã xoá ${removed} tệp tạm của video ${job.status === 'completed' || job.status === 'skipped' ? 'đã tải xong' : job.status === 'failed' ? 'tải lỗi' : 'đã huỷ'}.`,
-          { jobId: job.id, projectId: project.id, metadata: { removed, status: job.status } }
+          { jobId: job.id, projectId: job.projectId, metadata: { removed, status: job.status } }
         );
       }
     } catch (error) {
@@ -1986,7 +2026,7 @@ export class QueueManager {
   }
 
   /**
-   * Danh sách không còn tác vụ nào chưa kết thúc → xoá cả thư mục _dl\<mã danh sách>. Bản đệm ghép (_normalized-cache,
+   * Danh sách không còn tác vụ nào cần giữ .part → xoá cả thư mục _dl\<mã danh sách>. Bản đệm ghép (_normalized-cache,
    * _remux-cache) nằm chung thư mục tạm có thể dùng chung với danh sách khác → chỉ xoá khi MỌI danh sách dùng thư mục tạm này
    * đều đã kết thúc và không có quy trình lỗi nào đang chờ thử lại (lỗi thì giữ để ghép lại nhanh; lượt quét định kỳ dọn sau).
    */
@@ -1995,7 +2035,9 @@ export class QueueManager {
     protection: DownloadTempProtection
   ): Promise<{ files: number; folders: number }> {
     if (this.projectHasOpenJobs(project.id)) return { files: 0, folders: 0 };
-    const files = await removeDownloadWorkFolder(downloadWorkFolder(project.tempFolder, project.id), protection);
+    const files = this.projectHasResumableDownloadTemp(project.id)
+      ? 0
+      : await removeDownloadWorkFolder(downloadWorkFolder(project.tempFolder, project.id), protection);
     let folders = files > 0 ? 1 : 0;
     const sameTemp = this.projects
       .list(true)
@@ -2021,9 +2063,10 @@ export class QueueManager {
       for (const project of projects) {
         const jobs = this.repo.list(project.id);
         const open = jobs.some((job) => !TERMINAL_JOB_STATUSES.has(job.status));
+        const resumableDownload = jobs.some((job) => this.jobKeepsDownloadTemp(job));
         const failed = jobs.some((job) => job.status === 'failed');
         const workName = project.id.slice(0, 8).toLowerCase();
-        openByWorkName.set(workName, (openByWorkName.get(workName) ?? false) || open);
+        openByWorkName.set(workName, (openByWorkName.get(workName) ?? false) || resumableDownload);
         if (!project.tempFolder?.trim()) continue;
         const key = project.tempFolder.toLowerCase();
         const current = openByTemp.get(key) ?? { open: false, failed: false, tempFolder: project.tempFolder };
@@ -2424,7 +2467,8 @@ export class QueueManager {
             audioMaxVolumeDb: result.audioMaxVolumeDb ?? null,
             cookieFailureConfirmed: false,
             cookieRetryRequested: false,
-            resumeStatus: null
+            resumeStatus: null,
+            recoverableExternalFailure: false
           });
           if (this.rateLimits.hasAny()) {
             const platform = this.downloadPlatformOf(job);
@@ -2715,13 +2759,17 @@ export class QueueManager {
         const finalMessage = circuitEligible
           ? exhaustedDownloadFailureMessage(message, appError.details, job.attempts + 1)
           : message;
-        const failed = this.repo.update(job.id, {
-          status: 'failed',
-          attempts: job.attempts + 1,
-          errorCode: code,
-          errorMessage: finalMessage,
-          finishedAt: new Date().toISOString()
-        });
+        const failed = this.repo.update(
+          job.id,
+          {
+            status: 'failed',
+            attempts: job.attempts + 1,
+            errorCode: code,
+            errorMessage: finalMessage,
+            finishedAt: new Date().toISOString()
+          },
+          { recoverableExternalFailure: circuitEligible }
+        );
         this.emitProgress(failed);
         this.logger.error('queue', 'JOB_FAILED', failed.errorMessage ?? 'Tác vụ thất bại.', {
           jobId: job.id,
@@ -3283,6 +3331,7 @@ export class QueueManager {
     const removed = this.repo.clearProject(projectId);
     this.repeatedFailures.delete(projectId);
     this.projects.setStatus(projectId, 'draft');
+    void this.cleanupClearedProjectDownloadTemp(projectId);
     this.emit();
     return removed;
   }
@@ -3522,7 +3571,7 @@ export class QueueManager {
         errorMessage: null,
         finishedAt: null
       },
-      { startupInterruptions: 0 }
+      { startupInterruptions: 0, recoverableExternalFailure: false }
     );
     this.emit();
   }
@@ -3624,6 +3673,10 @@ export class QueueManager {
     }
     this.repo.remove(jobId);
     this.progressUpdates.delete(jobId);
+    if (current.type === 'download') {
+      await this.removeJobDownloadTempFiles(current).catch(() => 0);
+      if (current.projectId) await this.cleanupClearedProjectDownloadTemp(current.projectId);
+    }
     this.emit();
     return { removed: true, outputDeleted, outputMissing, outputPath };
   }
@@ -3634,6 +3687,7 @@ export class QueueManager {
         .some((entry) => !['completed', 'skipped', 'cancelled', 'failed'].includes(entry.status));
       if (unfinished) return 0;
       const count = this.repo.clearFinished(projectId);
+      void this.cleanupClearedProjectDownloadTemp(projectId);
       this.emit();
       return count;
     }
@@ -3650,12 +3704,14 @@ export class QueueManager {
         projectJobs.every((entry) => ['completed', 'skipped', 'cancelled', 'failed'].includes(entry.status))
       ) {
         count += this.repo.clearFinished(id);
+        void this.cleanupClearedProjectDownloadTemp(id);
       }
     }
     this.emit();
     return count;
   }
   public async removeProject(projectId: string): Promise<number> {
+    const project = this.projects.get(projectId);
     this.cancelProject(projectId);
     const deadline = Date.now() + 10_000;
     while (
@@ -3669,6 +3725,12 @@ export class QueueManager {
     }
     const removed = this.repo.clearProject(projectId);
     this.repeatedFailures.delete(projectId);
+    if (project?.tempFolder) {
+      await removeDownloadWorkFolder(
+        downloadWorkFolder(project.tempFolder, project.id),
+        this.downloadTempProtection()
+      ).catch(() => 0);
+    }
     this.emit();
     return removed;
   }

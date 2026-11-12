@@ -25,6 +25,7 @@ import { REQUIRED_TOOL_NAMES } from '../tools/tool-manager.js';
 import { sanitizeFilename } from '@shared/utils/filename.js';
 import { sizeFiles, sizePaths } from '../storage/workbench-storage.js';
 import { cleanupTemporaryArtifacts } from '../files/temporary-cleanup.js';
+import { downloadWorkFolder, removeDownloadWorkFolder } from '../files/download-temp-cleanup.js';
 import { buildCleanupProtection } from '../files/cleanup-protection.js';
 
 // A1 (2026-09-25): tăng từ 4 lên 6 lane theo yêu cầu người dùng — thêm hoàn toàn tương thích ngược,
@@ -503,7 +504,8 @@ export class WorkbenchService {
     const protection = this.cleanupProtection();
     await Promise.all(projects.flatMap((project) => [
       cleanupTemporaryArtifacts(project.tempFolder, [], false, protection),
-      cleanupTemporaryArtifacts(join(project.outputFolder, '_normalized'), [], false, protection)
+      cleanupTemporaryArtifacts(join(project.outputFolder, '_normalized'), [], false, protection),
+      removeDownloadWorkFolder(downloadWorkFolder(project.tempFolder, project.id), protection)
     ]));
     const projectsRemoved = this.projectRepo.removeAll();
     this.queue.clearAllHistory();

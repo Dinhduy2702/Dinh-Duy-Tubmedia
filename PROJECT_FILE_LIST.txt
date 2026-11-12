@@ -538,6 +538,7 @@ tests/integration/download-existing-file-reuse.test.ts
 tests/integration/download-pacing-args.test.ts
 tests/integration/download-path-too-long.test.ts
 tests/integration/download-repaste-existing.test.ts
+tests/integration/download-retryable-part-retention.test.ts
 tests/integration/download-temp-cleanup.test.ts
 tests/integration/error-report.test.ts
 tests/integration/helpers/queue-harness.ts
