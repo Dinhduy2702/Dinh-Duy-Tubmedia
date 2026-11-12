@@ -104,6 +104,13 @@ Before EVERY commit (including amends and test-only commits): `npm.cmd run lint`
   visual check.
 - Never call YouTube manually while the machine is rate-limited (429 / bot check); use saved data or wait.
 
+## 7. Design for the user's machine, not the dev machine (user-approved 2026-11-12)
+- Before ANY change (code, settings, thresholds, measurements, advice), put yourself in the place of a real user whose machine is unknown and may be weak.
+- Assume and handle: 2–4 logical CPUs; 4–8 GB RAM; HDD or nearly full disk; no GPU or an old driver; slow or unstable network (≤ 3 MB/s, drops, VPN); YouTube 429/bot checks; expired or rotated cookies; antivirus scanning files; non-admin account; Vietnamese/Unicode/long paths; CapCut and browsers running at the same time; app killed or PC shut down mid-task.
+- The dev machine (Xeon 72 threads, GTX 1060, NVMe + HDD, fast network) is only a logic check. Never use its numbers as defaults, limits or pass criteria.
+- For every change, list which risk cases apply and how the code detects each one and degrades safely (lower limit, wait/retry with backoff, resume .part, clear Vietnamese message). Never crash, hang, lose user data, or saturate the user's CPU, disk or network.
+- Before claiming done, verify on a simulated weak machine (2 and 4 threads, TUBMEDIA_E2E_GLOBAL_DOWNLOAD_CAP=2, limited network speed). Report what could NOT be simulated.
+
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
