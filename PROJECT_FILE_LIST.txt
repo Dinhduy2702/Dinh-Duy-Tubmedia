@@ -703,6 +703,7 @@ tests/unit/quality.test.ts
 tests/unit/quarantine-location.test.ts
 tests/unit/quarantine-single-location-guard.test.ts
 tests/unit/queue-lane.test.ts
+tests/unit/quick-download-bot-check.test.ts
 tests/unit/quick-download-cookie-integration.test.ts
 tests/unit/quick-download-credit-metadata.test.ts
 tests/unit/quick-download-filename-template.test.ts

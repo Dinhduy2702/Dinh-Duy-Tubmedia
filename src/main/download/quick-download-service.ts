@@ -26,7 +26,11 @@ import { buildQuickDownloadArguments } from './quick-download-command.js';
 import { acceptPathInside } from '../files/path-containment.js';
 import type { CookieJarStore, CookieRunOutcome } from '../cookies/cookie-jar-store.js';
 
-import { isCookieRotationText, isExplicitlyRemovedYoutubeSource } from '@shared/utils/download-failure.js';
+import {
+  classifyYtDlpFailure,
+  isCookieRotationText,
+  isExplicitlyRemovedYoutubeSource
+} from '@shared/utils/download-failure.js';
 import { cookieRotatedMessage } from '@shared/utils/cookie-guidance.js';
 
 interface PersistedQuickDownloadState {
@@ -100,7 +104,8 @@ function parseProgressPercent(value: string): number {
 }
 
 function classifyCookieFailure(lines: string[], cookiesAttached: boolean): QuickDownloadErrorCode | null {
-  const lower = lines.join('\n').toLowerCase();
+  const text = lines.join('\n');
+  const lower = text.toLowerCase();
 
   if (
     lower.includes('could not copy chrome cookie database') ||
@@ -108,6 +113,12 @@ function classifyCookieFailure(lines: string[], cookiesAttached: boolean): Quick
     (lower.includes('permission denied') && lower.includes('cookie'))
   ) {
     return 'BROWSER_COOKIE_DATABASE_LOCKED';
+  }
+
+  // 1.7.6 V1: "Sign in to confirm you're not a bot" (không kèm báo cookie bị xoay) là YouTube tạm chặn theo lượng yêu cầu,
+  // không phải cookie hỏng — xử lý riêng ở execute() như DownloadEngine để giữ cookie xoay vòng và không báo nhầm hết hạn.
+  if (classifyYtDlpFailure(text).subtype === 'bot_check') {
+    return null;
   }
 
   if (
@@ -119,6 +130,12 @@ function classifyCookieFailure(lines: string[], cookiesAttached: boolean): Quick
   }
 
   return null;
+}
+
+function quickBotCheckFailureMessage(cookiesAttached: boolean): string {
+  return cookiesAttached
+    ? 'YouTube đang tạm chặn tải tự động theo lượng yêu cầu ("Sign in to confirm you’re not a bot"). Lỗi này không phải do cookies; hãy đợi vài phút hoặc đổi mạng rồi bấm Tải lại.'
+    : 'YouTube đang tạm chặn tải tự động theo lượng yêu cầu ("Sign in to confirm you’re not a bot"). Hãy đợi vài phút, đổi mạng hoặc cấu hình thêm Cookies rồi thử lại.';
 }
 
 /** 1.7.6 việc B: `lines` là các dòng yt-dlp vừa in — có câu "cookie bị xoay" thì nói đúng lý do + cách xuất từ cửa sổ ẩn danh. */
@@ -643,9 +660,11 @@ export class QuickDownloadService {
 
         if (result.code !== 0) {
           const cookieCode = classifyCookieFailure(active.recentLines, active.cookiesAttached);
+          const isBotCheck =
+            cookieCode === null && classifyYtDlpFailure(active.recentLines.join('\n')).subtype === 'bot_check';
 
           if (
-            cookieCode === 'AUTHENTICATION_REQUIRED' &&
+            (cookieCode === 'AUTHENTICATION_REQUIRED' || isBotCheck) &&
             !active.cookiesAttached &&
             hasConfiguredCookies(this.cookieSettings())
           ) {
@@ -668,6 +687,12 @@ export class QuickDownloadService {
               { jobId: active.status.taskId }
             );
             continue;
+          }
+
+          if (isBotCheck) {
+            this.failTask(active, quickBotCheckFailureMessage(active.cookiesAttached), 'BOT_CHECK');
+            await this.cleanupActive(active, true);
+            return;
           }
 
           if (cookieCode) {
