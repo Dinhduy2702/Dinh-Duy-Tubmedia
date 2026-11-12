@@ -1,5 +1,5 @@
 /* TUBMEDIA_V132_DOWNLOAD_STALL_RECOVERY_R11 */
-import { copyFile, link, readdir, rename, rm, stat } from 'node:fs/promises';
+import { copyFile, link, readdir, rm, stat } from 'node:fs/promises';
 import { cpus, totalmem } from 'node:os';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { PROGRESS_MARKER } from '@shared/constants/app.js';
@@ -47,7 +47,7 @@ import type { MediaSourceRepository } from '../database/repositories/media-sourc
 import type { ProjectRepository } from '../database/repositories/project-repository.js';
 import type { Logger } from '../logging/logger.js';
 import { ensureDirectory } from '../files/ensure-directory.js';
-import { commitFileWithoutOverwrite, nonConflictingPath } from '../files/non-conflicting-path.js';
+import { commitFileWithoutOverwrite, nonConflictingPath, renameWithRetry } from '../files/non-conflicting-path.js';
 import { capCutFilterChain, isCapCutOneFileMode } from '@shared/utils/capcut-encode.js';
 import { ensureTubmediaOwnedDirectory, isReservedTubmediaDirectory } from '../files/file-ownership.js';
 import type { FileVerifier } from '../media/file-verifier.js';
@@ -446,21 +446,22 @@ export class DownloadEngine {
       return input;
     }
 
+    const commitContext = { jobId: job.id, projectId: job.projectId };
     let committedOutput: string;
     if (alreadyMp4) {
       // Thay tệp gốc bằng bản đã chuyển tiếng: giữ bản gốc tới khi bản mới đã vào đúng chỗ.
       const original = input.replace(/\.mp4$/i, `.tubmedia-${job.id}.original.mp4`);
-      await rename(input, original);
+      await renameWithRetry(input, original, commitContext);
       try {
-        await rename(pending, input);
+        await renameWithRetry(pending, input, commitContext);
       } catch (error) {
-        await rename(original, input);
+        await renameWithRetry(original, input, commitContext);
         throw error;
       }
       await rm(original, { force: true });
       committedOutput = input;
     } else {
-      committedOutput = await commitFileWithoutOverwrite(pending, output);
+      committedOutput = await commitFileWithoutOverwrite(pending, output, commitContext);
       await rm(input, { force: true });
     }
     if (convertAudio) {
@@ -792,23 +793,24 @@ export class DownloadEngine {
 
     // 1.7.5: một tệp — bản đạt chuẩn THAY tệp gốc (cùng tên, đuôi .mp4). Tệp gốc đang là nguồn của danh sách khác thì giữ
     // (không làm hỏng danh sách đó) và để bản CapCut cạnh nó như chế độ 2 tệp.
+    const commitContext = { jobId: job.id, projectId: job.projectId };
     const sharedWithOtherList = job.sourceId ? this.sources.othersUsingFile(input, job.sourceId).length > 0 : false;
     if (oneFile && !sharedWithOtherList) {
       const target = `${stem}.mp4`;
       let committed: string;
       if (resolve(target) === resolve(input)) {
         const original = `${stem}.tubmedia-${job.id}.original${extension}`;
-        await rename(input, original);
+        await renameWithRetry(input, original, commitContext);
         try {
-          await rename(pending, input);
+          await renameWithRetry(pending, input, commitContext);
         } catch (error) {
-          await rename(original, input);
+          await renameWithRetry(original, input, commitContext);
           throw error;
         }
         await rm(original, { force: true });
         committed = input;
       } else {
-        committed = await commitFileWithoutOverwrite(pending, target);
+        committed = await commitFileWithoutOverwrite(pending, target, commitContext);
         await rm(input, { force: true });
       }
       this.logger.info(
@@ -824,7 +826,7 @@ export class DownloadEngine {
       return committed;
     }
 
-    await rename(pending, output);
+    await renameWithRetry(pending, output, commitContext);
     this.logger.info(
       'download',
       'CAPCUT_EDIT_COPY_COMPLETED',

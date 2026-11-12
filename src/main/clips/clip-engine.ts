@@ -1,4 +1,4 @@
-import { readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { extname, join } from 'node:path';
 import { sanitizeProgress } from '@shared/utils/progress-policy.js';
@@ -10,6 +10,7 @@ import type { FileVerifier } from '../media/file-verifier.js';
 import type { QuarantineService } from '../media/quarantine-service.js';
 import { ensureDirectory } from '../files/ensure-directory.js';
 import { ensureTubmediaOwnedDirectory, isReservedTubmediaDirectory } from '../files/file-ownership.js';
+import { renameWithRetry } from '../files/non-conflicting-path.js';
 export class ClipEngine {
   public constructor(private readonly tools: ToolManager, private readonly processes: ProcessManager, private readonly verifier: FileVerifier, private readonly quarantine: QuarantineService) {}
   public async create(job: QueueJob, item: ProjectItem, input: string, tempFolder: string, resource: ResourceProfile, signal: AbortSignal, onProgress: (percent: number) => void): Promise<string> {
@@ -94,16 +95,17 @@ export class ClipEngine {
       const quarantined = await this.quarantine.move(pending, check.reasons.join('; '), { jobId: job.id, projectId: job.projectId });
       throw new ProcessingFailedError(`Đoạn video bị lỗi và đã chuyển vào khu cách ly: ${quarantined}`);
     }
+    const commitContext = { jobId: job.id, projectId: job.projectId };
     const backup = `${final}.previous-${Date.now()}.bak`;
     let hadExisting = false;
     try {
-      await rename(final, backup);
+      await renameWithRetry(final, backup, commitContext);
       hadExisting = true;
     } catch { /* final chưa tồn tại */ }
     try {
-      await rename(pending, final);
+      await renameWithRetry(pending, final, commitContext);
     } catch (error) {
-      if (hadExisting) await rename(backup, final).catch(() => undefined);
+      if (hadExisting) await renameWithRetry(backup, final, commitContext).catch(() => undefined);
       throw error;
     }
     if (hadExisting) await rm(backup, { force: true });

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { access, rename, rm, stat } from 'node:fs/promises';
+import { access, rm, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import type {
@@ -28,6 +28,7 @@ import type { QuarantineService } from '../media/quarantine-service.js';
 import type { Logger } from '../logging/logger.js';
 import { ensureDirectory } from '../files/ensure-directory.js';
 import { ensureTubmediaOwnedDirectory, isReservedTubmediaDirectory } from '../files/file-ownership.js';
+import { renameWithRetry } from '../files/non-conflicting-path.js';
 
 export interface NormalizeTarget {
   width: number;
@@ -610,7 +611,7 @@ export class NormalizeEngine {
       );
     }
     await rm(pending, { force: true });
-    await rename(repaired, pending);
+    await renameWithRetry(repaired, pending, { jobId: job.id, projectId: job.projectId });
     this.logger.info('normalize', 'NORMALIZE_AUDIO_ENCODE_REPAIRED', 'Đã mã hóa lại phần tiếng; luồng tiếng giải mã sạch.', {
       ...context,
       metadata: { input, ffmpegVersion }
@@ -624,12 +625,13 @@ export class NormalizeEngine {
    * đệm cũ (có thể chính là bản vừa bị loại vì không qua kiểm tra).
    */
   private async commitCacheFile(pending: string, final: string, job: QueueJob): Promise<string> {
+    const commitContext = { jobId: job.id, projectId: job.projectId };
     try {
-      await rename(pending, final);
+      await renameWithRetry(pending, final, commitContext);
       return final;
     } catch (error) {
       const own = final.replace(/\.mp4$/i, '') + '.' + randomUUID().slice(0, 8) + '.mp4';
-      await rename(pending, own);
+      await renameWithRetry(pending, own, commitContext);
       this.logger.warn('normalize', 'NORMALIZE_CACHE_IN_USE', 'Bản đệm đang được quy trình khác dùng — quy trình này dùng bản vừa làm dưới tên riêng.', {
         ...(job.projectId ? { projectId: job.projectId } : {}),
         jobId: job.id,

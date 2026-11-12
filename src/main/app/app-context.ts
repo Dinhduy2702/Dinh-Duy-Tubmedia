@@ -34,6 +34,7 @@ import { WorkbenchService } from '../workbench/workbench-service.js';
 import { SenderValidator } from '../security/sender-validator.js';
 import { CookieService } from '../cookies/cookie-service.js';
 import { cleanupTemporaryArtifacts } from '../files/temporary-cleanup.js';
+import { setFileLockRetryLogger } from '../files/non-conflicting-path.js';
 import { defaultYtDlpRuntimeTemp } from '../processes/ytdlp-runtime-temp.js';
 import { buildCleanupProtection } from '../files/cleanup-protection.js';
 import { QuickDownloadService } from '../download/quick-download-service.js';
@@ -164,6 +165,27 @@ export class AppContext {
     return [s.defaultSourceFolder, s.defaultTempFolder, s.defaultOutputFolder].map((x) => parse(x).root || x);
   });
   public constructor(prepareForAppUpdate: () => Promise<void> = () => Promise.resolve()) {
+    setFileLockRetryLogger((event) => {
+      this.logger.warn(
+        'files',
+        'FILE_COMMIT_LOCK_RETRY',
+        `Tệp ${event.fileName} đang bận (${event.errorCode}) khi ${event.operation} — thử lại lần ${event.retryAttempt}/${event.maxRetries} sau ${event.delayMs} ms.`,
+        {
+          ...(event.jobId ? { jobId: event.jobId } : {}),
+          ...(event.projectId ? { projectId: event.projectId } : {}),
+          metadata: {
+            operation: event.operation,
+            fileName: event.fileName,
+            errorCode: event.errorCode,
+            retryAttempt: event.retryAttempt,
+            maxRetries: event.maxRetries,
+            delayMs: event.delayMs,
+            sourcePath: event.sourcePath,
+            targetPath: event.targetPath
+          }
+        }
+      );
+    });
     this.tools.setRequiredRepairHandler(() => this.toolUpdates.repairRequired());
     // Mọi nơi chạy yt-dlp có cookies đều mượn bản sao tạm từ CÙNG một kho (cookie-jar-store.ts).
     this.downloader.setCookieJar(this.cookieJar);

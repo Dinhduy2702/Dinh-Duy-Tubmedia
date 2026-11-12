@@ -22,6 +22,7 @@ import type { Logger } from '../logging/logger.js';
 import type { ProcessManager } from '../processes/process-manager.js';
 import type { SettingsService } from '../settings/settings-service.js';
 import type { ToolManager } from '../tools/tool-manager.js';
+import { renameWithRetry } from '../files/non-conflicting-path.js';
 import { buildQuickDownloadArguments } from './quick-download-command.js';
 import { acceptPathInside } from '../files/path-containment.js';
 import type { CookieJarStore, CookieRunOutcome } from '../cookies/cookie-jar-store.js';
@@ -1129,7 +1130,7 @@ export class QuickDownloadService {
       if (result.code !== 0 || !existsSync(stripped)) {
         throw new Error(result.stderrTail.trim() || `FFmpeg kết thúc với mã ${result.code}.`);
       }
-      await rename(stripped, outputPath);
+      await renameWithRetry(stripped, outputPath, { jobId: active.status.taskId });
     } catch (error) {
       await rm(stripped, { force: true }).catch(() => undefined);
       if (signal.aborted) throw error;
@@ -1203,7 +1204,7 @@ export class QuickDownloadService {
       if (result.code !== 0 || !existsSync(tempOutput)) {
         throw new Error(result.stderrTail.trim() || `FFmpeg kết thúc với mã ${result.code}.`);
       }
-      await rename(tempOutput, outputPath);
+      await renameWithRetry(tempOutput, outputPath, { jobId: active.status.taskId });
     } catch (error) {
       await rm(tempOutput, { force: true }).catch(() => undefined);
       if (active.controller.signal.aborted) throw error;
