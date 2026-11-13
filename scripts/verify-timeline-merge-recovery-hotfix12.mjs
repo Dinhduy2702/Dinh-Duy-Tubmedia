@@ -215,7 +215,7 @@ check(
   'invalid existing final files are preserved while owned checkpoints may be quarantined',
   engine.includes('if (recoveryDecision.quarantineCheckpoint)') &&
     engine.includes('Never delete or quarantine a user-visible final file') &&
-    engine.includes('commitFileWithoutOverwrite(pending, final)')
+    engine.includes('commitFileWithoutOverwrite(sourcePendingPath, targetVideoPath,')
 );
 check(
   'a valid final output skips concat and reports verified-final',
@@ -225,11 +225,13 @@ check(
 check(
   'a valid pending file continues from final commit rather than concatenating again',
   engine.includes("'verified-checkpoint'") &&
-    engine.includes('commitFileWithoutOverwrite(candidate.path, final)')
+    engine.includes('this.commitProductIntoDedicatedFolder(') &&
+    engine.includes('candidate.path')
 );
 check(
   'fresh merges still use non-overwriting final commit and write a receipt',
-  engine.includes('commitFileWithoutOverwrite(pending, final)') &&
+  engine.includes('reserveNonConflictingDirectory(outputFolder, safeName)') &&
+    engine.includes('commitFileWithoutOverwrite(sourcePendingPath, targetVideoPath,') &&
     engine.includes("recoveryMode: 'new-merge'") &&
     engine.includes('reusedExisting: false')
 );

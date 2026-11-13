@@ -166,9 +166,14 @@ export class WorkbenchService {
     const mergeJobs = this.queue.list(project.id).filter((job) => job.type === 'merge');
     const lastMerge = mergeJobs.at(-1);
     const storedOutput = lastMerge?.input.outputPath;
+    const storedTimeline = lastMerge?.input.timelineTxt;
     const finalPath = typeof storedOutput === 'string' && storedOutput.trim()
       ? storedOutput
-      : join(project.outputFolder, `${safeName}.mp4`);
+      : join(project.outputFolder, safeName, `${safeName}.mp4`);
+    const finalFiles = [
+      finalPath,
+      ...(typeof storedTimeline === 'string' && storedTimeline.trim() ? [storedTimeline] : [])
+    ];
     const temporaryPaths = [
       project.tempFolder,
       join(project.outputFolder, `${safeName}.pending.mp4`),
@@ -178,7 +183,7 @@ export class WorkbenchService {
     const [downloaded, temporary, final] = await Promise.all([
       sizeFiles(sourceFiles),
       sizePaths(temporaryPaths),
-      sizeFiles([finalPath])
+      sizeFiles(finalFiles)
     ]);
     return {
       slot,

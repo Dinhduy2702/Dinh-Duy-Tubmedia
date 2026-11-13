@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { rm, writeFile } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { TimelineRow } from '@shared/types/domain.js';
 import type { MediaAnalyzer } from '../media/media-analyzer.js';
@@ -13,13 +13,19 @@ export interface TimelineArtifact {
   rows: TimelineRow[];
 }
 
+export interface TimelineWriteOptions {
+  /** V13: khi dùng lại thành phẩm cũ đã hậu kiểm, nếu cạnh MP4 đã có .timeline.txt cùng nội dung thì dùng lại, không đẻ bản "(2)". */
+  reuseMatchingExisting?: boolean;
+}
+
 export class TimelineService {
   public constructor(private readonly analyzer: MediaAnalyzer) {}
   public async write(
     files: Array<{ path: string; label: string; note: string }>,
     outputFolder: string,
     productName: string,
-    exportTxt: boolean
+    exportTxt: boolean,
+    options?: TimelineWriteOptions
   ): Promise<TimelineArtifact> {
     let cursor = 0;
     const rows: TimelineRow[] = [];
@@ -40,7 +46,14 @@ export class TimelineService {
     }
     let txt: string | null = null;
     if (exportTxt) {
+      const content = rows.map((row) => row.code).join('\r\n');
       const desired = join(outputFolder, `${productName}.timeline.txt`);
+      if (options?.reuseMatchingExisting) {
+        const existingContent = await readFile(desired, 'utf8').catch(() => null);
+        if (existingContent === content) {
+          return { txt: desired, totalDuration: cursor, itemCount: rows.length, rows };
+        }
+      }
       const pending = join(
         outputFolder,
         `${productName}.tubmedia-${randomUUID()}.timeline.pending.txt`
@@ -48,7 +61,7 @@ export class TimelineService {
       try {
         await writeFile(
           pending,
-          rows.map((row) => row.code).join('\r\n'),
+          content,
           { encoding: 'utf8', flag: 'wx' }
         );
         txt = await commitFileWithoutOverwrite(pending, desired);

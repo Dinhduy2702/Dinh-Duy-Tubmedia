@@ -2,9 +2,10 @@ import { malformedYouTubeVideoUrlMessage } from '@shared/utils/youtube-url-valid
 import { formatDiskShortfall } from '@shared/utils/disk-shortfall-format.js';
 import { type BrowserWindow } from 'electron';
 import { cpus, freemem, totalmem } from 'node:os';
-import { rm, stat, statfs } from 'node:fs/promises';
+import { readdir, rm, stat, statfs } from 'node:fs/promises';
 import { nearestExistingFolder } from '../files/disk-check-path.js';
-import { basename, dirname, join } from 'node:path';
+import { removeEmptyDirectoryIfPossible } from '../files/non-conflicting-path.js';
+import { basename, dirname, extname, join, resolve } from 'node:path';
 import type { AttentionNotice, JobType, LaneWaitState, MediaSource, Project, QueueJob, RateLimitWaitState, ResourceProfile } from '@shared/types/domain.js';
 import { IPC } from '@shared/contracts/channels.js';
 import { retryDelayMs } from '@shared/utils/retry.js';
@@ -3630,6 +3631,9 @@ export class QueueManager {
           }
           await rm(outputPath, { force: true });
           outputDeleted = true;
+          if (current.type === 'merge') {
+            await this.cleanupDeletedMergeProductFolder(current, outputPath);
+          }
           this.logger.info(
             'queue',
             'QUEUE_OUTPUT_DELETED_BY_USER',
@@ -3680,6 +3684,57 @@ export class QueueManager {
     this.emit();
     return { removed: true, outputDeleted, outputMissing, outputPath };
   }
+
+  private async cleanupDeletedMergeProductFolder(job: QueueJob, outputPath: string): Promise<void> {
+    const timelinePath = typeof job.input.timelineTxt === 'string' ? job.input.timelineTxt.trim() : '';
+    if (timelinePath) {
+      try {
+        const timelineInfo = await stat(timelinePath);
+        if (timelineInfo.isFile()) {
+          await rm(timelinePath, { force: true });
+        }
+      } catch {
+        // Bỏ qua nếu tệp Timeline đã không còn trên ổ đĩa.
+      }
+    }
+
+    const resolvedOutput = resolve(outputPath);
+    const parentFolder = dirname(resolvedOutput);
+    const mp4Stem = basename(resolvedOutput, extname(resolvedOutput));
+    const parentName = basename(parentFolder);
+    if (!mp4Stem || parentName !== mp4Stem) return;
+
+    const projectOutputFolder = job.projectId ? this.projects.get(job.projectId)?.outputFolder : undefined;
+    const jobOutputFolder =
+      typeof job.input.outputFolder === 'string' && job.input.outputFolder.trim()
+        ? job.input.outputFolder.trim()
+        : undefined;
+    const listOutputFolder = projectOutputFolder ?? jobOutputFolder;
+    if (!listOutputFolder) return;
+
+    const norm = (value: string): string => resolve(value).toLowerCase();
+    if (norm(parentFolder) === norm(listOutputFolder)) return;
+    if (norm(dirname(parentFolder)) !== norm(listOutputFolder)) return;
+
+    const appSettings = this.settings.get();
+    const configuredFolders = [
+      appSettings.defaultSourceFolder,
+      appSettings.defaultTempFolder,
+      appSettings.defaultOutputFolder,
+      ...this.projects
+        .list()
+        .flatMap((project) => [project.sourceFolder, project.tempFolder, project.outputFolder])
+    ]
+      .filter((folder): folder is string => typeof folder === 'string' && folder.trim().length > 0)
+      .map(norm);
+    if (configuredFolders.includes(norm(parentFolder))) return;
+
+    const entries = await readdir(parentFolder).catch(() => ['__keep__']);
+    if (entries.length === 0) {
+      await removeEmptyDirectoryIfPossible(parentFolder);
+    }
+  }
+
   public clearFinished(projectId?: string): number {
     if (projectId) {
       const unfinished = this.repo

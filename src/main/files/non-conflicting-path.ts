@@ -1,4 +1,4 @@
-import { access, copyFile, link, rename, rm, stat } from 'node:fs/promises';
+import { access, copyFile, link, mkdir, rename, rm, rmdir, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
 
@@ -174,4 +174,55 @@ export async function commitFileWithoutOverwrite(
     }
   }
   throw new Error(`Không thể commit tệp do có quá nhiều tên trùng: ${desired}.`);
+}
+
+/**
+ * V13: Giữ chỗ nguyên tử một thư mục con mới cho thành phẩm ghép (`<tên>`, `<tên> (2)`...).
+ * `mkdir` không đệ quy thất bại ngay ở tầng hệ điều hành nếu đường dẫn đã có sẵn (dù là thư mục hay tệp),
+ * nên không bao giờ ghi đè hay bỏ tệp mới vào thư mục cũ.
+ */
+export async function reserveNonConflictingDirectory(
+  parentFolder: string,
+  baseFolderName: string
+): Promise<{ folderPath: string; folderName: string }> {
+  await mkdir(parentFolder, { recursive: true });
+  for (let index = 1; index <= 10_000; index += 1) {
+    const folderName = index === 1 ? baseFolderName : `${baseFolderName} (${index})`;
+    const folderPath = join(parentFolder, folderName);
+    try {
+      await mkdir(folderPath);
+      return { folderPath, folderName };
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'EEXIST') continue;
+      if ((code === 'EACCES' || code === 'EPERM') && (await pathExists(folderPath).catch(() => false))) {
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error(`Không thể tạo thư mục thành phẩm không trùng cho ${join(parentFolder, baseFolderName)}.`);
+}
+
+/**
+ * V13: Xoá thư mục rỗng (không đệ quy), thử lại ngắn nếu Antivirus / Explorer vừa mở quét thư mục.
+ * Thư mục còn tệp bên trong (`ENOTEMPTY`) thì giữ nguyên tuyệt đối và trả về `false`.
+ */
+export async function removeEmptyDirectoryIfPossible(folderPath: string): Promise<boolean> {
+  let waitedMs = 0;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rmdir(folderPath);
+      return true;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code ?? '';
+      if (code === 'ENOENT' || code === 'ENOTEMPTY' || code === 'ENOTDIR') return false;
+      const delayMs = LOCK_RETRY_DELAYS_MS[attempt];
+      if (!TRANSIENT_LOCK_CODES.has(code) || delayMs === undefined || waitedMs + delayMs > MAX_TOTAL_LOCK_WAIT_MS) {
+        return false;
+      }
+      waitedMs += delayMs;
+      await sleepMs(delayMs);
+    }
+  }
 }

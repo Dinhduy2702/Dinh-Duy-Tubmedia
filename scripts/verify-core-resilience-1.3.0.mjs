@@ -45,7 +45,7 @@ requireText(verifier, "...(options.expectedStreams?.audio ? ['-map', '0:a:0'] : 
 requireText(verifier, "'-xerror'", 'deep verification uses strict FFmpeg decoding');
 requireText(merge, "expectedStreams: { video: true, audio: expectedAudio }", 'merged output requires the expected audio stream');
 requireText(merge, "phase: 'av-sync-verification'", 'merged output enforces audio/video duration synchronization');
-requireText(merge, 'commitFileWithoutOverwrite(pending, final)', 'final merge commit never overwrites a valid existing output');
+requireText(merge, 'commitFileWithoutOverwrite(sourcePendingPath, targetVideoPath,', 'final merge commit never overwrites a valid existing output');
 requireText(target, "hasAnyAudio || profile.audioMode === 'silent'", 'smart merge cannot silently drop audio when the dominant clip is silent');
 requireText(clip, "'-xerror', '-err_detect', 'explode'", 'clip creation fails closed on decoder corruption');
 requireText(clip, '.previous-' + '$' + '{Date.now()}.bak', 'clip replacement keeps a restorable previous file until commit succeeds');

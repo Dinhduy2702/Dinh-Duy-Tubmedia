@@ -37,7 +37,7 @@ check('boundary policy runs before the expensive repair branch', merge.indexOf('
 check('boundary policy is re-applied after the bounded repair verification', merge.split('acceptShortBoundaryTransitions();').length - 1 >= 2);
 check('source-origin reconciliation still runs before boundary classification', merge.indexOf('reconcileVisualIssuesWithOriginalSources') < merge.indexOf('acceptShortBoundaryTransitions();'));
 check('genuine visual failures still use quarantine', merge.includes("phase: 'visual-integrity-verification'") && merge.includes('await this.quarantine.move'));
-check('final output still commits without overwrite', merge.includes('commitFileWithoutOverwrite(pending, final)'));
+check('final output still commits without overwrite', merge.includes('commitFileWithoutOverwrite(sourcePendingPath, targetVideoPath,'));
 check('success warnings are short Vietnamese explanations', merge.includes('Đã ghép an toàn: Tubmedia nhận diện'));
 check('queue persists structured boundary diagnostics', queue.includes('mergeVisualBoundaryTransitions: result.visualBoundaryTransitions'));
 check('queue warning logs include structured boundary diagnostics', queue.includes('visualBoundaryTransitions: result.visualBoundaryTransitions'));

@@ -89,11 +89,12 @@ check(
       files['src/main/queue/queue-manager.ts']
     ) &&
     /\bexportTimelineTxt\b/.test(files['src/main/merge/merge-engine.ts']) &&
-    /safeName\s*,\s*exportTimelineTxt/.test(files['src/main/merge/merge-engine.ts'])
+    has('src/main/merge/merge-engine.ts', 'commitProductIntoDedicatedFolder(')
 );
 check(
   'final commit never overwrites an existing output',
-  has('src/main/merge/merge-engine.ts', 'commitFileWithoutOverwrite(pending, final)')
+  has('src/main/merge/merge-engine.ts', 'reserveNonConflictingDirectory(outputFolder, safeName)') &&
+    has('src/main/merge/merge-engine.ts', 'commitFileWithoutOverwrite(sourcePendingPath, targetVideoPath,')
 );
 check(
   'timeline export never overwrites an existing text file',

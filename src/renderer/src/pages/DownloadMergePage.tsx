@@ -457,7 +457,9 @@ function MergeProductionPanel({
   const timelineRows = timelineRowsOf(mergeJob);
   const hasActualTimeline = timelineRows.length > 0;
   const safeName = sanitizeFilename(form.finalFileName.replace(/\.mp4$/i, ''), 'Thành phẩm');
-  const video = jobInputText(mergeJob, 'outputPath') ?? outputPath(form.outputFolder, `${safeName}.mp4`);
+  const video =
+    jobInputText(mergeJob, 'outputPath') ??
+    outputPath(outputPath(form.outputFolder, safeName), `${safeName}.mp4`);
   const completedDownloads = downloadJobs.filter((job) =>
     ['completed', 'skipped'].includes(job.status)
   ).length;
@@ -476,7 +478,7 @@ function MergeProductionPanel({
         { label: 'Tải nguồn', icon: Download, value: downloadJobs.length ? `${completedDownloads}/${downloadJobs.length}` : 'Chờ bắt đầu', active: downloadJobs.some((job) => ACTIVE.includes(job.status)), done: downloadJobs.length > 0 && completedDownloads === downloadJobs.length },
         { label: 'Cắt / chuẩn hóa', icon: Scissors, value: clipJobs.length ? `${completedClips}/${clipJobs.length}` : 'Tự động khi cần', active: clipJobs.some((job) => ACTIVE.includes(job.status)), done: clipJobs.length > 0 && completedClips === clipJobs.length },
         { label: 'Ghép thành phẩm', icon: Layers3, value: recoveryMode === 'verified-final' ? 'Đã hậu kiểm và dùng lại' : recoveryMode === 'verified-checkpoint' ? 'Đã tiếp tục từ checkpoint' : mergeJob ? `${statusLabel(mergeJob.status)} · ${mergeJob.progress.toFixed(1)}%` : 'Chờ nguồn', active: Boolean(mergeJob && ACTIVE.includes(mergeJob.status)), done: mergeCompleted },
-        { label: 'Timeline TXT', icon: FileText, value: mergeCompleted ? 'Sẵn sàng chọn nơi lưu' : 'Xuất thủ công sau khi ghép', active: false, done: mergeCompleted }
+        { label: 'Timeline TXT', icon: FileText, value: mergeCompleted ? 'Đã lưu kèm trong thư mục thành phẩm' : 'Tự lưu kèm trong thư mục thành phẩm', active: false, done: mergeCompleted }
       ];
   const copyTimelineMark = async (row: TimelineRow): Promise<void> => {
     const text = formatTimelineCopyText(row.start);
@@ -512,7 +514,7 @@ function MergeProductionPanel({
   return (
     <section className="merge-production-panel">
       <header>
-        <div><span>{timelineOnly ? 'TIMELINE ĐỘC LẬP' : 'ĐẦU RA SẢN PHẨM'}</span><b>{timelineOnly ? 'Không tạo MP4; kiểm tra toàn bộ video nguồn rồi hiển thị timeline chính xác để xuất TXT' : resultMessage ?? 'Thành phẩm nằm trực tiếp trong thư mục đã chọn'}</b></div>
+        <div><span>{timelineOnly ? 'TIMELINE ĐỘC LẬP' : 'ĐẦU RA SẢN PHẨM'}</span><b>{timelineOnly ? 'Không tạo MP4; kiểm tra toàn bộ video nguồn rồi hiển thị timeline chính xác để xuất TXT' : resultMessage ?? 'Tự tạo thư mục riêng chứa video thành phẩm và Timeline TXT'}</b></div>
         <button
           className="icon-action"
           type="button"

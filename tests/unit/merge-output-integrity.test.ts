@@ -85,7 +85,10 @@ describe('merge output integrity hardening', () => {
     ]);
     expect(merge).toContain('verifyVisualIntegrity');
     expect(merge).toContain("phase: 'visual-integrity-verification'");
-    expect(merge.indexOf('verifyVisualIntegrity')).toBeLessThan(merge.indexOf('commitFileWithoutOverwrite(pending, final)'));
+    expect(merge).toContain('commitFileWithoutOverwrite(sourcePendingPath, targetVideoPath,');
+    expect(merge.indexOf('verifyVisualIntegrity(pending')).toBeLessThan(
+      merge.indexOf('const { video: committedFinal, timeline } = await this.commitProductIntoDedicatedFolder(')
+    );
     expect(verifier).toContain("'-xerror'");
     expect(verifier).toContain("'blackdetect=d=0.08:pix_th=0.02,freezedetect=n=-60dB:d=1'");
     expect(normalize).toContain('forceVideoTranscode = false');

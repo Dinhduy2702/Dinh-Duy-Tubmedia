@@ -20,7 +20,8 @@ export function buildCleanupProtection(input: {
   ];
   const files = [
     ...input.sourceFiles,
-    ...input.jobs.map((job) => job.input.outputPath).filter((path): path is string => typeof path === 'string')
+    ...input.jobs.map((job) => job.input.outputPath).filter((path): path is string => typeof path === 'string'),
+    ...input.jobs.map((job) => job.input.timelineTxt).filter((path): path is string => typeof path === 'string')
   ];
   return {
     protectedFolders: [...new Set(folders.filter((path) => typeof path === 'string' && path.trim()))],

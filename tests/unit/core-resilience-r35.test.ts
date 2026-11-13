@@ -30,7 +30,7 @@ describe('Tubmedia core resilience contract R35', () => {
     expect(merge).toContain('canonicalizeTimeBase');
     expect(verifier).toContain("'blackdetect=d=0.08:pix_th=0.02,freezedetect=n=-60dB:d=1'");
     expect(merge).toContain("phase: 'av-sync-verification'");
-    expect(merge).toContain('commitFileWithoutOverwrite(pending, final)');
+    expect(merge).toContain('commitFileWithoutOverwrite(sourcePendingPath, targetVideoPath,');
   });
   it('keeps recovery, update, tool, backup and diagnostic safety as invariants', () => {
     expect(source('src/main/queue/queue-manager.ts')).toContain('TUBMEDIA RACE SAFE RESUME R29');

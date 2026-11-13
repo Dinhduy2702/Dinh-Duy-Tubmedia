@@ -32,12 +32,12 @@ await expectText(
 );
 await expectText(
   'src/main/merge/merge-engine.ts',
-  'const final = join(outputFolder',
-  'Thành phẩm nằm trực tiếp trong output'
+  'const desiredOutput = join(outputFolder, safeName,',
+  'Thành phẩm nằm trong thư mục riêng mang tên thành phẩm'
 );
 await expectText(
   'src/main/merge/merge-engine.ts',
-  'commitFileWithoutOverwrite(pending, final)',
+  'commitFileWithoutOverwrite(sourcePendingPath, targetVideoPath,',
   'Không ghi đè thành phẩm hiện có'
 );
 await expectText(

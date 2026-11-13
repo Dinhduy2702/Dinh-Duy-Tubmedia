@@ -71,7 +71,8 @@ describe('timeline-only Hotfix 12', () => {
     expect(merge).toContain('verifyPendingTwice(candidate');
     expect(merge).toContain('verifyVisualIntegrity(');
     expect(merge).toContain('validateMergeOutputSize([...inputInfos]');
-    expect(merge).toContain('commitFileWithoutOverwrite(pending, final)');
+    expect(merge).toContain('reserveNonConflictingDirectory(outputFolder, safeName)');
+    expect(merge).toContain('commitFileWithoutOverwrite(sourcePendingPath, targetVideoPath,');
   });
 
   it('never keys a merge checkpoint by the transient job id', () => {

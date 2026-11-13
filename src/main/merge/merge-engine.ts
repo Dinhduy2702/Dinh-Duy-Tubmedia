@@ -7,7 +7,7 @@ import { access, open, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { constants } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, extname, join, resolve } from 'node:path';
 import type {
   MediaInfo,
   QualityProfile,
@@ -39,7 +39,11 @@ import type { TimelineArtifact, TimelineService } from './timeline-service.js';
 import type { QuarantineService } from '../media/quarantine-service.js';
 import { ensureDirectory } from '../files/ensure-directory.js';
 import { ensureTubmediaOwnedDirectory } from '../files/file-ownership.js';
-import { commitFileWithoutOverwrite } from '../files/non-conflicting-path.js';
+import {
+  commitFileWithoutOverwrite,
+  removeEmptyDirectoryIfPossible,
+  reserveNonConflictingDirectory
+} from '../files/non-conflicting-path.js';
 // Giai đoạn 6 mục 4 (2026-09-24): preset xuất theo nền tảng — tái dùng NGUYÊN VẸN bộ lọc nền mờ kiểu
 // CapCut đã làm và xác minh thật ở "Cắt tệp có sẵn" (mục 3). Cố tình KHÔNG chạm vào merge()/checkpoint —
 // đây là một bước xử lý RIÊNG, chạy SAU khi merge() đã hoàn tất và commit xong thành phẩm như cũ, để
@@ -440,6 +444,23 @@ function hasTimeBaseMismatch(reference: MediaInfo, candidate: MediaInfo): boolea
   return (reference.timeBase ?? null) !== (candidate.timeBase ?? null);
 }
 
+const WINDOWS_MAX_FILE_PATH_LENGTH = 259;
+
+function assertMergedProductPathLength(outputFolder: string, safeName: string): void {
+  const numberedStem = `${safeName} (99)`;
+  const worstCasePath = join(
+    resolve(outputFolder),
+    numberedStem,
+    `${numberedStem}.timeline.txt`
+  );
+  if (worstCasePath.length <= WINDOWS_MAX_FILE_PATH_LENGTH) return;
+  const excessChars = worstCasePath.length - WINDOWS_MAX_FILE_PATH_LENGTH;
+  const shortenNameChars = Math.max(1, Math.ceil(excessChars / 2));
+  throw new MergeFailedError(
+    `Đường dẫn thành phẩm dự kiến dài ${worstCasePath.length} ký tự (vượt giới hạn ${WINDOWS_MAX_FILE_PATH_LENGTH} ký tự của Windows, đã tính dự phòng " (99)"). Hãy rút ngắn tên thành phẩm khoảng ${shortenNameChars} ký tự hoặc chọn thư mục đầu ra ngắn hơn ít nhất ${excessChars} ký tự.`
+  );
+}
+
 export class MergeEngine {
   public constructor(
     private readonly tools: ToolManager,
@@ -550,7 +571,9 @@ export class MergeEngine {
     }));
     try {
       return {
-        timeline: await this.timeline.write(timelineInputs, outputFolder, safeName, exportTimelineTxt),
+        timeline: await this.timeline.write(timelineInputs, outputFolder, safeName, exportTimelineTxt, {
+          reuseMatchingExisting: true
+        }),
         warnings
       };
     } catch (error) {
@@ -573,6 +596,44 @@ export class MergeEngine {
         };
       });
       return { timeline: { txt: null, totalDuration: cursor, itemCount: rows.length, rows }, warnings };
+    }
+  }
+
+  private async commitProductIntoDedicatedFolder(
+    sourcePendingPath: string,
+    outputFolder: string,
+    safeName: string,
+    prepared: readonly PreparedInput[],
+    job: QueueJob
+  ): Promise<{ video: string; timeline: TimelineArtifact }> {
+    assertMergedProductPathLength(outputFolder, safeName);
+    const timelineInputs = prepared.map((item) => ({
+      path: item.path,
+      label: item.label,
+      note: item.note
+    }));
+    const reserved = await reserveNonConflictingDirectory(outputFolder, safeName);
+    const targetVideoPath = join(reserved.folderPath, `${reserved.folderName}.mp4`);
+    let writtenTimelinePath: string | null = null;
+    try {
+      const timeline = await this.timeline.write(
+        timelineInputs,
+        reserved.folderPath,
+        reserved.folderName,
+        true
+      );
+      writtenTimelinePath = timeline.txt;
+      const video = await commitFileWithoutOverwrite(sourcePendingPath, targetVideoPath, {
+        jobId: job.id,
+        projectId: job.projectId
+      });
+      return { video, timeline };
+    } catch (error) {
+      if (writtenTimelinePath) {
+        await rm(writtenTimelinePath, { force: true }).catch(() => undefined);
+      }
+      await removeEmptyDirectoryIfPossible(reserved.folderPath);
+      throw new MergeFailedError(`Không thể commit thành phẩm an toàn: ${String(error)}`);
     }
   }
 
@@ -839,6 +900,12 @@ export class MergeEngine {
       });
     };
 
+    void exportTimelineTxt;
+    const safeName = sanitizeFilename(finalFileName.replace(/\.mp4$/i, ''), 'Thành phẩm');
+    if (!recovery.trustedOutputPath) {
+      assertMergedProductPathLength(outputFolder, safeName);
+    }
+
     emit(1, 'Khởi tạo luồng ghép thông minh');
     await ensureDirectory(outputFolder);
     await ensureDirectory(workFolder);
@@ -890,13 +957,12 @@ export class MergeEngine {
     const normalizationRequired = !allCompatible || profileRequiresNormalization;
 
     /* TUBMEDIA VERIFIED MERGE RECOVERY HOTFIX12 */
-    const safeName = sanitizeFilename(finalFileName.replace(/\.mp4$/i, ''), 'Thành phẩm');
-    const final = join(outputFolder, `${safeName}.mp4`);
+    const desiredOutput = join(outputFolder, safeName, `${safeName}.mp4`);
     const expectedDuration = prepared.reduce((sum, item) => sum + item.info.duration, 0);
     knownTotalDuration = expectedDuration;
     const checkpointFolder = join(workFolder, 'Tubmedia', 'merge-checkpoints');
     await ensureTubmediaOwnedDirectory(checkpointFolder, 'merge-checkpoints', join(workFolder, 'Tubmedia'));
-    const checkpointSignature = await this.createMergeCheckpointSignature(inputs, profile, final);
+    const checkpointSignature = await this.createMergeCheckpointSignature(inputs, profile, desiredOutput);
     const checkpointStem = checkpointFileStem(safeName);
     const pending = join(checkpointFolder, `${checkpointStem}.${checkpointSignature}.pending.mp4`);
     const receiptPath = join(checkpointFolder, `${checkpointStem}.${checkpointSignature}.complete.json`);
@@ -966,16 +1032,29 @@ export class MergeEngine {
       }
 
       const recoveryMode: MergeRecoveryMode = recoveryDecision.mode;
-      const recoveredOutput =
-        recoveryDecision.action === 'reuse-final'
-          ? candidate.path
-          : await commitFileWithoutOverwrite(candidate.path, final);
-      const recoveredTimeline = await this.timelineForRecoveredMerge(
-        prepared,
-        outputFolder,
-        safeName,
-        exportTimelineTxt
-      );
+      let recoveredOutput: string;
+      let recoveredTimeline: { timeline: TimelineArtifact; warnings: string[] };
+      if (recoveryDecision.action === 'reuse-final') {
+        recoveredOutput = candidate.path;
+        const existingFolder = dirname(recoveredOutput);
+        const existingStem = basename(recoveredOutput, extname(recoveredOutput));
+        recoveredTimeline = await this.timelineForRecoveredMerge(
+          prepared,
+          existingFolder,
+          existingStem,
+          true
+        );
+      } else {
+        const committed = await this.commitProductIntoDedicatedFolder(
+          candidate.path,
+          outputFolder,
+          safeName,
+          prepared,
+          job
+        );
+        recoveredOutput = committed.video;
+        recoveredTimeline = { timeline: committed.timeline, warnings: [] };
+      }
       const warnings = [...validation.warnings, ...recoveredTimeline.warnings];
       warnings.push(
         recoveryMode === 'verified-final'
@@ -1018,6 +1097,7 @@ export class MergeEngine {
         }))
       };
     }
+    assertMergedProductPathLength(outputFolder, safeName);
     if (normalizationRequired) {
       const target: NormalizeTarget = mergeTarget;
       const progressByItem = new Array<number>(prepared.length).fill(0);
@@ -1640,17 +1720,18 @@ export class MergeEngine {
       );
     }
 
-    const finalizePercent = 99;
-    emit(finalizePercent, 'Thành phẩm hợp lệ, đang ghi tệp cuối', {
+    const finalizePercent = timestampRepairAttempted ? 99.5 : 99;
+    emit(finalizePercent, 'Thành phẩm hợp lệ, đang ghi thư mục thành phẩm và timeline', {
       processedSeconds: expectedDuration,
       totalSeconds: expectedDuration
     });
-    let committedFinal: string;
-    try {
-      committedFinal = await commitFileWithoutOverwrite(pending, final);
-    } catch (error) {
-      throw new MergeFailedError(`Không thể commit thành phẩm an toàn: ${String(error)}`);
-    }
+    const { video: committedFinal, timeline } = await this.commitProductIntoDedicatedFolder(
+      pending,
+      outputFolder,
+      safeName,
+      prepared,
+      job
+    );
     try {
       await this.writeMergeCheckpointReceipt(
         receiptPath,
@@ -1661,39 +1742,7 @@ export class MergeEngine {
     } catch (error) {
       visualWarnings.push('Video đã hoàn tất nhưng không thể lưu biên nhận checkpoint: ' + String(error));
     }
-
-    emit(timestampRepairAttempted ? 99.5 : 99, 'Đang tạo timeline thành phẩm', {
-      processedSeconds: expectedDuration,
-      totalSeconds: expectedDuration
-    });
-    const timelineInputs = prepared.map((item) => ({
-      path: item.path,
-      label: item.label,
-      note: item.note
-    }));
     const warnings: string[] = [...new Set(visualWarnings)];
-    let timeline: TimelineArtifact;
-    try {
-      timeline = await this.timeline.write(timelineInputs, outputFolder, safeName, exportTimelineTxt);
-    } catch (error) {
-      warnings.push(`Video đã hoàn tất nhưng không thể tạo hoặc ghi timeline TXT: ${String(error)}`);
-      let cursor = 0;
-      const rows: TimelineRow[] = prepared.map((item, index) => {
-        const start = cursor;
-        cursor += item.info.duration;
-        return {
-          index: index + 1,
-          start,
-          end: cursor,
-          duration: item.info.duration,
-          code: formatTimelineLine(start, index + 1),
-          label: item.label,
-          note: item.note,
-          file: item.path
-        };
-      });
-      timeline = { txt: null, totalDuration: cursor, itemCount: rows.length, rows };
-    }
 
     emit(100, 'Ghép và kiểm tra thành phẩm hoàn tất', {
       etaSeconds: 0,
