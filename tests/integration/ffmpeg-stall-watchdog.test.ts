@@ -1,4 +1,5 @@
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { createServer, type AddressInfo, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -16,11 +17,53 @@ import type { MediaInfo, QualityProfile, QueueJob, ResourceProfile } from '../..
 
 const tempDirs: string[] = [];
 const managedManagers: ProcessManager[] = [];
+const activeSignalGates: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
+  await Promise.all(activeSignalGates.splice(0).map((close) => close()));
   await Promise.all(managedManagers.splice(0).map((manager) => manager.shutdown()));
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
+
+// Dùng cổng TCP loopback 127.0.0.1 thay vì fs.watch + watcher.close() + process.exit(0):
+// Trên Node 24 Windows Server CI, gọi watcher.close() rồi process.exit(0) ngay trong callback fs.watch
+// làm nổ libuv UV_HANDLE_CLOSING (__fastfail 0xC0000409 = 3221226505). Đóng socket tự nhiên tránh hoàn toàn lỗi này.
+async function createLoopbackSignalGate(): Promise<{ port: number; release: () => void }> {
+  const sockets = new Set<Socket>();
+  let released = false;
+  const server = createServer((socket) => {
+    if (released) {
+      socket.end('go\n');
+      return;
+    }
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
+  });
+  await new Promise<void>((resolveListen) => server.listen(0, '127.0.0.1', () => resolveListen()));
+  activeSignalGates.push(
+    () =>
+      new Promise<void>((resolveClose) => {
+        for (const socket of sockets) socket.destroy();
+        sockets.clear();
+        if (!server.listening) {
+          resolveClose();
+          return;
+        }
+        server.close(() => resolveClose());
+      })
+  );
+  const port = (server.address() as AddressInfo).port;
+  return {
+    port,
+    release: () => {
+      if (released) return;
+      released = true;
+      for (const socket of sockets) socket.end('go\n');
+      sockets.clear();
+      server.close();
+    }
+  };
+}
 
 function isProcessAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -164,7 +207,6 @@ const repeat = setInterval(() => {
 // Giữ đứng im > 3× ngưỡng (${SIMULATED_HANG_HOLD_MS} ms vs ${SIMULATED_STALL_TIMEOUT_MS} ms); nếu bộ canh tắt sẽ thoát 0 làm bài kiểm ĐỎ
 setTimeout(() => {
   clearInterval(repeat);
-  process.exit(0);
 }, ${SIMULATED_HANG_HOLD_MS});
 `,
       'utf8'
@@ -283,7 +325,6 @@ const timer = setInterval(() => {
   process.stdout.write('out_time_ms=' + ((step + 1) * 250000) + '\\nprogress=' + (step >= 5 ? 'end' : 'continue') + '\\n');
   if (step >= 5) {
     clearInterval(timer);
-    process.exit(0);
   }
 }, 450);
 `,
@@ -312,27 +353,25 @@ const timer = setInterval(() => {
   it('thời gian tác vụ đang Tạm dừng (suspended) và bước dồn moov (+faststart) không bị cắt oan', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tubmedia-v6-pause-faststart-'));
     tempDirs.push(root);
+    const faststartGate = await createLoopbackSignalGate();
     const faststartScript = join(root, 'fake-faststart-ffmpeg.mjs');
-    const enterFinalizeFlag = join(root, 'enter-finalize.flag');
     await writeFile(
       faststartScript,
       `
-import { existsSync, watch } from 'node:fs';
-process.stdout.write('out_time_ms=10000000\\nprogress=continue\\n');
+import { createConnection } from 'node:net';
+const sock = createConnection({ host: '127.0.0.1', port: ${faststartGate.port} }, () => {
+  process.stdout.write('out_time_ms=10000000\\nprogress=continue\\n');
+});
 let startedFinalize = false;
-function beginFinalize() {
-  if (startedFinalize || !existsSync(${JSON.stringify(enterFinalizeFlag)})) return;
+sock.on('data', () => {
+  if (startedFinalize) return;
   startedFinalize = true;
-  watcher.close();
   process.stderr.write('[mp4 @ 000001] Starting second pass: moving the moov atom to the beginning of the file\\n');
-  // Bước dồn moov im lặng 2.100ms (> stallTimeoutMs 1.500ms nhưng < finalizeStallTimeoutMs 6.000ms)
+  // Bước dồn moov im lặng 2.100ms (> stallTimeoutMs 1.500ms nhưng < finalizeStallTimeoutMs 6.000ms), tự thoát 0 khi hết timer
   setTimeout(() => {
     process.stdout.write('out_time_ms=10000000\\nprogress=end\\n');
-    process.exit(0);
   }, 2_100);
-}
-const watcher = watch(${JSON.stringify(root)}, () => beginFinalize());
-beginFinalize();
+});
 `,
       'utf8'
     );
@@ -353,7 +392,7 @@ beginFinalize();
       progressValueOfStdoutLine: parseFfmpegOutTimeSeconds,
       onStdoutLine: (line) => {
         if (line.includes('out_time_ms=10000000')) {
-          void writeFile(enterFinalizeFlag, 'go', 'utf8');
+          faststartGate.release();
         }
       },
       isFinalizeStderrLine: (line) => line.includes('Starting second pass')
@@ -361,23 +400,21 @@ beginFinalize();
     expect(result.code).toBe(0);
 
     // Kiểm tra thêm: khi người dùng bấm Tạm dừng (pauseByJob → suspended = true), đồng hồ canh đứng im cũng tạm dừng
+    const pausedGate = await createLoopbackSignalGate();
     const pausedScript = join(root, 'fake-paused-ffmpeg.mjs');
-    const resumedFlag = join(root, 'resumed.flag');
     await writeFile(
       pausedScript,
       `
-import { existsSync, watch } from 'node:fs';
-process.stdout.write('out_time_ms=5000000\\nprogress=continue\\n');
+import { createConnection } from 'node:net';
+const sock = createConnection({ host: '127.0.0.1', port: ${pausedGate.port} }, () => {
+  process.stdout.write('out_time_ms=5000000\\nprogress=continue\\n');
+});
 let finished = false;
-function finishIfResumed() {
-  if (finished || !existsSync(${JSON.stringify(resumedFlag)})) return;
+sock.on('data', () => {
+  if (finished) return;
   finished = true;
-  watcher.close();
   process.stdout.write('out_time_ms=9000000\\nprogress=end\\n');
-  process.exit(0);
-}
-const watcher = watch(${JSON.stringify(root)}, () => finishIfResumed());
-finishIfResumed();
+});
 `,
       'utf8'
     );
@@ -406,7 +443,7 @@ finishIfResumed();
     // Giữ trạng thái Tạm dừng lâu hơn stallTimeoutMs (2.100ms > 1.500ms) để chứng minh đồng hồ canh không cộng thời gian đang tạm dừng
     await new Promise((resolve) => setTimeout(resolve, 2_100));
     await processes.resumeByJob('job-paused-ok');
-    await writeFile(resumedFlag, 'ok', 'utf8');
+    pausedGate.release();
     const pausedResult = await runPaused;
     expect(pausedResult.code).toBe(0);
   }, INTEGRATION_CASE_TIMEOUT_MS);

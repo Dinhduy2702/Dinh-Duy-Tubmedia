@@ -111,12 +111,10 @@ if (inputPath.includes('TT131') && isAacEncode && !hasFastCoder) {
   }, 100);
   setTimeout(() => {
     clearInterval(repeat);
-    process.exit(0);
   }, ${SIMULATED_HANG_HOLD_MS});
 } else {
   if (outPath && !outPath.startsWith('-')) writeFileSync(outPath, Buffer.alloc(16384, 9));
   process.stdout.write('out_time_ms=487480000\\nprogress=end\\n');
-  process.exit(0);
 }
 `,
       'utf8'
@@ -282,12 +280,10 @@ if (inPath.includes('TT131_HongNang')) {
   const repeat = setInterval(() => process.stdout.write('out_time_ms=460940227\\nprogress=continue\\n'), 100);
   setTimeout(() => {
     clearInterval(repeat);
-    process.exit(0);
   }, ${SIMULATED_HANG_HOLD_MS});
 } else {
   if (outPath && !outPath.startsWith('-')) writeFileSync(outPath, 'ok-normalized');
   process.stdout.write('out_time_ms=120000000\\nprogress=end\\n');
-  process.exit(0);
 }
 `,
       'utf8'
@@ -437,12 +433,10 @@ if (mode === 'always-hang' || !hasFast) {
   const repeat = setInterval(() => process.stdout.write('out_time_ms=15000000\\nprogress=continue\\n'), 100);
   setTimeout(() => {
     clearInterval(repeat);
-    process.exit(0);
   }, ${SIMULATED_HANG_HOLD_MS});
 } else {
   if (outPath && !outPath.startsWith('-')) writeFileSync(outPath, Buffer.alloc(16384, 5));
   process.stdout.write('out_time_ms=60000000\\nprogress=end\\n');
-  process.exit(0);
 }
 `,
       'utf8'
