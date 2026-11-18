@@ -1851,7 +1851,7 @@ export class QueueManager {
     if (jobs.every((job) => ['completed', 'skipped', 'cancelled'].includes(job.status))) {
       const cancelled = jobs.some((job) => job.status === 'cancelled');
       this.projects.setStatus(projectId, cancelled ? 'paused' : 'completed');
-      void this.cleanupProjectTemporaryArtifacts(projectId);
+      void this.cleanupProjectTemporaryArtifacts(projectId, cancelled);
     }
   }
 
@@ -2044,34 +2044,40 @@ export class QueueManager {
       .list(true)
       .filter((item) => item.tempFolder && item.tempFolder.toLowerCase() === project.tempFolder.toLowerCase());
     const cachesStillUseful = sameTemp.some((item) =>
-      this.repo.list(item.id).some((job) => !TERMINAL_JOB_STATUSES.has(job.status) || job.status === 'failed')
+      this.repo
+        .list(item.id)
+        .some((job) => !TERMINAL_JOB_STATUSES.has(job.status) || job.status === 'failed' || job.status === 'cancelled')
     );
     if (!cachesStillUseful) folders += await removeMergeCaches(project.tempFolder, protection);
     return { files, folders };
   }
 
   /**
-   * 2026-10-24: quét tệp tạm mồ côi khi mở app và mỗi 6 giờ — tệp còn sót khi app bị tắt đột ngột, mất điện, hoặc của danh
-   * sách đã xoá. Giữ thư mục của danh sách còn tiếp tục được (trừ khi bị bỏ quên quá 14 ngày). Bản đệm ghép của thư mục tạm
-   * không còn danh sách nào mở thì dọn luôn; còn quy trình lỗi chờ thử lại thì giữ tối đa 14 ngày.
+   * 2026-10-24 / 1.7.6 V14: quét tệp tạm mồ côi khi mở app và mỗi 6 giờ — tệp còn sót khi app bị tắt đột ngột, mất điện,
+   * hoặc của danh sách đã xoá. Giữ thư mục của danh sách còn tiếp tục được (trừ khi bị bỏ quên quá 14 ngày). Bản đệm ghép
+   * của thư mục tạm không còn danh sách nào mở thì dọn luôn; còn quy trình lỗi hoặc vừa huỷ chờ ghép lại thì giữ tối đa 14 ngày.
    */
   public async sweepOrphanTemporaryFiles(now = Date.now()): Promise<void> {
     try {
       const projects = this.projects.list(true);
       const protection = this.downloadTempProtection();
       const openByWorkName = new Map<string, boolean>();
-      const openByTemp = new Map<string, { open: boolean; failed: boolean; tempFolder: string }>();
+      const openByTemp = new Map<string, { open: boolean; keepMergeCache: boolean; tempFolder: string }>();
       for (const project of projects) {
         const jobs = this.repo.list(project.id);
         const open = jobs.some((job) => !TERMINAL_JOB_STATUSES.has(job.status));
         const resumableDownload = jobs.some((job) => this.jobKeepsDownloadTemp(job));
-        const failed = jobs.some((job) => job.status === 'failed');
+        const keepMergeCache = jobs.some((job) => job.status === 'failed' || job.status === 'cancelled');
         const workName = project.id.slice(0, 8).toLowerCase();
         openByWorkName.set(workName, (openByWorkName.get(workName) ?? false) || resumableDownload);
         if (!project.tempFolder?.trim()) continue;
         const key = project.tempFolder.toLowerCase();
-        const current = openByTemp.get(key) ?? { open: false, failed: false, tempFolder: project.tempFolder };
-        openByTemp.set(key, { open: current.open || open, failed: current.failed || failed, tempFolder: current.tempFolder });
+        const current = openByTemp.get(key) ?? { open: false, keepMergeCache: false, tempFolder: project.tempFolder };
+        openByTemp.set(key, {
+          open: current.open || open,
+          keepMergeCache: current.keepMergeCache || keepMergeCache,
+          tempFolder: current.tempFolder
+        });
       }
       const settings = this.settings.get();
       const tempFolders = [...openByTemp.values()].map((item) => item.tempFolder);
@@ -2080,7 +2086,7 @@ export class QueueManager {
       let caches = 0;
       for (const item of openByTemp.values()) {
         if (item.open) continue;
-        if (item.failed && !(await mergeCachesIdle(item.tempFolder, now))) continue;
+        if (item.keepMergeCache && !(await mergeCachesIdle(item.tempFolder, now))) continue;
         caches += await removeMergeCaches(item.tempFolder, protection);
       }
       if (report.removedFolders + report.removedFiles + caches > 0) {

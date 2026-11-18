@@ -546,6 +546,7 @@ tests/integration/helpers/queue-harness.ts
 tests/integration/helpers/real-ffmpeg.ts
 tests/integration/legacy-quarantine-untouched.test.ts
 tests/integration/log-repository-filter.test.ts
+tests/integration/merge-cancel-cache-retention.test.ts
 tests/integration/merge-missing-source-requeue.test.ts
 tests/integration/merge-product-folder.test.ts
 tests/integration/migration-attempts-reset.test.ts
