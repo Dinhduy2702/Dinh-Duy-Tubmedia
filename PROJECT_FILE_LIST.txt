@@ -716,6 +716,7 @@ tests/unit/process-abort-before-spawn.test.ts
 tests/unit/process-callback-safety.test.ts
 tests/unit/process-encoding.test.ts
 tests/unit/process-error-taxonomy.test.ts
+tests/unit/process-fast-exit-job-host-race.test.ts
 tests/unit/progress-policy.test.ts
 tests/unit/quality.test.ts
 tests/unit/quarantine-location.test.ts

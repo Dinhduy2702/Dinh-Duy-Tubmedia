@@ -314,9 +314,21 @@ export class ProcessManager {
       controlTail: Promise.resolve()
     };
     this.active.set(id, managed);
-    if (child.pid && this.jobHost.isEnabled()) {
-      await this.jobHost.assignProcess(child.pid, options.cpuCapGroup ?? 'default');
-    }
+    // Đăng ký lắng nghe error/close/stdout/stderr ĐỒNG BỘ ngay sau spawn (không chen await ở giữa)
+    // để các tiến trình cực ngắn (như ffmpeg -muxers/-version thoát trong vài ms) không bao giờ mất sự kiện close.
+    const exitPromise = new Promise<number>((resolve, reject) => {
+      child.once('error', reject);
+      child.once('close', (exitCode) => resolve(exitCode ?? -1));
+    });
+    exitPromise.catch(() => undefined);
+    let assignSettled = !child.pid || !this.jobHost.isEnabled();
+    const earlyStdoutLines: string[] = [];
+    const earlyStderrLines: string[] = [];
+    const assignPromise = assignSettled
+      ? Promise.resolve()
+      : this.jobHost
+          .assignProcess(child.pid!, options.cpuCapGroup ?? 'default')
+          .catch(() => undefined);
     this.logger.info('process', 'PROCESS_STARTED', `${options.tool} PID ${child.pid ?? 0} đã bắt đầu.`, {
       jobId: options.jobId,
       ...(options.projectId ? { projectId: options.projectId } : {}),
@@ -414,20 +426,7 @@ export class ProcessManager {
           Math.max(25, Math.min(2_000, Math.floor((options.stallTimeoutMs ?? 1_000) / 4)))
         )
       : null;
-    const outPromise = lineConsumer(child.stdout, (line) => {
-      stdout.push(line);
-      if (watchStall && options.progressValueOfStdoutLine) {
-        const progressValue = options.progressValueOfStdoutLine(line);
-        if (
-          progressValue !== null &&
-          Number.isFinite(progressValue) &&
-          (maxProgressValue === null ? progressValue > 0 : progressValue > maxProgressValue + 1e-6)
-        ) {
-          maxProgressValue = progressValue;
-          unpausedIdleMs = 0;
-          lastStallSampleAt = Date.now();
-        }
-      }
+    const invokeStdoutCallback = (line: string): void => {
       if (!stdoutCallbackEnabled || !options.onStdoutLine) return;
       try {
         options.onStdoutLine(line);
@@ -448,14 +447,8 @@ export class ProcessManager {
           }
         );
       }
-    });
-    const errPromise = lineConsumer(child.stderr, (line) => {
-      stderr.push(line);
-      if (watchStall && !inFinalize && options.isFinalizeStderrLine?.(line)) {
-        inFinalize = true;
-        unpausedIdleMs = 0;
-        lastStallSampleAt = Date.now();
-      }
+    };
+    const invokeStderrCallback = (line: string): void => {
       if (!stderrCallbackEnabled || !options.onStderrLine) return;
       try {
         options.onStderrLine(line);
@@ -476,13 +469,47 @@ export class ProcessManager {
           }
         );
       }
+    };
+    const outPromise = lineConsumer(child.stdout, (line) => {
+      stdout.push(line);
+      if (watchStall && options.progressValueOfStdoutLine) {
+        const progressValue = options.progressValueOfStdoutLine(line);
+        if (
+          progressValue !== null &&
+          Number.isFinite(progressValue) &&
+          (maxProgressValue === null ? progressValue > 0 : progressValue > maxProgressValue + 1e-6)
+        ) {
+          maxProgressValue = progressValue;
+          unpausedIdleMs = 0;
+          lastStallSampleAt = Date.now();
+        }
+      }
+      if (!assignSettled) {
+        if (options.onStdoutLine) earlyStdoutLines.push(line);
+        return;
+      }
+      invokeStdoutCallback(line);
+    });
+    const errPromise = lineConsumer(child.stderr, (line) => {
+      stderr.push(line);
+      if (watchStall && !inFinalize && options.isFinalizeStderrLine?.(line)) {
+        inFinalize = true;
+        unpausedIdleMs = 0;
+        lastStallSampleAt = Date.now();
+      }
+      if (!assignSettled) {
+        if (options.onStderrLine) earlyStderrLines.push(line);
+        return;
+      }
+      invokeStderrCallback(line);
     });
     let code: number;
     try {
-      code = await new Promise<number>((resolve, reject) => {
-        child.once('error', reject);
-        child.once('close', (exitCode) => resolve(exitCode ?? -1));
-      });
+      await assignPromise;
+      assignSettled = true;
+      for (const line of earlyStdoutLines.splice(0)) invokeStdoutCallback(line);
+      for (const line of earlyStderrLines.splice(0)) invokeStderrCallback(line);
+      code = await exitPromise;
     } catch (error) {
       await Promise.allSettled([outPromise, errPromise]);
       throw new ProcessSpawnError(options.tool, error instanceof Error ? error.message : String(error));
