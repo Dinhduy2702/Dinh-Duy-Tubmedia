@@ -4,7 +4,7 @@ import {
   sanitizeProgress
 } from '@shared/utils/progress-policy.js';
 import { access, open, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { constants } from 'node:fs';
 import { basename, dirname, extname, join, resolve } from 'node:path';
@@ -645,6 +645,33 @@ export class MergeEngine {
     }
   }
 
+  private async commitTimelineOnlyIntoDedicatedFolder(
+    rows: readonly TimelineRow[],
+    outputFolder: string,
+    safeName: string,
+    job: QueueJob
+  ): Promise<string> {
+    assertMergedProductPathLength(outputFolder, safeName);
+    const reserved = await reserveNonConflictingDirectory(outputFolder, safeName);
+    const desiredTxtPath = join(reserved.folderPath, `${reserved.folderName}.timeline.txt`);
+    const pendingTxtPath = join(
+      reserved.folderPath,
+      `${reserved.folderName}.tubmedia-${randomUUID()}.timeline.pending.txt`
+    );
+    const content = rows.map((row) => row.code).join('\r\n');
+    try {
+      await writeFile(pendingTxtPath, content, { encoding: 'utf8', flag: 'wx' });
+      return await commitFileWithoutOverwrite(pendingTxtPath, desiredTxtPath, {
+        jobId: job.id,
+        projectId: job.projectId
+      });
+    } catch (error) {
+      await rm(pendingTxtPath, { force: true }).catch(() => undefined);
+      await removeEmptyDirectoryIfPossible(reserved.folderPath);
+      throw new MergeFailedError(`Không thể tự lưu tệp timeline an toàn: ${String(error)}`);
+    }
+  }
+
   private async validateReusableMergeCandidate(
     candidate: string,
     prepared: readonly PreparedInput[],
@@ -752,9 +779,16 @@ export class MergeEngine {
     inputs: TimelineOnlyInput[],
     resource: ResourceProfile,
     signal: AbortSignal,
-    onProgress: (progress: MergeProgress) => void
+    onProgress: (progress: MergeProgress) => void,
+    options?: { outputFolder: string; finalFileName: string }
   ): Promise<TimelineArtifact> {
     if (!inputs.length) throw new MergeFailedError('Không có video hợp lệ để tạo timeline.');
+    const safeName = options
+      ? sanitizeFilename(options.finalFileName.replace(/\.mp4$/i, ''), 'Thành phẩm')
+      : null;
+    if (options && safeName) {
+      assertMergedProductPathLength(options.outputFolder, safeName);
+    }
     const startedAt = Date.now();
     const emit = (
       percent: number,
@@ -862,9 +896,18 @@ export class MergeEngine {
       inputs,
       infos.map((info) => info.duration)
     );
+    if (options && safeName) {
+      await ensureDirectory(options.outputFolder);
+      artifact.txt = await this.commitTimelineOnlyIntoDedicatedFolder(
+        artifact.rows,
+        options.outputFolder,
+        safeName,
+        job
+      );
+    }
     emit(
       100,
-      'Timeline đã sẵn sàng để xem và xuất TXT',
+      artifact.txt ? 'Đã tự lưu Timeline TXT vào thư mục thành phẩm' : 'Timeline đã sẵn sàng để xem và xuất TXT',
       inputs.length,
       artifact.totalDuration,
       artifact.totalDuration

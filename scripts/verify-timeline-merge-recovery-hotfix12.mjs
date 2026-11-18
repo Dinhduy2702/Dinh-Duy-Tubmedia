@@ -77,8 +77,8 @@ check(
     queue.includes('createTimelineOnly(')
 );
 check(
-  'timeline-only result never advertises an MP4 output',
-  queue.includes('outputPath: null') && queue.includes('timelineTxt: null')
+  'timeline-only result never advertises an MP4 output and records auto-saved timelineTxt',
+  queue.includes('outputPath: null') && queue.includes('timelineTxt: timeline.txt')
 );
 check(
   'timeline-only progress remains in the legal merge state',
@@ -107,8 +107,9 @@ check(
     timelineMethod.includes('sourcePath: input.path')
 );
 check(
-  'timeline-only path never normalizes, concatenates, encodes or writes output automatically',
-  !/this\.normaliz|concatCopy|encode|timeline\.write|commitFile/i.test(timelineMethod)
+  'timeline-only path never normalizes, concatenates or encodes an MP4',
+  !/this\.normaliz|concatCopy|encode/i.test(timelineMethod) &&
+    timelineMethod.includes('commitTimelineOnlyIntoDedicatedFolder(')
 );
 check(
   'source start/end ranges are clamped before timeline accumulation',

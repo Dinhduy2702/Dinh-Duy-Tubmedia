@@ -454,6 +454,7 @@ function MergeProductionPanel({
   /* TUBMEDIA VERIFIED MERGE RECOVERY HOTFIX12 */
   const recoveryMode = jobInputText(mergeJob, 'mergeRecoveryMode');
   const resultMessage = jobInputText(mergeJob, 'resultMessage');
+  const savedTimelineTxt = jobInputText(mergeJob, 'timelineTxt');
   const timelineRows = timelineRowsOf(mergeJob);
   const hasActualTimeline = timelineRows.length > 0;
   const safeName = sanitizeFilename(form.finalFileName.replace(/\.mp4$/i, ''), 'Thành phẩm');
@@ -472,7 +473,7 @@ function MergeProductionPanel({
     ? [
         { label: 'Tải hoặc dùng lại nguồn', icon: Download, value: downloadJobs.length ? `${completedDownloads}/${downloadJobs.length}` : 'Chờ bắt đầu', active: downloadJobs.some((job) => ACTIVE.includes(job.status)), done: downloadJobs.length > 0 && completedDownloads === downloadJobs.length },
         { label: 'Đọc thời lượng', icon: Gauge, value: mergeJob ? `${statusLabel(mergeJob.status)} · ${mergeJob.progress.toFixed(1)}%` : 'Không chạy ghép video', active: Boolean(mergeJob && ACTIVE.includes(mergeJob.status)), done: mergeCompleted },
-        { label: 'Timeline TXT', icon: FileText, value: mergeCompleted ? 'Sẵn sàng xem và xuất' : 'Đang chờ metadata nguồn', active: false, done: mergeCompleted }
+        { label: 'Timeline TXT', icon: FileText, value: mergeCompleted ? (savedTimelineTxt ? 'Đã tự lưu vào thư mục thành phẩm' : 'Sẵn sàng xem và xuất') : 'Đang chờ metadata nguồn', active: false, done: mergeCompleted }
       ]
     : [
         { label: 'Tải nguồn', icon: Download, value: downloadJobs.length ? `${completedDownloads}/${downloadJobs.length}` : 'Chờ bắt đầu', active: downloadJobs.some((job) => ACTIVE.includes(job.status)), done: downloadJobs.length > 0 && completedDownloads === downloadJobs.length },
@@ -705,7 +706,14 @@ function MergeProductionPanel({
         <div>
           <FileText size={16} />
           <span>Timeline TXT</span>
-          <b>{hasActualTimeline ? 'Nhấn biểu tượng Lưu để chọn nơi xuất' : 'Có sau khi ghép hoàn tất'}</b>
+          <b title={savedTimelineTxt ?? undefined}>
+            {savedTimelineTxt ??
+              (hasActualTimeline
+                ? 'Nhấn biểu tượng Lưu để chọn nơi xuất'
+                : timelineOnly
+                  ? 'Tự lưu vào thư mục riêng khi kiểm tra xong'
+                  : 'Có sau khi ghép hoàn tất')}
+          </b>
         </div>
       </div>
     </section>

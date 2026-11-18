@@ -660,7 +660,7 @@ describe('V13 — Thư mục riêng cho mỗi thành phẩm ghép (video + timel
   it('(6) chế độ chỉ-Timeline, bản đổi tỉ lệ 9:16 và bộ quét dọn dẹp máy giữ nguyên hành vi an toàn', async () => {
     const h = await createMergeHarness();
 
-    // Chế độ chỉ tính Timeline, không ghép -> không tạo thư mục thành phẩm hay MP4/TXT
+    // Chế độ chỉ tính Timeline, không ghép -> tự lưu <tên>\<tên>.timeline.txt theo đúng quy ước V13 (T1), không tạo MP4
     const tlOnly = await h.seedProjectWithClips('Chi_Timeline', [
       { fileName: 't1.mp4', duration: 14, label: 'T1' },
       { fileName: 't2.mp4', duration: 16, label: 'T2' }
@@ -670,8 +670,8 @@ describe('V13 — Thư mục riêng cho mỗi thành phẩm ghép (video + timel
     const tlDone = h.queueRepo.get(tlJob.id)!;
     expect(tlDone.status).toBe('completed');
     expect(tlDone.input.outputPath).toBeNull();
-    expect(tlDone.input.timelineTxt).toBeNull();
-    expect(await readdir(h.outputFolder)).toEqual([]);
+    expect(tlDone.input.timelineTxt).toBe(join(h.outputFolder, 'Chi_Timeline', 'Chi_Timeline.timeline.txt'));
+    expect(await readdir(join(h.outputFolder, 'Chi_Timeline'))).toEqual(['Chi_Timeline.timeline.txt']);
 
     // Bản đổi tỉ lệ 9:16 -> giữ nguyên hành vi applyAspectRatio cạnh ngoài, thư mục gốc vẫn có đủ 2 tệp
     const portrait = await h.seedProjectWithClips(

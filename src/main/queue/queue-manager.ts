@@ -2958,23 +2958,31 @@ export class QueueManager {
     /* TUBMEDIA TIMELINE ONLY QUEUE HOTFIX12 */
     /* TUBMEDIA LEGAL TIMELINE QUEUE STATE HOTFIX12R8 */
     if (timelineOnly) {
-      const timeline = await this.merger.createTimelineOnly(job, inputs, profile, signal, (progress) =>
-        this.updateProgress(job.id, progress.percent, progress.speed, progress.etaSeconds, 'merging', false, {
-          progressStage: progress.stage,
-          progressElapsedSeconds: progress.elapsedSeconds,
-          progressProcessedSeconds: progress.processedSeconds,
-          progressTotalSeconds: progress.totalSeconds,
-          progressCurrentItem: progress.currentItem,
-          progressItemCount: progress.itemCount
-        })
+      const timeline = await this.merger.createTimelineOnly(
+        job,
+        inputs,
+        profile,
+        signal,
+        (progress) =>
+          this.updateProgress(job.id, progress.percent, progress.speed, progress.etaSeconds, 'merging', false, {
+            progressStage: progress.stage,
+            progressElapsedSeconds: progress.elapsedSeconds,
+            progressProcessedSeconds: progress.processedSeconds,
+            progressTotalSeconds: progress.totalSeconds,
+            progressCurrentItem: progress.currentItem,
+            progressItemCount: progress.itemCount
+          }),
+        { outputFolder: project.outputFolder, finalFileName: project.finalFileName }
       );
       this.repo.updateInput(job.id, {
         timelineOnly: true,
         productName: project.finalFileName,
         outputPath: null,
-        timelineTxt: null,
-        exportTimelineTxt: false,
-        resultMessage: 'Timeline đã sẵn sàng. Không có video thành phẩm nào được tạo.',
+        timelineTxt: timeline.txt,
+        exportTimelineTxt: Boolean(timeline.txt),
+        resultMessage: timeline.txt
+          ? `Đã tạo và tự lưu Timeline tại ${timeline.txt}. Không có video thành phẩm nào được tạo.`
+          : 'Timeline đã sẵn sàng. Không có video thành phẩm nào được tạo.',
         timelineItemCount: timeline.itemCount,
         totalDuration: timeline.totalDuration,
         timelineRows: timeline.rows
@@ -2982,11 +2990,15 @@ export class QueueManager {
       this.logger.info(
         'merge',
         'TIMELINE_ONLY_READY',
-        'Đã tính xong timeline chính xác từ video nguồn; không chạy ghép và không tạo MP4.',
+        'Đã tính và tự lưu xong timeline từ video nguồn; không chạy ghép và không tạo MP4.',
         {
           jobId: job.id,
           projectId: project.id,
-          metadata: { itemCount: timeline.itemCount, totalDuration: timeline.totalDuration }
+          metadata: {
+            itemCount: timeline.itemCount,
+            totalDuration: timeline.totalDuration,
+            timelineTxt: timeline.txt
+          }
         }
       );
       this.projects.setStatus(project.id, 'completed');
@@ -3617,10 +3629,18 @@ export class QueueManager {
     }
 
     const current = this.repo.get(jobId) ?? job;
-    const outputPath =
+    const rawOutputPath =
       typeof current.input.outputPath === 'string' && current.input.outputPath.trim()
         ? current.input.outputPath.trim()
         : null;
+    const timelineOnlyTxtPath =
+      current.type === 'merge' &&
+      current.input.timelineOnly === true &&
+      typeof current.input.timelineTxt === 'string' &&
+      current.input.timelineTxt.trim()
+        ? current.input.timelineTxt.trim()
+        : null;
+    const outputPath = rawOutputPath ?? timelineOnlyTxtPath;
     let outputDeleted = false;
     let outputMissing = false;
 
@@ -3706,9 +3726,12 @@ export class QueueManager {
 
     const resolvedOutput = resolve(outputPath);
     const parentFolder = dirname(resolvedOutput);
-    const mp4Stem = basename(resolvedOutput, extname(resolvedOutput));
+    const fileName = basename(resolvedOutput);
+    const productStem = /\.timeline\.txt$/i.test(fileName)
+      ? fileName.replace(/\.timeline\.txt$/i, '')
+      : basename(resolvedOutput, extname(resolvedOutput));
     const parentName = basename(parentFolder);
-    if (!mp4Stem || parentName !== mp4Stem) return;
+    if (!productStem || parentName !== productStem) return;
 
     const projectOutputFolder = job.projectId ? this.projects.get(job.projectId)?.outputFolder : undefined;
     const jobOutputFolder =
