@@ -218,7 +218,11 @@ export function retryableDownloadFailureMessage(subtype: YtDlpFailureSubtype): s
 }
 
 /** 2026-10-27: câu cho lỗi KHÔNG thử lại — nêu nguyên nhân cụ thể (tên nền tảng nếu biết) thay vì "lỗi không xác định". */
-export function finalDownloadFailureMessage(subtype: YtDlpFailureSubtype, platformLabel: string | null): string {
+export function finalDownloadFailureMessage(
+  subtype: YtDlpFailureSubtype,
+  platformLabel: string | null,
+  technicalText?: string | null
+): string {
   const where = platformLabel?.trim() || 'nền tảng gốc';
   switch (subtype) {
     case 'format_unavailable':
@@ -228,6 +232,9 @@ export function finalDownloadFailureMessage(subtype: YtDlpFailureSubtype, platfo
     case 'not_found':
       return `Liên kết không còn tồn tại trên ${where} (HTTP 404/410) — video có thể đã bị xoá hoặc link sai. Kiểm tra lại link trong trình duyệt.`;
     case 'unavailable':
+      if (technicalText && isGeoRestrictedText(technicalText)) {
+        return `Video này bị chặn tại quốc gia/vùng của bạn trên ${where} (chủ kênh hoặc đơn vị bản quyền không mở cho khu vực hiện tại). Nếu cần tải, hãy bật VPN/Proxy sang quốc gia được phép xem rồi bấm Thử lại; nếu không cần thì xoá riêng liên kết này khỏi danh sách.`;
+      }
       return `Video không khả dụng trên ${where} (riêng tư, bị gỡ hoặc bị chặn theo vùng). Mở link trong trình duyệt để xem lý do cụ thể.`;
     default:
       return 'Không tải được video này vì một lỗi không xác định do công cụ tải (yt-dlp) báo về. Mở Nhật ký riêng của danh sách để xem chi tiết kỹ thuật; nếu lỗi lặp lại, hãy gửi gói chẩn đoán cho bên hỗ trợ.';
@@ -238,7 +245,13 @@ export function finalDownloadFailureMessage(subtype: YtDlpFailureSubtype, platfo
  * Câu nhật ký YTDLP_DOWNLOAD_FAILED nêu NGUYÊN NHÂN đã phân loại (Đợt 5 mục 14: câu chung cũ khiến Chẩn đoán → "Lỗi gần
  * nhất" không nói được lỗi gì). Trang Chẩn đoán cũng dùng hàm này để dựng lại câu cho dòng nhật ký cũ từ metadata.
  */
-export function ytDlpFailureLogMessage(subtype: YtDlpFailureSubtype | null): string {
+export function ytDlpFailureLogMessage(
+  subtype: YtDlpFailureSubtype | null,
+  technicalText?: string | null
+): string {
+  if (subtype === 'unavailable' && technicalText && isGeoRestrictedText(technicalText)) {
+    return 'yt-dlp không hoàn tất được video: video bị chặn theo quốc gia/vùng lãnh thổ.';
+  }
   return `yt-dlp không hoàn tất được video: ${YTDLP_FAILURE_CAUSES[subtype ?? 'unknown']}.`;
 }
 
@@ -265,6 +278,25 @@ export function isCookieRotationText(text: string): boolean {
 
 function includesAny(text: string, needles: readonly string[]): boolean {
   return needles.some((needle) => text.includes(needle));
+}
+
+export const GEO_RESTRICTED_PHRASES: readonly string[] = [
+  'not available in your country',
+  'not made this video available in your country',
+  'has not made this video available',
+  'blocked it in your country',
+  'blocked in your country',
+  'blocked in your region',
+  'not available in your region',
+  'not available in your area',
+  'not available from your location',
+  'geo-restricted',
+  'geo restricted',
+  'georestricted'
+];
+
+export function isGeoRestrictedText(text: string): boolean {
+  return includesAny(text.toLowerCase(), GEO_RESTRICTED_PHRASES);
 }
 
 export function isExplicitlyRemovedYoutubeSource(text: string): boolean {
@@ -450,14 +482,13 @@ export function classifyYtDlpFailure(text: string): YtDlpFailureDetail {
   }
 
   if (
+    isGeoRestrictedText(lower) ||
     includesAny(lower, [
       'private video',
       'video unavailable',
       'this video is unavailable',
       'video has been removed',
-      'video has been deleted',
-      'geo-restricted',
-      'not available in your country'
+      'video has been deleted'
     ])
   ) {
     return {

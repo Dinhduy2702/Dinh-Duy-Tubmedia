@@ -1940,7 +1940,7 @@ export class DownloadEngine {
         this.logger.error(
           'download',
           'YTDLP_DOWNLOAD_FAILED',
-          ytDlpFailureLogMessage(failure.subtype),
+          ytDlpFailureLogMessage(failure.subtype, text),
           {
             jobId: job.id,
             projectId: project.id,
@@ -1978,7 +1978,11 @@ export class DownloadEngine {
 
         // 2026-10-27: nêu nguyên nhân cụ thể + tên nền tảng (định dạng không khớp chất lượng, đang phát trực tiếp, 404/410…).
         throw new DownloadFailedError(
-          finalDownloadFailureMessage(failure.subtype, source.platform ? rateLimitPlatformLabel(source.platform) : null),
+          finalDownloadFailureMessage(
+            failure.subtype,
+            source.platform ? rateLimitPlatformLabel(source.platform) : null,
+            text
+          ),
           false,
           failureDetails
         );

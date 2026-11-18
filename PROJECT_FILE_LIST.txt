@@ -796,6 +796,7 @@ tests/unit/window-close-policy.test.ts
 tests/unit/windows-process-control.test.ts
 tests/unit/workbench-storage.test.ts
 tests/unit/youtube-cookie-check.test.ts
+tests/unit/youtube-geo-restricted-v18.test.ts
 tests/unit/youtube-source-removed-r36.test.ts
 tests/unit/youtube-url-validation-r34.test.ts
 tests/unit/ytdlp-arguments.test.ts

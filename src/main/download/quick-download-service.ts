@@ -29,8 +29,10 @@ import type { CookieJarStore, CookieRunOutcome } from '../cookies/cookie-jar-sto
 
 import {
   classifyYtDlpFailure,
+  finalDownloadFailureMessage,
   isCookieRotationText,
-  isExplicitlyRemovedYoutubeSource
+  isExplicitlyRemovedYoutubeSource,
+  isGeoRestrictedText
 } from '@shared/utils/download-failure.js';
 import { cookieRotatedMessage } from '@shared/utils/cookie-guidance.js';
 
@@ -998,6 +1000,10 @@ export class QuickDownloadService {
 
   private async finishTask(active: ActiveQuickTask, code: number): Promise<void> {
     if (code !== 0) {
+      const joinedLines = active.recentLines.join('\n');
+      if (isGeoRestrictedText(joinedLines)) {
+        throw new Error(finalDownloadFailureMessage('unavailable', null, joinedLines));
+      }
       const detail = this.lastUsefulError(active.recentLines);
       const contentLabel = active.status.mediaMode === 'audio-only' ? 'âm thanh' : 'video';
       throw new Error(detail ? `Tải ${contentLabel} thất bại: ${detail}` : `yt-dlp kết thúc với mã ${code}.`);
