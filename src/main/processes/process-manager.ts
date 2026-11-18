@@ -15,6 +15,11 @@ import {
   type YtDlpRuntimeAllocation,
   type YtDlpRuntimeTemp
 } from './ytdlp-runtime-temp.js';
+import {
+  defaultWindowsJobHost,
+  type JobCpuCapGroup,
+  type WindowsJobHost
+} from './windows-job-host.js';
 
 export interface ProcessStallInfo {
   stallTimeoutMs: number;
@@ -31,6 +36,7 @@ export interface ProcessRunOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   priority?: ProcessPriority;
+  cpuCapGroup?: JobCpuCapGroup;
   timeoutMs?: number;
   stallTimeoutMs?: number;
   finalizeStallTimeoutMs?: number;
@@ -230,8 +236,16 @@ export class ProcessManager {
   private readonly active = new Map<string, Managed>();
   public constructor(
     private readonly logger: Logger,
-    private readonly ytDlpRuntimeTemp: YtDlpRuntimeTemp = defaultYtDlpRuntimeTemp
-  ) {}
+    private readonly ytDlpRuntimeTemp: YtDlpRuntimeTemp = defaultYtDlpRuntimeTemp,
+    private readonly jobHost: WindowsJobHost = defaultWindowsJobHost
+  ) {
+    if (this.jobHost.isEnabled()) {
+      void this.jobHost.ensureReady();
+    }
+  }
+  public setBackgroundEncodeCpuCap(percentOfAppCpus: number | null, appLogicalCpus: number): void {
+    this.jobHost.setEncodeCpuCapPercent(percentOfAppCpus, appLogicalCpus);
+  }
   public count(): number {
     return this.active.size;
   }
@@ -275,6 +289,9 @@ export class ProcessManager {
     const runtimeTemp: YtDlpRuntimeAllocation | null = isYtDlpExecutable(options.executablePath)
       ? await this.ytDlpRuntimeTemp.allocate().catch(() => null)
       : null;
+    if (this.jobHost.isEnabled()) {
+      await this.jobHost.ensureReady();
+    }
     const child = spawn(options.executablePath, options.args, {
       cwd: options.cwd,
       env: processEnvironmentFor(options.tool, { ...(runtimeTemp?.env ?? {}), ...options.env }),
@@ -297,6 +314,9 @@ export class ProcessManager {
       controlTail: Promise.resolve()
     };
     this.active.set(id, managed);
+    if (child.pid && this.jobHost.isEnabled()) {
+      await this.jobHost.assignProcess(child.pid, options.cpuCapGroup ?? 'default');
+    }
     this.logger.info('process', 'PROCESS_STARTED', `${options.tool} PID ${child.pid ?? 0} đã bắt đầu.`, {
       jobId: options.jobId,
       ...(options.projectId ? { projectId: options.projectId } : {}),
@@ -585,6 +605,7 @@ export class ProcessManager {
         `Không thể kết thúc ${failed.length}/${results.length} tiến trình khi đóng ứng dụng.`
       );
     }
+    this.jobHost.dispose();
   }
 
   private async setSuspended(id: string, suspended: boolean): Promise<void> {

@@ -7,6 +7,7 @@ import { basename, dirname, extname, join, relative, resolve, sep } from 'node:p
 import type { Logger } from '../logging/logger.js';
 import type { ToolManager } from '../tools/tool-manager.js';
 import { processEnvironmentFor } from '../processes/process-manager.js';
+import { defaultWindowsJobHost, killProcessTreeBestEffort } from '../processes/windows-job-host.js';
 import { defaultYtDlpRuntimeTemp } from '../processes/ytdlp-runtime-temp.js';
 import type {
   VideoLinkFilterLink,
@@ -290,6 +291,9 @@ export class VideoLinkFilterService {
   ): Promise<{ code: number; stdout: string; stderr: string }> {
     // Thư mục tạm riêng: bị kill (quá giờ / quá nhiều dữ liệu) thì không để sót %TEMP%\_MEIxxxx (xem ytdlp-runtime-temp.ts).
     const runtimeTemp = await defaultYtDlpRuntimeTemp.allocate().catch(() => null);
+    if (defaultWindowsJobHost.isEnabled()) {
+      await defaultWindowsJobHost.ensureReady();
+    }
     return new Promise((resolvePromise, reject) => {
       const child = spawn(executablePath, args, {
         windowsHide: true,
@@ -298,8 +302,14 @@ export class VideoLinkFilterService {
         env: processEnvironmentFor('yt-dlp', runtimeTemp?.env),
         stdio: ['ignore', 'pipe', 'pipe']
       });
-      // Xóa khi tiến trình THỰC SỰ đóng (không phải lúc trả kết quả — kill rồi trả ngay thì tiến trình còn chạy thêm).
-      const releaseRuntimeTemp = (): void => void runtimeTemp?.release();
+      if (child.pid && defaultWindowsJobHost.isEnabled()) {
+        void defaultWindowsJobHost.assignProcess(child.pid, 'default');
+      }
+      let killTreeDone = Promise.resolve();
+      // Xóa khi cả cây tiến trình THỰC SỰ đóng (không phải lúc trả kết quả — kill rồi trả ngay thì tiến trình con còn giữ _MEIxxxx).
+      const releaseRuntimeTemp = (): void => {
+        void killTreeDone.finally(() => runtimeTemp?.release());
+      };
       child.once('close', releaseRuntimeTemp);
       child.once('error', releaseRuntimeTemp);
       let stdout = '';
@@ -315,15 +325,23 @@ export class VideoLinkFilterService {
         callback();
       };
 
+      const abortProcessTree = (message: string): void => {
+        if (settled) return;
+        settled = true;
+        if (timeout) clearTimeout(timeout);
+        killTreeDone = killProcessTreeBestEffort(child);
+        void killTreeDone.finally(() => reject(new ProcessingFailedError(message)));
+      };
+
       // StringDecoder giữ lại byte UTF-8 dang dở giữa hai chunk; giải mã từng chunk riêng lẻ sẽ
       // làm hỏng ký tự tiếng Việt nằm đúng ranh giới chunk.
       const stdoutDecoder = new StringDecoder('utf8');
       const stderrDecoder = new StringDecoder('utf8');
       const append = (current: string, chunk: Buffer, decoder: StringDecoder): string => {
+        if (settled) return current;
         outputBytes += chunk.length;
         if (outputBytes > MAX_YTDLP_OUTPUT_BYTES) {
-          child.kill();
-          settle(() => reject(new ProcessingFailedError('yt-dlp trả về quá nhiều dữ liệu khi nhận diện link.')));
+          abortProcessTree('yt-dlp trả về quá nhiều dữ liệu khi nhận diện link.');
           return current;
         }
         return current + decoder.write(chunk);
@@ -349,8 +367,7 @@ export class VideoLinkFilterService {
       });
 
       timeout = setTimeout(() => {
-        child.kill();
-        settle(() => reject(new ProcessingFailedError('yt-dlp quá thời gian khi nhận diện danh sách link.')));
+        abortProcessTree('yt-dlp quá thời gian khi nhận diện danh sách link.');
       }, YTDLP_TIMEOUT_MS);
     });
   }
