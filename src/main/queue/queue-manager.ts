@@ -84,7 +84,11 @@ import {
   exhaustedDownloadFailureMessage,
   isCircuitEligibleDownloadFailure
 } from '@shared/utils/download-failure.js';
-import { effectiveMemoryReserveBytes } from '@shared/utils/resource-memory.js';
+import {
+  LOW_MEMORY_WAITING_CODE,
+  LOW_MEMORY_WAITING_TITLE,
+  requiredFreeMemoryBytesForStart
+} from '@shared/utils/resource-memory.js';
 import { toneForErrorCode } from '@shared/utils/notice-tone.js';
 import { detectPlatform, downloadLinkTag } from '@shared/utils/url.js';
 import { failureReasonLabel } from '@shared/utils/failure-reason.js';
@@ -353,6 +357,7 @@ export class QueueManager {
   private readonly diskRecoveryChecks = new Map<string, number>();
   private readonly diskRecoveryInProgress = new Set<string>();
   private lastActiveDiskCheckAt = 0;
+  private lastLowMemoryNoticeAt = 0;
   private readonly progressUpdates = new Map<
     string,
     {
@@ -1558,6 +1563,30 @@ export class QueueManager {
     });
   }
 
+  private notifyLowMemoryWaiting(freeBytes: number, requiredBytes: number): void {
+    const now = Date.now();
+    if (this.lastLowMemoryNoticeAt > 0 && now - this.lastLowMemoryNoticeAt < 60_000) return;
+    if (!this.window || this.window.isDestroyed()) return;
+    this.lastLowMemoryNoticeAt = now;
+    const freeMb = Math.max(0, Math.round(freeBytes / (1024 ** 2)));
+    const requiredMb = Math.max(1, Math.ceil(requiredBytes / (1024 ** 2)));
+    const notice: AttentionNotice = {
+      id: 'low-memory-waiting',
+      severity: 'warning',
+      title: LOW_MEMORY_WAITING_TITLE,
+      message:
+        `${LOW_MEMORY_WAITING_TITLE} (hiện còn khoảng ${freeMb} MB trống, cần tối thiểu ${requiredMb} MB). ` +
+        'Ứng dụng sẽ tự chạy tiếp ngay khi hệ thống có thêm RAM trống.',
+      code: LOW_MEMORY_WAITING_CODE,
+      steps: [
+        'Tạm đóng bớt các thẻ trình duyệt hoặc ứng dụng nặng chưa dùng tới để giải phóng RAM.',
+        'Không cần bấm lại — Tubmedia tự tiếp tục ngay khi RAM trống vượt mức an toàn.'
+      ],
+      sticky: false
+    };
+    this.window.webContents.send(IPC.events.attention, notice);
+  }
+
   private async resourcesAllow(
     job: QueueJob,
     profile: ResourceProfile,
@@ -1565,11 +1594,26 @@ export class QueueManager {
     /** Bảo đảm sống (DOWNLOAD_LIVENESS_MS): bỏ qua bộ điều tiết CPU cho đúng 1 video tải. */
     bypassCpu = false
   ): Promise<boolean> {
-    const memoryReserve = effectiveMemoryReserveBytes(profile.memoryFreeMinimumBytes, totalmem());
+    const activeCount = this.active.size;
+    const memoryReserve = requiredFreeMemoryBytesForStart(
+      profile.memoryFreeMinimumBytes,
+      totalmem(),
+      activeCount
+    );
     const freeMemory = freemem();
     if (freeMemory < memoryReserve) {
-      this.logStartBlocked(job, 'memory', { freeBytes: freeMemory, reserveBytes: memoryReserve });
+      this.logStartBlocked(job, 'memory', {
+        freeBytes: freeMemory,
+        reserveBytes: memoryReserve,
+        activeJobs: activeCount
+      });
+      if (activeCount === 0) {
+        this.notifyLowMemoryWaiting(freeMemory, memoryReserve);
+      }
       return false;
+    }
+    if (this.lastLowMemoryNoticeAt > 0) {
+      this.lastLowMemoryNoticeAt = 0;
     }
     // VẤN ĐỀ 2 mục 1 (2026-09-22): thay kiểm tra tức thời (cpuPercent > cpuSoftLimitPercent, dễ nhấp
     // nháy bật/tắt khi CPU dao động quanh ngưỡng) bằng bộ điều tiết có độ trễ hai chiều, dùng ĐÚNG ngưỡng

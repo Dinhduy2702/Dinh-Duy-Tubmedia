@@ -673,6 +673,7 @@ tests/unit/local-cut.test.ts
 tests/unit/logger-resilience.test.ts
 tests/unit/logs-page-dot3.test.ts
 tests/unit/long-text-info-hint.test.ts
+tests/unit/low-ram-starvation-v8.test.ts
 tests/unit/machine-threads-a0.test.ts
 tests/unit/main-window-open-external.test.ts
 tests/unit/media-analyzer-hdr.test.ts
