@@ -38,3 +38,20 @@ export function formatTimelineLine(startSeconds: number, index: number): string 
 export function formatTimelineCopyText(startSeconds: number): string {
   return `${formatTimestamp(startSeconds)} Ph`;
 }
+
+export function formatAllTimelineText(rows: ReadonlyArray<{ code: string }>): string {
+  return rows.map((row) => row.code).join('\r\n');
+}
+
+export async function copyAllTimelineRowsToClipboard(
+  rows: ReadonlyArray<{ code: string }>,
+  writeClipboard: (text: string) => Promise<unknown>,
+  onNotice: (title: string, message: string) => void
+): Promise<void> {
+  if (rows.length === 0) return;
+  await writeClipboard(formatAllTimelineText(rows));
+  onNotice(
+    'Đã sao chép toàn bộ timeline',
+    `Đã chép ${rows.length} dòng mốc thời gian vào bộ nhớ tạm.`
+  );
+}

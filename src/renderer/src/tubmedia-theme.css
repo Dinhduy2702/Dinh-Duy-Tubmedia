@@ -3131,6 +3131,13 @@ body,
   flex-direction: column;
 }
 
+.merge-production-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.42rem;
+}
+
 .job-progress-panel > header span,
 .merge-production-panel > header span,
 .merge-detailed-progress > header span {

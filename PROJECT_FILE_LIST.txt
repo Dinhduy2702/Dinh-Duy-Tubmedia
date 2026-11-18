@@ -757,6 +757,7 @@ tests/unit/temporary-cleanup-protection.test.ts
 tests/unit/temporary-cleanup-unowned.test.ts
 tests/unit/temporary-cleanup.test.ts
 tests/unit/theme-label.test.ts
+tests/unit/timeline-copy-all-ui.test.ts
 tests/unit/timeline-merge-recovery-hotfix12.test.ts
 tests/unit/timeline-service-safety.test.ts
 tests/unit/timeline.test.ts

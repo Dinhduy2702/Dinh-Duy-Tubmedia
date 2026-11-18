@@ -52,7 +52,12 @@ import { redactSecrets } from '@shared/utils/secret-redaction';
 import { sanitizeFilename } from '@shared/utils/filename';
 import { planApplyTempFolderToAll } from '@shared/utils/apply-temp-folder';
 import { shouldShowInlineBlockingIssue } from '@shared/utils/notification-policy';
-import { formatTimelineCopyText, formatTimestamp } from '@shared/utils/timestamp';
+import {
+  copyAllTimelineRowsToClipboard,
+  formatAllTimelineText,
+  formatTimelineCopyText,
+  formatTimestamp
+} from '@shared/utils/timestamp';
 import { shouldAnimateJobProgress } from '@shared/utils/progress-policy';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CookieManagerDialog } from '../components/CookieManagerDialog';
@@ -414,7 +419,44 @@ function MergeDetailedProgress({ jobs, timelineOnly }: { jobs: QueueJob[]; timel
   );
 }
 
-function MergeProductionPanel({
+export function TimelineHeaderActions({
+  hasActualTimeline,
+  onCopyAll,
+  onExportTxt
+}: {
+  hasActualTimeline: boolean;
+  onCopyAll: () => void;
+  onExportTxt: () => void;
+}): React.JSX.Element {
+  return (
+    <aside className="merge-production-actions">
+      <button
+        className="btn btn-small"
+        type="button"
+        title="Sao chép toàn bộ timeline vào bộ nhớ tạm"
+        aria-label="Sao chép tất cả timeline"
+        disabled={!hasActualTimeline}
+        onClick={onCopyAll}
+      >
+        <Copy size={15} />
+        Sao chép tất cả
+      </button>
+      <button
+        className="btn btn-small"
+        type="button"
+        title="Xuất timeline TXT và chọn nơi lưu"
+        aria-label="Xuất timeline TXT và chọn nơi lưu"
+        disabled={!hasActualTimeline}
+        onClick={onExportTxt}
+      >
+        <FileDown size={15} />
+        Lưu TXT
+      </button>
+    </aside>
+  );
+}
+
+export function MergeProductionPanel({
   form,
   jobs,
   storage,
@@ -493,13 +535,17 @@ function MergeProductionPanel({
       setError(messageOf(error));
     }
   };
+  const copyAllTimeline = (): Promise<void> =>
+    copyAllTimelineRowsToClipboard(timelineRows, (t) => window.desktop.app.writeClipboard(t), onNotice).catch((e) =>
+      setError(messageOf(e))
+    );
   const exportTimelineFile = async (): Promise<void> => {
     if (!hasActualTimeline) return;
     try {
       const saved = await window.desktop.dialogs.saveTextFile({
         defaultName: `${safeName}.timeline.txt`,
         defaultFolder: form.outputFolder,
-        content: timelineRows.map((row) => row.code).join('\r\n')
+        content: formatAllTimelineText(timelineRows)
       });
       if (saved) onNotice('Đã xuất timeline TXT', saved);
     } catch (error) {
@@ -516,16 +562,7 @@ function MergeProductionPanel({
     <section className="merge-production-panel">
       <header>
         <div><span>{timelineOnly ? 'TIMELINE ĐỘC LẬP' : 'ĐẦU RA SẢN PHẨM'}</span><b>{timelineOnly ? 'Không tạo MP4; kiểm tra toàn bộ video nguồn rồi hiển thị timeline chính xác để xuất TXT' : resultMessage ?? 'Tự tạo thư mục riêng chứa video thành phẩm và Timeline TXT'}</b></div>
-        <button
-          className="icon-action"
-          type="button"
-          title="Xuất timeline TXT và chọn nơi lưu"
-          aria-label="Xuất timeline TXT và chọn nơi lưu"
-          disabled={!hasActualTimeline}
-          onClick={() => void exportTimelineFile()}
-        >
-          <FileDown size={17} />
-        </button>
+        <TimelineHeaderActions hasActualTimeline={hasActualTimeline} onCopyAll={() => void copyAllTimeline()} onExportTxt={() => void exportTimelineFile()} />
       </header>
       {resultMessage && !timelineOnly && <div className={`merge-recovery-notice ${recoveryMode === 'verified-final' || recoveryMode === 'verified-checkpoint' ? 'is-reused' : ''}`}>
       <ShieldCheck size={17}/><span><b>{recoveryMode === 'verified-final' ? 'Không ghép trùng thành phẩm' : recoveryMode === 'verified-checkpoint' ? 'Đã tiếp tục đúng checkpoint' : 'Đã hậu kiểm thành phẩm'}</b><small>{resultMessage}</small></span>
@@ -554,7 +591,7 @@ function MergeProductionPanel({
       </div>
       <div className="merge-timeline-preview">
         <div className="merge-timeline-heading">
-          <div><b>Timeline theo định dạng dựng</b><small>{timelineOnly ? 'Timeline được tính từ nguồn mà không ghép video; copy từng mốc hoặc chọn Xuất TXT' : hasActualTimeline ? 'Copy từng mốc hoặc nhấn biểu tượng Lưu để chọn nơi xuất TXT' : onReorder ? 'Kéo ⠿ để đổi thứ tự ghép' : 'Copy từng mốc hoặc nhấn biểu tượng Lưu để chọn nơi xuất TXT'}</small></div>
+          <div><b>Timeline theo định dạng dựng</b><small>{timelineOnly ? 'Timeline được tính từ nguồn và tự lưu TXT; có thể Sao chép tất cả hoặc chọn Lưu TXT sang nơi khác' : hasActualTimeline ? 'Copy từng mốc, Sao chép tất cả hoặc nhấn Lưu TXT để chọn nơi xuất khác' : onReorder ? 'Kéo ⠿ để đổi thứ tự ghép' : 'Copy từng mốc, Sao chép tất cả hoặc nhấn Lưu TXT để chọn nơi xuất khác'}</small></div>
           <span>
             {hasActualTimeline
               ? `${timelineRows.length} mốc thời gian thực`
@@ -709,7 +746,7 @@ function MergeProductionPanel({
           <b title={savedTimelineTxt ?? undefined}>
             {savedTimelineTxt ??
               (hasActualTimeline
-                ? 'Nhấn biểu tượng Lưu để chọn nơi xuất'
+                ? 'Nhấn Lưu TXT để chọn nơi xuất'
                 : timelineOnly
                   ? 'Tự lưu vào thư mục riêng khi kiểm tra xong'
                   : 'Có sau khi ghép hoàn tất')}
