@@ -21,6 +21,9 @@ export interface FailureReasonInput {
 function mergeReason(message: string): string | null {
   const lower = message.toLowerCase();
   const sourceNumber = /video nguồn #(\d+)/i.exec(message)?.[1];
+  if (/bị đứng.*tại mốc|đứng tiến độ/.test(lower)) {
+    return sourceNumber ? `Video nguồn #${sourceNumber} bị đứng khi xử lý` : 'Bước xử lý video bị đứng tiến độ';
+  }
   if (/không đọc được video nguồn|không vượt qua kiểm tra giải mã|video nguồn #\d+ –/.test(lower)) {
     return sourceNumber ? `Video nguồn #${sourceNumber} bị hỏng` : 'Một video nguồn bị hỏng';
   }
@@ -114,6 +117,7 @@ export function failureReasonLabel(input: FailureReasonInput): string {
   }
   const code = input.code.toUpperCase();
   if (code === 'NETWORK_ERROR') return 'Mạng hoặc máy chủ không ổn định';
+  if (code === 'PROCESS_STALLED') return mergeReason(input.message ?? '') ?? 'Bước xử lý video bị đứng tiến độ';
   if (code === 'MERGE_FAILED' || input.jobType === 'merge') return mergeReason(input.message ?? '') ?? 'Ghép video gặp sự cố';
   if (code.includes('VERIFY') || code.includes('VERIFICATION')) return 'Tệp tải về không đạt kiểm tra';
   return 'Lỗi chưa xác định (xem Nhật ký)';

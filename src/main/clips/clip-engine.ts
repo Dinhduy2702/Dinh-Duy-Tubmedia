@@ -1,11 +1,18 @@
 import { readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { extname, join } from 'node:path';
+import { basename, extname, join } from 'node:path';
+import {
+  buildFfmpegStallMessage,
+  FFMPEG_FASTSTART_FINALIZE_STALL_TIMEOUT_MS,
+  FFMPEG_PROGRESS_STALL_TIMEOUT_MS,
+  isFfmpegFaststartSecondPassLine,
+  parseFfmpegOutTimeSeconds
+} from '@shared/utils/ffmpeg-progress.js';
 import { sanitizeProgress } from '@shared/utils/progress-policy.js';
 import type { ProjectItem, QueueJob, ResourceProfile } from '@shared/types/domain.js';
 import { ToolNotFoundError, ProcessingFailedError } from '@shared/errors/app-errors.js';
 import type { ToolManager } from '../tools/tool-manager.js';
-import type { ProcessManager } from '../processes/process-manager.js';
+import type { ProcessManager, ProcessResult } from '../processes/process-manager.js';
 import type { FileVerifier } from '../media/file-verifier.js';
 import type { QuarantineService } from '../media/quarantine-service.js';
 import { ensureDirectory } from '../files/ensure-directory.js';
@@ -85,7 +92,46 @@ export class ClipEngine {
       args.push('-movflags', '+faststart');
     }
     args.push('-progress', 'pipe:1', '-nostats', pending);
-    const result = await this.processes.run({ jobId: job.id, projectId: job.projectId, tool: 'ffmpeg', executablePath: ffmpeg.executablePath, args, priority: resource.processPriority, signal, timeoutMs: 24 * 60 * 60 * 1000, onStdoutLine: line => { if (!line.startsWith('out_time_ms=') || !Number.isFinite(expected) || expected <= 0) return; const microseconds=Number(line.slice(12)); if (!Number.isFinite(microseconds)) return; onProgress(sanitizeProgress(microseconds / 1_000_000 / expected * 100)); } });
+    let result: ProcessResult;
+    try {
+      result = await this.processes.run({
+        jobId: job.id,
+        projectId: job.projectId,
+        tool: 'ffmpeg',
+        executablePath: ffmpeg.executablePath,
+        args,
+        priority: resource.processPriority,
+        signal,
+        timeoutMs: 24 * 60 * 60 * 1000,
+        stallTimeoutMs: FFMPEG_PROGRESS_STALL_TIMEOUT_MS,
+        finalizeStallTimeoutMs: FFMPEG_FASTSTART_FINALIZE_STALL_TIMEOUT_MS,
+        progressValueOfStdoutLine: parseFfmpegOutTimeSeconds,
+        isFinalizeStderrLine: isFfmpegFaststartSecondPassLine,
+        describeStall: ({ lastProgressValue }) => ({
+          message: buildFfmpegStallMessage({
+            stepLabel: 'cắt đoạn video',
+            videoLabel: basename(input),
+            sourceIndex: item.position,
+            lastProgressSeconds: lastProgressValue
+          }),
+          details: {
+            step: 'clip',
+            sourcePath: input,
+            sourceIndex: item.position,
+            lastProgressSeconds: lastProgressValue
+          }
+        }),
+        onStdoutLine: (line) => {
+          if (!line.startsWith('out_time_ms=') || !Number.isFinite(expected) || expected <= 0) return;
+          const microseconds = Number(line.slice(12));
+          if (!Number.isFinite(microseconds)) return;
+          onProgress(sanitizeProgress((microseconds / 1_000_000 / expected) * 100));
+        }
+      });
+    } catch (error) {
+      await rm(pending, { force: true }).catch(() => undefined);
+      throw error;
+    }
     if (result.code !== 0) {
       try { await this.quarantine.move(pending, result.stderrTail || 'Tạo đoạn video thất bại.', { jobId: job.id, projectId: job.projectId }); } catch { /* pending chưa tồn tại */ }
       throw new ProcessingFailedError(result.stderrTail || 'Tạo đoạn video thất bại.');

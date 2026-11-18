@@ -541,6 +541,7 @@ tests/integration/download-repaste-existing.test.ts
 tests/integration/download-retryable-part-retention.test.ts
 tests/integration/download-temp-cleanup.test.ts
 tests/integration/error-report.test.ts
+tests/integration/ffmpeg-stall-watchdog.test.ts
 tests/integration/helpers/queue-harness.ts
 tests/integration/helpers/real-ffmpeg.ts
 tests/integration/legacy-quarantine-untouched.test.ts

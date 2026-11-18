@@ -11,6 +11,13 @@ import { constants as fsConstants, existsSync } from 'node:fs';
 import { access, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, extname, join } from 'node:path';
+import {
+  buildFfmpegStallMessage,
+  FFMPEG_FASTSTART_FINALIZE_STALL_TIMEOUT_MS,
+  FFMPEG_PROGRESS_STALL_TIMEOUT_MS,
+  isFfmpegFaststartSecondPassLine,
+  parseFfmpegOutTimeSeconds
+} from '@shared/utils/ffmpeg-progress.js';
 import { sanitizeProgress } from '@shared/utils/progress-policy.js';
 import {
   LOCAL_CUT_ASPECT_RATIOS,
@@ -321,6 +328,18 @@ export class LocalCutService {
         priority: 'below_normal',
         signal: active.controller.signal,
         timeoutMs: CUT_TIMEOUT_MS,
+        stallTimeoutMs: FFMPEG_PROGRESS_STALL_TIMEOUT_MS,
+        finalizeStallTimeoutMs: FFMPEG_FASTSTART_FINALIZE_STALL_TIMEOUT_MS,
+        progressValueOfStdoutLine: parseFfmpegOutTimeSeconds,
+        isFinalizeStderrLine: isFfmpegFaststartSecondPassLine,
+        describeStall: ({ lastProgressValue }) => ({
+          message: buildFfmpegStallMessage({
+            stepLabel: 'cắt video cục bộ',
+            videoLabel: basename(request.filePath),
+            lastProgressSeconds: lastProgressValue
+          }),
+          details: { step: 'local-cut', sourcePath: request.filePath, lastProgressSeconds: lastProgressValue }
+        }),
         onStdoutLine: (line) => {
           if (!line.startsWith('out_time_ms=')) return;
           const microseconds = Number(line.slice('out_time_ms='.length));
@@ -330,11 +349,11 @@ export class LocalCutService {
         }
       });
     } catch (error) {
+      await rm(pendingOutput, { force: true }).catch(() => undefined);
       // Sửa lỗi (2026-09-24): ProcessManager.run() NÉM lỗi (không trả về {code,...}) khi tiến trình bị
       // hủy qua signal — bài kiểm thật (Playwright + Electron thật) bắt đúng lỗi này: trước khi sửa,
       // hủy giữa chừng bị báo NHẦM thành "failed" thay vì "cancelled" vì lỗi lọt qua catch chung ở start().
       if (error instanceof ProcessCancelledError || active.controller.signal.aborted) {
-        await rm(pendingOutput, { force: true }).catch(() => undefined);
         status.phase = 'cancelled';
         status.message = 'Đã dừng theo yêu cầu.';
         status.completedAt = new Date().toISOString();

@@ -40,7 +40,8 @@ const ERROR_CODES: ReadonlySet<string> = new Set([
   'MERGE_FAILED',
   'ROLLBACK_FAILED',
   'DATABASE_MIGRATION_FAILED',
-  'PROCESS_SPAWN_FAILED'
+  'PROCESS_SPAWN_FAILED',
+  'PROCESS_STALLED'
 ]);
 
 const WARNING_CODES: ReadonlySet<string> = new Set([

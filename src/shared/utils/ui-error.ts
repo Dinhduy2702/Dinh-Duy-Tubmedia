@@ -535,6 +535,22 @@ function classifyIssue(value: unknown): FriendlyIssue {
     };
   }
 
+  if (lower.includes('đứng tiến độ') || /bị đứng.*tại mốc/.test(lower)) {
+    return {
+      title: 'Bước xử lý video bị đứng tiến độ',
+      message: userMessage(
+        cleaned,
+        'Một bước xử lý video bị đứng tiến độ quá lâu nên đã được dừng an toàn.'
+      ),
+      steps: [
+        'Các video đã xử lý xong trước đó vẫn được giữ lại.',
+        'Hãy bấm Thử lại hoặc kiểm tra lại tệp nguồn được nêu trong thông báo.'
+      ],
+      technical,
+      tone: 'error'
+    };
+  }
+
   // Đợt 5 mục 14: câu nhật ký lỗi tải đã nêu nguyên nhân (ytDlpFailureLogMessage) — các nguyên nhân chưa có luật riêng ở
   // trên vẫn hiện tiêu đề "Không tải được video" và đúng nguyên nhân thay vì tiêu đề chung.
   const ytDlpCause = /^yt-dlp không hoàn tất được video: (.+)$/i.exec(cleaned.trim());
@@ -648,6 +664,13 @@ const KNOWN_CODE_FALLBACK: Partial<Record<string, KnownCodeFallback>> = {
     message: 'Bước xử lý video này chạy quá lâu nên đã bị dừng để tránh treo ứng dụng.',
     steps: [
       'Thử lại; nếu máy đang chạy nhiều việc cùng lúc, hãy giảm số quy trình song song trong Cài đặt.'
+    ]
+  },
+  PROCESS_STALLED: {
+    title: 'Bước xử lý video bị đứng tiến độ',
+    steps: [
+      'Các video đã xử lý xong trước đó vẫn được giữ lại.',
+      'Hãy bấm Thử lại hoặc kiểm tra lại tệp nguồn được nêu trong thông báo.'
     ]
   }
 };

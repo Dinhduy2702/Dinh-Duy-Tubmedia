@@ -20,7 +20,14 @@ import { blockedOutputProblemLabel } from '@shared/utils/ffmpeg-decode-failure.j
 import { matchNormalizationTarget } from '@shared/utils/normalization-match.js';
 import { sanitizeFilename } from '@shared/utils/filename.js';
 import { chooseMergeTarget, validateMergeOutputSize } from '@shared/utils/merge-target.js';
-import { FfmpegProgressTracker } from '@shared/utils/ffmpeg-progress.js';
+import {
+  buildFfmpegStallMessage,
+  FFMPEG_FASTSTART_FINALIZE_STALL_TIMEOUT_MS,
+  FFMPEG_PROGRESS_STALL_TIMEOUT_MS,
+  FfmpegProgressTracker,
+  isFfmpegFaststartSecondPassLine,
+  parseFfmpegOutTimeSeconds
+} from '@shared/utils/ffmpeg-progress.js';
 import { formatTimelineLine } from '@shared/utils/timestamp.js';
 import { MergeFailedError, ToolNotFoundError } from '@shared/errors/app-errors.js';
 import type { ToolManager } from '../tools/tool-manager.js';
@@ -1128,7 +1135,8 @@ export class MergeEngine {
                     currentItem: Math.max(1, finishedItems + 1),
                     totalSeconds: knownTotalDuration
                   });
-                }
+                },
+                { sourceIndex: index + 1, sourceLabel: current.label }
               );
               progressByItem[index] = 100;
               finishedItems += 1;
@@ -1173,7 +1181,8 @@ export class MergeEngine {
             profile,
             undefined,
             forceUniformVideo,
-            forceUniformAudio
+            forceUniformAudio,
+            { sourceIndex: index + 1, sourceLabel: current.label }
           );
 
           progressByItem[index] = 100;
@@ -1288,7 +1297,7 @@ export class MergeEngine {
             });
           },
           // Không cần chuẩn hóa → mọi nguồn đều là stream-copy và vừa qua "kiểm tra toàn bộ nguồn" ở trên.
-          { sourceDecodeVerified: true }
+          { sourceDecodeVerified: true, sourceIndex: index + 1, sourceLabel: current.label }
         );
         remuxProgress[index] = 100;
         remuxed += 1;
@@ -1369,7 +1378,8 @@ export class MergeEngine {
               currentItem: Math.max(1, repaired + 1),
               totalSeconds: expectedDuration
             });
-          }
+          },
+          { sourceIndex: index + 1, sourceLabel: current.label }
         );
         repairProgress[index] = 100;
         repaired += 1;
@@ -1532,7 +1542,9 @@ export class MergeEngine {
             },
             profile,
             undefined,
-            true
+            true,
+            false,
+            { sourceIndex: index + 1, sourceLabel: current.label }
           );
           return {
             ...current,
@@ -2000,6 +2012,19 @@ export class MergeEngine {
         priority: resource.processPriority,
         signal,
         timeoutMs: 24 * 60 * 60 * 1000,
+        stallTimeoutMs: FFMPEG_PROGRESS_STALL_TIMEOUT_MS,
+        finalizeStallTimeoutMs: FFMPEG_FASTSTART_FINALIZE_STALL_TIMEOUT_MS,
+        progressValueOfStdoutLine: parseFfmpegOutTimeSeconds,
+        isFinalizeStderrLine: isFfmpegFaststartSecondPassLine,
+        describeStall: ({ lastProgressValue }) => ({
+          message: buildFfmpegStallMessage({
+            stepLabel: 'ghép nối thành phẩm',
+            lastProgressSeconds: lastProgressValue,
+            advice:
+              'Đã dừng tiến trình ghép bị kẹt để tránh treo máy; các bản chuẩn hóa đã xong vẫn được giữ lại, hãy bấm Thử lại.'
+          }),
+          details: { step: 'concat', lastProgressSeconds: lastProgressValue }
+        }),
         onStdoutLine: (line) => {
           const snapshot = tracker.update(line);
           if (!snapshot) return;
@@ -2015,6 +2040,9 @@ export class MergeEngine {
           );
         }
       });
+    } catch (error) {
+      await rm(pending, { force: true }).catch(() => undefined);
+      throw error;
     } finally {
       await rm(concatPath, { force: true });
     }
@@ -2060,55 +2088,75 @@ export class MergeEngine {
     await rm(pending, { force: true }).catch(() => undefined);
 
     const tracker = new FfmpegProgressTracker(info.duration);
-    const result = await this.processes.run({
-      jobId,
-      tool: 'ffmpeg',
-      executablePath: ffmpeg.executablePath,
-      args: [
-        '-hide_banner',
-        '-y',
-        '-i',
-        inputPath,
-        '-filter_complex',
-        buildAspectRatioFilter(width, height),
-        '-map',
-        '0:a:0?',
-        '-c:v',
-        'libx264',
-        '-preset',
-        'veryfast',
-        '-crf',
-        '18',
-        '-c:a',
-        'aac',
-        '-ar',
-        '48000',
-        '-movflags',
-        '+faststart',
-        '-progress',
-        'pipe:1',
-        '-nostats',
-        pending
-      ],
-      // Rà soát toàn diện (2026-09-24): trước đây cố định 'below_normal' bất kể hồ sơ hiệu năng người
-      // dùng chọn — không nhất quán với bước ghép chính (dùng resource.processPriority), khiến bước đổi
-      // tỉ lệ tự nhiên "chậm lại" ngay sau khi ghép nhanh trên hồ sơ "Toàn bộ hiệu năng". Dùng đúng cùng
-      // một mức ưu tiên với bước ghép chính.
-      priority: resource.processPriority,
-      signal,
-      timeoutMs: 24 * 60 * 60 * 1000,
-      onStdoutLine: (line) => {
-        const snapshot = tracker.update(line);
-        if (!snapshot) return;
-        onProgress({
-          percent: snapshot.percent,
-          speed: snapshot.speed,
-          etaSeconds: snapshot.etaSeconds,
-          processedSeconds: snapshot.processedSeconds,
-          totalSeconds: snapshot.totalSeconds
-        });
-      }
-    });
+    let result: ProcessResult;
+    try {
+      result = await this.processes.run({
+        jobId,
+        tool: 'ffmpeg',
+        executablePath: ffmpeg.executablePath,
+        args: [
+          '-hide_banner',
+          '-y',
+          '-i',
+          inputPath,
+          '-filter_complex',
+          buildAspectRatioFilter(width, height),
+          '-map',
+          '0:a:0?',
+          '-c:v',
+          'libx264',
+          '-preset',
+          'veryfast',
+          '-crf',
+          '18',
+          '-c:a',
+          'aac',
+          '-ar',
+          '48000',
+          '-movflags',
+          '+faststart',
+          '-progress',
+          'pipe:1',
+          '-nostats',
+          pending
+        ],
+        // Rà soát toàn diện (2026-09-24): trước đây cố định 'below_normal' bất kể hồ sơ hiệu năng người
+        // dùng chọn — không nhất quán với bước ghép chính (dùng resource.processPriority), khiến bước đổi
+        // tỉ lệ tự nhiên "chậm lại" ngay sau khi ghép nhanh trên hồ sơ "Toàn bộ hiệu năng". Dùng đúng cùng
+        // một mức ưu tiên với bước ghép chính.
+        priority: resource.processPriority,
+        signal,
+        timeoutMs: 24 * 60 * 60 * 1000,
+        stallTimeoutMs: FFMPEG_PROGRESS_STALL_TIMEOUT_MS,
+        finalizeStallTimeoutMs: FFMPEG_FASTSTART_FINALIZE_STALL_TIMEOUT_MS,
+        progressValueOfStdoutLine: parseFfmpegOutTimeSeconds,
+        isFinalizeStderrLine: isFfmpegFaststartSecondPassLine,
+        describeStall: ({ lastProgressValue }) => ({
+          message: buildFfmpegStallMessage({
+            stepLabel: 'đổi tỉ lệ khung hình',
+            videoLabel: basename(inputPath),
+            lastProgressSeconds: lastProgressValue,
+            advice:
+              'Đã dừng bước đổi tỉ lệ bị kẹt; thành phẩm gốc đã ghép trước đó vẫn còn nguyên, hãy bấm Thử lại.'
+          }),
+          details: { step: 'aspect-ratio', sourcePath: inputPath, lastProgressSeconds: lastProgressValue }
+        }),
+        onStdoutLine: (line) => {
+          const snapshot = tracker.update(line);
+          if (!snapshot) return;
+          onProgress({
+            percent: snapshot.percent,
+            speed: snapshot.speed,
+            etaSeconds: snapshot.etaSeconds,
+            processedSeconds: snapshot.processedSeconds,
+            totalSeconds: snapshot.totalSeconds
+          });
+        }
+      });
+    } catch (error) {
+      await rm(pending, { force: true }).catch(() => undefined);
+      throw error;
+    }
 
     if (result.code !== 0) {
       await rm(pending, { force: true }).catch(() => undefined);

@@ -29,7 +29,14 @@ import {
   validateDownloadedQuality,
   validateSelectedDownloadSize
 } from '@shared/utils/download-quality.js';
-import { FfmpegProgressTracker } from '@shared/utils/ffmpeg-progress.js';
+import {
+  buildFfmpegStallMessage,
+  FFMPEG_FASTSTART_FINALIZE_STALL_TIMEOUT_MS,
+  FFMPEG_PROGRESS_STALL_TIMEOUT_MS,
+  FfmpegProgressTracker,
+  isFfmpegFaststartSecondPassLine,
+  parseFfmpegOutTimeSeconds
+} from '@shared/utils/ffmpeg-progress.js';
 import {
   classifyYtDlpFailure,
   pathTooLongLength,
@@ -732,6 +739,20 @@ export class DownloadEngine {
         priority: backgroundEncodePriority(resource.processPriority),
         signal,
         timeoutMs: 48 * 60 * 60 * 1000,
+        stallTimeoutMs: FFMPEG_PROGRESS_STALL_TIMEOUT_MS,
+        finalizeStallTimeoutMs: FFMPEG_FASTSTART_FINALIZE_STALL_TIMEOUT_MS,
+        progressValueOfStdoutLine: parseFfmpegOutTimeSeconds,
+        isFinalizeStderrLine: isFfmpegFaststartSecondPassLine,
+        describeStall: ({ lastProgressValue }) => ({
+          message: buildFfmpegStallMessage({
+            stepLabel: 'tạo bản dựng CapCut',
+            videoLabel: basename(input),
+            lastProgressSeconds: lastProgressValue,
+            advice:
+              'Đã dừng bước tạo bản dựng CapCut bị kẹt; bản gốc chất lượng cao vừa tải vẫn an toàn.'
+          }),
+          details: { step: 'capcut-copy', sourcePath: input, encoder, lastProgressSeconds: lastProgressValue }
+        }),
         onStdoutLine: (line) => {
           const snapshot = tracker.update(line);
           if (!snapshot) return;

@@ -1,9 +1,15 @@
 import { constants } from 'node:fs';
 import { access, stat } from 'node:fs/promises';
+import { basename } from 'node:path';
 import type { VerificationLevel } from '@shared/types/domain.js';
 import { VerificationFailedError } from '@shared/errors/app-errors.js';
 import { parseVolumeDetect, type AudioLevel } from '@shared/utils/audio-presence.js';
 import { describeFfmpegDecodeFailure, type DecodeFailureStream } from '@shared/utils/ffmpeg-decode-failure.js';
+import {
+  buildFfmpegStallMessage,
+  FFMPEG_PROGRESS_STALL_TIMEOUT_MS,
+  parseFfmpegOutTimeSeconds
+} from '@shared/utils/ffmpeg-progress.js';
 import type { MediaAnalyzer } from './media-analyzer.js';
 import type { ProcessManager } from '../processes/process-manager.js';
 import type { ToolManager } from '../tools/tool-manager.js';
@@ -509,6 +515,16 @@ export class FileVerifier {
         '-'
       ],
       timeoutMs: 48 * 60 * 60 * 1000,
+      stallTimeoutMs: FFMPEG_PROGRESS_STALL_TIMEOUT_MS,
+      progressValueOfStdoutLine: parseFfmpegOutTimeSeconds,
+      describeStall: ({ lastProgressValue }) => ({
+        message: buildFfmpegStallMessage({
+          stepLabel: 'hậu kiểm hình ảnh',
+          videoLabel: basename(path),
+          lastProgressSeconds: lastProgressValue
+        }),
+        details: { step: 'verify-visual', sourcePath: path, lastProgressSeconds: lastProgressValue }
+      }),
       priority: 'below_normal',
       ...(options.signal ? { signal: options.signal } : {}),
       onStdoutLine: (line) => {
@@ -698,6 +714,16 @@ export class FileVerifier {
             '-'
           ],
           timeoutMs: 24 * 60 * 60 * 1000,
+          stallTimeoutMs: FFMPEG_PROGRESS_STALL_TIMEOUT_MS,
+          progressValueOfStdoutLine: parseFfmpegOutTimeSeconds,
+          describeStall: ({ lastProgressValue }) => ({
+            message: buildFfmpegStallMessage({
+              stepLabel: 'kiểm tra giải mã video',
+              videoLabel: basename(path),
+              lastProgressSeconds: lastProgressValue
+            }),
+            details: { step: 'verify-deep', sourcePath: path, lastProgressSeconds: lastProgressValue }
+          }),
           priority: 'below_normal',
           ...(options.signal ? { signal: options.signal } : {}),
           onStdoutLine: (line) => {

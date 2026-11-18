@@ -142,6 +142,11 @@ export class ProcessTimeoutError extends AppError {
     );
   }
 }
+export class ProcessStalledError extends AppError {
+  public constructor(tool: string, message: string, details?: Record<string, unknown>) {
+    super('PROCESS_STALLED', message, false, { tool, ...details });
+  }
+}
 export class ProcessCancelledError extends AppError {
   public constructor() {
     super('PROCESS_CANCELLED', 'Tác vụ đã bị hủy.');

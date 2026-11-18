@@ -1,7 +1,12 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { ProcessPriority } from '@shared/types/domain.js';
-import { ProcessCancelledError, ProcessSpawnError, ProcessTimeoutError } from '@shared/errors/app-errors.js';
+import {
+  ProcessCancelledError,
+  ProcessSpawnError,
+  ProcessStalledError,
+  ProcessTimeoutError
+} from '@shared/errors/app-errors.js';
 import type { Logger } from '../logging/logger.js';
 import { toSignedExitCode } from '@shared/utils/nvenc-diagnosis.js';
 import {
@@ -10,6 +15,12 @@ import {
   type YtDlpRuntimeAllocation,
   type YtDlpRuntimeTemp
 } from './ytdlp-runtime-temp.js';
+
+export interface ProcessStallInfo {
+  stallTimeoutMs: number;
+  lastProgressValue: number | null;
+  inFinalize: boolean;
+}
 
 export interface ProcessRunOptions {
   jobId: string;
@@ -21,6 +32,11 @@ export interface ProcessRunOptions {
   env?: NodeJS.ProcessEnv;
   priority?: ProcessPriority;
   timeoutMs?: number;
+  stallTimeoutMs?: number;
+  finalizeStallTimeoutMs?: number;
+  progressValueOfStdoutLine?: (line: string) => number | null;
+  isFinalizeStderrLine?: (line: string) => boolean;
+  describeStall?: (info: ProcessStallInfo) => { message: string; details?: Record<string, unknown> } | string;
   signal?: AbortSignal;
   onStdoutLine?: (line: string) => void;
   onStderrLine?: (line: string) => void;
@@ -310,8 +326,73 @@ export class ProcessManager {
       : null;
     let stdoutCallbackEnabled = true;
     let stderrCallbackEnabled = true;
+    const watchStall = Boolean(
+      options.stallTimeoutMs && options.stallTimeoutMs > 0 && options.progressValueOfStdoutLine
+    );
+    let maxProgressValue: number | null = null;
+    let inFinalize = false;
+    let unpausedIdleMs = 0;
+    let lastStallSampleAt = Date.now();
+    let stalled = false;
+    let triggeredStallLimitMs = options.stallTimeoutMs ?? 0;
+    const stallTimer = watchStall
+      ? setInterval(
+          () => {
+            const now = Date.now();
+            const delta = Math.max(0, now - lastStallSampleAt);
+            lastStallSampleAt = now;
+            if (!managed.suspended) {
+              unpausedIdleMs += delta;
+            }
+            const baseLimit = options.stallTimeoutMs ?? 0;
+            const limit = inFinalize
+              ? Math.max(baseLimit, options.finalizeStallTimeoutMs ?? baseLimit)
+              : baseLimit;
+            if (!stalled && !cancelled && !timedOut && unpausedIdleMs >= limit) {
+              stalled = true;
+              triggeredStallLimitMs = limit;
+              this.logger.warn(
+                'process',
+                'PROCESS_STALLED',
+                `${options.tool} đứng tiến độ quá ${Math.round(limit / 1000)} giây.`,
+                {
+                  jobId: options.jobId,
+                  ...(options.projectId ? { projectId: options.projectId } : {}),
+                  metadata: {
+                    pid: child.pid ?? 0,
+                    lastProgressValue: maxProgressValue,
+                    stallTimeoutMs: limit,
+                    inFinalize
+                  }
+                }
+              );
+              void this.kill(id).catch((error) => {
+                this.logger.error(
+                  'process',
+                  'PROCESS_STALL_KILL_FAILED',
+                  `Không thể kết thúc cây tiến trình bị đứng tiến độ: ${error instanceof Error ? error.message : String(error)}`,
+                  { jobId: options.jobId, ...(options.projectId ? { projectId: options.projectId } : {}) }
+                );
+              });
+            }
+          },
+          Math.max(25, Math.min(2_000, Math.floor((options.stallTimeoutMs ?? 1_000) / 4)))
+        )
+      : null;
     const outPromise = lineConsumer(child.stdout, (line) => {
       stdout.push(line);
+      if (watchStall && options.progressValueOfStdoutLine) {
+        const progressValue = options.progressValueOfStdoutLine(line);
+        if (
+          progressValue !== null &&
+          Number.isFinite(progressValue) &&
+          (maxProgressValue === null ? progressValue > 0 : progressValue > maxProgressValue + 1e-6)
+        ) {
+          maxProgressValue = progressValue;
+          unpausedIdleMs = 0;
+          lastStallSampleAt = Date.now();
+        }
+      }
       if (!stdoutCallbackEnabled || !options.onStdoutLine) return;
       try {
         options.onStdoutLine(line);
@@ -335,6 +416,11 @@ export class ProcessManager {
     });
     const errPromise = lineConsumer(child.stderr, (line) => {
       stderr.push(line);
+      if (watchStall && !inFinalize && options.isFinalizeStderrLine?.(line)) {
+        inFinalize = true;
+        unpausedIdleMs = 0;
+        lastStallSampleAt = Date.now();
+      }
       if (!stderrCallbackEnabled || !options.onStderrLine) return;
       try {
         options.onStderrLine(line);
@@ -367,6 +453,7 @@ export class ProcessManager {
       throw new ProcessSpawnError(options.tool, error instanceof Error ? error.message : String(error));
     } finally {
       if (timer) clearTimeout(timer);
+      if (stallTimer) clearInterval(stallTimer);
       options.signal?.removeEventListener('abort', abort);
       this.active.delete(id);
       if (runtimeTemp) void runtimeTemp.release();
@@ -383,8 +470,28 @@ export class ProcessManager {
       ...(options.projectId ? { projectId: options.projectId } : {}),
       metadata: { durationMs: result.durationMs }
     });
-    if (timedOut) throw new ProcessTimeoutError(options.tool, options.timeoutMs ?? 0);
     if (cancelled) throw new ProcessCancelledError();
+    if (stalled) {
+      const stallInfo: ProcessStallInfo = {
+        stallTimeoutMs: triggeredStallLimitMs,
+        lastProgressValue: maxProgressValue,
+        inFinalize
+      };
+      const described = options.describeStall?.(stallInfo);
+      const fallbackMessage = `${options.tool} bị đứng tiến độ quá ${Math.max(1, Math.round(triggeredStallLimitMs / 1000))} giây nên đã được dừng an toàn.`;
+      const message =
+        typeof described === 'string'
+          ? described
+          : described?.message?.trim() || fallbackMessage;
+      const extraDetails = typeof described === 'object' && described !== null ? described.details : undefined;
+      throw new ProcessStalledError(options.tool, message, {
+        stallTimeoutMs: triggeredStallLimitMs,
+        lastProgressValue: maxProgressValue,
+        inFinalize,
+        ...(extraDetails ?? {})
+      });
+    }
+    if (timedOut) throw new ProcessTimeoutError(options.tool, options.timeoutMs ?? 0);
     return result;
   }
   public async setPriority(pid: number, priority: ProcessPriority): Promise<void> {

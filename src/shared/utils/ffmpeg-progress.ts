@@ -20,6 +20,65 @@ function compactDecimal(value: number): string {
   return value >= 10 ? value.toFixed(1) : value.toFixed(2);
 }
 
+/**
+ * Ngưỡng canh tiến độ đứng im cho FFmpeg (1.7.6 V6 — thiết kế cho máy 2 luồng + HDD theo CLAUDE.md mục 7):
+ * - Máy 2 luồng mã hoá 4K/HDR bằng libx264 veryfast (~0.5–1 fps) kèm bộ đệm lookahead ~40–60 khung hình và ổ HDD bận
+ *   vẫn nhích `out_time_ms` sau tối đa ~60–90 giây; đặt 5 phút (300 000 ms, không tính thời gian đang Tạm dừng) để có
+ *   biên an toàn > 3 lần mà không phải chờ 48 giờ khi FFmpeg kẹt chết.
+ * - Khi FFmpeg đã mã hoá xong và in `Starting second pass` (dồn moov `+faststart`), `out_time_ms` không tăng nữa trong
+ *   lúc chép lại tệp nhiều GB trên HDD (~30–50 MB/s với tệp 20 GB mất ~7–11 phút) → nới cửa sổ hoàn tất lên 15 phút.
+ */
+export const FFMPEG_PROGRESS_STALL_TIMEOUT_MS = 5 * 60 * 1000;
+export const FFMPEG_FASTSTART_FINALIZE_STALL_TIMEOUT_MS = 15 * 60 * 1000;
+
+export function parseFfmpegOutTimeSeconds(line: string): number | null {
+  if (line.startsWith('out_time_ms=')) {
+    const microseconds = Number(line.slice(12).trim());
+    return Number.isFinite(microseconds) && microseconds >= 0 ? microseconds / 1_000_000 : null;
+  }
+  if (line.startsWith('out_time=')) {
+    const seconds = parseClock(line.slice(9));
+    return seconds !== null && seconds >= 0 ? seconds : null;
+  }
+  return null;
+}
+
+export function isFfmpegFaststartSecondPassLine(line: string): boolean {
+  return line.includes('Starting second pass');
+}
+
+export function formatStallClock(seconds: number | null): string {
+  const safe = seconds !== null && Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  const secs = safe % 60;
+  const mm = String(minutes).padStart(2, '0');
+  const ss = String(secs).padStart(2, '0');
+  return hours > 0 ? `${String(hours).padStart(2, '0')}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+export function buildFfmpegStallMessage(input: {
+  stepLabel: string;
+  videoLabel?: string | null;
+  sourceIndex?: number | null;
+  lastProgressSeconds: number | null;
+  advice?: string;
+}): string {
+  const cleanName = input.videoLabel?.trim().slice(0, 90) || '';
+  const subject = input.sourceIndex
+    ? cleanName
+      ? `Video nguồn #${input.sourceIndex} ("${cleanName}")`
+      : `Video nguồn #${input.sourceIndex}`
+    : cleanName
+      ? `Video "${cleanName}"`
+      : 'Bước xử lý video';
+  const clock = formatStallClock(input.lastProgressSeconds);
+  const guidance =
+    input.advice ??
+    'Đã dừng tiến trình bị kẹt để tránh treo máy; hãy bấm Thử lại hoặc kiểm tra lại tệp nguồn này.';
+  return `${subject} bị đứng tiến độ ở bước ${input.stepLabel} tại mốc ${clock}. ${guidance}`;
+}
+
 export class FfmpegProgressTracker {
   private processedSeconds = 0;
   private speedRatio: number | null = null;

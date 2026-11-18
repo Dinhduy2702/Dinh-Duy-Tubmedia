@@ -18,6 +18,13 @@ import {
 import { sanitizeFilename } from '@shared/utils/filename.js';
 import { matchNormalizationTarget } from '@shared/utils/normalization-match.js';
 import { sourceEquivalentVideoBitrate } from '@shared/utils/merge-target.js';
+import {
+  buildFfmpegStallMessage,
+  FFMPEG_FASTSTART_FINALIZE_STALL_TIMEOUT_MS,
+  FFMPEG_PROGRESS_STALL_TIMEOUT_MS,
+  isFfmpegFaststartSecondPassLine,
+  parseFfmpegOutTimeSeconds
+} from '@shared/utils/ffmpeg-progress.js';
 import { sanitizeProgress } from '@shared/utils/progress-policy.js';
 import { ProcessingFailedError, ToolNotFoundError } from '@shared/errors/app-errors.js';
 import type { ToolManager } from '../tools/tool-manager.js';
@@ -129,7 +136,7 @@ export class NormalizeEngine {
     resource: ResourceProfile,
     signal: AbortSignal,
     onProgress: (percent: number) => void,
-    options: { sourceDecodeVerified?: boolean } = {}
+    options: { sourceDecodeVerified?: boolean; sourceIndex?: number; sourceLabel?: string } = {}
   ): Promise<string> {
     const source = await this.analyzer.analyze(input, job.id);
     const ffmpeg = this.tools.get('ffmpeg');
@@ -160,39 +167,63 @@ export class NormalizeEngine {
     }
 
     await rm(pending, { force: true });
-    const result = await this.processes.run({
-      jobId: job.id,
-      projectId: job.projectId,
-      tool: 'ffmpeg',
-      executablePath: ffmpeg.executablePath,
-      args: [
-        '-hide_banner', '-nostdin', '-y',
-        '-fflags', '+genpts',
-        '-copyts',
-        '-start_at_zero',
-        '-i', input,
-        '-map', '0:v:0',
-        '-map', '0:a:0?',
-        '-map_metadata', '-1',
-        '-map_chapters', '-1',
-        '-c', 'copy',
-        '-avoid_negative_ts', 'make_zero',
-        '-movflags', '+faststart',
-        '-video_track_timescale', '90000',
-        '-progress', 'pipe:1',
-        '-nostats',
-        pending
-      ],
-      priority: resource.processPriority,
-      signal,
-      timeoutMs: 12 * 60 * 60 * 1000,
-      onStdoutLine: (line) => {
-        if (!line.startsWith('out_time_ms=')) return;
-        const microseconds = Number(line.slice(12));
-        if (!Number.isFinite(microseconds) || source.duration <= 0) return;
-        onProgress(sanitizeProgress((microseconds / 1_000_000 / source.duration) * 100));
-      }
-    });
+    let result: ProcessResult;
+    try {
+      result = await this.processes.run({
+        jobId: job.id,
+        projectId: job.projectId,
+        tool: 'ffmpeg',
+        executablePath: ffmpeg.executablePath,
+        args: [
+          '-hide_banner', '-nostdin', '-y',
+          '-fflags', '+genpts',
+          '-copyts',
+          '-start_at_zero',
+          '-i', input,
+          '-map', '0:v:0',
+          '-map', '0:a:0?',
+          '-map_metadata', '-1',
+          '-map_chapters', '-1',
+          '-c', 'copy',
+          '-avoid_negative_ts', 'make_zero',
+          '-movflags', '+faststart',
+          '-video_track_timescale', '90000',
+          '-progress', 'pipe:1',
+          '-nostats',
+          pending
+        ],
+        priority: resource.processPriority,
+        signal,
+        timeoutMs: 12 * 60 * 60 * 1000,
+        stallTimeoutMs: FFMPEG_PROGRESS_STALL_TIMEOUT_MS,
+        finalizeStallTimeoutMs: FFMPEG_FASTSTART_FINALIZE_STALL_TIMEOUT_MS,
+        progressValueOfStdoutLine: parseFfmpegOutTimeSeconds,
+        isFinalizeStderrLine: isFfmpegFaststartSecondPassLine,
+        describeStall: ({ lastProgressValue }) => ({
+          message: buildFfmpegStallMessage({
+            stepLabel: 'đóng gói lại (remux)',
+            videoLabel: options.sourceLabel ?? basename(input),
+            sourceIndex: options.sourceIndex ?? null,
+            lastProgressSeconds: lastProgressValue
+          }),
+          details: {
+            step: 'remux',
+            sourcePath: input,
+            sourceIndex: options.sourceIndex ?? null,
+            lastProgressSeconds: lastProgressValue
+          }
+        }),
+        onStdoutLine: (line) => {
+          if (!line.startsWith('out_time_ms=')) return;
+          const microseconds = Number(line.slice(12));
+          if (!Number.isFinite(microseconds) || source.duration <= 0) return;
+          onProgress(sanitizeProgress((microseconds / 1_000_000 / source.duration) * 100));
+        }
+      });
+    } catch (error) {
+      await rm(pending, { force: true }).catch(() => undefined);
+      throw error;
+    }
 
     if (result.code !== 0) {
       await rm(pending, { force: true });
@@ -247,7 +278,8 @@ export class NormalizeEngine {
     profile?: QualityProfile,
     existingDecision?: QualityDecision,
     forceVideoTranscode = false,
-    forceAudioTranscode = false
+    forceAudioTranscode = false,
+    context?: { sourceIndex?: number; sourceLabel?: string }
   ): Promise<string> {
     /* TUBMEDIA FORCE VIDEO NORMALIZE R33 */
     const streamMatch = matchNormalizationTarget(source, target);
@@ -456,22 +488,48 @@ export class NormalizeEngine {
           }
         }
       );
-      return this.processes.run({
-        jobId: job.id,
-        projectId: job.projectId,
-        tool: 'ffmpeg',
-        executablePath: ffmpeg.executablePath!,
-        args: buildArgs(encoder),
-        priority: resource.processPriority,
-        signal,
-        timeoutMs: 48 * 60 * 60 * 1000,
-        onStdoutLine: (line) => {
-          if (!line.startsWith('out_time_ms=')) return;
-          const microseconds = Number(line.slice(12));
-          if (!Number.isFinite(microseconds) || !Number.isFinite(source.duration) || source.duration <= 0) return;
-          onProgress(sanitizeProgress((microseconds / 1_000_000 / source.duration) * 100));
-        }
-      });
+      try {
+        return await this.processes.run({
+          jobId: job.id,
+          projectId: job.projectId,
+          tool: 'ffmpeg',
+          executablePath: ffmpeg.executablePath!,
+          args: buildArgs(encoder),
+          priority: resource.processPriority,
+          signal,
+          timeoutMs: 48 * 60 * 60 * 1000,
+          stallTimeoutMs: FFMPEG_PROGRESS_STALL_TIMEOUT_MS,
+          finalizeStallTimeoutMs: FFMPEG_FASTSTART_FINALIZE_STALL_TIMEOUT_MS,
+          progressValueOfStdoutLine: parseFfmpegOutTimeSeconds,
+          isFinalizeStderrLine: isFfmpegFaststartSecondPassLine,
+          describeStall: ({ lastProgressValue }) => ({
+            message: buildFfmpegStallMessage({
+              stepLabel: videoCopy ? 'chuẩn hóa âm thanh' : 'chuẩn hóa video',
+              videoLabel: context?.sourceLabel ?? basename(input),
+              sourceIndex: context?.sourceIndex ?? null,
+              lastProgressSeconds: lastProgressValue
+            }),
+            details: {
+              step: 'normalize',
+              sourcePath: input,
+              sourceIndex: context?.sourceIndex ?? null,
+              encoder,
+              videoStreamCopy: videoCopy,
+              audioStreamCopy: audioCopy,
+              lastProgressSeconds: lastProgressValue
+            }
+          }),
+          onStdoutLine: (line) => {
+            if (!line.startsWith('out_time_ms=')) return;
+            const microseconds = Number(line.slice(12));
+            if (!Number.isFinite(microseconds) || !Number.isFinite(source.duration) || source.duration <= 0) return;
+            onProgress(sanitizeProgress((microseconds / 1_000_000 / source.duration) * 100));
+          }
+        });
+      } catch (error) {
+        await rm(pending, { force: true }).catch(() => undefined);
+        throw error;
+      }
     };
 
     let encoder = selection.encoder;
