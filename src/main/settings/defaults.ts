@@ -85,7 +85,7 @@ export const builtInResourceProfiles: ResourceProfile[] = [
     processPriority: 'below_normal',
     cpuSoftLimitPercent: 85,
     memoryFreeMinimumBytes: 4 * 1024 ** 3,
-    diskFreeMinimumBytes: 15 * 1024 ** 3,
+    diskFreeMinimumBytes: 5 * 1024 ** 3,
     gpuJobs: 0,
     builtIn: true
   },
@@ -105,7 +105,7 @@ export const builtInResourceProfiles: ResourceProfile[] = [
     processPriority: 'below_normal',
     cpuSoftLimitPercent: 88,
     memoryFreeMinimumBytes: 6 * 1024 ** 3,
-    diskFreeMinimumBytes: 20 * 1024 ** 3,
+    diskFreeMinimumBytes: 5 * 1024 ** 3,
     gpuJobs: 1,
     builtIn: true
   },
@@ -125,7 +125,7 @@ export const builtInResourceProfiles: ResourceProfile[] = [
     processPriority: 'below_normal',
     cpuSoftLimitPercent: 88,
     memoryFreeMinimumBytes: 8 * 1024 ** 3,
-    diskFreeMinimumBytes: 25 * 1024 ** 3,
+    diskFreeMinimumBytes: 5 * 1024 ** 3,
     gpuJobs: 1,
     builtIn: true
   },
@@ -149,7 +149,7 @@ export const builtInResourceProfiles: ResourceProfile[] = [
     processPriority: 'below_normal',
     cpuSoftLimitPercent: 98,
     memoryFreeMinimumBytes: 4 * 1024 ** 3,
-    diskFreeMinimumBytes: 15 * 1024 ** 3,
+    diskFreeMinimumBytes: 5 * 1024 ** 3,
     gpuJobs: 2,
     builtIn: true
   }

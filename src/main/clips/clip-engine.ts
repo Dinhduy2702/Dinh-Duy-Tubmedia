@@ -9,8 +9,9 @@ import {
   parseFfmpegOutTimeSeconds
 } from '@shared/utils/ffmpeg-progress.js';
 import { sanitizeProgress } from '@shared/utils/progress-policy.js';
+import { buildDiskFullWriteMessage, isDiskFullOutput } from '@shared/utils/disk-space-policy.js';
 import type { ProjectItem, QueueJob, ResourceProfile } from '@shared/types/domain.js';
-import { ToolNotFoundError, ProcessingFailedError } from '@shared/errors/app-errors.js';
+import { DiskFullError, ToolNotFoundError, ProcessingFailedError } from '@shared/errors/app-errors.js';
 import type { ToolManager } from '../tools/tool-manager.js';
 import type { ProcessManager } from '../processes/process-manager.js';
 import { runFfmpegWithFastAacRescue } from '../processes/ffmpeg-aac-rescue.js';
@@ -139,6 +140,10 @@ export class ClipEngine {
       }
     );
     if (result.code !== 0) {
+      if (isDiskFullOutput(result.stderrTail)) {
+        await rm(pending, { force: true }).catch(() => undefined);
+        throw new DiskFullError(tempFolder, buildDiskFullWriteMessage(tempFolder, 'cắt đoạn video'));
+      }
       try { await this.quarantine.move(pending, result.stderrTail || 'Tạo đoạn video thất bại.', { jobId: job.id, projectId: job.projectId }); } catch { /* pending chưa tồn tại */ }
       throw new ProcessingFailedError(result.stderrTail || 'Tạo đoạn video thất bại.');
     }

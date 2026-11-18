@@ -31,7 +31,8 @@ import {
   parseFfmpegOutTimeSeconds
 } from '@shared/utils/ffmpeg-progress.js';
 import { formatTimelineLine } from '@shared/utils/timestamp.js';
-import { MergeFailedError, ToolNotFoundError } from '@shared/errors/app-errors.js';
+import { buildDiskFullWriteMessage, isDiskFullOutput } from '@shared/utils/disk-space-policy.js';
+import { DiskFullError, MergeFailedError, ToolNotFoundError } from '@shared/errors/app-errors.js';
 import type { ToolManager } from '../tools/tool-manager.js';
 import type { ProcessManager, ProcessResult } from '../processes/process-manager.js';
 import { runFfmpegWithFastAacRescue } from '../processes/ffmpeg-aac-rescue.js';
@@ -2025,7 +2026,7 @@ export class MergeEngine {
     const expectedDuration = prepared.reduce((sum, item) => sum + item.info.duration, 0);
     const tracker = new FfmpegProgressTracker(expectedDuration);
     try {
-      return await this.processes.run({
+      const concatResult = await this.processes.run({
         jobId: job.id,
         projectId: job.projectId,
         tool: 'ffmpeg',
@@ -2086,6 +2087,11 @@ export class MergeEngine {
           );
         }
       });
+      if (concatResult.code !== 0 && isDiskFullOutput(concatResult.stderrTail)) {
+        await rm(pending, { force: true }).catch(() => undefined);
+        throw new DiskFullError(pending, buildDiskFullWriteMessage(pending, 'ghép nối thành phẩm'));
+      }
+      return concatResult;
     } catch (error) {
       await rm(pending, { force: true }).catch(() => undefined);
       throw error;
@@ -2215,6 +2221,9 @@ export class MergeEngine {
 
     if (result.code !== 0) {
       await rm(pending, { force: true }).catch(() => undefined);
+      if (isDiskFullOutput(result.stderrTail)) {
+        throw new DiskFullError(outputFolder, buildDiskFullWriteMessage(outputFolder, 'đổi tỉ lệ khung hình'));
+      }
       throw new MergeFailedError(
         result.stderrTail.trim() || `FFmpeg kết thúc với mã ${result.code} khi đổi tỉ lệ khung hình.`
       );

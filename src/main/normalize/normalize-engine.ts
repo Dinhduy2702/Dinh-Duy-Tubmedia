@@ -26,7 +26,8 @@ import {
   parseFfmpegOutTimeSeconds
 } from '@shared/utils/ffmpeg-progress.js';
 import { sanitizeProgress } from '@shared/utils/progress-policy.js';
-import { ProcessingFailedError, ToolNotFoundError } from '@shared/errors/app-errors.js';
+import { buildDiskFullWriteMessage, isDiskFullOutput } from '@shared/utils/disk-space-policy.js';
+import { DiskFullError, ProcessingFailedError, ToolNotFoundError } from '@shared/errors/app-errors.js';
 import type { ToolManager } from '../tools/tool-manager.js';
 import type { ProcessManager, ProcessResult } from '../processes/process-manager.js';
 import { runFfmpegWithFastAacRescue } from '../processes/ffmpeg-aac-rescue.js';
@@ -228,6 +229,9 @@ export class NormalizeEngine {
 
     if (result.code !== 0) {
       await rm(pending, { force: true });
+      if (isDiskFullOutput(result.stderrTail)) {
+        throw new DiskFullError(outputFolder, buildDiskFullWriteMessage(outputFolder, 'remux video'));
+      }
       throw new ProcessingFailedError(result.stderrTail || 'Remux video thất bại.');
     }
 
@@ -544,7 +548,7 @@ export class NormalizeEngine {
     let encoder = selection.encoder;
     let result = await runEncoder(encoder);
 
-    if (!videoCopy && result.code !== 0 && isNvencEncoder(encoder)) {
+    if (!videoCopy && result.code !== 0 && isNvencEncoder(encoder) && !isDiskFullOutput(result.stderrTail)) {
       const failedEncoder = encoder;
       encoder = selection.cpuEncoder;
       this.logger.warn(
@@ -566,6 +570,10 @@ export class NormalizeEngine {
     }
 
     if (result.code !== 0) {
+      if (isDiskFullOutput(result.stderrTail)) {
+        await rm(pending, { force: true }).catch(() => undefined);
+        throw new DiskFullError(outputFolder, buildDiskFullWriteMessage(outputFolder, 'chuẩn hóa video'));
+      }
       try {
         await this.quarantine.move(
           pending,
@@ -684,6 +692,11 @@ export class NormalizeEngine {
     } catch (error) {
       await rm(repaired, { force: true }).catch(() => undefined);
       throw error;
+    }
+
+    if (result.code !== 0 && isDiskFullOutput(result.stderrTail)) {
+      await rm(repaired, { force: true }).catch(() => undefined);
+      throw new DiskFullError(pending, buildDiskFullWriteMessage(pending, 'mã hóa lại âm thanh dự phòng'));
     }
 
     const stillBroken =

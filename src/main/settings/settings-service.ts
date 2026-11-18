@@ -4,7 +4,7 @@ import { InvalidInputError } from '@shared/errors/app-errors.js';
 import { matchesLegacyTheoMayButton } from '@shared/utils/download-presets.js';
 import type { SettingsRepository } from '../database/repositories/settings-repository.js';
 import { builtInQualityProfiles, builtInResourceProfiles, defaultAppSettings } from './defaults.js';
-import { AUTO_RESOURCE_PROFILE_NAME, type HardwareService } from './hardware-service.js';
+import { AUTO_RESOURCE_PROFILE_ID, AUTO_RESOURCE_PROFILE_NAME, type HardwareService } from './hardware-service.js';
 import type { Logger } from '../logging/logger.js';
 import { assertGuardedSettingsChange, sanitizeGuardedSettings } from '../security/settings-policy.js';
 
@@ -222,6 +222,14 @@ export class SettingsService {
         );
       }
       this.repo.set('theo_may_edit_copy_reset_v176', true);
+    }
+    if (!this.repo.get<boolean>('auto_profile_disk_floor_v177', false)) {
+      for (const profile of this.repo.listResourceProfiles()) {
+        if (profile.id === AUTO_RESOURCE_PROFILE_ID && profile.diskFreeMinimumBytes >= 15 * 1024 ** 3) {
+          this.repo.saveResourceProfile({ ...profile, diskFreeMinimumBytes: 5 * 1024 ** 3 });
+        }
+      }
+      this.repo.set('auto_profile_disk_floor_v177', true);
     }
     app.setLoginItemSettings({ openAtLogin: this.get().startWithWindows });
   }

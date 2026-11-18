@@ -1,5 +1,6 @@
 import { malformedYouTubeVideoUrlMessage } from '@shared/utils/youtube-url-validation.js';
 import { formatDiskShortfall } from '@shared/utils/disk-shortfall-format.js';
+import { requiredFreeDiskBytesForDownload } from '@shared/utils/disk-space-policy.js';
 import { app, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { access, mkdir, readFile, readdir, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
@@ -911,20 +912,23 @@ export class QuickDownloadService {
     }
   }
 
-  private quickDiskMinimumBytes(): number {
+  private quickDiskMinimumBytes(estimatedBytes = 0): number {
     const settings = this.settings?.get();
     const profiles = this.settings?.profiles().resources ?? [];
     const selected = profiles.find((profile) => profile.id === settings?.defaultResourceProfileId);
-    return selected?.diskFreeMinimumBytes ?? 5 * 1024 ** 3;
+    return requiredFreeDiskBytesForDownload(selected, estimatedBytes);
   }
 
-  private async quickDiskState(paths: readonly string[]): Promise<{
+  private async quickDiskState(
+    paths: readonly string[],
+    estimatedBytes = 0
+  ): Promise<{
     ready: boolean;
     folder: string;
     freeBytes: number;
     requiredBytes: number;
   }> {
-    const requiredBytes = this.quickDiskMinimumBytes();
+    const requiredBytes = this.quickDiskMinimumBytes(estimatedBytes);
     for (const folder of new Set(paths)) {
       const info = await statfs(folder);
       const freeBytes = Number(info.bavail) * Number(info.bsize);

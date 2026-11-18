@@ -8,9 +8,15 @@
 import { shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { constants as fsConstants, existsSync } from 'node:fs';
-import { access, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm, stat, statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, extname, join } from 'node:path';
+import { formatDiskShortfall } from '@shared/utils/disk-shortfall-format.js';
+import {
+  buildDiskFullWriteMessage,
+  isDiskFullOutput,
+  requiredFreeDiskBytesForLocalCut
+} from '@shared/utils/disk-space-policy.js';
 import {
   buildFfmpegStallMessage,
   FFMPEG_FASTSTART_FINALIZE_STALL_TIMEOUT_MS,
@@ -29,7 +35,7 @@ import {
   type LocalCutStatus,
   type ValidatedLocalCutRequest
 } from '@shared/local-cut.js';
-import { ProcessCancelledError, ToolNotFoundError } from '@shared/errors/app-errors.js';
+import { DiskFullError, ProcessCancelledError, ToolNotFoundError } from '@shared/errors/app-errors.js';
 import type { FileVerifier } from './file-verifier.js';
 import type { Logger } from '../logging/logger.js';
 import type { ProcessManager } from '../processes/process-manager.js';
@@ -288,6 +294,25 @@ export class LocalCutService {
     const rangeIssue = describeCutRangeBeyondDuration(request.startSeconds, request.endSeconds, sourceDuration);
     if (rangeIssue) throw new Error(rangeIssue);
 
+    const cutDuration = Math.max(0, request.endSeconds - request.startSeconds);
+    const estimatedCutBytes =
+      sourceDuration && sourceDuration > 0
+        ? Math.ceil(sourceStat.size * Math.min(1, cutDuration / sourceDuration))
+        : sourceStat.size;
+    const requiredFreeBytes = requiredFreeDiskBytesForLocalCut(estimatedCutBytes);
+    const fsInfo = await statfs(request.outputDirectory).catch(() => null);
+    if (fsInfo) {
+      const freeBytes = Number(fsInfo.bavail) * Number(fsInfo.bsize);
+      if (freeBytes < requiredFreeBytes) {
+        const shown = formatDiskShortfall(freeBytes, requiredFreeBytes);
+        throw new DiskFullError(
+          request.outputDirectory,
+          `Ổ đĩa chứa ${request.outputDirectory} không đủ dung lượng trống để cắt tệp ` +
+            `(chỉ còn ${shown.free}, cần tối thiểu ${shown.required}). Hãy dọn dung lượng rồi thử lại.`
+        );
+      }
+    }
+
     // Đổi tỉ lệ khung hình LUÔN bắt buộc mã hóa lại (bộ lọc nền mờ là bộ lọc pixel, không thể đi cùng
     // -c copy) — accurateCut không còn ý nghĩa khi aspectRatio khác 'original', xem local-cut-command.ts.
     const isReencode = request.accurateCut || request.aspectRatio !== 'original';
@@ -390,6 +415,12 @@ export class LocalCutService {
 
     if (result.code !== 0 || !existsSync(pendingOutput)) {
       await rm(pendingOutput, { force: true }).catch(() => undefined);
+      if (isDiskFullOutput(result.stderrTail)) {
+        throw new DiskFullError(
+          request.outputDirectory,
+          buildDiskFullWriteMessage(request.outputDirectory, 'cắt video cục bộ')
+        );
+      }
       throw new Error(result.stderrTail.trim() || `FFmpeg kết thúc với mã ${result.code}.`);
     }
 

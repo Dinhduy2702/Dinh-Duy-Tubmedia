@@ -56,8 +56,8 @@ export class RetryWithConfiguredCookiesError extends AppError {
   }
 }
 export class DiskFullError extends AppError {
-  public constructor(path: string) {
-    super('DISK_FULL', `Ổ đĩa không đủ dung lượng: ${path}`);
+  public constructor(path: string, customMessage?: string) {
+    super('DISK_FULL', customMessage ?? `Ổ đĩa không đủ dung lượng: ${path}`);
   }
 }
 export class PermissionDeniedError extends AppError {

@@ -479,6 +479,7 @@ src/shared/utils/csv.ts
 src/shared/utils/diagnostic-policy.ts
 src/shared/utils/disk-load.ts
 src/shared/utils/disk-shortfall-format.ts
+src/shared/utils/disk-space-policy.ts
 src/shared/utils/download-failure.ts
 src/shared/utils/download-pacing.ts
 src/shared/utils/download-path-budget.ts
@@ -751,6 +752,7 @@ tests/unit/settings-save-stale-error.test.ts
 tests/unit/sha256-sums.test.ts
 tests/unit/shared-folder-policy.test.ts
 tests/unit/shutdown-sequence.test.ts
+tests/unit/smart-disk-guard-v5.test.ts
 tests/unit/smart-merge-pipeline-v120.test.ts
 tests/unit/source-completeness.test.ts
 tests/unit/startup-fast.test.ts

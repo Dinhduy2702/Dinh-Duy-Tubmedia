@@ -210,7 +210,7 @@ export class HardwareService {
       cpuSoftLimitPercent: 88,
       memoryFreeMinimumBytes:
         Math.min(8, Math.max(4, Math.floor(ramGb * 0.08))) * 1024 ** 3,
-      diskFreeMinimumBytes: 20 * 1024 ** 3,
+      diskFreeMinimumBytes: 5 * 1024 ** 3,
       gpuJobs: hasNvidiaGpu ? (workstation ? 2 : 1) : 0,
       builtIn: false
     };

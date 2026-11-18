@@ -1,5 +1,11 @@
 import { malformedYouTubeVideoUrlMessage } from '@shared/utils/youtube-url-validation.js';
 import { formatDiskShortfall } from '@shared/utils/disk-shortfall-format.js';
+import {
+  isDiskFullOutput,
+  requiredActiveDiskGuardBytes,
+  requiredFreeDiskBytesForDownload,
+  requiredFreeDiskBytesForMerge
+} from '@shared/utils/disk-space-policy.js';
 import { type BrowserWindow } from 'electron';
 import { cpus, freemem, totalmem } from 'node:os';
 import { readdir, rm, stat, statfs } from 'node:fs/promises';
@@ -885,6 +891,50 @@ export class QueueManager {
     return Number(fsInfo.bavail) * Number(fsInfo.bsize);
   }
 
+  private async knownBytesForJob(job: QueueJob): Promise<number> {
+    if (job.type === 'download') {
+      if (typeof job.input.estimatedBytes === 'number' && Number.isFinite(job.input.estimatedBytes)) {
+        return Math.max(0, job.input.estimatedBytes);
+      }
+      const source = job.sourceId ? (this.sources?.get?.(job.sourceId) ?? null) : null;
+      return Math.max(0, source?.mediaInfo?.fileSize ?? 0);
+    }
+    if (job.type === 'merge') {
+      if (!job.projectId) return 0;
+      const projectItems = (this.items?.list?.(job.projectId) ?? []).filter((item) => item.enabled);
+      let total = 0;
+      for (const item of projectItems) {
+        const source = item.sourceId ? (this.sources?.get?.(item.sourceId) ?? null) : null;
+        if (!item.clipFile && source?.mediaInfo?.fileSize && source.mediaInfo.fileSize > 0) {
+          total += source.mediaInfo.fileSize;
+          continue;
+        }
+        const candidatePath =
+          item.clipFile ?? source?.sourceFile ?? (item.url === null ? item.originalText.trim() : '');
+        if (!candidatePath) continue;
+        const fileStat = await stat(candidatePath).catch(() => null);
+        if (fileStat?.isFile()) total += fileStat.size;
+      }
+      return total;
+    }
+    const source = job.sourceId ? (this.sources?.get?.(job.sourceId) ?? null) : null;
+    if (source?.mediaInfo?.fileSize && source.mediaInfo.fileSize > 0) {
+      return source.mediaInfo.fileSize;
+    }
+    const candidatePath =
+      typeof job.input.inputPath === 'string' ? job.input.inputPath : (source?.sourceFile ?? '');
+    if (!candidatePath) return 0;
+    const fileStat = await stat(candidatePath).catch(() => null);
+    return fileStat?.isFile() ? fileStat.size : 0;
+  }
+
+  private async requiredDiskBytesForJob(job: QueueJob, profile: ResourceProfile): Promise<number> {
+    const knownBytes = await this.knownBytesForJob(job);
+    return job.type === 'download'
+      ? requiredFreeDiskBytesForDownload(profile, knownBytes)
+      : requiredFreeDiskBytesForMerge(profile, knownBytes);
+  }
+
   private async diskSpaceStateForJobs(jobs: QueueJob[]): Promise<{
     ready: boolean;
     folder: string | null;
@@ -894,7 +944,7 @@ export class QueueManager {
     const checks = new Map<string, { requiredBytes: number; job: QueueJob }>();
     for (const job of jobs) {
       if (!job.projectId) continue;
-      const required = this.profileFor(job).diskFreeMinimumBytes;
+      const required = await this.requiredDiskBytesForJob(job, this.profileFor(job));
       for (const folder of this.diskFoldersForJob(job)) {
         checks.set(folder, { requiredBytes: Math.max(checks.get(folder)?.requiredBytes ?? 0, required), job });
       }
@@ -918,7 +968,7 @@ export class QueueManager {
     for (const active of this.active.values()) {
       const current = this.repo.get(active.job.id);
       if (!current || !PAUSABLE_STATUSES.has(current.status)) continue;
-      const requiredBytes = this.profileFor(current).diskFreeMinimumBytes;
+      const requiredBytes = requiredActiveDiskGuardBytes(current.type, this.profileFor(current));
 
       for (const folder of this.diskFoldersForJob(current)) {
         let freeBytes = 0;
@@ -1545,12 +1595,15 @@ export class QueueManager {
       }
     }
     if (job.projectId) {
+      const requiredDiskBytes = await this.requiredDiskBytesForJob(job, profile);
       for (const targetFolder of this.diskFoldersForJob(job)) {
         try {
           const free = await this.freeBytesForDiskCheck(job, targetFolder);
-          if (free < profile.diskFreeMinimumBytes) {
+          if (free < requiredDiskBytes) {
+            const shown = formatDiskShortfall(free, requiredDiskBytes);
             const message =
-              `Ổ đĩa chứa ${targetFolder} không đủ dung lượng trống để bắt đầu tác vụ. ` +
+              `Ổ đĩa chứa ${targetFolder} không đủ dung lượng trống để bắt đầu tác vụ ` +
+              `(chỉ còn ${shown.free}, cần tối thiểu ${shown.required}). ` +
               `Danh sách đã được tạm dừng để tránh tạo hàng loạt lỗi.`;
             this.repo.update(
               job.id,
@@ -2700,8 +2753,11 @@ export class QueueManager {
         return;
       }
       const appError = error as Partial<AppError>;
-      const code = appError.code ?? 'UNHANDLED_ERROR';
+      const errnoCode = (error as NodeJS.ErrnoException | undefined)?.code;
       let message = error instanceof Error ? error.message : String(error);
+      const code =
+        appError.code ??
+        (errnoCode === 'ENOSPC' || isDiskFullOutput(message) ? 'DISK_FULL' : 'UNHANDLED_ERROR');
       this.noteAdaptiveThrottle(job, code, appError.details);
       if (code === 'RETRY_WITH_CONFIGURED_COOKIES') {
         const retrying = this.repo.update(job.id, {
