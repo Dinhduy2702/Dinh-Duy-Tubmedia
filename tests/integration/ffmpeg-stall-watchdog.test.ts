@@ -335,14 +335,19 @@ setTimeout(() => {
 
     // Kiểm tra thêm: khi người dùng bấm Tạm dừng (pauseByJob → suspended = true), đồng hồ canh đứng im cũng tạm dừng
     const pausedScript = join(root, 'fake-paused-ffmpeg.mjs');
+    const resumedFlag = join(root, 'resumed.flag');
     await writeFile(
       pausedScript,
       `
+import { existsSync } from 'node:fs';
 process.stdout.write('out_time_ms=5000000\\nprogress=continue\\n');
-setTimeout(() => {
-  process.stdout.write('out_time_ms=9000000\\nprogress=end\\n');
-  process.exit(0);
-}, 360);
+const timer = setInterval(() => {
+  if (existsSync(${JSON.stringify(resumedFlag)})) {
+    clearInterval(timer);
+    process.stdout.write('out_time_ms=9000000\\nprogress=end\\n');
+    process.exit(0);
+  }
+}, 20);
 `,
       'utf8'
     );
@@ -350,19 +355,27 @@ setTimeout(() => {
       processes as unknown as { controlWindowsProcessTree: () => Promise<void> },
       'controlWindowsProcessTree'
     ).mockResolvedValue();
+    let resolveFirstStdout!: () => void;
+    const firstStdoutReady = new Promise<void>((resolve) => {
+      resolveFirstStdout = resolve;
+    });
     const runPaused = processes.run({
       jobId: 'job-paused-ok',
       tool: 'ffmpeg',
       executablePath: process.execPath,
       args: [pausedScript],
       timeoutMs: 10_000,
-      stallTimeoutMs: 180,
-      progressValueOfStdoutLine: parseFfmpegOutTimeSeconds
+      stallTimeoutMs: 320,
+      progressValueOfStdoutLine: parseFfmpegOutTimeSeconds,
+      onStdoutLine: (line) => {
+        if (line.includes('out_time_ms=5000000')) resolveFirstStdout();
+      }
     });
-    await new Promise((resolve) => setTimeout(resolve, 40));
+    await firstStdoutReady;
     await processes.pauseByJob('job-paused-ok');
-    await new Promise((resolve) => setTimeout(resolve, 260));
+    await new Promise((resolve) => setTimeout(resolve, 550));
     await processes.resumeByJob('job-paused-ok');
+    await writeFile(resumedFlag, 'ok', 'utf8');
     const pausedResult = await runPaused;
     expect(pausedResult.code).toBe(0);
   });

@@ -79,6 +79,20 @@ export function buildFfmpegStallMessage(input: {
   return `${subject} bị đứng tiến độ ở bước ${input.stepLabel} tại mốc ${clock}. ${guidance}`;
 }
 
+/**
+ * 1.7.6 (Thang cứu Bậc 1): chèn `-aac_coder fast` ngay sau `-c:a aac` để vượt qua lỗi lặp vô hạn ở bộ lượng tử mặc định
+ * `twoloop` của FFmpeg nightly khi gặp đoạn đuôi im lặng. Trả `null` nếu lệnh không mã hoá `-c:a aac` hoặc đã có `-aac_coder`.
+ */
+export function injectFastAacCoder(args: readonly string[]): string[] | null {
+  for (let index = 0; index < args.length - 1; index += 1) {
+    if (args[index] === '-c:a' && args[index + 1] === 'aac') {
+      if (args[index + 2] === '-aac_coder') return null;
+      return [...args.slice(0, index + 2), '-aac_coder', 'fast', ...args.slice(index + 2)];
+    }
+  }
+  return null;
+}
+
 export class FfmpegProgressTracker {
   private processedSeconds = 0;
   private speedRatio: number | null = null;

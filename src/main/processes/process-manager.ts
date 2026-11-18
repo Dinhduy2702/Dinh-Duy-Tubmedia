@@ -241,6 +241,21 @@ export class ProcessManager {
   public isToolActive(tool: string): boolean {
     return [...this.active.values()].some((item) => item.tool === tool);
   }
+  public logEvent(
+    level: 'info' | 'warn',
+    module: string,
+    eventCode: string,
+    message: string,
+    context?: { jobId?: string; projectId?: string | null; metadata?: Record<string, unknown> }
+  ): void {
+    const details = {
+      ...(context?.jobId ? { jobId: context.jobId } : {}),
+      ...(context?.projectId ? { projectId: context.projectId } : {}),
+      ...(context?.metadata ? { metadata: context.metadata } : {})
+    };
+    if (level === 'warn') this.logger.warn(module, eventCode, message, details);
+    else this.logger.info(module, eventCode, message, details);
+  }
   /** 2026-11-05 (sửa B): PID các tiến trình `tool` của những tác vụ này đang chạy ở mức ưu tiên thấp (việc nền của app). */
   public lowPriorityPids(jobIds: ReadonlySet<string>, tool: string): number[] {
     const pids: number[] = [];

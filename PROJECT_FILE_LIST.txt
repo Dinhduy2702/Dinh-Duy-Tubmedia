@@ -324,6 +324,7 @@ src/main/media/video-link-filter-service.ts
 src/main/merge/merge-engine.ts
 src/main/merge/timeline-service.ts
 src/main/normalize/normalize-engine.ts
+src/main/processes/ffmpeg-aac-rescue.ts
 src/main/processes/process-manager.ts
 src/main/processes/ytdlp-runtime-temp.ts
 src/main/projects/project-service.ts
@@ -541,6 +542,7 @@ tests/integration/download-repaste-existing.test.ts
 tests/integration/download-retryable-part-retention.test.ts
 tests/integration/download-temp-cleanup.test.ts
 tests/integration/error-report.test.ts
+tests/integration/ffmpeg-aac-rescue-ladder.test.ts
 tests/integration/ffmpeg-stall-watchdog.test.ts
 tests/integration/helpers/queue-harness.ts
 tests/integration/helpers/real-ffmpeg.ts

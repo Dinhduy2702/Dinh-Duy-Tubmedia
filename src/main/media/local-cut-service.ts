@@ -33,6 +33,7 @@ import { ProcessCancelledError, ToolNotFoundError } from '@shared/errors/app-err
 import type { FileVerifier } from './file-verifier.js';
 import type { Logger } from '../logging/logger.js';
 import type { ProcessManager } from '../processes/process-manager.js';
+import { runFfmpegWithFastAacRescue } from '../processes/ffmpeg-aac-rescue.js';
 import type { ToolManager } from '../tools/tool-manager.js';
 import { buildLocalCutArguments, buildLocalFrameExtractArguments } from './local-cut-command.js';
 import { commitFileWithoutOverwrite } from '../files/non-conflicting-path.js';
@@ -320,34 +321,47 @@ export class LocalCutService {
 
     let result: Awaited<ReturnType<ProcessManager['run']>>;
     try {
-      result = await this.processes.run({
-        jobId: `local-cut-${status.taskId}`,
-        tool: 'ffmpeg',
-        executablePath: ffmpeg.executablePath,
-        args,
-        priority: 'below_normal',
-        signal: active.controller.signal,
-        timeoutMs: CUT_TIMEOUT_MS,
-        stallTimeoutMs: FFMPEG_PROGRESS_STALL_TIMEOUT_MS,
-        finalizeStallTimeoutMs: FFMPEG_FASTSTART_FINALIZE_STALL_TIMEOUT_MS,
-        progressValueOfStdoutLine: parseFfmpegOutTimeSeconds,
-        isFinalizeStderrLine: isFfmpegFaststartSecondPassLine,
-        describeStall: ({ lastProgressValue }) => ({
-          message: buildFfmpegStallMessage({
-            stepLabel: 'cắt video cục bộ',
-            videoLabel: basename(request.filePath),
-            lastProgressSeconds: lastProgressValue
+      result = await runFfmpegWithFastAacRescue(
+        this.processes,
+        {
+          jobId: `local-cut-${status.taskId}`,
+          tool: 'ffmpeg',
+          executablePath: ffmpeg.executablePath,
+          args,
+          priority: 'below_normal',
+          signal: active.controller.signal,
+          timeoutMs: CUT_TIMEOUT_MS,
+          stallTimeoutMs: FFMPEG_PROGRESS_STALL_TIMEOUT_MS,
+          finalizeStallTimeoutMs: FFMPEG_FASTSTART_FINALIZE_STALL_TIMEOUT_MS,
+          progressValueOfStdoutLine: parseFfmpegOutTimeSeconds,
+          isFinalizeStderrLine: isFfmpegFaststartSecondPassLine,
+          describeStall: ({ lastProgressValue }) => ({
+            message: buildFfmpegStallMessage({
+              stepLabel: 'cắt video cục bộ',
+              videoLabel: basename(request.filePath),
+              lastProgressSeconds: lastProgressValue
+            }),
+            details: { step: 'local-cut', sourcePath: request.filePath, lastProgressSeconds: lastProgressValue }
           }),
-          details: { step: 'local-cut', sourcePath: request.filePath, lastProgressSeconds: lastProgressValue }
-        }),
-        onStdoutLine: (line) => {
-          if (!line.startsWith('out_time_ms=')) return;
-          const microseconds = Number(line.slice('out_time_ms='.length));
-          if (!Number.isFinite(microseconds) || expectedDuration <= 0) return;
-          status.progress = sanitizeProgress((microseconds / 1_000_000 / expectedDuration) * 100);
-          this.publish(active);
+          onStdoutLine: (line) => {
+            if (!line.startsWith('out_time_ms=')) return;
+            const microseconds = Number(line.slice('out_time_ms='.length));
+            if (!Number.isFinite(microseconds) || expectedDuration <= 0) return;
+            status.progress = sanitizeProgress((microseconds / 1_000_000 / expectedDuration) * 100);
+            this.publish(active);
+          }
+        },
+        {
+          pendingPath: pendingOutput,
+          logModule: 'local-cut',
+          stepLabel: 'cắt video cục bộ',
+          videoLabel: basename(request.filePath),
+          onBeforeRetry: () => {
+            status.progress = 0;
+            this.publish(active);
+          }
         }
-      });
+      );
     } catch (error) {
       await rm(pendingOutput, { force: true }).catch(() => undefined);
       // Sửa lỗi (2026-09-24): ProcessManager.run() NÉM lỗi (không trả về {code,...}) khi tiến trình bị

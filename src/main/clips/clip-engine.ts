@@ -12,7 +12,8 @@ import { sanitizeProgress } from '@shared/utils/progress-policy.js';
 import type { ProjectItem, QueueJob, ResourceProfile } from '@shared/types/domain.js';
 import { ToolNotFoundError, ProcessingFailedError } from '@shared/errors/app-errors.js';
 import type { ToolManager } from '../tools/tool-manager.js';
-import type { ProcessManager, ProcessResult } from '../processes/process-manager.js';
+import type { ProcessManager } from '../processes/process-manager.js';
+import { runFfmpegWithFastAacRescue } from '../processes/ffmpeg-aac-rescue.js';
 import type { FileVerifier } from '../media/file-verifier.js';
 import type { QuarantineService } from '../media/quarantine-service.js';
 import { ensureDirectory } from '../files/ensure-directory.js';
@@ -92,9 +93,9 @@ export class ClipEngine {
       args.push('-movflags', '+faststart');
     }
     args.push('-progress', 'pipe:1', '-nostats', pending);
-    let result: ProcessResult;
-    try {
-      result = await this.processes.run({
+    const result = await runFfmpegWithFastAacRescue(
+      this.processes,
+      {
         jobId: job.id,
         projectId: job.projectId,
         tool: 'ffmpeg',
@@ -127,11 +128,16 @@ export class ClipEngine {
           if (!Number.isFinite(microseconds)) return;
           onProgress(sanitizeProgress((microseconds / 1_000_000 / expected) * 100));
         }
-      });
-    } catch (error) {
-      await rm(pending, { force: true }).catch(() => undefined);
-      throw error;
-    }
+      },
+      {
+        pendingPath: pending,
+        logModule: 'clips',
+        stepLabel: 'cắt đoạn video',
+        videoLabel: basename(input),
+        sourceIndex: item.position,
+        onBeforeRetry: () => onProgress(0)
+      }
+    );
     if (result.code !== 0) {
       try { await this.quarantine.move(pending, result.stderrTail || 'Tạo đoạn video thất bại.', { jobId: job.id, projectId: job.projectId }); } catch { /* pending chưa tồn tại */ }
       throw new ProcessingFailedError(result.stderrTail || 'Tạo đoạn video thất bại.');

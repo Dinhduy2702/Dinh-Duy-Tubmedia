@@ -32,6 +32,7 @@ import { formatTimelineLine } from '@shared/utils/timestamp.js';
 import { MergeFailedError, ToolNotFoundError } from '@shared/errors/app-errors.js';
 import type { ToolManager } from '../tools/tool-manager.js';
 import type { ProcessManager, ProcessResult } from '../processes/process-manager.js';
+import { runFfmpegWithFastAacRescue } from '../processes/ffmpeg-aac-rescue.js';
 import type { MediaAnalyzer } from '../media/media-analyzer.js';
 import { classifyShortVisualBoundaryTransition, isVisualIssueNearBoundary } from '../media/file-verifier.js';
 import type {
@@ -2087,10 +2088,10 @@ export class MergeEngine {
     const pending = join(outputFolder, `${safeName} [${tag}].pending.mp4`);
     await rm(pending, { force: true }).catch(() => undefined);
 
-    const tracker = new FfmpegProgressTracker(info.duration);
-    let result: ProcessResult;
-    try {
-      result = await this.processes.run({
+    let tracker = new FfmpegProgressTracker(info.duration);
+    const result = await runFfmpegWithFastAacRescue(
+      this.processes,
+      {
         jobId,
         tool: 'ffmpeg',
         executablePath: ffmpeg.executablePath,
@@ -2152,11 +2153,19 @@ export class MergeEngine {
             totalSeconds: snapshot.totalSeconds
           });
         }
-      });
-    } catch (error) {
-      await rm(pending, { force: true }).catch(() => undefined);
-      throw error;
-    }
+      },
+      {
+        pendingPath: pending,
+        logModule: 'merge',
+        stepLabel: 'đổi tỉ lệ khung hình',
+        videoLabel: basename(inputPath),
+        exhaustedAdvice:
+          'Tubmedia đã tự thử cứu 1 lần bằng bộ mã hoá tiếng nhanh nhưng bước đổi tỉ lệ vẫn kẹt; thành phẩm gốc đã ghép trước đó vẫn còn nguyên.',
+        onBeforeRetry: () => {
+          tracker = new FfmpegProgressTracker(info.duration);
+        }
+      }
+    );
 
     if (result.code !== 0) {
       await rm(pending, { force: true }).catch(() => undefined);

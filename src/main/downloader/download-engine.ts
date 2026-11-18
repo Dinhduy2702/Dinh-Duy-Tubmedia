@@ -61,6 +61,7 @@ import type { FileVerifier } from '../media/file-verifier.js';
 import type { MediaAnalyzer } from '../media/media-analyzer.js';
 import type { QuarantineService } from '../media/quarantine-service.js';
 import type { ProcessManager } from '../processes/process-manager.js';
+import { runFfmpegWithFastAacRescue } from '../processes/ffmpeg-aac-rescue.js';
 import type { SettingsService } from '../settings/settings-service.js';
 import type { ToolManager } from '../tools/tool-manager.js';
 import { parseYtDlpProgress, YTDLP_PROGRESS_FLAGS, YTDLP_UTF8_FLAGS } from './ytdlp-progress.js';
@@ -380,31 +381,57 @@ export class DownloadEngine {
     // Tệp đã là MP4 thì ghi đè đúng tệp đó (tệp vừa tải, chưa danh sách nào dùng) qua tệp tạm bên cạnh.
     const output = alreadyMp4 ? input : await nonConflictingPath(desiredOutput);
     const pending = output.replace(/\.mp4$/i, `.tubmedia-${job.id}.pending.mp4`);
-    const result = await this.processes.run({
-      jobId: job.id,
-      projectId: job.projectId,
-      tool: 'ffmpeg',
-      executablePath: ffmpeg.executablePath,
-      args: [
-        '-hide_banner',
-        '-y',
-        '-i',
-        input,
-        '-map',
-        '0:v:0',
-        '-map',
-        '0:a:0?',
-        '-c:v',
-        'copy',
-        ...(convertAudio ? ['-c:a', 'aac', '-b:a', '192k'] : ['-c:a', 'copy']),
-        '-movflags',
-        '+faststart',
-        pending
-      ],
-      priority: resource.processPriority,
-      signal,
-      timeoutMs: 6 * 60 * 60 * 1000
-    });
+    const remuxStepLabel = convertAudio ? 'chuyển đổi âm thanh sang AAC' : 'đóng gói sang MP4';
+    const result = await runFfmpegWithFastAacRescue(
+      this.processes,
+      {
+        jobId: job.id,
+        projectId: job.projectId,
+        tool: 'ffmpeg',
+        executablePath: ffmpeg.executablePath,
+        args: [
+          '-hide_banner',
+          '-nostdin',
+          '-y',
+          '-i',
+          input,
+          '-map',
+          '0:v:0',
+          '-map',
+          '0:a:0?',
+          '-c:v',
+          'copy',
+          ...(convertAudio ? ['-c:a', 'aac', '-b:a', '192k'] : ['-c:a', 'copy']),
+          '-movflags',
+          '+faststart',
+          '-progress',
+          'pipe:1',
+          '-nostats',
+          pending
+        ],
+        priority: resource.processPriority,
+        signal,
+        timeoutMs: 6 * 60 * 60 * 1000,
+        stallTimeoutMs: FFMPEG_PROGRESS_STALL_TIMEOUT_MS,
+        finalizeStallTimeoutMs: FFMPEG_FASTSTART_FINALIZE_STALL_TIMEOUT_MS,
+        progressValueOfStdoutLine: parseFfmpegOutTimeSeconds,
+        isFinalizeStderrLine: isFfmpegFaststartSecondPassLine,
+        describeStall: ({ lastProgressValue }) => ({
+          message: buildFfmpegStallMessage({
+            stepLabel: remuxStepLabel,
+            videoLabel: basename(input),
+            lastProgressSeconds: lastProgressValue
+          }),
+          details: { step: 'download-remux', sourcePath: input, convertAudio, lastProgressSeconds: lastProgressValue }
+        })
+      },
+      {
+        pendingPath: pending,
+        logModule: 'download',
+        stepLabel: remuxStepLabel,
+        videoLabel: basename(input)
+      }
+    );
     if (result.code !== 0) {
       await rm(pending, { force: true });
       if (alreadyMp4) {
@@ -729,43 +756,57 @@ export class DownloadEngine {
         pending
       );
 
-      const tracker = new FfmpegProgressTracker(info.duration);
-      const result = await this.processes.run({
-        jobId: job.id,
-        projectId: job.projectId,
-        tool: 'ffmpeg',
-        executablePath: ffmpeg.executablePath,
-        args,
-        priority: backgroundEncodePriority(resource.processPriority),
-        signal,
-        timeoutMs: 48 * 60 * 60 * 1000,
-        stallTimeoutMs: FFMPEG_PROGRESS_STALL_TIMEOUT_MS,
-        finalizeStallTimeoutMs: FFMPEG_FASTSTART_FINALIZE_STALL_TIMEOUT_MS,
-        progressValueOfStdoutLine: parseFfmpegOutTimeSeconds,
-        isFinalizeStderrLine: isFfmpegFaststartSecondPassLine,
-        describeStall: ({ lastProgressValue }) => ({
-          message: buildFfmpegStallMessage({
-            stepLabel: 'tạo bản dựng CapCut',
-            videoLabel: basename(input),
-            lastProgressSeconds: lastProgressValue,
-            advice:
-              'Đã dừng bước tạo bản dựng CapCut bị kẹt; bản gốc chất lượng cao vừa tải vẫn an toàn.'
+      let tracker = new FfmpegProgressTracker(info.duration);
+      const result = await runFfmpegWithFastAacRescue(
+        this.processes,
+        {
+          jobId: job.id,
+          projectId: job.projectId,
+          tool: 'ffmpeg',
+          executablePath: ffmpeg.executablePath,
+          args,
+          priority: backgroundEncodePriority(resource.processPriority),
+          signal,
+          timeoutMs: 48 * 60 * 60 * 1000,
+          stallTimeoutMs: FFMPEG_PROGRESS_STALL_TIMEOUT_MS,
+          finalizeStallTimeoutMs: FFMPEG_FASTSTART_FINALIZE_STALL_TIMEOUT_MS,
+          progressValueOfStdoutLine: parseFfmpegOutTimeSeconds,
+          isFinalizeStderrLine: isFfmpegFaststartSecondPassLine,
+          describeStall: ({ lastProgressValue }) => ({
+            message: buildFfmpegStallMessage({
+              stepLabel: 'tạo bản dựng CapCut',
+              videoLabel: basename(input),
+              lastProgressSeconds: lastProgressValue,
+              advice:
+                'Đã dừng bước tạo bản dựng CapCut bị kẹt; bản gốc chất lượng cao vừa tải vẫn an toàn.'
+            }),
+            details: { step: 'capcut-copy', sourcePath: input, encoder, lastProgressSeconds: lastProgressValue }
           }),
-          details: { step: 'capcut-copy', sourcePath: input, encoder, lastProgressSeconds: lastProgressValue }
-        }),
-        onStdoutLine: (line) => {
-          const snapshot = tracker.update(line);
-          if (!snapshot) return;
-          onProgress({
-            percent: snapshot.percent,
-            speed: snapshot.speed,
-            etaSeconds: snapshot.etaSeconds,
-            stage: 'processing',
-            stageLabel,
-            elapsedSeconds: snapshot.elapsedSeconds
-          });
+          onStdoutLine: (line) => {
+            const snapshot = tracker.update(line);
+            if (!snapshot) return;
+            onProgress({
+              percent: snapshot.percent,
+              speed: snapshot.speed,
+              etaSeconds: snapshot.etaSeconds,
+              stage: 'processing',
+              stageLabel,
+              elapsedSeconds: snapshot.elapsedSeconds
+            });
+          }
+        },
+        {
+          pendingPath: pending,
+          logModule: 'download',
+          stepLabel: 'tạo bản dựng CapCut',
+          videoLabel: basename(input),
+          exhaustedAdvice:
+            'Tubmedia đã tự thử cứu 1 lần bằng bộ mã hoá tiếng nhanh nhưng bước tạo bản dựng CapCut vẫn kẹt; bản gốc chất lượng cao vừa tải vẫn an toàn, hãy kiểm tra hoặc thay video nguồn khác.',
+          onBeforeRetry: () => {
+            tracker = new FfmpegProgressTracker(info.duration);
+          }
         }
-      });
+      );
       if (result.code === 0) {
         completed = true;
         usedEncoder = encoder;

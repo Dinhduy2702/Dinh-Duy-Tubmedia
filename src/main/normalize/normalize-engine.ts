@@ -29,6 +29,7 @@ import { sanitizeProgress } from '@shared/utils/progress-policy.js';
 import { ProcessingFailedError, ToolNotFoundError } from '@shared/errors/app-errors.js';
 import type { ToolManager } from '../tools/tool-manager.js';
 import type { ProcessManager, ProcessResult } from '../processes/process-manager.js';
+import { runFfmpegWithFastAacRescue } from '../processes/ffmpeg-aac-rescue.js';
 import type { MediaAnalyzer } from '../media/media-analyzer.js';
 import type { FileVerifier } from '../media/file-verifier.js';
 import type { QuarantineService } from '../media/quarantine-service.js';
@@ -488,8 +489,11 @@ export class NormalizeEngine {
           }
         }
       );
-      try {
-        return await this.processes.run({
+      const stepLabel = videoCopy ? 'chuẩn hóa âm thanh' : 'chuẩn hóa video';
+      const videoLabel = context?.sourceLabel ?? basename(input);
+      return runFfmpegWithFastAacRescue(
+        this.processes,
+        {
           jobId: job.id,
           projectId: job.projectId,
           tool: 'ffmpeg',
@@ -504,8 +508,8 @@ export class NormalizeEngine {
           isFinalizeStderrLine: isFfmpegFaststartSecondPassLine,
           describeStall: ({ lastProgressValue }) => ({
             message: buildFfmpegStallMessage({
-              stepLabel: videoCopy ? 'chuẩn hóa âm thanh' : 'chuẩn hóa video',
-              videoLabel: context?.sourceLabel ?? basename(input),
+              stepLabel,
+              videoLabel,
               sourceIndex: context?.sourceIndex ?? null,
               lastProgressSeconds: lastProgressValue
             }),
@@ -525,11 +529,16 @@ export class NormalizeEngine {
             if (!Number.isFinite(microseconds) || !Number.isFinite(source.duration) || source.duration <= 0) return;
             onProgress(sanitizeProgress((microseconds / 1_000_000 / source.duration) * 100));
           }
-        });
-      } catch (error) {
-        await rm(pending, { force: true }).catch(() => undefined);
-        throw error;
-      }
+        },
+        {
+          pendingPath: pending,
+          logModule: 'normalize',
+          stepLabel,
+          videoLabel,
+          sourceIndex: context?.sourceIndex ?? null,
+          onBeforeRetry: () => onProgress(0)
+        }
+      );
     };
 
     let encoder = selection.encoder;
@@ -627,34 +636,55 @@ export class NormalizeEngine {
     const ffmpeg = this.tools.get('ffmpeg');
     const repaired = `${pending}.audio-fallback.mp4`;
     await rm(repaired, { force: true });
-    const result = await this.processes.run({
-      jobId: job.id,
-      projectId: job.projectId,
-      tool: 'ffmpeg',
-      executablePath: ffmpeg.executablePath!,
-      args: [
-        '-hide_banner', '-nostdin', '-y', '-xerror', '-err_detect', 'explode',
-        '-i', pending,
-        '-i', input,
-        '-map', '0:v:0',
-        '-map', '1:a:0',
-        '-c:v', 'copy',
-        '-c:a', 'aac',
-        '-aac_coder', 'fast',
-        '-b:a', profile?.audioMode === 'aac_320' ? '320k' : '256k',
-        '-ar', String(target.sampleRate ?? 48000),
-        '-ac', String(target.channels ?? 2),
-        '-map_metadata', '-1',
-        '-avoid_negative_ts', 'make_zero',
-        '-movflags', '+faststart',
-        '-video_track_timescale', '90000',
-        '-nostats',
-        repaired
-      ],
-      priority: resource.processPriority,
-      signal,
-      timeoutMs: 12 * 60 * 60 * 1000
-    });
+    let result: ProcessResult;
+    try {
+      result = await this.processes.run({
+        jobId: job.id,
+        projectId: job.projectId,
+        tool: 'ffmpeg',
+        executablePath: ffmpeg.executablePath!,
+        args: [
+          '-hide_banner', '-nostdin', '-y', '-xerror', '-err_detect', 'explode',
+          '-i', pending,
+          '-i', input,
+          '-map', '0:v:0',
+          '-map', '1:a:0',
+          '-c:v', 'copy',
+          '-c:a', 'aac',
+          '-aac_coder', 'fast',
+          '-b:a', profile?.audioMode === 'aac_320' ? '320k' : '256k',
+          '-ar', String(target.sampleRate ?? 48000),
+          '-ac', String(target.channels ?? 2),
+          '-map_metadata', '-1',
+          '-avoid_negative_ts', 'make_zero',
+          '-movflags', '+faststart',
+          '-video_track_timescale', '90000',
+          '-progress', 'pipe:1',
+          '-nostats',
+          repaired
+        ],
+        priority: resource.processPriority,
+        signal,
+        timeoutMs: 12 * 60 * 60 * 1000,
+        stallTimeoutMs: FFMPEG_PROGRESS_STALL_TIMEOUT_MS,
+        finalizeStallTimeoutMs: FFMPEG_FASTSTART_FINALIZE_STALL_TIMEOUT_MS,
+        progressValueOfStdoutLine: parseFfmpegOutTimeSeconds,
+        isFinalizeStderrLine: isFfmpegFaststartSecondPassLine,
+        describeStall: ({ lastProgressValue }) => ({
+          message: buildFfmpegStallMessage({
+            stepLabel: 'mã hóa lại âm thanh dự phòng',
+            videoLabel: basename(input),
+            lastProgressSeconds: lastProgressValue,
+            advice:
+              'Bước sửa âm thanh bằng bộ mã hoá tiếng nhanh vẫn bị kẹt; hãy thay video này bằng tệp khác rồi bấm chạy lại.'
+          }),
+          details: { step: 'normalize-audio-repair', sourcePath: input, lastProgressSeconds: lastProgressValue }
+        })
+      });
+    } catch (error) {
+      await rm(repaired, { force: true }).catch(() => undefined);
+      throw error;
+    }
 
     const stillBroken =
       result.code !== 0
