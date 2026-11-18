@@ -303,6 +303,7 @@ src/main/files/file-ownership.ts
 src/main/files/legacy-quarantine.ts
 src/main/files/non-conflicting-path.ts
 src/main/files/path-containment.ts
+src/main/files/post-merge-source-cleanup.ts
 src/main/files/quarantine-location.ts
 src/main/files/save-text-file-policy.ts
 src/main/files/temporary-cleanup.ts
@@ -387,6 +388,7 @@ src/renderer/src/components/quarantine-anchors.ts
 src/renderer/src/components/QuickDownloadPanel.tsx
 src/renderer/src/components/RateLimitWaitBadges.tsx
 src/renderer/src/components/RendererErrorBoundary.tsx
+src/renderer/src/components/SourceCleanupAction.tsx
 src/renderer/src/components/StartupResumeDialog.tsx
 src/renderer/src/components/StatCard.tsx
 src/renderer/src/components/StatusBadge.tsx
@@ -557,6 +559,7 @@ tests/integration/migration-attempts-reset.test.ts
 tests/integration/normalize-audio-encoder-fallback.test.ts
 tests/integration/normalize-cache-commit-locked.test.ts
 tests/integration/normalize-cache-corrupt-audio.test.ts
+tests/integration/post-merge-source-cleanup-v15.test.ts
 tests/integration/quarantine-service.test.ts
 tests/integration/queue-attempts.test.ts
 tests/integration/queue-audio-issue.test.ts

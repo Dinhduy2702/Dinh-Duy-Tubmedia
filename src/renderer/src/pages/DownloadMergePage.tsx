@@ -63,6 +63,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CookieManagerDialog } from '../components/CookieManagerDialog';
 import { InfoDisclosure } from '../components/InfoDisclosure';
 import { InfoHint } from '../components/InfoHint';
+import { SourceCleanupAction } from '../components/SourceCleanupAction';
 import { ToolReadinessPanel } from '../components/ToolReadinessPanel';
 import { FolderField } from '../components/FolderField';
 import { StatusBadge } from '../components/StatusBadge';
@@ -1414,11 +1415,13 @@ function MergeLaneCard({
   setError: (error: string | null) => void;
 }): React.JSX.Element {
   const dismissedSharedTemp = useAppStore((state) => state.settings?.dismissedSharedTempWarnings);
+  const postMergeCleanupMode = useAppStore((state) => state.settings?.postMergeSourceCleanupMode ?? 'ask');
   // 1.7.6 việc A0: hiện số luồng ffmpeg THẬT theo máy (cùng quy tắc với hàng đợi), không phải số gốc của hồ sơ.
   const logicalCpus = useAppStore((state) => state.hardware?.logicalCpuCount ?? 0);
   const [showLogs, setShowLogs] = useState(false);
   const combinedLogs = useLaneLogs(projectId, liveLogs, logsVersion, setError);
   const [storage, setStorage] = useState<WorkbenchStorageSummary | null>(null);
+  const [storageTick, setStorageTick] = useState(0);
   const state = workflowState(jobs);
   const number = mergeNumber(slot);
   const failed = jobs.filter((job) => job.status === 'failed');
@@ -1493,7 +1496,20 @@ function MergeLaneCard({
       document.removeEventListener('visibilitychange', onVisibility);
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [hasActiveJobs, projectId, setError, slot]);
+  }, [hasActiveJobs, projectId, setError, slot, storageTick]);
+
+  const lastMergeJob = jobs.filter((job) => job.type === 'merge').at(-1);
+  const canShowSourceCleanup = Boolean(
+    projectId &&
+      state === 'completed' &&
+      !form.timelineOnly &&
+      lastMergeJob &&
+      ['completed', 'skipped'].includes(lastMergeJob.status) &&
+      lastMergeJob.input.timelineOnly !== true &&
+      typeof lastMergeJob.input.outputPath === 'string' &&
+      lastMergeJob.input.outputPath.trim().length > 0 &&
+      (storage === null || storage.downloadedFileCount > 0)
+  );
 
   const latestFailedJob =
     [...failed].sort((a, b) => (b.finishedAt ?? b.updatedAt).localeCompare(a.finishedAt ?? a.updatedAt))[0] ??
@@ -1813,6 +1829,26 @@ function MergeLaneCard({
           </div>
           <LaneWaitNotice projectId={jobs.find((job) => job.projectId)?.projectId} kind="merge" />
           <AudioIssueSummary jobs={jobs} />
+          {canShowSourceCleanup && projectId && (
+            <div className="mt-2">
+              <SourceCleanupAction
+                projectId={projectId}
+                askHint={postMergeCleanupMode === 'ask'}
+                disabled={busy}
+                onError={(msg) => setError(msg)}
+                onCleaned={(result) => {
+                  setStorageTick((n) => n + 1);
+                  if (result.trashedCount > 0) {
+                    onNotice(
+                      'Đã dọn video nguồn vào Thùng rác',
+                      `Đã chuyển ${result.trashedCount} video nguồn vào Thùng rác${result.keptItems.length > 0 ? ` và giữ lại an toàn ${result.keptItems.length} tệp` : ''}.`,
+                      'success'
+                    );
+                  }
+                }}
+              />
+            </div>
+          )}
         </div>
         <details className="workflow-detail-disclosure" open={form.timelineOnly}>
           <summary><span><ListOrdered size={16}/>{form.timelineOnly ? 'Timeline không ghép video' : 'Chi tiết đầu ra, dung lượng và timeline'}</span><ChevronDown size={16}/></summary>

@@ -252,6 +252,42 @@ export type DownloadCompatibilityMode =
 
 export type AppFontSize = 'medium' | 'large' | 'xlarge';
 
+export type PostMergeSourceCleanupMode = 'ask' | 'auto_trash' | 'keep';
+
+export type SourceCleanupKeptReason =
+  | 'shared_incomplete_project'
+  | 'capcut_draft_reference'
+  | 'locked_or_busy'
+  | 'not_tubmedia_link_file'
+  | 'protected_output_file';
+
+export interface SourceCleanupKeptItem {
+  path: string;
+  name: string;
+  bytes: number;
+  reason: SourceCleanupKeptReason;
+  reasonLabel: string;
+}
+
+export interface SourceCleanupPreview {
+  projectId: string;
+  eligible: boolean;
+  canTrash: boolean;
+  blockedReason: string | null;
+  eligibleCount: number;
+  eligibleBytes: number;
+  recycleBinMaxBytes: number | null;
+  keptItems: SourceCleanupKeptItem[];
+}
+
+export interface SourceCleanupResult {
+  projectId: string;
+  trashedCount: number;
+  trashedBytes: number;
+  keptItems: SourceCleanupKeptItem[];
+  blockedReason: string | null;
+}
+
 export interface AppSettings {
   theme: 'system' | 'light' | 'dark';
   language: 'vi';
@@ -272,6 +308,8 @@ export interface AppSettings {
   verificationLevel: VerificationLevel;
   sourceCachePolicy: 'forever' | 'days' | 'project_complete' | 'manual';
   sourceCacheDays: number;
+  /** 1.7.7 (V15): dọn video nguồn vào Thùng rác sau khi ghép xong thành phẩm và hậu kiểm đạt. Lưu ngoài khối 'app'. */
+  postMergeSourceCleanupMode: PostMergeSourceCleanupMode;
   logRetentionDays: number;
   appUpdateChannel: 'stable' | 'beta';
   toolUpdateChannel: 'stable' | 'beta';

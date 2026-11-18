@@ -22,7 +22,9 @@ const api: DesktopApi = {
     clearProgress: (slot) => invoke(IPC.workbench.clearProgress, { slot }),
     clearLogs: (slot) => invoke(IPC.workbench.clearLogs, { slot }),
     remove: (slot) => invoke(IPC.workbench.remove, { slot }),
-    removeAll: () => invoke(IPC.workbench.removeAll)
+    removeAll: () => invoke(IPC.workbench.removeAll),
+    previewSourceCleanup: (projectId) => invoke(IPC.workbench.previewSourceCleanup, { projectId }),
+    runSourceCleanup: (projectId) => invoke(IPC.workbench.runSourceCleanup, { projectId })
   },
   app: {
     bootstrap: () => invoke(IPC.app.getBootstrap),

@@ -22,6 +22,7 @@ export const defaultAppSettings: AppSettings = {
   verificationLevel: 'standard',
   sourceCachePolicy: 'manual',
   sourceCacheDays: 30,
+  postMergeSourceCleanupMode: 'ask',
   logRetentionDays: 30,
   appUpdateChannel: 'stable',
   toolUpdateChannel: 'stable',

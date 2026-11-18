@@ -19,7 +19,9 @@ export const IPC = {
     clearProgress: 'workbench:clear-progress',
     clearLogs: 'workbench:clear-logs',
     remove: 'workbench:remove',
-    removeAll: 'workbench:remove-all'
+    removeAll: 'workbench:remove-all',
+    previewSourceCleanup: 'workbench:preview-source-cleanup',
+    runSourceCleanup: 'workbench:run-source-cleanup'
   },
   projects: {
     list: 'projects:list',

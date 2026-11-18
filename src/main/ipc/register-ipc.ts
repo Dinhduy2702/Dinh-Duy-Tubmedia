@@ -234,6 +234,12 @@ export function registerIpc(ctx: AppContext): void {
   handle(IPC.workbench.clearLogs, clearWorkbenchSchema, ({ slot }) => ctx.workbench.clearLogs(slot));
   handle(IPC.workbench.remove, workbenchSlotSchema, ({ slot }) => ctx.workbench.remove(slot));
   noArgs(IPC.workbench.removeAll, () => ctx.workbench.removeAll());
+  handle(IPC.workbench.previewSourceCleanup, projectIdSchema, ({ projectId }) =>
+    ctx.workbench.previewSourceCleanup(projectId, resolveCleanupEnvironmentOverride() ?? undefined)
+  );
+  handle(IPC.workbench.runSourceCleanup, projectIdSchema, ({ projectId }) =>
+    ctx.workbench.runSourceCleanup(projectId, resolveCleanupEnvironmentOverride() ?? undefined)
+  );
 
   noArgs(IPC.projects.list, () => ctx.projects.list());
   handle(IPC.projects.get, idSchema, (id) => ctx.projects.get(id));

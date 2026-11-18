@@ -69,6 +69,7 @@ import { InvalidInputError, ProcessCancelledError, ProcessingFailedError, type A
 import { computeBackgroundEncodeCpuCapPercent, editEncodeLimit } from '@shared/utils/capcut-encode.js';
 import { buildCleanupProtection } from '../files/cleanup-protection.js';
 import { cleanupTemporaryArtifacts } from '../files/temporary-cleanup.js';
+import { executePostMergeSourceCleanup } from '../files/post-merge-source-cleanup.js';
 import { sanitizeNullableSeconds, sanitizeProgress } from '@shared/utils/progress-policy.js';
 import { audioIssueLabel, audioIssueNote, isAudioIssue, type AudioIssue } from '@shared/utils/audio-presence.js';
 import { initialJobStatus, resolveResumeStatus } from '@shared/utils/job-state-machine.js';
@@ -1940,6 +1941,53 @@ export class QueueManager {
       if (!preserveTrackedClips) {
         for (const item of items) {
           if (item.clipFile) this.items.setClipFile(item.id, null);
+        }
+        if (this.settings.get()?.postMergeSourceCleanupMode === 'auto_trash') {
+          const projectJobs = this.repo.list(projectId);
+          const mergeDone = projectJobs
+            .filter((j) => j.type === 'merge')
+            .at(-1);
+          if (
+            mergeDone &&
+            (mergeDone.status === 'completed' || mergeDone.status === 'skipped') &&
+            mergeDone.input.timelineOnly !== true
+          ) {
+            const autoResult = await executePostMergeSourceCleanup(projectId, {
+              projects: this.projects,
+              items: this.items,
+              sources: this.sources,
+              queue: this.repo,
+              settings: () => this.settings.get()
+            });
+            if (autoResult.trashedCount > 0) {
+              this.logger.info(
+                'cleanup',
+                'POST_MERGE_AUTO_TRASHED',
+                `Tự động chuyển ${autoResult.trashedCount} video nguồn của danh sách "${project.name}" vào Thùng rác (giữ lại ${autoResult.keptItems.length} tệp).`,
+                {
+                  projectId,
+                  metadata: {
+                    trashedCount: autoResult.trashedCount,
+                    trashedBytes: autoResult.trashedBytes,
+                    keptCount: autoResult.keptItems.length
+                  }
+                }
+              );
+            } else if (autoResult.blockedReason && autoResult.blockedReason.includes('Thùng rác')) {
+              this.logger.warn('cleanup', 'POST_MERGE_AUTO_TRASH_BLOCKED', autoResult.blockedReason, { projectId });
+              if (this.window && !this.window.isDestroyed()) {
+                const notice: AttentionNotice = {
+                  id: `post-merge-trash-${projectId}`,
+                  severity: 'warning',
+                  title: 'Chưa thể tự dọn video nguồn vào Thùng rác',
+                  message: autoResult.blockedReason,
+                  projectId,
+                  sticky: false
+                };
+                this.window.webContents.send(IPC.events.attention, notice);
+              }
+            }
+          }
         }
       }
       this.logger.info(

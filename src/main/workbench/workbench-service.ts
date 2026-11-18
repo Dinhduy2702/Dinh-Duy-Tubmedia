@@ -7,6 +7,8 @@ import type {
   DownloadMergeInput,
   MergeLaneId,
   Project,
+  SourceCleanupPreview,
+  SourceCleanupResult,
   WorkbenchSlot,
   WorkbenchStorageSummary,
   WorkbenchSlotState,
@@ -27,6 +29,11 @@ import { sizeFiles, sizePaths } from '../storage/workbench-storage.js';
 import { cleanupTemporaryArtifacts } from '../files/temporary-cleanup.js';
 import { downloadWorkFolder, removeDownloadWorkFolder } from '../files/download-temp-cleanup.js';
 import { buildCleanupProtection } from '../files/cleanup-protection.js';
+import {
+  executePostMergeSourceCleanup,
+  planPostMergeSourceCleanup
+} from '../files/post-merge-source-cleanup.js';
+import type { CleanupEnvironmentPaths } from '../system/cleanup-scanner.js';
 
 // A1 (2026-09-25): tăng từ 4 lên 6 lane theo yêu cầu người dùng — thêm hoàn toàn tương thích ngược,
 // không đụng tới 4 lane cũ đã có dữ liệu của người dùng (chỉ thêm phần tử mới vào cuối 2 mảng/bảng).
@@ -541,5 +548,50 @@ export class WorkbenchService {
       await this.projects.remove(project.id, false);
     }
     return this.slotState(slot);
+  }
+
+  public async previewSourceCleanup(
+    projectId: string,
+    envPaths?: () => CleanupEnvironmentPaths
+  ): Promise<SourceCleanupPreview> {
+    return planPostMergeSourceCleanup(projectId, {
+      projects: this.projectRepo,
+      items: this.input,
+      sources: this.sources,
+      queue: this.queue,
+      settings: () => this.settings.get(),
+      ...(envPaths ? { envPaths } : {})
+    });
+  }
+
+  public async runSourceCleanup(
+    projectId: string,
+    envPaths?: () => CleanupEnvironmentPaths
+  ): Promise<SourceCleanupResult> {
+    const result = await executePostMergeSourceCleanup(projectId, {
+      projects: this.projectRepo,
+      items: this.input,
+      sources: this.sources,
+      queue: this.queue,
+      settings: () => this.settings.get(),
+      ...(envPaths ? { envPaths } : {})
+    });
+    if (result.trashedCount > 0) {
+      this.logger.info(
+        'cleanup',
+        'POST_MERGE_SOURCES_TRASHED',
+        `Đã chuyển ${result.trashedCount} video nguồn vào Thùng rác sau khi ghép xong (giữ lại ${result.keptItems.length} tệp).`,
+        {
+          projectId,
+          metadata: {
+            trashedCount: result.trashedCount,
+            trashedBytes: result.trashedBytes,
+            keptCount: result.keptItems.length
+          }
+        }
+      );
+      this.queue.refreshState();
+    }
+    return result;
   }
 }

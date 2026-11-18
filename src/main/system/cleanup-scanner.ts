@@ -583,3 +583,39 @@ export async function copyFileVerified(sourcePath: string, destinationPath: stri
     throw new Error('Sao chép không khớp kích thước — đã hủy, giữ nguyên file gốc.');
   }
 }
+
+const MAX_CAPCUT_DRAFT_JSON_BYTES = 32 * 1024 * 1024;
+
+/**
+ * 1.7.7 (V15): Đọc chỉ-đọc các tệp nháp CapCut (`draft_content.json`, `draft_meta_info.json`) để phát hiện
+ * video nguồn đang được dự án CapCut tham chiếu — tuyệt đối không xoá/dọn tệp nguồn đó.
+ */
+export async function collectCapCutDraftReferencedTexts(env: CleanupEnvironmentPaths): Promise<string[]> {
+  if (!env.localAppData) return [];
+  const draftsRoot = join(env.localAppData, 'CapCut', 'User Data', 'Projects', 'com.lveditor.draft');
+  let entries: Dirent[];
+  try {
+    entries = await readdir(draftsRoot, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const texts: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+    const draftDir = join(draftsRoot, entry.name);
+    for (const fileName of ['draft_content.json', 'draft_meta_info.json']) {
+      const jsonPath = join(draftDir, fileName);
+      try {
+        const info = await lstat(jsonPath);
+        if (!info.isFile() || info.isSymbolicLink() || info.size <= 0 || info.size > MAX_CAPCUT_DRAFT_JSON_BYTES) {
+          continue;
+        }
+        const raw = await readFile(jsonPath, 'utf8');
+        texts.push(raw.toLowerCase());
+      } catch {
+        continue;
+      }
+    }
+  }
+  return texts;
+}

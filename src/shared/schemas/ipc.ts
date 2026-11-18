@@ -52,6 +52,7 @@ export const appSettingsSchema = z
     verificationLevel: z.enum(['fast', 'standard', 'deep']),
     sourceCachePolicy: z.enum(['forever', 'days', 'project_complete', 'manual']),
     sourceCacheDays: z.number().int().min(1).max(3650),
+    postMergeSourceCleanupMode: z.enum(['ask', 'auto_trash', 'keep']).default('ask'),
     logRetentionDays: z.number().int().min(1).max(3650),
     appUpdateChannel: z.enum(['stable', 'beta']),
     toolUpdateChannel: z.enum(['stable', 'beta']),

@@ -20,6 +20,8 @@ import type {
   QuarantineOverview,
   QueueJob,
   ResourceProfile,
+  SourceCleanupPreview,
+  SourceCleanupResult,
   SystemStats,
   ToolStatus,
   ToolUpdateCheck,
@@ -54,6 +56,8 @@ export interface DesktopApi {
     clearLogs(slot: WorkbenchSlot): Promise<WorkbenchSlotState>;
     remove(slot: WorkbenchSlot): Promise<WorkbenchSlotState>;
     removeAll(): Promise<{ projectsRemoved: number; jobsRemoved: number }>;
+    previewSourceCleanup(projectId: string): Promise<SourceCleanupPreview>;
+    runSourceCleanup(projectId: string): Promise<SourceCleanupResult>;
   };
   app: {
     bootstrap(): Promise<{
