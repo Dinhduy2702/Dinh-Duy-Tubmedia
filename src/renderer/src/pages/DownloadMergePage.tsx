@@ -1785,7 +1785,8 @@ function MergeLaneCard({
             </small>
             {timelineTrimOrMuteNotice && (
               <small className="merge-timeline-trim-note">
-                Lưu ý mốc cắt / tắt tiếng: Chế độ Chỉ tạo Timeline tính theo thời lượng nguồn và khoảng cắt yêu cầu (không cắt tệp thật hay tắt tiếng); nếu ghép video thật sau này, điểm cắt có thể chênh nhẹ khoảng 0,1–0,5 giây.
+                Mốc cắt / tắt tiếng tính theo nguồn (ghép thật có thể chênh ~0,1–0,5 giây).
+                <InfoHint text="Chế độ Chỉ tạo Timeline tính theo thời lượng nguồn và khoảng cắt yêu cầu (không cắt tệp thật hay tắt tiếng); nếu ghép video thật sau này, điểm cắt có thể chênh nhẹ khoảng 0,1–0,5 giây." />
               </small>
             )}
           </span>
