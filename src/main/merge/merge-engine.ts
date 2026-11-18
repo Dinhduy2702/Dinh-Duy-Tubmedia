@@ -7,7 +7,9 @@ import { access, open, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { constants } from 'node:fs';
+import { cpus } from 'node:os';
 import { basename, dirname, extname, join, resolve } from 'node:path';
+import { defaultFfmpegThreadArgs } from '@shared/utils/machine-threads.js';
 import type {
   MediaInfo,
   QualityProfile,
@@ -2153,6 +2155,7 @@ export class MergeEngine {
           'veryfast',
           '-crf',
           '18',
+          ...defaultFfmpegThreadArgs(cpus().length, resource),
           '-c:a',
           'aac',
           '-ar',

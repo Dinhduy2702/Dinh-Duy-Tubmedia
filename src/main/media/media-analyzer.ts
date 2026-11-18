@@ -128,6 +128,7 @@ export class MediaAnalyzer {
       tool: 'ffprobe',
       executablePath: tool.executablePath,
       args: ['-v', 'error', '-show_streams', '-show_format', '-show_data_hash', 'sha256', '-of', 'json=compact=1', path],
+      priority: 'below_normal',
       timeoutMs: 120_000
     });
     if (result.code !== 0) {

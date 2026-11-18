@@ -17,7 +17,9 @@
  * giải mã tệp 2 lần (đây là thao tác một lần do người dùng chủ động bấm, không phải việc chạy nền liên
  * tục — không đáng lo về hiệu năng).
  */
+import { cpus } from 'node:os';
 import type { CutSuggestion, CutSuggestionReason } from '@shared/local-cut.js';
+import { defaultFfmpegThreadArgs } from '@shared/utils/machine-threads.js';
 
 /** Không cần thời gian thực — chạy nền dưới nút bấm chủ động, nhưng vẫn cần chặn trên video cực dài. */
 export const CUT_SUGGESTION_ANALYSIS_TIMEOUT_MS = 10 * 60 * 1000;
@@ -32,7 +34,7 @@ const MIN_SUGGESTION_SECONDS = 3;
 const MAX_SUGGESTION_SECONDS = 180;
 const MAX_SUGGESTIONS = 8;
 
-export function buildSilenceDetectArguments(filePath: string): string[] {
+export function buildSilenceDetectArguments(filePath: string, logicalCpus?: number): string[] {
   return [
     '-hide_banner',
     '-i',
@@ -40,13 +42,14 @@ export function buildSilenceDetectArguments(filePath: string): string[] {
     '-vn',
     '-af',
     `silencedetect=noise=${SILENCE_NOISE_THRESHOLD_DB}dB:d=${SILENCE_MIN_DURATION_SECONDS}`,
+    ...defaultFfmpegThreadArgs(logicalCpus ?? cpus().length),
     '-f',
     'null',
     '-'
   ];
 }
 
-export function buildSceneDetectArguments(filePath: string): string[] {
+export function buildSceneDetectArguments(filePath: string, logicalCpus?: number): string[] {
   return [
     '-hide_banner',
     '-i',
@@ -54,6 +57,7 @@ export function buildSceneDetectArguments(filePath: string): string[] {
     '-an',
     '-vf',
     `select='gt(scene,${SCENE_CHANGE_THRESHOLD})',showinfo`,
+    ...defaultFfmpegThreadArgs(logicalCpus ?? cpus().length),
     '-f',
     'null',
     '-'

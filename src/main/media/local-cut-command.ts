@@ -3,7 +3,9 @@
  * ClipEngine (gắn chặt với QueueJob/ProjectItem/checkpoint DB và LUÔN mã hóa lại) vì đây là công cụ độc
  * lập, đơn giản, thao tác trực tiếp trên một tệp người dùng tự chọn — không qua hàng đợi/dự án nào.
  */
+import { cpus } from 'node:os';
 import type { LocalCutAspectRatio } from '@shared/local-cut.js';
+import { defaultFfmpegThreadArgs } from '@shared/utils/machine-threads.js';
 // Giai đoạn 6 mục 4 (2026-09-24): bộ lọc nền mờ kiểu CapCut được tách ra tệp dùng chung để "preset xuất
 // theo nền tảng" ở Ghép theo Timeline tái dùng nguyên vẹn — không định nghĩa lại.
 import { ASPECT_RATIO_DIMENSIONS, buildAspectRatioFilter } from './aspect-ratio-filter.js';
@@ -15,7 +17,8 @@ export function buildLocalFrameExtractArguments(
   filePath: string,
   timestampSeconds: number,
   framePath: string,
-  aspectRatio: LocalCutAspectRatio = 'original'
+  aspectRatio: LocalCutAspectRatio = 'original',
+  logicalCpus?: number
 ): string[] {
   const safeTimestamp = Math.max(0, timestampSeconds);
   const base = ['-y', '-v', 'error', '-ss', String(safeTimestamp), '-i', filePath];
@@ -25,7 +28,18 @@ export function buildLocalFrameExtractArguments(
   }
 
   const { width, height } = ASPECT_RATIO_DIMENSIONS[aspectRatio];
-  return [...base, '-filter_complex', buildAspectRatioFilter(width, height), '-frames:v', '1', '-q:v', '3', framePath];
+  const threadArgs = defaultFfmpegThreadArgs(logicalCpus ?? cpus().length);
+  return [
+    ...base,
+    '-filter_complex',
+    buildAspectRatioFilter(width, height),
+    ...threadArgs,
+    '-frames:v',
+    '1',
+    '-q:v',
+    '3',
+    framePath
+  ];
 }
 
 export interface LocalCutArgumentsInput {
@@ -35,6 +49,7 @@ export interface LocalCutArgumentsInput {
   accurateCut: boolean;
   aspectRatio: LocalCutAspectRatio;
   outputPath: string;
+  logicalCpus?: number;
 }
 
 /**
@@ -50,6 +65,7 @@ export function buildLocalCutArguments(input: LocalCutArgumentsInput): string[] 
   const duration = Math.max(0.01, input.endSeconds - input.startSeconds);
   const base = ['-hide_banner', '-y', '-ss', String(input.startSeconds), '-i', input.filePath, '-t', String(duration)];
 
+  const threadArgs = defaultFfmpegThreadArgs(input.logicalCpus ?? cpus().length);
   if (input.aspectRatio === 'original') {
     if (!input.accurateCut) {
       return [...base, '-map', '0', '-c', 'copy', '-progress', 'pipe:1', '-nostats', input.outputPath];
@@ -67,6 +83,7 @@ export function buildLocalCutArguments(input: LocalCutArgumentsInput): string[] 
       'veryfast',
       '-crf',
       '18',
+      ...threadArgs,
       '-c:a',
       'aac',
       '-ar',
@@ -94,6 +111,7 @@ export function buildLocalCutArguments(input: LocalCutArgumentsInput): string[] 
     'veryfast',
     '-crf',
     '18',
+    ...threadArgs,
     '-c:a',
     'aac',
     '-ar',

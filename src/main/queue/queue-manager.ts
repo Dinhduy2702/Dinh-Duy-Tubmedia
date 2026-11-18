@@ -58,6 +58,7 @@ import type { ClipEngine } from '../clips/clip-engine.js';
 import type { MergeEngine } from '../merge/merge-engine.js';
 import type { ProcessManager } from '../processes/process-manager.js';
 import { withMachineFfmpegThreads } from '../settings/resource-machine-threads.js';
+import { effectiveMergeWorkflowCap, withMachineMergeWorkers } from '@shared/utils/machine-threads.js';
 import { EncodeCpuMonitor } from './encode-cpu-monitor.js';
 import type { Logger } from '../logging/logger.js';
 import {
@@ -744,11 +745,41 @@ export class QueueManager {
   private emitProgress(job: QueueJob): void {
     if (this.window && !this.window.isDestroyed()) this.window.webContents.send(IPC.events.jobProgress, job);
   }
+  private projectUsesHdd(projectId: string | null | undefined): boolean {
+    if (!projectId) return false;
+    const project = this.projects.get(projectId);
+    if (!project) return false;
+    for (const folder of [project.tempFolder, project.outputFolder]) {
+      const letter = driveLetterOf(folder);
+      if (letter && this.diskKindOf(letter) === 'hdd') return true;
+    }
+    return false;
+  }
+
+  private anyMergeUsesHdd(): boolean {
+    for (const entry of this.active.values()) {
+      if (queueExecutionLane(entry.job) === 'merge-workflow' && this.projectUsesHdd(entry.job.projectId)) {
+        return true;
+      }
+    }
+    const s = this.settings.get();
+    for (const folder of [s?.defaultTempFolder, s?.defaultOutputFolder]) {
+      const letter = driveLetterOf(folder);
+      if (letter && this.diskKindOf(letter) === 'hdd') return true;
+    }
+    return false;
+  }
+
   private profileFor(job: QueueJob): ResourceProfile {
     const profiles = this.settings.profiles().resources;
     const project = job.projectId ? this.projects.get(job.projectId) : null;
     // 2026-11-05 (sửa A): luồng ffmpeg của hồ sơ có sẵn tự theo số luồng máy đang chạy.
-    return withMachineFfmpegThreads(profiles.find((x) => x.id === project?.resourceProfileId) ?? profiles[0]!, cpus().length);
+    const withThreads = withMachineFfmpegThreads(
+      profiles.find((x) => x.id === project?.resourceProfileId) ?? profiles[0]!,
+      cpus().length
+    );
+    if (job.type === 'download') return withThreads;
+    return withMachineMergeWorkers(withThreads, cpus().length, this.projectUsesHdd(job.projectId));
   }
   private limitFor(type: JobType, profile: ResourceProfile): number {
     if (type === 'download') return profile.downloadWorkers;
@@ -1170,7 +1201,11 @@ export class QueueManager {
       downloadLists: [...this.waitingLaneProjects.downloadLists],
       mergeWorkflows: [...this.waitingLaneProjects.mergeWorkflows],
       downloadListCap: effectiveConcurrentDownloadLists(this.settings.get().maxConcurrentDownloadLists, this.autoConcurrentDownloadLists()),
-      mergeWorkflowCap: Math.max(1, Math.min(4, this.settings.get().maxGlobalMergeJobs))
+      mergeWorkflowCap: effectiveMergeWorkflowCap(
+        this.settings.get().maxGlobalMergeJobs,
+        cpus().length,
+        this.anyMergeUsesHdd()
+      )
     };
   }
 
@@ -1638,7 +1673,11 @@ export class QueueManager {
       this.settings.get().maxConcurrentDownloadLists,
       this.autoConcurrentDownloadLists()
     );
-    const mergeWorkflowCap = Math.max(1, Math.min(4, this.settings.get().maxGlobalMergeJobs));
+    const mergeWorkflowCap = effectiveMergeWorkflowCap(
+      this.settings.get().maxGlobalMergeJobs,
+      cpus().length,
+      this.anyMergeUsesHdd()
+    );
     this.jobStartTimes = recentJobStarts(this.jobStartTimes, Date.now());
     let startsLeft = MAX_JOB_STARTS_PER_WINDOW - this.jobStartTimes.length;
     // Bảo đảm sống (người dùng duyệt 2026-11-05): còn video chờ mà không video nào giữ chỗ tải liên tục DOWNLOAD_LIVENESS_MS →
@@ -1711,7 +1750,11 @@ export class QueueManager {
         const listLimit = this.downloadListLimit(profile, listsWithWork);
         if (!independentDownloadProjectCanStart(activeOfProjectType, { downloadWorkers: listLimit })) continue;
       } else if (job.type === 'merge') {
-        const globalMergeLimit = Math.max(1, Math.min(4, this.settings.get().maxGlobalMergeJobs));
+        const globalMergeLimit = effectiveMergeWorkflowCap(
+          this.settings.get().maxGlobalMergeJobs,
+          cpus().length,
+          this.projectUsesHdd(job.projectId) || this.anyMergeUsesHdd()
+        );
         if (activeOfProjectType >= 1 || activeOfType >= globalMergeLimit) continue;
       } else if (activeOfType >= this.limitFor(job.type, profile)) continue;
       if (job.sourceId && this.sourceLocks.has(job.sourceId)) continue;

@@ -47,3 +47,80 @@ export function withMachineThreads<T extends ResourceProfile>(profile: T, logica
 export function effectiveFfmpegThreads(profile: ResourceProfile, logicalCpus: number): number {
   return withMachineThreads(profile, logicalCpus).ffmpegThreads;
 }
+
+/**
+ * 1.7.7 (V4): Kẹp số quy trình ghép chạy đồng thời theo sức máy và loại ổ đĩa:
+ * khi máy <= 4 luồng hoặc ổ tạm/xuất là HDD, luôn giữ tối đa 1 quy trình ghép để tránh cào chéo ổ và kẹt CPU.
+ */
+export function effectiveMergeWorkflowCap(
+  configuredMaxGlobalMergeJobs: number,
+  logicalCpus: number,
+  hasHdd = false
+): number {
+  const base = Math.max(1, Math.min(4, Math.trunc(configuredMaxGlobalMergeJobs || 1)));
+  if (hasHdd || (logicalCpus > 0 && logicalCpus <= 4)) return 1;
+  return base;
+}
+
+/**
+ * 1.7.7 (V4): Kẹp số worker chuẩn hoá/remux/phân tích/cắt theo máy yếu và loại ổ HDD.
+ */
+export function withMachineMergeWorkers<T extends ResourceProfile>(
+  profile: T,
+  logicalCpus: number,
+  hasHdd = false
+): T {
+  const lowCpu = logicalCpus > 0 && logicalCpus <= 4;
+  if (lowCpu || hasHdd) {
+    if (
+      profile.normalizeWorkers === 1 &&
+      profile.remuxWorkers === 1 &&
+      profile.analyzeWorkers === 1 &&
+      profile.clipWorkers === 1
+    ) {
+      return profile;
+    }
+    return {
+      ...profile,
+      normalizeWorkers: 1,
+      remuxWorkers: 1,
+      analyzeWorkers: 1,
+      clipWorkers: 1
+    };
+  }
+  if (logicalCpus > 4 && logicalCpus <= 8 && profile.analyzeWorkers > 2) {
+    return { ...profile, analyzeWorkers: 2 };
+  }
+  return profile;
+}
+
+/**
+ * 1.7.7 (V4): Bộ cờ giới hạn luồng chuẩn cho mọi lệnh FFmpeg chưa gắn hồ sơ tài nguyên trực tiếp
+ * (`FileVerifier`, `LocalCut`, `cut-suggestion`) hoặc lấy từ hồ sơ đã qua `withMachineThreads`.
+ */
+export function defaultFfmpegThreadArgs(
+  logicalCpus: number,
+  profile?: Partial<Pick<ResourceProfile, 'ffmpegThreads' | 'filterThreads' | 'filterComplexThreads'>>
+): string[] {
+  const cap = machineThreadCap(logicalCpus);
+  const threads =
+    typeof profile?.ffmpegThreads === 'number' && profile.ffmpegThreads > 0
+      ? profile.ffmpegThreads
+      : Math.min(6, cap);
+  const filterThreads =
+    typeof profile?.filterThreads === 'number' && profile.filterThreads > 0
+      ? profile.filterThreads
+      : Math.min(3, cap);
+  const filterComplexThreads =
+    typeof profile?.filterComplexThreads === 'number' && profile.filterComplexThreads > 0
+      ? profile.filterComplexThreads
+      : Math.min(3, cap);
+  return [
+    '-threads',
+    String(threads),
+    '-filter_threads',
+    String(filterThreads),
+    '-filter_complex_threads',
+    String(filterComplexThreads)
+  ];
+}

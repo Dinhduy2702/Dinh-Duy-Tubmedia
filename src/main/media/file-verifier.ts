@@ -1,7 +1,9 @@
 import { constants } from 'node:fs';
 import { access, stat } from 'node:fs/promises';
+import { cpus } from 'node:os';
 import { basename } from 'node:path';
-import type { VerificationLevel } from '@shared/types/domain.js';
+import type { ResourceProfile, VerificationLevel } from '@shared/types/domain.js';
+import { defaultFfmpegThreadArgs } from '@shared/utils/machine-threads.js';
 import { VerificationFailedError } from '@shared/errors/app-errors.js';
 import { parseVolumeDetect, type AudioLevel } from '@shared/utils/audio-presence.js';
 import { describeFfmpegDecodeFailure, type DecodeFailureStream } from '@shared/utils/ffmpeg-decode-failure.js';
@@ -49,6 +51,8 @@ export interface VerificationOptions {
   projectId?: string | null;
   signal?: AbortSignal;
   onProgress?: (percent: number) => void;
+  logicalCpus?: number;
+  resource?: Partial<Pick<ResourceProfile, 'ffmpegThreads' | 'filterThreads' | 'filterComplexThreads'>>;
 }
 
 function ffmpegProgressPercent(line: string, duration: number): number | null {
@@ -330,6 +334,7 @@ export class FileVerifier {
       jobId: `${verifyJobId}-decode-${label}`,
       tool: 'ffmpeg',
       executablePath: ffmpeg.executablePath,
+      priority: 'below_normal',
       args: [
         '-hide_banner',
         '-v',
@@ -340,6 +345,7 @@ export class FileVerifier {
         path,
         '-map',
         '0:v:0',
+        ...defaultFfmpegThreadArgs(options.logicalCpus ?? cpus().length, options.resource),
         '-frames:v',
         '1',
         '-f',
@@ -389,6 +395,7 @@ export class FileVerifier {
         '-ss', seekStart.toFixed(3), '-i', path, '-t', windowDuration.toFixed(3),
         '-map', '0:v:0', '-an',
         '-vf', 'blackdetect=d=0.08:pix_th=0.02,freezedetect=n=-60dB:d=1',
+        ...defaultFfmpegThreadArgs(options.logicalCpus ?? cpus().length, options.resource),
         '-f', 'null', '-'
       ],
       timeoutMs: Math.max(60_000, Math.min(10 * 60_000, windowDuration * 20_000)),
@@ -447,6 +454,7 @@ export class FileVerifier {
         '-hide_banner', '-nostdin', '-v', 'error', '-xerror', '-err_detect', 'explode',
         '-i', path,
         '-map', stream === 'audio' ? '0:a:0' : '0:v:0',
+        ...defaultFfmpegThreadArgs(options.logicalCpus ?? cpus().length, options.resource),
         '-f', 'null', '-'
       ],
       timeoutMs: 12 * 60 * 60 * 1000,
@@ -507,6 +515,7 @@ export class FileVerifier {
         ...(options.expectedStreams?.audio ? ['-map', '0:a:0'] : ['-an']),
         '-vf',
         'blackdetect=d=0.08:pix_th=0.02,freezedetect=n=-60dB:d=1',
+        ...defaultFfmpegThreadArgs(options.logicalCpus ?? cpus().length, options.resource),
         '-progress',
         'pipe:1',
         '-nostats',
@@ -706,6 +715,7 @@ export class FileVerifier {
             path,
             ...(expectedStreams.video ? ['-map', '0:v:0'] : []),
             ...(expectedStreams.audio ? ['-map', '0:a:0'] : []),
+            ...defaultFfmpegThreadArgs(options.logicalCpus ?? cpus().length, options.resource),
             '-progress',
             'pipe:1',
             '-nostats',
