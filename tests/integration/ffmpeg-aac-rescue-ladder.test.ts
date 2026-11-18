@@ -71,6 +71,13 @@ const RESOURCE_4_THREADS: ResourceProfile = {
   filterComplexThreads: 2
 };
 
+// Ngưỡng giả lập cho máy CI 4 nhân (GitHub Actions Windows + Defender):
+// Khởi tạo lạnh node.exe ESM + ghi tệp 16 KB + đóng pipe dưới tải 4 worker mất tối đa ~150–650 ms,
+// nên 1.500 ms chừa biên an toàn > 2,3× cho lượt cứu bình thường; ca treo giữ đứng im 5.000 ms (> 3,3× ngưỡng).
+const SIMULATED_STALL_TIMEOUT_MS = 1_500;
+const SIMULATED_HANG_HOLD_MS = 5_000;
+const INTEGRATION_CASE_TIMEOUT_MS = 60_000;
+
 describe('VIỆC 1 — Thang cứu Bậc 1 (-aac_coder fast) + Bậc 3 khi FFmpeg treo ở bộ mã hóa AAC', () => {
   it('ghép danh sách: lượt thường KHÔNG có -aac_coder bị treo → tự cứu đúng 1 lần bằng -aac_coder fast (giữ nguyên số luồng) → ghép về đích completed', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tubmedia-aac-rescue-merge-'));
@@ -95,13 +102,17 @@ const cAIdx = args.indexOf('-c:a');
 const isAacEncode = cAIdx >= 0 && args[cAIdx + 1] === 'aac';
 const hasFastCoder = cAIdx >= 0 && args[cAIdx + 2] === '-aac_coder' && args[cAIdx + 3] === 'fast';
 
-// Tái hiện đúng lỗi TT131: mã hóa AAC trên TT131 mà thiếu -aac_coder fast thì kẹt lặp out_time_ms=460940227
+// Tái hiện đúng lỗi TT131: mã hóa AAC trên TT131 mà thiếu -aac_coder fast thì kẹt lặp out_time_ms=460940227 (> 3× ngưỡng)
 if (inputPath.includes('TT131') && isAacEncode && !hasFastCoder) {
   if (outPath && !outPath.startsWith('-')) writeFileSync(outPath, 'partial-stalled');
   process.stdout.write('out_time_ms=460940227\\nprogress=continue\\n');
-  setInterval(() => {
+  const repeat = setInterval(() => {
     process.stdout.write('out_time_ms=460940227\\nspeed=0.00x\\nprogress=continue\\n');
-  }, 25);
+  }, 100);
+  setTimeout(() => {
+    clearInterval(repeat);
+    process.exit(0);
+  }, ${SIMULATED_HANG_HOLD_MS});
 } else {
   if (outPath && !outPath.startsWith('-')) writeFileSync(outPath, Buffer.alloc(16384, 9));
   process.stdout.write('out_time_ms=487480000\\nprogress=end\\n');
@@ -124,7 +135,7 @@ if (inputPath.includes('TT131') && isAacEncode && !hasFastCoder) {
         ...opts,
         executablePath: process.execPath,
         args: [fakeFfmpeg, ...opts.args],
-        stallTimeoutMs: 180
+        stallTimeoutMs: SIMULATED_STALL_TIMEOUT_MS
       });
     });
 
@@ -245,7 +256,7 @@ if (inputPath.includes('TT131') && isAacEncode && !hasFastCoder) {
       ...logger.warn.mock.calls.map((c) => String(c[2] ?? ''))
     ].join('\n');
     expect(allLogMessages.toLowerCase()).toContain('đã cứu bằng bộ mã hoá tiếng nhanh');
-  });
+  }, INTEGRATION_CASE_TIMEOUT_MS);
 
   it('cả 2 lượt (thường + cứu) đều treo → dừng ở Bậc 3 (tối đa 1 lần cứu, không lặp vô hạn), báo rõ tên video + thay video khác và giữ nguyên bản chuẩn hóa trước đó', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tubmedia-aac-rescue-both-hang-'));
@@ -268,7 +279,11 @@ const inPath = inIdx >= 0 ? args[inIdx + 1] : '';
 if (inPath.includes('TT131_HongNang')) {
   if (outPath && !outPath.startsWith('-')) writeFileSync(outPath, 'partial');
   process.stdout.write('out_time_ms=460940227\\nprogress=continue\\n');
-  setInterval(() => process.stdout.write('out_time_ms=460940227\\nprogress=continue\\n'), 25);
+  const repeat = setInterval(() => process.stdout.write('out_time_ms=460940227\\nprogress=continue\\n'), 100);
+  setTimeout(() => {
+    clearInterval(repeat);
+    process.exit(0);
+  }, ${SIMULATED_HANG_HOLD_MS});
 } else {
   if (outPath && !outPath.startsWith('-')) writeFileSync(outPath, 'ok-normalized');
   process.stdout.write('out_time_ms=120000000\\nprogress=end\\n');
@@ -291,7 +306,7 @@ if (inPath.includes('TT131_HongNang')) {
         ...opts,
         executablePath: process.execPath,
         args: [fakeAlwaysHang, ...opts.args],
-        stallTimeoutMs: 160
+        stallTimeoutMs: SIMULATED_STALL_TIMEOUT_MS
       });
     });
 
@@ -395,7 +410,7 @@ if (inPath.includes('TT131_HongNang')) {
     expect(existsSync(cached1)).toBe(true);
     const leftoverPending = (await readdir(cacheFolder)).filter((f) => f.includes('.pending'));
     expect(leftoverPending).toEqual([]);
-  });
+  }, INTEGRATION_CASE_TIMEOUT_MS);
 
   it('bước tạo bản dựng CapCut (makeCapCutCompatible): treo khi thiếu -aac_coder fast → tự cứu 1 lần thành công; treo cả 2 lượt → dừng sau đúng 2 lần gọi', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tubmedia-aac-rescue-capcut-'));
@@ -419,7 +434,11 @@ const hasFast = cAIdx >= 0 && args[cAIdx + 2] === '-aac_coder' && args[cAIdx + 3
 if (mode === 'always-hang' || !hasFast) {
   if (outPath && !outPath.startsWith('-')) writeFileSync(outPath, 'partial');
   process.stdout.write('out_time_ms=15000000\\nprogress=continue\\n');
-  setInterval(() => process.stdout.write('out_time_ms=15000000\\nprogress=continue\\n'), 25);
+  const repeat = setInterval(() => process.stdout.write('out_time_ms=15000000\\nprogress=continue\\n'), 100);
+  setTimeout(() => {
+    clearInterval(repeat);
+    process.exit(0);
+  }, ${SIMULATED_HANG_HOLD_MS});
 } else {
   if (outPath && !outPath.startsWith('-')) writeFileSync(outPath, Buffer.alloc(16384, 5));
   process.stdout.write('out_time_ms=60000000\\nprogress=end\\n');
@@ -442,7 +461,7 @@ if (mode === 'always-hang' || !hasFast) {
         ...opts,
         executablePath: process.execPath,
         args: [fakeCapCutFfmpeg, ...opts.args],
-        stallTimeoutMs: 160
+        stallTimeoutMs: SIMULATED_STALL_TIMEOUT_MS
       });
     });
 
@@ -540,7 +559,7 @@ if (mode === 'always-hang' || !hasFast) {
       )
     ).rejects.toBeInstanceOf(ProcessStalledError);
     expect(capcutCalls).toHaveLength(2);
-  });
+  }, INTEGRATION_CASE_TIMEOUT_MS);
 
   it('injectFastAacCoder chèn đúng sau -c:a aac và toàn bộ các điểm mã hóa AAC trong src/main đều được nối thang cứu', async () => {
     expect(injectFastAacCoder(['-c:v', 'libx264', '-c:a', 'aac', '-b:a', '256k'])).toEqual([

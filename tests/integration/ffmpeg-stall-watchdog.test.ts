@@ -130,6 +130,14 @@ const QUALITY_PROFILE: QualityProfile = {
   builtIn: true
 };
 
+// Ngưỡng giả lập cho máy CI 4 nhân (GitHub Actions Windows + Defender):
+// Khởi tạo lạnh node.exe ESM + ghi tệp tạm + đóng pipe dưới tải 4 worker mất tối đa ~150–650 ms,
+// nên 1.500 ms chừa biên an toàn > 2,3× cho luồng bình thường; ca treo giữ đứng im 5.000 ms (> 3,3× ngưỡng).
+const SIMULATED_STALL_TIMEOUT_MS = 1_500;
+const SIMULATED_HANG_HOLD_MS = 5_000;
+const SIMULATED_FINALIZE_STALL_TIMEOUT_MS = 6_000;
+const INTEGRATION_CASE_TIMEOUT_MS = 60_000;
+
 describe('V6 — Bộ canh tiến độ thật (out_time_ms / out_time) cho ffmpeg', () => {
   it('ffmpeg giả in out_time_ms lặp liên tục nhưng KHÔNG tăng → bị dừng ngay sau ngưỡng, xoá .pending dở và báo rõ tiếng Việt', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tubmedia-v6-stall-'));
@@ -150,9 +158,14 @@ if (outPath && !outPath.startsWith('-')) {
   writeFileSync(outPath, Buffer.alloc(8192, 7));
 }
 process.stdout.write('out_time_ms=460940227\\nprogress=continue\\n');
-setInterval(() => {
+const repeat = setInterval(() => {
   process.stdout.write('frame=13828\\nout_time_ms=460940227\\nspeed=0.00x\\nprogress=continue\\n');
-}, 30);
+}, 100);
+// Giữ đứng im > 3× ngưỡng (${SIMULATED_HANG_HOLD_MS} ms vs ${SIMULATED_STALL_TIMEOUT_MS} ms); nếu bộ canh tắt sẽ thoát 0 làm bài kiểm ĐỎ
+setTimeout(() => {
+  clearInterval(repeat);
+  process.exit(0);
+}, ${SIMULATED_HANG_HOLD_MS});
 `,
       'utf8'
     );
@@ -169,7 +182,7 @@ setInterval(() => {
         ...opts,
         executablePath: process.execPath,
         args: [fakeScript, ...opts.args],
-        stallTimeoutMs: 220
+        stallTimeoutMs: SIMULATED_STALL_TIMEOUT_MS
       })
     );
 
@@ -224,7 +237,7 @@ setInterval(() => {
     const elapsedMs = Date.now() - startedAt;
 
     expect(caught).toBeInstanceOf(ProcessStalledError);
-    expect(elapsedMs).toBeLessThan(5_000);
+    expect(elapsedMs).toBeLessThan(SIMULATED_HANG_HOLD_MS);
 
     const stalledError = caught as ProcessStalledError;
     expect(stalledError.code).toBe('PROCESS_STALLED');
@@ -238,11 +251,10 @@ setInterval(() => {
       sourcePath
     });
 
-    // Tiến trình con bị treo đã bị tắt sạch theo PID
+    // Tiến trình con bị treo đã bị tắt sạch theo PID (chờ theo điều kiện tiến trình thoát thay vì sleep cố định)
     const spawnedPid = Number((await readFile(pidRecordFile, 'utf8')).trim());
     expect(spawnedPid).toBeGreaterThan(0);
-    await new Promise((resolve) => setTimeout(resolve, 80));
-    expect(isProcessAlive(spawnedPid)).toBe(false);
+    await expect.poll(() => isProcessAlive(spawnedPid), { timeout: 3_000, interval: 25 }).toBe(false);
 
     // Tệp .pending.mp4 dở của lượt bị dừng đã được xoá sạch, không để rác trong _normalized-cache
     const remainingFiles = await readdir(cacheFolder);
@@ -255,7 +267,7 @@ setInterval(() => {
     expect(failureReasonLabel({ code: stalledError.code, jobType: 'merge', message: stalledError.message })).toContain(
       'Video nguồn #3'
     );
-  });
+  }, INTEGRATION_CASE_TIMEOUT_MS);
 
   it('ffmpeg giả chạy chậm (máy 2 luồng + HDD) nhưng out_time_ms tăng đều → KHÔNG bị dừng oan', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tubmedia-v6-slow-'));
@@ -265,14 +277,15 @@ setInterval(() => {
       slowScript,
       `
 let step = 0;
+process.stdout.write('out_time_ms=100000\\nprogress=continue\\n');
 const timer = setInterval(() => {
   step += 1;
-  process.stdout.write('out_time_ms=' + (step * 250000) + '\\nprogress=' + (step >= 5 ? 'end' : 'continue') + '\\n');
+  process.stdout.write('out_time_ms=' + ((step + 1) * 250000) + '\\nprogress=' + (step >= 5 ? 'end' : 'continue') + '\\n');
   if (step >= 5) {
     clearInterval(timer);
     process.exit(0);
   }
-}, 80);
+}, 450);
 `,
       'utf8'
     );
@@ -282,35 +295,44 @@ const timer = setInterval(() => {
     managedManagers.push(processes);
     vi.spyOn(processes, 'setPriority').mockResolvedValue();
 
-    // Tổng thời gian chạy ~420ms > stallTimeoutMs (200ms), nhưng mỗi 80ms out_time_ms đều tăng
+    // Tổng thời gian chạy ~2.250ms > stallTimeoutMs (1.500ms), nhưng mỗi 450ms out_time_ms đều tăng
     const result = await processes.run({
       jobId: 'job-slow-ok',
       tool: 'ffmpeg',
       executablePath: process.execPath,
       args: [slowScript],
-      timeoutMs: 10_000,
-      stallTimeoutMs: 200,
+      timeoutMs: 30_000,
+      stallTimeoutMs: SIMULATED_STALL_TIMEOUT_MS,
       progressValueOfStdoutLine: parseFfmpegOutTimeSeconds
     });
 
     expect(result.code).toBe(0);
-  });
+  }, INTEGRATION_CASE_TIMEOUT_MS);
 
   it('thời gian tác vụ đang Tạm dừng (suspended) và bước dồn moov (+faststart) không bị cắt oan', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tubmedia-v6-pause-faststart-'));
     tempDirs.push(root);
     const faststartScript = join(root, 'fake-faststart-ffmpeg.mjs');
+    const enterFinalizeFlag = join(root, 'enter-finalize.flag');
     await writeFile(
       faststartScript,
       `
+import { existsSync, watch } from 'node:fs';
 process.stdout.write('out_time_ms=10000000\\nprogress=continue\\n');
-setTimeout(() => {
+let startedFinalize = false;
+function beginFinalize() {
+  if (startedFinalize || !existsSync(${JSON.stringify(enterFinalizeFlag)})) return;
+  startedFinalize = true;
+  watcher.close();
   process.stderr.write('[mp4 @ 000001] Starting second pass: moving the moov atom to the beginning of the file\\n');
-}, 60);
-setTimeout(() => {
-  process.stdout.write('out_time_ms=10000000\\nprogress=end\\n');
-  process.exit(0);
-}, 340);
+  // Bước dồn moov im lặng 2.100ms (> stallTimeoutMs 1.500ms nhưng < finalizeStallTimeoutMs 6.000ms)
+  setTimeout(() => {
+    process.stdout.write('out_time_ms=10000000\\nprogress=end\\n');
+    process.exit(0);
+  }, 2_100);
+}
+const watcher = watch(${JSON.stringify(root)}, () => beginFinalize());
+beginFinalize();
 `,
       'utf8'
     );
@@ -325,10 +347,15 @@ setTimeout(() => {
       tool: 'ffmpeg',
       executablePath: process.execPath,
       args: [faststartScript],
-      timeoutMs: 10_000,
-      stallTimeoutMs: 160,
-      finalizeStallTimeoutMs: 800,
+      timeoutMs: 30_000,
+      stallTimeoutMs: SIMULATED_STALL_TIMEOUT_MS,
+      finalizeStallTimeoutMs: SIMULATED_FINALIZE_STALL_TIMEOUT_MS,
       progressValueOfStdoutLine: parseFfmpegOutTimeSeconds,
+      onStdoutLine: (line) => {
+        if (line.includes('out_time_ms=10000000')) {
+          void writeFile(enterFinalizeFlag, 'go', 'utf8');
+        }
+      },
       isFinalizeStderrLine: (line) => line.includes('Starting second pass')
     });
     expect(result.code).toBe(0);
@@ -339,15 +366,18 @@ setTimeout(() => {
     await writeFile(
       pausedScript,
       `
-import { existsSync } from 'node:fs';
+import { existsSync, watch } from 'node:fs';
 process.stdout.write('out_time_ms=5000000\\nprogress=continue\\n');
-const timer = setInterval(() => {
-  if (existsSync(${JSON.stringify(resumedFlag)})) {
-    clearInterval(timer);
-    process.stdout.write('out_time_ms=9000000\\nprogress=end\\n');
-    process.exit(0);
-  }
-}, 20);
+let finished = false;
+function finishIfResumed() {
+  if (finished || !existsSync(${JSON.stringify(resumedFlag)})) return;
+  finished = true;
+  watcher.close();
+  process.stdout.write('out_time_ms=9000000\\nprogress=end\\n');
+  process.exit(0);
+}
+const watcher = watch(${JSON.stringify(root)}, () => finishIfResumed());
+finishIfResumed();
 `,
       'utf8'
     );
@@ -364,8 +394,8 @@ const timer = setInterval(() => {
       tool: 'ffmpeg',
       executablePath: process.execPath,
       args: [pausedScript],
-      timeoutMs: 10_000,
-      stallTimeoutMs: 320,
+      timeoutMs: 30_000,
+      stallTimeoutMs: SIMULATED_STALL_TIMEOUT_MS,
       progressValueOfStdoutLine: parseFfmpegOutTimeSeconds,
       onStdoutLine: (line) => {
         if (line.includes('out_time_ms=5000000')) resolveFirstStdout();
@@ -373,12 +403,13 @@ const timer = setInterval(() => {
     });
     await firstStdoutReady;
     await processes.pauseByJob('job-paused-ok');
-    await new Promise((resolve) => setTimeout(resolve, 550));
+    // Giữ trạng thái Tạm dừng lâu hơn stallTimeoutMs (2.100ms > 1.500ms) để chứng minh đồng hồ canh không cộng thời gian đang tạm dừng
+    await new Promise((resolve) => setTimeout(resolve, 2_100));
     await processes.resumeByJob('job-paused-ok');
     await writeFile(resumedFlag, 'ok', 'utf8');
     const pausedResult = await runPaused;
     expect(pausedResult.code).toBe(0);
-  });
+  }, INTEGRATION_CASE_TIMEOUT_MS);
 
   it('ngưỡng mặc định đủ rộng cho máy 2 luồng + HDD (5 phút xử lý / 15 phút dồn faststart) và gắn đủ ở các bước dài', async () => {
     expect(FFMPEG_PROGRESS_STALL_TIMEOUT_MS).toBe(5 * 60 * 1000);
