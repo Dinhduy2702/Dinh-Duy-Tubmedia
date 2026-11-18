@@ -218,15 +218,21 @@ setTimeout(() => {
     // Bỏ qua gọi powershell setPriority trong bài kiểm tốc độ cao để đo đúng thời gian canh đứng im
     vi.spyOn(processes, 'setPriority').mockResolvedValue();
 
+    const perAttemptElapsedMs: number[] = [];
     const realRun = processes.run.bind(processes);
-    vi.spyOn(processes, 'run').mockImplementation((opts) =>
-      realRun({
-        ...opts,
-        executablePath: process.execPath,
-        args: [fakeScript, ...opts.args],
-        stallTimeoutMs: SIMULATED_STALL_TIMEOUT_MS
-      })
-    );
+    vi.spyOn(processes, 'run').mockImplementation(async (opts) => {
+      const attemptStartedAt = Date.now();
+      try {
+        return await realRun({
+          ...opts,
+          executablePath: process.execPath,
+          args: [fakeScript, ...opts.args],
+          stallTimeoutMs: SIMULATED_STALL_TIMEOUT_MS
+        });
+      } finally {
+        perAttemptElapsedMs.push(Date.now() - attemptStartedAt);
+      }
+    });
 
     const tools = {
       get: vi.fn(() => ({
@@ -279,7 +285,13 @@ setTimeout(() => {
     const elapsedMs = Date.now() - startedAt;
 
     expect(caught).toBeInstanceOf(ProcessStalledError);
-    expect(elapsedMs).toBeLessThan(SIMULATED_HANG_HOLD_MS);
+    // NormalizeEngine chạy tối đa 2 lượt (lượt thường + 1 lượt cứu -aac_coder fast); mỗi lượt đều phải dừng trước ngưỡng giữ 5.000ms
+    expect(perAttemptElapsedMs.length).toBeGreaterThanOrEqual(1);
+    expect(perAttemptElapsedMs.length).toBeLessThanOrEqual(2);
+    for (const attemptMs of perAttemptElapsedMs) {
+      expect(attemptMs).toBeLessThan(SIMULATED_HANG_HOLD_MS);
+    }
+    expect(elapsedMs).toBeLessThan(SIMULATED_HANG_HOLD_MS * perAttemptElapsedMs.length);
 
     const stalledError = caught as ProcessStalledError;
     expect(stalledError.code).toBe('PROCESS_STALLED');
