@@ -66,7 +66,7 @@ import {
   defaultLowPercentFor
 } from './system-load-governor.js';
 import { InvalidInputError, ProcessCancelledError, ProcessingFailedError, type AppError } from '@shared/errors/app-errors.js';
-import { editEncodeLimit } from '@shared/utils/capcut-encode.js';
+import { computeBackgroundEncodeCpuCapPercent, editEncodeLimit } from '@shared/utils/capcut-encode.js';
 import { buildCleanupProtection } from '../files/cleanup-protection.js';
 import { cleanupTemporaryArtifacts } from '../files/temporary-cleanup.js';
 import { sanitizeNullableSeconds, sanitizeProgress } from '@shared/utils/progress-policy.js';
@@ -318,6 +318,9 @@ export class QueueManager {
   private readonly encodeCpu = new EncodeCpuMonitor();
   private downloadStarvedSince: number | null = null;
   private lastBackgroundEncodeCpu = 0;
+  private smoothedOtherCpuPercent = 20;
+  private lastEncodeCapSyncAt = 0;
+  private lastAppliedEncodeCapPercent: number | null = null;
   private startupReadyResolve: (() => void) | null = null;
   private readonly startupReady = new Promise<void>((resolve) => {
     this.startupReadyResolve = resolve;
@@ -403,12 +406,16 @@ export class QueueManager {
     }
     this.encodesRunning += 1;
     this.encodeHolders.add(job.id);
+    this.updateBackgroundEncodeCpuCap(Date.now(), true);
     let released = false;
     return () => {
       if (released) return;
       released = true;
       this.encodesRunning = Math.max(0, this.encodesRunning - 1);
       this.encodeHolders.delete(job.id);
+      if (this.encodesRunning === 0) {
+        this.updateBackgroundEncodeCpuCap(Date.now(), true);
+      }
     };
   }
   /**
@@ -630,6 +637,10 @@ export class QueueManager {
     this.timer = null;
     this.cancelQueueChangedSend();
     this.diskBusy.stop();
+    this.encodeCpu.stop();
+    this.encodesRunning = 0;
+    this.encodeHolders.clear();
+    this.updateBackgroundEncodeCpuCap(Date.now(), true);
     if (this.tempSweepTimer) clearInterval(this.tempSweepTimer);
     this.tempSweepTimer = null;
     for (const active of this.active.values()) {
@@ -1408,6 +1419,31 @@ export class QueueManager {
    * 2026-11-05 (người dùng duyệt, sửa B): % CPU toàn máy của các ffmpeg mã hoá nền đang giữ lượt mã hoá (ưu tiên thấp, do chính
    * app chạy). Không có bản mã hoá → dừng đo, 0.
    */
+  private updateBackgroundEncodeCpuCap(now: number, force = false): void {
+    const setCap = (this.processes as Partial<Pick<ProcessManager, 'setBackgroundEncodeCpuCap'>>)
+      .setBackgroundEncodeCpuCap;
+    if (!setCap) return;
+    const logicalCpus = Math.max(1, cpus().length);
+    if (this.encodesRunning <= 0) {
+      if (this.lastAppliedEncodeCapPercent !== null) {
+        this.lastAppliedEncodeCapPercent = null;
+        this.lastEncodeCapSyncAt = now;
+        setCap.call(this.processes, null, logicalCpus);
+      }
+      return;
+    }
+    if (!force && this.lastAppliedEncodeCapPercent !== null && now - this.lastEncodeCapSyncAt < 2_000) {
+      return;
+    }
+    const nextCap = computeBackgroundEncodeCpuCapPercent(logicalCpus, this.smoothedOtherCpuPercent);
+    if (!force && this.lastAppliedEncodeCapPercent !== null && Math.abs(nextCap - this.lastAppliedEncodeCapPercent) < 2) {
+      return;
+    }
+    this.lastAppliedEncodeCapPercent = nextCap;
+    this.lastEncodeCapSyncAt = now;
+    setCap.call(this.processes, nextCap, logicalCpus);
+  }
+
   private backgroundEncodeCpuPercent(): number {
     if (!this.encodeHolders.size) {
       this.encodeCpu.stop();
@@ -1532,6 +1568,13 @@ export class QueueManager {
     // Sửa B: việc tải chỉ xét phần CPU KHÔNG phải của bản mã hoá nền (vẫn chặn nếu phần còn lại cao).
     this.lastBackgroundEncodeCpu = Math.min(cpuPercent, Math.max(0, this.backgroundEncodeCpuPercent()));
     const downloadCpuPercent = cpuPercent - this.lastBackgroundEncodeCpu;
+    const estimatedEncodeCpu =
+      this.encodesRunning > 0 && this.lastBackgroundEncodeCpu === 0 && this.lastAppliedEncodeCapPercent !== null
+        ? Math.min(cpuPercent, this.lastAppliedEncodeCapPercent)
+        : this.lastBackgroundEncodeCpu;
+    const rawOtherCpu = Math.max(0, cpuPercent - estimatedEncodeCpu);
+    this.smoothedOtherCpuPercent = this.smoothedOtherCpuPercent * 0.65 + rawOtherCpu * 0.35;
+    this.updateBackgroundEncodeCpuCap(Date.now());
     // VẤN ĐỀ 2 mục 1 (2026-09-22): lấy mẫu bộ điều tiết CHO MỌI HỒ SƠ đang có tác vụ hoạt động, MỖI LƯỢT
     // tick — không chỉ khi có tác vụ đang CHỜ được xét (resourcesAllow). Nếu chỉ lấy mẫu lúc xét tác vụ
     // chờ, một hàng đợi có tác vụ chờ luôn bị chặn bởi giới hạn SỐ WORKER (không phải CPU) sẽ không bao

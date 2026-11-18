@@ -22,6 +22,23 @@ export function editEncodeLimit(logicalCpus: number, threadsPerEncode: number): 
   return Math.max(1, Math.floor((Math.max(0, logicalCpus) * 0.5) / coresPerEncode));
 }
 
+/**
+ * 1.7.7 (việc A): Trần cứng CPU động có sàn (Windows Job Object HARD_CAP) cho nhóm mã hoá CapCut nền:
+ * - Máy >= 4 luồng: giữ tổng CPU toàn máy < 60% khi vừa tải vừa mã hoá (~56% - tải khác, sàn 43% để thời gian <= 2x, trần 48%).
+ * - Máy <= 2 luồng (Q1b đã duyệt): thời gian mã hoá <= 2x (sàn 45%), chấp nhận tổng CPU 65-70% (~68% - tải khác, trần 50%).
+ */
+export function computeBackgroundEncodeCpuCapPercent(logicalCpus: number, otherCpuPercent: number): number {
+  const safeCpus = Math.max(1, Math.trunc(logicalCpus));
+  const other = Number.isFinite(otherCpuPercent) ? Math.max(0, Math.min(100, otherCpuPercent)) : 0;
+  if (safeCpus <= 2) {
+    return Math.max(45, Math.min(50, Math.round(68 - other)));
+  }
+  if (safeCpus <= 4) {
+    return Math.max(43, Math.min(48, Math.round(56 - other)));
+  }
+  return Math.max(25, Math.min(50, Math.round(55 - other)));
+}
+
 /** Kích thước sau thu nhỏ — đúng như `scale=w='min(iw,W)':h='min(ih,H)':force_original_aspect_ratio=decrease:force_divisible_by=2`. */
 export function capCutScaledSize(
   width: number,

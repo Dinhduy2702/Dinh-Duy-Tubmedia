@@ -766,6 +766,7 @@ export class DownloadEngine {
           executablePath: ffmpeg.executablePath,
           args,
           priority: backgroundEncodePriority(resource.processPriority),
+          cpuCapGroup: 'background-encode',
           signal,
           timeoutMs: 48 * 60 * 60 * 1000,
           stallTimeoutMs: FFMPEG_PROGRESS_STALL_TIMEOUT_MS,

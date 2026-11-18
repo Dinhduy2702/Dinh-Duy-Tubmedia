@@ -300,10 +300,13 @@ while ($true) {
 `;
 }
 
-function unrefStream(stream: unknown): void {
-  if (typeof stream === 'object' && stream !== null && 'unref' in stream) {
-    const fn = (stream as { unref?: () => void }).unref;
-    if (typeof fn === 'function') fn.call(stream);
+function setStreamRef(stream: unknown, ref: boolean): void {
+  if (typeof stream === 'object' && stream !== null) {
+    const key = ref ? 'ref' : 'unref';
+    if (key in stream) {
+      const fn = (stream as Record<string, unknown>)[key];
+      if (typeof fn === 'function') (fn as () => void).call(stream);
+    }
   }
 }
 
@@ -345,10 +348,12 @@ export class WindowsJobHost {
         if (settled) return;
         settled = true;
         clearTimeout(startupTimer);
+        if (this.pendingAcks.length === 0) {
+          setStreamRef(this.child?.stdout, false);
+        }
         resolve();
       };
       const startupTimer = setTimeout(finish, 4_000);
-      startupTimer.unref?.();
 
       try {
         const encoded = Buffer.from(buildJobHostPowerShellScript(process.pid), 'utf16le').toString('base64');
@@ -363,8 +368,7 @@ export class WindowsJobHost {
         );
         this.child = child;
         child.unref();
-        unrefStream(child.stdin);
-        unrefStream(child.stdout);
+        setStreamRef(child.stdin, false);
 
         child.stdin?.on('error', () => undefined);
         if (child.stdout) {
@@ -419,6 +423,9 @@ export class WindowsJobHost {
         if (done) return;
         done = true;
         clearTimeout(ackTimer);
+        if (this.pendingAcks.length === 0) {
+          setStreamRef(this.child?.stdout, false);
+        }
         resolve();
       };
       const ackTimer = setTimeout(() => {
@@ -426,9 +433,9 @@ export class WindowsJobHost {
         if (idx >= 0) this.pendingAcks.splice(idx, 1);
         complete();
       }, 1_500);
-      ackTimer.unref?.();
 
       this.pendingAcks.push(complete);
+      setStreamRef(this.child?.stdout, true);
       const tag = group === 'background-encode' ? 'ENCODE' : 'DEFAULT';
       try {
         stdin.write(`ASSIGN ${pid} ${tag}\n`);
