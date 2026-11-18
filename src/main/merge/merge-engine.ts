@@ -2288,11 +2288,17 @@ export class MergeEngine {
       );
     }
 
-    const checked = await this.verifier.verify(pending, 'standard', info.duration, {
-      jobId,
-      signal,
-      expectedStreams: { video: true, audio: info.audioCodec !== null }
-    });
+    let checked: Awaited<ReturnType<FileVerifier['verify']>>;
+    try {
+      checked = await this.verifier.verify(pending, 'standard', info.duration, {
+        jobId,
+        signal,
+        expectedStreams: { video: true, audio: info.audioCodec !== null }
+      });
+    } catch (error) {
+      await rm(pending, { force: true }).catch(() => undefined);
+      throw error;
+    }
     if (!checked.ok) {
       await rm(pending, { force: true }).catch(() => undefined);
       throw new MergeFailedError(`Thành phẩm sau khi đổi tỉ lệ không đạt kiểm tra: ${checked.reasons.join('; ')}`);

@@ -463,11 +463,17 @@ export class DownloadEngine {
       return input;
     }
 
-    const checked = await this.verifier.verify(pending, 'fast', undefined, {
-      jobId: job.id,
-      projectId: job.projectId,
-      signal
-    });
+    let checked: Awaited<ReturnType<FileVerifier['verify']>>;
+    try {
+      checked = await this.verifier.verify(pending, 'fast', undefined, {
+        jobId: job.id,
+        projectId: job.projectId,
+        signal
+      });
+    } catch (error) {
+      await rm(pending, { force: true }).catch(() => undefined);
+      throw error;
+    }
     if (!checked.ok) {
       await rm(pending, { force: true });
       if (appSettings.downloadContainerPreference === 'mp4' && !alreadyMp4) {
@@ -840,11 +846,17 @@ export class DownloadEngine {
       );
     }
 
-    const checked = await this.verifier.verify(pending, 'fast', undefined, {
-      jobId: job.id,
-      projectId: job.projectId,
-      signal
-    });
+    let checked: Awaited<ReturnType<FileVerifier['verify']>>;
+    try {
+      checked = await this.verifier.verify(pending, 'fast', undefined, {
+        jobId: job.id,
+        projectId: job.projectId,
+        signal
+      });
+    } catch (error) {
+      await rm(pending, { force: true }).catch(() => undefined);
+      throw error;
+    }
     if (!checked.ok) {
       await rm(pending, { force: true });
       throw new DownloadFailedError(

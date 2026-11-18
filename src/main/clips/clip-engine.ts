@@ -147,7 +147,13 @@ export class ClipEngine {
       try { await this.quarantine.move(pending, result.stderrTail || 'Tạo đoạn video thất bại.', { jobId: job.id, projectId: job.projectId }); } catch { /* pending chưa tồn tại */ }
       throw new ProcessingFailedError(result.stderrTail || 'Tạo đoạn video thất bại.');
     }
-    const check = await this.verifier.verify(pending, 'standard', expected > 0 ? expected : undefined, { jobId: job.id, projectId: job.projectId, signal, expectedStreams: { video: true, audio: item.audioMode !== 'mute' } });
+    let check: Awaited<ReturnType<FileVerifier['verify']>>;
+    try {
+      check = await this.verifier.verify(pending, 'standard', expected > 0 ? expected : undefined, { jobId: job.id, projectId: job.projectId, signal, expectedStreams: { video: true, audio: item.audioMode !== 'mute' } });
+    } catch (error) {
+      await rm(pending, { force: true }).catch(() => undefined);
+      throw error;
+    }
     if (!check.ok) {
       const quarantined = await this.quarantine.move(pending, check.reasons.join('; '), { jobId: job.id, projectId: job.projectId });
       throw new ProcessingFailedError(`Đoạn video bị lỗi và đã chuyển vào khu cách ly: ${quarantined}`);

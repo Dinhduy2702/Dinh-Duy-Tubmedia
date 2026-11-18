@@ -239,12 +239,21 @@ export class NormalizeEngine {
     // gói hỏng của nguồn đi thẳng sang; ở bước chuẩn hóa timestamp, tệp remux thay chỗ nguồn nên nguồn cũng không qua bước
     // "kiểm tra toàn bộ nguồn stream-copy" của MergeEngine — trước đây tiếng hỏng lọt tới tận hậu kiểm thành phẩm.
     const level = options.sourceDecodeVerified ? 'standard' : 'deep';
-    const check = await this.verifier.verify(pending, level, source.duration, {
-      jobId: job.id,
-      projectId: job.projectId,
-      signal,
-      expectedStreams: { video: true, audio: source.audioCodec !== null }
-    });
+    let check: Awaited<ReturnType<FileVerifier['verify']>>;
+    try {
+      check = await this.verifier.verify(pending, level, source.duration, {
+        jobId: job.id,
+        projectId: job.projectId,
+        signal,
+        expectedStreams: { video: true, audio: source.audioCodec !== null }
+      });
+    } catch (error) {
+      await rm(pending, { force: true }).catch(() => undefined);
+      if (signal.aborted && signal.reason instanceof Error && signal.reason.name !== 'AbortError') {
+        throw signal.reason;
+      }
+      throw error;
+    }
     if (signal.aborted) {
       // Tạm dừng/hủy giữa lúc kiểm: tệp chưa bị chứng minh là hỏng → không cách ly, chỉ bỏ tệp tạm.
       await rm(pending, { force: true }).catch(() => undefined);
@@ -588,12 +597,18 @@ export class NormalizeEngine {
       );
     }
 
-    const check = await this.verifier.verify(pending, 'standard', source.duration, {
-      jobId: job.id,
-      projectId: job.projectId,
-      signal,
-      expectedStreams: { video: true, audio: target.audioCodec !== null }
-    });
+    let check: Awaited<ReturnType<FileVerifier['verify']>>;
+    try {
+      check = await this.verifier.verify(pending, 'standard', source.duration, {
+        jobId: job.id,
+        projectId: job.projectId,
+        signal,
+        expectedStreams: { video: true, audio: target.audioCodec !== null }
+      });
+    } catch (error) {
+      await rm(pending, { force: true }).catch(() => undefined);
+      throw error;
+    }
     if (!check.ok) {
       const quarantined = await this.quarantine.move(
         pending,
