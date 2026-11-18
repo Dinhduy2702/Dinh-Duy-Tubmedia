@@ -4,12 +4,17 @@ import { cpus } from 'node:os';
 import { basename } from 'node:path';
 import type { ResourceProfile, VerificationLevel } from '@shared/types/domain.js';
 import { defaultFfmpegThreadArgs } from '@shared/utils/machine-threads.js';
-import { VerificationFailedError } from '@shared/errors/app-errors.js';
+import {
+  ProcessCancelledError,
+  ProcessStalledError,
+  VerificationFailedError
+} from '@shared/errors/app-errors.js';
 import { parseVolumeDetect, type AudioLevel } from '@shared/utils/audio-presence.js';
 import { describeFfmpegDecodeFailure, type DecodeFailureStream } from '@shared/utils/ffmpeg-decode-failure.js';
 import {
   buildFfmpegStallMessage,
   FFMPEG_PROGRESS_STALL_TIMEOUT_MS,
+  FfmpegProgressTracker,
   parseFfmpegOutTimeSeconds
 } from '@shared/utils/ffmpeg-progress.js';
 import type { MediaAnalyzer } from './media-analyzer.js';
@@ -51,6 +56,13 @@ export interface VerificationOptions {
   projectId?: string | null;
   signal?: AbortSignal;
   onProgress?: (percent: number) => void;
+  onDetailedProgress?: (snapshot: {
+    percent: number;
+    speed: string | null;
+    speedRatio: number | null;
+    etaSeconds: number | null;
+    processedSeconds: number;
+  }) => void;
   logicalCpus?: number;
   resource?: Partial<Pick<ResourceProfile, 'ffmpegThreads' | 'filterThreads' | 'filterComplexThreads'>>;
 }
@@ -699,6 +711,11 @@ export class FileVerifier {
           throw new VerificationFailedError('Thiếu FFmpeg cho Deep verification.');
         }
         options.onProgress?.(0);
+        const tracker = new FfmpegProgressTracker(info.duration);
+        let sawDecodedOutTime = false;
+        let lastDecodedSeconds = 0;
+        let lastSpeedText: string | null = null;
+        let lastSpeedRatio: number | null = null;
         const result = await this.processes.run({
           jobId: verifyJobId,
           ...(options.projectId ? { projectId: options.projectId } : {}),
@@ -737,12 +754,52 @@ export class FileVerifier {
           priority: 'below_normal',
           ...(options.signal ? { signal: options.signal } : {}),
           onStdoutLine: (line) => {
+            const outSeconds = parseFfmpegOutTimeSeconds(line);
+            if (outSeconds !== null) {
+              sawDecodedOutTime = true;
+              lastDecodedSeconds = Math.max(lastDecodedSeconds, outSeconds);
+            }
+            if (line.startsWith('speed=')) {
+              const rawSpeed = line.slice('speed='.length).trim();
+              const ratio = Number(rawSpeed.replace(/x$/i, ''));
+              if (Number.isFinite(ratio) && ratio > 0) {
+                lastSpeedRatio = ratio;
+                lastSpeedText = `${ratio >= 10 ? ratio.toFixed(1) : ratio.toFixed(2)}x`;
+              }
+            }
+            const snapshot = tracker.update(line);
             const percent = ffmpegProgressPercent(line, info.duration);
             if (percent !== null) options.onProgress?.(percent);
+            if (snapshot && options.onDetailedProgress) {
+              options.onDetailedProgress({
+                percent: snapshot.percent,
+                speed: snapshot.speed ?? lastSpeedText,
+                speedRatio: snapshot.speedRatio ?? lastSpeedRatio,
+                etaSeconds: snapshot.etaSeconds,
+                processedSeconds: snapshot.processedSeconds
+              });
+            } else if (line === 'progress=continue' && sawDecodedOutTime && options.onDetailedProgress) {
+              const remaining = Math.max(0, info.duration - lastDecodedSeconds);
+              const pct = info.duration > 0 ? Math.max(0, Math.min(100, (lastDecodedSeconds / info.duration) * 100)) : 0;
+              options.onDetailedProgress({
+                percent: pct,
+                speed: lastSpeedText,
+                speedRatio: lastSpeedRatio,
+                etaSeconds: lastSpeedRatio && lastSpeedRatio > 0 ? Math.ceil(remaining / lastSpeedRatio) : null,
+                processedSeconds: lastDecodedSeconds
+              });
+            }
           }
         });
         if (result.code !== 0 || result.stderrTail.trim()) {
           reasons.push(result.stderrTail || 'Deep verification thất bại.');
+        } else if (sawDecodedOutTime && info.duration >= 3) {
+          const decodedTolerance = Math.max(2.5, info.duration * 0.05);
+          if (Math.abs(lastDecodedSeconds - info.duration) > decodedTolerance) {
+            reasons.push(
+              `Thời lượng giải mã thực tế (${lastDecodedSeconds.toFixed(2)}s) lệch thời lượng header (${info.duration.toFixed(2)}s) vượt mức cho phép (${decodedTolerance.toFixed(2)}s).`
+            );
+          }
         }
         options.onProgress?.(100);
       }
@@ -755,6 +812,13 @@ export class FileVerifier {
         duration: info.duration
       };
     } catch (error) {
+      if (
+        error instanceof ProcessCancelledError ||
+        error instanceof ProcessStalledError ||
+        options.signal?.aborted
+      ) {
+        throw error;
+      }
       return {
         ok: false,
         path,

@@ -1112,9 +1112,12 @@ export class QueueManager {
 
   private warnMergeAudioIssues(job: QueueJob, projectId: string, issues: readonly MergeAudioIssue[]): void {
     const listed = issues.map((entry) => `vị trí ${entry.position} "${entry.title}" (${audioIssueLabel(entry.issue).toLowerCase()})`).join(', ');
-    const message =
-      `Thành phẩm sẽ có ${issues.length} đoạn không có tiếng vì nguồn không có tiếng: ${listed}. ` +
-      'Tubmedia vẫn ghép bình thường và chèn im lặng ở các đoạn này; nếu cần tiếng, hãy thay link khác cho các video trên.';
+    const timelineOnly = job.input.timelineOnly === true;
+    const message = timelineOnly
+      ? `Danh sách tạo Timeline có ${issues.length} video nguồn không có tiếng: ${listed}. ` +
+        'Tubmedia vẫn tính mốc Timeline bình thường; nếu sau này cần ghép video có tiếng, hãy thay link khác cho các video trên.'
+      : `Thành phẩm sẽ có ${issues.length} đoạn không có tiếng vì nguồn không có tiếng: ${listed}. ` +
+        'Tubmedia vẫn ghép bình thường và chèn im lặng ở các đoạn này; nếu cần tiếng, hãy thay link khác cho các video trên.';
     this.logger.warn('merge', 'MERGE_SOURCE_AUDIO_ISSUES', message, {
       jobId: job.id,
       projectId,
@@ -1904,6 +1907,7 @@ export class QueueManager {
         this.encodingJobs.delete(job.id);
         this.progressUpdates.delete(job.id);
         this.downloadSpeeds.delete(job.id);
+        void (this.processes as Partial<Pick<ProcessManager, 'killByJob'>>).killByJob?.(job.id)?.catch(() => undefined);
         // 2026-10-24: video tải xong / lỗi hẳn / bị huỷ → xoá tệp tạm của riêng video đó (tạm dừng / chờ thử lại thì giữ).
         if (job.type === 'download') void this.cleanupVideoDownloadTemp(job.id);
         if (sourceLock) this.sourceLocks.delete(sourceLock);
@@ -3180,7 +3184,7 @@ export class QueueManager {
     const allItems = this.items.list(project.id).filter((x) => x.enabled && x.validity !== 'invalid');
     const timelineOnly = job.input.timelineOnly === true;
     if (await this.requeueMissingMergeSources(job, project.id, allItems, timelineOnly)) return 'requeued';
-    const audioIssues = timelineOnly ? [] : this.mergeAudioIssues(project.id, allItems);
+    const audioIssues = this.mergeAudioIssues(project.id, allItems);
     this.repo.updateInput(job.id, { mergeAudioIssues: audioIssues });
     if (audioIssues.length > 0) this.warnMergeAudioIssues(job, project.id, audioIssues);
     const inputs = allItems.map((item) => {

@@ -172,13 +172,33 @@ function mapOf<T>(factory: (slot: MergeLaneId) => T): MergeMap<T> {
 const MERGE_LANE_NAME_MAX_LENGTH = 160;
 const MERGE_FINAL_FILE_NAME_MAX_LENGTH = 220;
 
+const TIMELINE_ONLY_SESSION_PREFIX = 'tubmedia.merge.timelineOnly.';
+
 function loadTimelineOnlyMode(slot: MergeLaneId): boolean {
-  try { return window.localStorage.getItem('tubmedia.merge.timelineOnly.' + slot) === '1'; }
-  catch { return false; }
+  try {
+    window.localStorage.removeItem(TIMELINE_ONLY_SESSION_PREFIX + slot);
+    return window.sessionStorage.getItem(TIMELINE_ONLY_SESSION_PREFIX + slot) === '1';
+  } catch {
+    return false;
+  }
 }
 function saveTimelineOnlyMode(slot: MergeLaneId, enabled: boolean): void {
-  try { window.localStorage.setItem('tubmedia.merge.timelineOnly.' + slot, enabled ? '1' : '0'); }
-  catch { /* renderer storage is best-effort */ }
+  try {
+    window.localStorage.removeItem(TIMELINE_ONLY_SESSION_PREFIX + slot);
+    if (enabled) window.sessionStorage.setItem(TIMELINE_ONLY_SESSION_PREFIX + slot, '1');
+    else window.sessionStorage.removeItem(TIMELINE_ONLY_SESSION_PREFIX + slot);
+  } catch {
+    /* renderer storage is best-effort */
+  }
+}
+function hasTimelineCutOrMuteItems(linksText: string): boolean {
+  if (!linksText.trim()) return false;
+  return parseInputText(linksText).some(
+    (line) =>
+      line.timestampStartSeconds !== null ||
+      line.timestampEndSeconds !== null ||
+      line.audioMode === 'mute'
+  );
 }
 function childFolder(base: string, name: string): string {
   return base ? `${base.replace(/[\\/]+$/, '')}\\${name}` : '';
@@ -836,7 +856,9 @@ export function DownloadMergePage(): React.JSX.Element {
               finalFileName: current.project.finalFileName,
               qualityProfileId: current.project.qualityProfileId,
               resourceProfileId: current.project.resourceProfileId,
-              timelineOnly: current.jobs.some((job) => job.type === 'merge' && job.input.timelineOnly === true) || loadTimelineOnlyMode(slot),
+              timelineOnly: current.jobs.some((job) => job.type === 'merge')
+                ? current.jobs.some((job) => job.type === 'merge' && job.input.timelineOnly === true)
+                : loadTimelineOnlyMode(slot),
               exportTimelineTxt: false,
               aspectRatio: current.project.aspectRatio
             };
@@ -1124,6 +1146,7 @@ export function DownloadMergePage(): React.JSX.Element {
     try {
       const previousProjectId = states[slot]?.project?.id;
       const next = await window.desktop.workbench.remove(slot);
+      saveTimelineOnlyMode(slot, false);
       setStates((current) => ({ ...current, [slot]: next }));
       setForms((current) => ({ ...current, [slot]: emptyMerge(slot, settings, qualities, resources) }));
       if (previousProjectId) clearProjectLogs(previousProjectId);
@@ -1556,6 +1579,10 @@ function MergeLaneCard({
     }
   };
 
+  const timelineTrimOrMuteNotice = useMemo(
+    () => (form.timelineOnly ? hasTimelineCutOrMuteItems(form.linksText) : false),
+    [form.linksText, form.timelineOnly]
+  );
   const hasCompletedMerge = jobs.some((job) => job.type === 'merge' && ['completed', 'skipped'].includes(job.status));
   const primary = state === 'running'
     ? { label: 'Tạm dừng quy trình', icon: Pause, action: () => onControl('pause') }
@@ -1750,7 +1777,18 @@ function MergeLaneCard({
         </div>
         <label className={`merge-timeline-only-option ${form.timelineOnly ? 'is-active' : ''}`}>
           <input type="checkbox" checked={form.timelineOnly} disabled={locked} onChange={(event: ChangeEvent<HTMLInputElement>) => { saveTimelineOnlyMode(slot, event.target.checked); update((current) => ({ ...current, timelineOnly: event.target.checked })); }}/>
-          <span><b>Chỉ tạo timeline (không ghép video)</b><small><em>Không tạo MP4.</em><InfoHint text="Tubmedia tải khi cần hoặc dùng lại video sẵn có, kiểm tra giải mã từng tệp từ đầu đến cuối, rồi tính mốc chính xác. Bạn tự chọn nơi lưu khi bấm Xuất TXT." /></small></span>
+          <span>
+            <b>Chỉ tạo timeline (không ghép video)</b>
+            <small>
+              <em>Không tạo MP4.</em>
+              <InfoHint text="Tubmedia tải khi cần hoặc dùng lại video sẵn có, kiểm tra giải mã từng tệp từ đầu đến cuối, rồi tính mốc chính xác. Bạn tự chọn nơi lưu khi bấm Xuất TXT." />
+            </small>
+            {timelineTrimOrMuteNotice && (
+              <small className="merge-timeline-trim-note">
+                Lưu ý mốc cắt / tắt tiếng: Chế độ Chỉ tạo Timeline tính theo thời lượng nguồn và khoảng cắt yêu cầu (không cắt tệp thật hay tắt tiếng); nếu ghép video thật sau này, điểm cắt có thể chênh nhẹ khoảng 0,1–0,5 giây.
+              </small>
+            )}
+          </span>
         </label>
         <InfoDisclosure
           className="merge-quality-disclosure"
@@ -1864,6 +1902,15 @@ function MergeLaneCard({
             />
           </div>
         </details>
+        {form.timelineOnly && (
+          <div className="merge-timeline-only-banner" role="status">
+            <AlertTriangle size={16} />
+            <div>
+              <strong>Đang bật chế độ Chỉ tạo Timeline — lượt chạy này KHÔNG xuất video MP4.</strong>
+              <span>Tubmedia chỉ kiểm tra toàn bộ video nguồn và tự lưu tệp .timeline.txt vào thư mục thành phẩm.</span>
+            </div>
+          </div>
+        )}
         <div className="lane-primary-actions">
           <button
             className={`btn btn-primary workflow-primary ${state === 'running' ? 'is-running' : ''}`}

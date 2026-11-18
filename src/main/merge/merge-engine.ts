@@ -226,20 +226,43 @@ async function sampledFileFingerprint(filePath: string, fileSize: number): Promi
 async function mapLimit<T, R>(
   values: readonly T[],
   concurrency: number,
-  worker: (value: T, index: number) => Promise<R>
+  worker: (value: T, index: number, batchSignal: AbortSignal) => Promise<R>,
+  parentSignal?: AbortSignal
 ): Promise<R[]> {
   const result = new Array<R>(values.length);
   let nextIndex = 0;
-  const runners = Array.from({ length: Math.max(1, Math.min(concurrency, values.length)) }, async () => {
-    while (true) {
-      const index = nextIndex;
-      nextIndex += 1;
-      if (index >= values.length) return;
-      result[index] = await worker(values[index]!, index);
-    }
-  });
-  await Promise.all(runners);
-  return result;
+  const controller = new AbortController();
+  const onParentAbort = (): void => controller.abort(parentSignal?.reason);
+  if (parentSignal) {
+    if (parentSignal.aborted) controller.abort(parentSignal.reason);
+    else parentSignal.addEventListener('abort', onParentAbort, { once: true });
+  }
+  let firstError: unknown;
+  let hasError = false;
+  try {
+    const runners = Array.from({ length: Math.max(1, Math.min(concurrency, values.length)) }, async () => {
+      while (!controller.signal.aborted) {
+        const index = nextIndex;
+        nextIndex += 1;
+        if (index >= values.length) return;
+        try {
+          result[index] = await worker(values[index]!, index, controller.signal);
+        } catch (error) {
+          if (!hasError) {
+            hasError = true;
+            firstError = error;
+            controller.abort(error);
+          }
+          return;
+        }
+      }
+    });
+    await Promise.all(runners);
+    if (hasError) throw firstError;
+    return result;
+  } finally {
+    parentSignal?.removeEventListener('abort', onParentAbort);
+  }
 }
 
 /* TUBMEDIA TIMELINE ONLY ENGINE HOTFIX12 */
@@ -798,13 +821,15 @@ export class MergeEngine {
       stage: string,
       currentItem = 0,
       totalSeconds = 0,
-      processedSeconds = 0
+      processedSeconds = 0,
+      speed: string | null = null,
+      etaSeconds: number | null = null
     ): void => {
       onProgress({
         percent: sanitizeProgress(percent),
         stage,
-        speed: null,
-        etaSeconds: null,
+        speed,
+        etaSeconds: sanitizeNullableSeconds(etaSeconds),
         elapsedSeconds: sanitizeNonNegativeNumber(Math.floor((Date.now() - startedAt) / 1000)),
         processedSeconds,
         totalSeconds,
@@ -816,78 +841,112 @@ export class MergeEngine {
     emit(2, 'Đang kiểm tra danh sách video nguồn; không ghép và không tạo MP4');
     let analyzed = 0;
     const analyzeConcurrency = Math.max(1, Math.min(resource.analyzeWorkers, inputs.length));
-    const infos = await mapLimit(inputs, analyzeConcurrency, async (input, index) => {
-      if (signal.aborted) throw new MergeFailedError('Đã hủy tạo timeline.');
-      let info: MediaInfo;
-      try {
-        info = await this.analyzer.analyze(input.path, job.id + '-timeline-analyze-' + (index + 1));
-      } catch (error) {
-        throw new MergeFailedError(
-          'Không đọc được video nguồn #' +
-            (index + 1) +
-            ' – ' +
-            input.label +
-            ': ' +
-            (error instanceof Error ? error.message : String(error)),
-          { phase: 'timeline-source-analysis', sourceIndex: index + 1, sourcePath: input.path }
+    const infos = await mapLimit(
+      inputs,
+      analyzeConcurrency,
+      async (input, index, batchSignal) => {
+        if (batchSignal.aborted) throw new MergeFailedError('Đã hủy tạo timeline.');
+        let info: MediaInfo;
+        try {
+          info = await this.analyzer.analyze(input.path, job.id + '-timeline-analyze-' + (index + 1));
+        } catch (error) {
+          throw new MergeFailedError(
+            'Không đọc được video nguồn #' +
+              (index + 1) +
+              ' – ' +
+              input.label +
+              ': ' +
+              (error instanceof Error ? error.message : String(error)),
+            { phase: 'timeline-source-analysis', sourceIndex: index + 1, sourcePath: input.path }
+          );
+        }
+        analyzed += 1;
+        emit(
+          5 + (analyzed / inputs.length) * 15,
+          `Đã đọc thông tin nguồn ${analyzed}/${inputs.length}`,
+          analyzed
         );
-      }
-      analyzed += 1;
-      emit(
-        5 + (analyzed / inputs.length) * 15,
-        `Đã đọc thông tin nguồn ${analyzed}/${inputs.length}`,
-        analyzed
-      );
-      return info;
-    });
+        return info;
+      },
+      signal
+    );
     const totalSourceSeconds = infos.reduce((sum, info) => sum + info.duration, 0);
     const verificationProgress = inputs.map(() => 0);
+    const workerSpeedRatios = inputs.map<number | null>(() => null);
     let verified = 0;
     const verificationConcurrency = Math.max(1, Math.min(resource.normalizeWorkers, 2, inputs.length));
     emit(20, `Kiểm tra giải mã toàn bộ ${inputs.length} video nguồn`, 0, totalSourceSeconds);
-    await mapLimit(inputs, verificationConcurrency, async (input, index) => {
-      if (signal.aborted) throw new MergeFailedError('Đã hủy tạo timeline.');
-      const info = infos[index]!;
-      const checked = await this.verifier.verify(input.path, 'deep', info.duration, {
-        jobId: job.id + '-timeline-source-' + (index + 1),
-        projectId: job.projectId,
-        signal,
-        expectedStreams: { video: true, audio: info.audioCodec !== null },
-        onProgress: (percent) => {
+    await mapLimit(
+      inputs,
+      verificationConcurrency,
+      async (input, index, batchSignal) => {
+        if (batchSignal.aborted) throw new MergeFailedError('Đã hủy tạo timeline.');
+        const info = infos[index]!;
+        let latestSpeedLabel: string | null = null;
+        const emitSourceProgress = (percent: number): void => {
           verificationProgress[index] = Math.max(verificationProgress[index] ?? 0, sanitizeProgress(percent));
           const aggregate = verificationProgress.reduce((sum, value) => sum + value, 0) / inputs.length;
+          const processed = (aggregate / 100) * totalSourceSeconds;
+          const remainingSeconds = Math.max(0, totalSourceSeconds - processed);
+          const combinedRatio = workerSpeedRatios.reduce<number>(
+            (sum, ratio) => (ratio && ratio > 0 ? sum + ratio : sum),
+            0
+          );
+          const eta =
+            combinedRatio > 0 && remainingSeconds > 0 ? Math.ceil(remainingSeconds / combinedRatio) : null;
+          const speedLabel =
+            combinedRatio > 0
+              ? latestSpeedLabel ?? `${combinedRatio >= 10 ? combinedRatio.toFixed(1) : combinedRatio.toFixed(2)}x`
+              : latestSpeedLabel;
           emit(
             20 + aggregate * 0.75,
             `Đang kiểm tra video nguồn ${index + 1}/${inputs.length} · ${Math.round(percent)}%`,
             Math.min(inputs.length, verified + 1),
             totalSourceSeconds,
-            (aggregate / 100) * totalSourceSeconds
+            processed,
+            speedLabel,
+            eta
+          );
+        };
+        const checked = await this.verifier.verify(input.path, 'deep', info.duration, {
+          jobId: job.id + '-timeline-source-' + (index + 1),
+          projectId: job.projectId,
+          signal: batchSignal,
+          resource,
+          expectedStreams: { video: true, audio: info.audioCodec !== null },
+          onProgress: (percent) => emitSourceProgress(percent),
+          onDetailedProgress: (detail) => {
+            if (detail.speed) latestSpeedLabel = detail.speed;
+            if (detail.speedRatio && detail.speedRatio > 0) workerSpeedRatios[index] = detail.speedRatio;
+            emitSourceProgress(detail.percent);
+          }
+        });
+        workerSpeedRatios[index] = null;
+        if (!checked.ok) {
+          throw new MergeFailedError(
+            'Video nguồn #' +
+              (index + 1) +
+              ' – ' +
+              input.label +
+              ' không đạt kiểm tra giải mã toàn bộ để tạo timeline: ' +
+              (checked.reasons.join('; ') || 'không xác định được nguyên nhân'),
+            { phase: 'timeline-source-deep-verification', sourceIndex: index + 1, sourcePath: input.path }
           );
         }
-      });
-      if (!checked.ok) {
-        throw new MergeFailedError(
-          'Video nguồn #' +
-            (index + 1) +
-            ' – ' +
-            input.label +
-            ' không đạt kiểm tra giải mã toàn bộ để tạo timeline: ' +
-            (checked.reasons.join('; ') || 'không xác định được nguyên nhân'),
-          { phase: 'timeline-source-deep-verification', sourceIndex: index + 1, sourcePath: input.path }
+        verificationProgress[index] = 100;
+        verified += 1;
+        const aggregate = verificationProgress.reduce((sum, value) => sum + value, 0) / inputs.length;
+        emit(
+          20 + aggregate * 0.75,
+          `Đã kiểm tra video nguồn ${verified}/${inputs.length}`,
+          verified,
+          totalSourceSeconds,
+          (aggregate / 100) * totalSourceSeconds
         );
-      }
-      verificationProgress[index] = 100;
-      verified += 1;
-      const aggregate = verificationProgress.reduce((sum, value) => sum + value, 0) / inputs.length;
-      emit(
-        20 + aggregate * 0.75,
-        `Đã kiểm tra video nguồn ${verified}/${inputs.length}`,
-        verified,
-        totalSourceSeconds,
-        (aggregate / 100) * totalSourceSeconds
-      );
-      return true;
-    });
+        return true;
+      },
+      signal
+    );
     emit(
       97,
       'Đang tính mốc timeline từ các nguồn đã xác minh',

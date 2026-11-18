@@ -771,6 +771,7 @@ tests/unit/temporary-cleanup.test.ts
 tests/unit/theme-label.test.ts
 tests/unit/timeline-copy-all-ui.test.ts
 tests/unit/timeline-merge-recovery-hotfix12.test.ts
+tests/unit/timeline-only-polish-t3-t7.test.ts
 tests/unit/timeline-service-safety.test.ts
 tests/unit/timeline.test.ts
 tests/unit/timestamp.test.ts

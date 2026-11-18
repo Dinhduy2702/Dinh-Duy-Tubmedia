@@ -554,17 +554,22 @@ export class ProcessManager {
       child.once('close', () => resolve());
     });
   }
+  private matchesJobFamily(candidateJobId: string, jobId: string): boolean {
+    return candidateJobId === jobId || candidateJobId.startsWith(`${jobId}-`);
+  }
   public async pauseByJob(jobId: string): Promise<number> {
     let paused = 0;
     for (const [id, process] of this.active) {
-      if (process.jobId !== jobId) continue;
+      if (!this.matchesJobFamily(process.jobId, jobId)) continue;
       await this.pause(id);
       paused += 1;
     }
     return paused;
   }
   public async resumeByJob(jobId: string): Promise<void> {
-    for (const [id, p] of this.active) if (p.jobId === jobId) await this.resume(id);
+    for (const [id, p] of this.active) {
+      if (this.matchesJobFamily(p.jobId, jobId)) await this.resume(id);
+    }
   }
   private async pause(id: string): Promise<void> {
     await this.setSuspended(id, true);
@@ -592,7 +597,9 @@ export class ProcessManager {
     } else m.process.kill('SIGKILL');
   }
   public async killByJob(jobId: string): Promise<void> {
-    for (const [id, p] of this.active) if (p.jobId === jobId) await this.kill(id);
+    for (const [id, p] of this.active) {
+      if (this.matchesJobFamily(p.jobId, jobId)) await this.kill(id);
+    }
   }
   public async shutdown(): Promise<void> {
     // allSettled: một tiến trình không kill được không được làm bỏ sót các tiến trình còn lại.
