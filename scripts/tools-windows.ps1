@@ -221,7 +221,9 @@ function Import-ExistingFfmpegSuite {
         $Ffprobe = Join-Path $Folder 'ffprobe.exe'
         $Ffplay = Join-Path $Folder 'ffplay.exe'
         if (-not (Test-Path -LiteralPath $Ffprobe -PathType Leaf)) { continue }
-        if (-not (Invoke-ToolProbe $Ffmpeg @('-version')).Ok) { continue }
+        $FfmpegCandidateProbe = Invoke-ToolProbe $Ffmpeg @('-version')
+        if (-not $FfmpegCandidateProbe.Ok) { continue }
+        if ($FfmpegCandidateProbe.Version -match 'version\s+N-') { continue }
         if (-not (Invoke-ToolProbe $Ffprobe @('-version')).Ok) { continue }
 
         Write-Host ('Reuse trusted existing FFmpeg suite: ' + $Folder) -ForegroundColor DarkGreen
@@ -284,7 +286,7 @@ function Update-FfmpegSuite {
     $Zip = Join-Path $TempDir 'ffmpeg.zip'
     $Extracted = Join-Path $TempDir 'ffmpeg-extracted'
     try {
-        Download-File 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip' $Zip
+        Download-File 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-8.1.zip' $Zip
         Expand-Archive -LiteralPath $Zip -DestinationPath $Extracted -Force
         Clear-InternetMarksInTree $Extracted
 
@@ -358,7 +360,7 @@ function Run-Main {
     # A runnable ffmpeg from PATH/WinGet is not enough because electron-builder
     # only packages files that actually exist in the project tool directory.
     $NeedYt = $Mode -eq 'update' -or -not (($BundledBefore | Where-Object Name -eq 'yt-dlp').Ok)
-    $NeedFfmpeg = $Mode -eq 'update' -or -not (($BundledBefore | Where-Object Name -eq 'ffmpeg').Ok) -or -not (($BundledBefore | Where-Object Name -eq 'ffprobe').Ok) -or ((-not $RequiredOnly) -and -not (($BundledBefore | Where-Object Name -eq 'ffplay').Ok))
+    $NeedFfmpeg = $Mode -eq 'update' -or -not (($BundledBefore | Where-Object Name -eq 'ffmpeg').Ok) -or ((($BundledBefore | Where-Object Name -eq 'ffmpeg').Version) -match 'version\s+N-') -or -not (($BundledBefore | Where-Object Name -eq 'ffprobe').Ok) -or ((-not $RequiredOnly) -and -not (($BundledBefore | Where-Object Name -eq 'ffplay').Ok))
     $NeedAria = (-not $RequiredOnly) -and ($Mode -eq 'update' -or -not (($BundledBefore | Where-Object Name -eq 'aria2c').Ok))
 
     if ($NeedYt) { Write-Title 'UPDATE YT-DLP'; Update-YtDlp }

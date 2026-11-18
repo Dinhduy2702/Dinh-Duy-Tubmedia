@@ -639,6 +639,7 @@ tests/unit/failure-reason-coverage.test.ts
 tests/unit/failure-reason-notice.test.ts
 tests/unit/ffmpeg-decode-failure.test.ts
 tests/unit/ffmpeg-progress.test.ts
+tests/unit/ffmpeg-stable-release-v16.test.ts
 tests/unit/file-verifier-audio-only.test.ts
 tests/unit/filename.test.ts
 tests/unit/fix10-timestamp-error-detail.test.ts

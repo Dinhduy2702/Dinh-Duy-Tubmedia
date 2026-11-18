@@ -64,6 +64,24 @@ const CHECKSUM_FILE_NAMES: Partial<Record<ToolPackage, string>> = {
   'yt-dlp': 'SHA2-256SUMS',
   'ffmpeg-suite': 'checksums.sha256'
 };
+// 1.7.7 V16: ghim nhánh phát hành ổn định chính thức (tuyệt đối không dùng nhánh dựng thử hàng đêm ffmpeg-master-latest).
+const FFMPEG_STABLE_WIN64_GPL_ZIP = 'ffmpeg-n8.1-latest-win64-gpl-8.1.zip';
+const FFMPEG_STABLE_RELEASE_ZIP_PATTERN = /^ffmpeg-n(\d+\.\d+)-latest-win64-gpl-\1\.zip$/i;
+
+function selectStableFfmpegWin64Asset(assets: readonly GitHubAsset[]): GitHubAsset | undefined {
+  const pinned = assets.find((item) => item.name === FFMPEG_STABLE_WIN64_GPL_ZIP);
+  if (pinned) return pinned;
+  const stableCandidates = assets
+    .map((asset) => {
+      const m = FFMPEG_STABLE_RELEASE_ZIP_PATTERN.exec(asset.name);
+      if (!m?.[1]) return null;
+      const [maj = 0, min = 0] = m[1].split('.').map(Number);
+      return { asset, score: maj * 1_000 + min };
+    })
+    .filter((entry): entry is { asset: GitHubAsset; score: number } => entry !== null)
+    .sort((a, b) => b.score - a.score);
+  return stableCandidates[0]?.asset;
+}
 const CHECKSUM_REQUEST_TIMEOUT_MS = 30_000;
 const RELEASE_REQUEST_TIMEOUT_MS = 45_000;
 const TOOL_DOWNLOAD_TIMEOUT_MS = 20 * 60_000;
@@ -384,11 +402,8 @@ export class ToolUpdateService {
 
     if (packageName === 'ffmpeg-suite') {
       const release = await this.githubLatest('BtbN/FFmpeg-Builds');
-      const asset = this.selectAsset(
-        release,
-        (item) => item.name === 'ffmpeg-master-latest-win64-gpl.zip',
-        'FFmpeg/ffprobe/ffplay'
-      );
+      const preferred = selectStableFfmpegWin64Asset(release.assets);
+      const asset = preferred ?? this.selectAsset(release, () => false, 'FFmpeg/ffprobe/ffplay (bản ổn định)');
       return {
         packageName,
         release,
@@ -439,9 +454,8 @@ export class ToolUpdateService {
     }
     if (packageName === 'ffmpeg-suite') {
       const asset: GitHubAsset = {
-        name: 'ffmpeg-master-latest-win64-gpl.zip',
-        browser_download_url:
-          'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip',
+        name: FFMPEG_STABLE_WIN64_GPL_ZIP,
+        browser_download_url: `https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/${FFMPEG_STABLE_WIN64_GPL_ZIP}`,
         size: 0
       };
       return {

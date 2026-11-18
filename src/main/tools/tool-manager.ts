@@ -289,12 +289,21 @@ export class ToolManager {
     return unique;
   }
 
-  /** Trình cập nhật ghi mục "ffmpeg-suite" vào metadata sau khi cài xong bộ ffmpeg (tool-update-service). */
+  /**
+   * Trình cập nhật ghi mục "ffmpeg-suite" vào metadata sau khi cài xong bộ ffmpeg (tool-update-service).
+   * 1.7.7 V16: nếu metadata trong userData\tools\current là bản nightly "ffmpeg-master-*" cũ (cài từ thời <= 1.7.6),
+   * không xếp nó trước bản ổn định đi kèm bộ cài 1.7.7 để tự loại bỏ lỗi treo bộ mã hoá AAC của nhánh master.
+   */
   private async managedFfmpegSuiteInstalledByUpdater(): Promise<boolean> {
     try {
       const raw = await readFile(join(this.userDataPath, 'tools', 'current', MANAGED_TOOL_METADATA_FILE), 'utf8');
-      const parsed = JSON.parse(raw) as { packages?: Record<string, unknown> } | null;
-      return Boolean(parsed?.packages && typeof parsed.packages === 'object' && parsed.packages['ffmpeg-suite']);
+      const parsed = JSON.parse(raw) as { packages?: Record<string, { sourceUrl?: unknown; version?: unknown }> } | null;
+      const entry = parsed?.packages && typeof parsed.packages === 'object' ? parsed.packages['ffmpeg-suite'] : undefined;
+      if (!entry || typeof entry !== 'object') return false;
+      const sourceUrl = typeof entry.sourceUrl === 'string' ? entry.sourceUrl.toLowerCase() : '';
+      const version = typeof entry.version === 'string' ? entry.version.trim() : '';
+      if (sourceUrl.includes('ffmpeg-master-') || /^n-d+/i.test(version)) return false;
+      return true;
     } catch {
       return false;
     }

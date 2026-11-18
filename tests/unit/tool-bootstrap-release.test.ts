@@ -46,7 +46,8 @@ describe('required tool bootstrap', () => {
   it('uses direct official fallbacks and download retries', async () => {
     const updater = await readProjectFile('src/main/updates/tool-update-service.ts');
     expect(updater).toContain('releases/latest/download/yt-dlp.exe');
-    expect(updater).toContain('releases/download/latest/ffmpeg-master-latest-win64-gpl.zip');
+    expect(updater).toContain('ffmpeg-n8.1-latest-win64-gpl-8.1.zip');
+    expect(updater).not.toContain('ffmpeg-master-latest-win64-gpl.zip');
     expect(updater).toContain('attempt <= 3');
     expect(updater).toContain('TOOL_DOWNLOAD_RETRY');
   });

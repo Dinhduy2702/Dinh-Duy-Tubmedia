@@ -260,10 +260,8 @@ check(
 check(
   'tool updater falls back to official direct downloads',
   has('src/main/updates/tool-update-service.ts', 'TOOL_RELEASE_API_DIRECT_FALLBACK') &&
-    has(
-      'src/main/updates/tool-update-service.ts',
-      'releases/download/latest/ffmpeg-master-latest-win64-gpl.zip'
-    )
+    has('src/main/updates/tool-update-service.ts', 'ffmpeg-n8.1-latest-win64-gpl-8.1.zip') &&
+    !has('src/main/updates/tool-update-service.ts', 'ffmpeg-master-latest-win64-gpl.zip')
 );
 check(
   'tool downloads retry before giving up',
