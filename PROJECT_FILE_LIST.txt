@@ -536,6 +536,7 @@ tests/integration/cookie-rotated-notice.test.ts
 tests/integration/database.test.ts
 tests/integration/download-bot-check.test.ts
 tests/integration/download-existing-file-reuse.test.ts
+tests/integration/download-native-source-quality-v17.test.ts
 tests/integration/download-pacing-args.test.ts
 tests/integration/download-path-too-long.test.ts
 tests/integration/download-repaste-existing.test.ts

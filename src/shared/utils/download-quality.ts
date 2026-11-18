@@ -50,6 +50,58 @@ export interface SelectedDownloadSizeValidation {
 export interface DownloadQualityValidationOptions {
   enforceCompatibility?: boolean;
   allowCapCutPreparation?: boolean;
+  platform?: string | null | undefined;
+  extractorKey?: string | null | undefined;
+}
+
+const FORMAT_SELECTABLE_PLATFORMS: ReadonlySet<string> = new Set([
+  'youtube',
+  'tiktok',
+  'instagram',
+  'facebook',
+  'x-twitter',
+  'vimeo',
+  'reddit',
+  'dailymotion',
+  'twitch',
+  'soundcloud'
+]);
+
+/**
+ * V17 (1.7.6): Google Drive và liên kết tệp trực tiếp (extractor generic / tên miền ngoài danh sách nền tảng)
+ * chỉ cung cấp đúng 1 tệp gốc, không cho yt-dlp chọn độ phân giải hay FPS thấp hơn.
+ */
+export function sourceAllowsFormatSelection(
+  platform?: string | null,
+  extractorKey?: string | null
+): boolean {
+  if (
+    platform === 'google-drive' ||
+    extractorKey === 'google-drive' ||
+    extractorKey === 'googledrive' ||
+    extractorKey === 'generic'
+  ) {
+    return false;
+  }
+  if (platform && !FORMAT_SELECTABLE_PLATFORMS.has(platform)) {
+    return false;
+  }
+  return true;
+}
+
+function nonSelectableSourceLabel(
+  platform?: string | null,
+  extractorKey?: string | null
+): { prep: 'trên' | 'từ'; name: string } {
+  if (
+    platform === 'google-drive' ||
+    extractorKey === 'google-drive' ||
+    extractorKey === 'googledrive' ||
+    (platform && platform.includes('google.com'))
+  ) {
+    return { prep: 'trên', name: 'Google Drive' };
+  }
+  return { prep: 'từ', name: 'liên kết trực tiếp' };
 }
 
 export interface EffectiveDownloadBounds {
@@ -239,9 +291,10 @@ export function isUnboundedHighestSourceDownload(settings: AppSettings): boolean
 export function formatSelectorForWorkflow(
   settings: AppSettings,
   workflow: DownloadWorkflow,
-  platform: string | null = null
+  platform: string | null = null,
+  extractorKey: string | null = null
 ): string | null {
-  if (platform === 'google-drive') {
+  if (platform === 'google-drive' || !sourceAllowsFormatSelection(platform, extractorKey)) {
     return GOOGLE_DRIVE_ORIGINAL_FORMAT_SELECTOR;
   }
   if (workflow === 'download-merge') {
@@ -259,9 +312,10 @@ export function formatSelectorForWorkflow(
 export function formatSortForWorkflow(
   settings: AppSettings,
   workflow: DownloadWorkflow,
-  platform: string | null = null
+  platform: string | null = null,
+  extractorKey: string | null = null
 ): string | null {
-  if (platform === 'google-drive') return null;
+  if (platform === 'google-drive' || !sourceAllowsFormatSelection(platform, extractorKey)) return null;
   if (workflow === 'download-merge') {
     return MERGE_SOURCE_FORMAT_SORT;
   }
@@ -480,12 +534,27 @@ export function validateDownloadedQuality(
   const enforceCompatibility = options.enforceCompatibility ?? true;
   const allowCapCutPreparation = options.allowCapCutPreparation ?? false;
   const capCutMode = isCapCutDownloadMode(settings.downloadCompatibilityMode);
+  const nativeOnlySource = !sourceAllowsFormatSelection(options.platform, options.extractorKey);
 
   if (bounds.maxHeight > 0 && info.height > bounds.maxHeight + 2 && !(capCutMode && allowCapCutPreparation)) {
-    blockingReasons.push(`Chiều cao ${info.height}px vượt mức tối đa ${bounds.maxHeight}px.`);
+    if (!capCutMode && nativeOnlySource) {
+      const src = nonSelectableSourceLabel(options.platform, options.extractorKey);
+      warnings.push(
+        `Video gốc ${src.prep} ${src.name} là ${info.height}p, cao hơn mức tối đa ${bounds.maxHeight}p của danh sách; Tubmedia giữ nguyên tệp gốc vì ${src.name} không cho chọn chất lượng.`
+      );
+    } else {
+      blockingReasons.push(`Chiều cao ${info.height}px vượt mức tối đa ${bounds.maxHeight}px.`);
+    }
   }
   if (bounds.maxFps > 0 && info.fps > bounds.maxFps + 0.5 && !(capCutMode && allowCapCutPreparation)) {
-    blockingReasons.push(`FPS ${info.fps.toFixed(2)} vượt mức tối đa ${bounds.maxFps}.`);
+    if (!capCutMode && nativeOnlySource) {
+      const src = nonSelectableSourceLabel(options.platform, options.extractorKey);
+      warnings.push(
+        `Video gốc ${src.prep} ${src.name} có ${Number(info.fps.toFixed(2))} FPS, cao hơn mức tối đa ${bounds.maxFps} FPS của danh sách; Tubmedia giữ nguyên tệp gốc vì ${src.name} không cho chọn chất lượng.`
+      );
+    } else {
+      blockingReasons.push(`FPS ${info.fps.toFixed(2)} vượt mức tối đa ${bounds.maxFps}.`);
+    }
   }
   if (bounds.minHeight > 0 && info.height < bounds.minHeight) {
     belowMinimum.push(`độ phân giải ${info.height}p thấp hơn ${bounds.minHeight}p`);

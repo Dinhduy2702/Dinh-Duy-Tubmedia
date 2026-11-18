@@ -1225,7 +1225,9 @@ export class DownloadEngine {
         const cachedInfo = await this.analyzer.analyze(cachedPath, job.id);
         const cachedQuality = validateDownloadedQuality(appSettings, cachedInfo, {
           enforceCompatibility: false,
-          allowCapCutPreparation: true
+          allowCapCutPreparation: true,
+          platform: source.platform,
+          extractorKey: source.extractorKey
         });
         if (cachedQuality.ok) {
           for (const warning of cachedQuality.warnings) {
@@ -1268,7 +1270,10 @@ export class DownloadEngine {
             await this.verifyFinal(job, readyPath, verificationLevel, signal, onProgress);
           }
           const finalInfo = await this.analyzer.analyze(readyPath, job.id);
-          const finalQuality = validateDownloadedQuality(appSettings, finalInfo);
+          const finalQuality = validateDownloadedQuality(appSettings, finalInfo, {
+            platform: source.platform,
+            extractorKey: source.extractorKey
+          });
           if (!finalQuality.ok) {
             throw new DownloadFailedError(finalQuality.blockingReasons.join('; '), false, { failureSubtype: 'quality_unmet' });
           }
@@ -1303,11 +1308,13 @@ export class DownloadEngine {
             }
           );
           const cachedAudio = await this.assessAudio(job, project.id, readyPath, finalInfo, signal);
+          const cachedNativeNote = finalQuality.warnings.find((w) => w.includes('không cho chọn chất lượng'));
           return {
             outputPath: readyPath,
             skipped: true,
             resultMessage:
               `Đã tải trước đó – đã kiểm tra hợp lệ và bỏ qua tải lại: ${readyPath}` +
+              (cachedNativeNote ? ` Lưu ý: ${cachedNativeNote}` : '') +
               (cachedAudio.audioIssue ? ` Lưu ý: ${audioIssueNote(cachedAudio.audioIssue)}` : ''),
             ...cachedAudio
           };
@@ -1543,7 +1550,7 @@ export class DownloadEngine {
       '--print',
       'after_move:__VDMSP_FORMAT__:%(format_id)s|%(height)s|%(fps)s|%(tbr)s|%(filesize)s|%(filesize_approx)s|%(vcodec)s|%(acodec)s|%(requested_formats.0.filesize)s|%(requested_formats.0.filesize_approx)s|%(requested_formats.1.filesize)s|%(requested_formats.1.filesize_approx)s|%(duration)s'
     ];
-    const requestedFormat = formatSelectorForWorkflow(appSettings, workflow, source.platform);
+    const requestedFormat = formatSelectorForWorkflow(appSettings, workflow, source.platform, source.extractorKey);
     if (requestedFormat) {
       args.splice(args.indexOf('--merge-output-format'), 0, '-f', requestedFormat);
     } else if (source.platform === 'google-drive') {
@@ -1558,7 +1565,7 @@ export class DownloadEngine {
         }
       );
     }
-    const forcedFormatSort = formatSortForWorkflow(appSettings, workflow, source.platform);
+    const forcedFormatSort = formatSortForWorkflow(appSettings, workflow, source.platform, source.extractorKey);
     if (forcedFormatSort) {
       args.push('--format-sort-force', '--format-sort', forcedFormatSort);
     }
@@ -2093,7 +2100,10 @@ export class DownloadEngine {
         }
       );
     }
-    const quality = validateDownloadedQuality(appSettings, info);
+    const quality = validateDownloadedQuality(appSettings, info, {
+      platform: source.platform,
+      extractorKey: source.extractorKey
+    });
     if (!quality.ok) {
       const quarantined = await this.quarantine.move(
         finalPath,
@@ -2205,13 +2215,15 @@ export class DownloadEngine {
       appSettings.downloadMinHeight > 0 &&
       info.height < appSettings.downloadMinHeight;
     const audio = await this.assessAudio(job, project.id, finalPath, info, signal);
-    const resultMessage = capCutReady
+    const nativeUpperNote = quality.warnings.find((w) => w.includes('không cho chọn chất lượng'));
+    const baseResultMessage = capCutReady
         ? `Đã giữ nguyên video master chất lượng cao và tạo riêng bản edit mượt cho CapCut: ${finalPath}`
         : workflow === 'download-merge'
           ? `Đã tải nguồn tốt nhất mà ${source.platform || 'nền tảng'} cung cấp để ghép, chưa mã hóa giảm chất lượng: ${finalPath}`
           : acceptedMinimumFallback
             ? `Đã tải thành công ${info.height}p — thấp hơn mức mong muốn ${appSettings.downloadMinHeight}p nhưng là fallback được danh sách cho phép: ${finalPath}`
             : `Đã tải và kiểm tra hoàn tất: ${finalPath}`;
+    const resultMessage = nativeUpperNote ? `${baseResultMessage} Lưu ý: ${nativeUpperNote}` : baseResultMessage;
     return {
       outputPath: finalPath,
       skipped: false,
