@@ -2,12 +2,17 @@ import { malformedYouTubeVideoUrlMessage } from '@shared/utils/youtube-url-valid
 import { formatDiskShortfall } from '@shared/utils/disk-shortfall-format.js';
 import { requiredFreeDiskBytesForDownload } from '@shared/utils/disk-space-policy.js';
 import { app, shell } from 'electron';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { access, mkdir, readFile, readdir, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import { constants as fsConstants, existsSync } from 'node:fs';
 import { cpus, totalmem } from 'node:os';
-import { basename, dirname, extname, join } from 'node:path';
+import { basename, dirname, extname, join, resolve } from 'node:path';
+import { driveLetterOf } from '@shared/utils/adaptive-download.js';
+import type { DiskKind } from '@shared/utils/disk-load.js';
 import { effectiveConcurrentFragments } from '@shared/utils/hardware-recommendation.js';
+import { formatAutoResumeEta, rateLimitPlatformLabel } from '@shared/utils/rate-limit-backoff.js';
+import { detectPlatform } from '@shared/utils/url.js';
+import type { PlatformRateLimitGate } from '../queue/platform-rate-limit-gate.js';
 import {
   formatQuickDownloadTime,
   validateQuickDownloadRequest,
@@ -71,6 +76,50 @@ const TERMINAL_PHASES = new Set<QuickDownloadStatus['phase']>([
 
 /** Thư mục tạm Tải nhanh không được ghi thêm gì chừng này mới coi là mồ côi (xem sweepOrphanTemp). */
 export const QUICK_TEMP_ORPHAN_AFTER_MS = 60 * 60 * 1_000;
+/** V7 (1.7.7): thư mục resume-<hash> giữ .part khi lỗi mạng tạm thời / tắt app để tải nối tiếp, dọn sau 7 ngày. */
+export const QUICK_RESUME_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
+const QUICK_RESUME_RECEIPT_FILE = '.tubmedia-qd-resume.json';
+
+function quickResumeKey(request: ValidatedQuickDownloadRequest): string {
+  const payload = JSON.stringify([
+    request.url.trim(),
+    resolve(request.outputDirectory).toLowerCase(),
+    request.mediaMode,
+    request.quality,
+    request.mode,
+    request.startSeconds,
+    request.endSeconds,
+    request.accurateCut
+  ]);
+  return createHash('sha256').update(payload, 'utf8').digest('hex').slice(0, 12);
+}
+
+function detectQuickPlatform(url: string): string | null {
+  try {
+    return detectPlatform(url).platform;
+  } catch {
+    return null;
+  }
+}
+
+async function cancellableSleep(ms: number, signal: AbortSignal): Promise<void> {
+  if (ms <= 0) return;
+  await new Promise<void>((resolveSleep, rejectSleep) => {
+    if (signal.aborted) {
+      rejectSleep(new ProcessCancelledError());
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolveSleep();
+    }, ms);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      rejectSleep(new ProcessCancelledError());
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
 
 /** Lần ghi tệp gần nhất trong thư mục (cả thư mục con); không có tệp nào → thời điểm của chính thư mục. */
 async function newestModificationDeep(folder: string): Promise<number> {
@@ -215,10 +264,38 @@ export class QuickDownloadService {
   private readonly tempRoot: string;
   private cookieBlockedRequest: ValidatedQuickDownloadRequest | null = null;
   private cookieJar: CookieJarStore | null = null;
+  private diskKindOf: (letter: string) => DiskKind = () => 'unknown';
+  private sharedRateLimits: {
+    gate: () => PlatformRateLimitGate;
+    activeOfPlatform?: (platform: string) => number;
+  } | null = null;
 
   /** yt-dlp nhận bản sao tạm của tệp cookies cho mỗi lượt (xem cookie-jar-store.ts). */
   public setCookieJar(jar: CookieJarStore): void {
     this.cookieJar = jar;
+  }
+
+  public setDiskKindLookup(lookup: (letter: string) => DiskKind): void {
+    this.diskKindOf = lookup;
+  }
+
+  public setSharedRateLimits(provider: {
+    gate: () => PlatformRateLimitGate;
+    activeOfPlatform?: (platform: string) => number;
+  }): void {
+    this.sharedRateLimits = provider;
+  }
+
+  private resolveQuickDiskKind(paths: readonly string[]): DiskKind {
+    let sawSsd = false;
+    for (const folder of paths) {
+      const letter = driveLetterOf(folder);
+      if (!letter) continue;
+      const kind = this.diskKindOf(letter);
+      if (kind === 'hdd') return 'hdd';
+      if (kind === 'ssd') sawSsd = true;
+    }
+    return sawSsd ? 'ssd' : 'unknown';
   }
 
   public constructor(
@@ -424,10 +501,24 @@ export class QuickDownloadService {
     }
 
     const taskId = randomUUID();
-    const outputToken = taskId.replaceAll('-', '').slice(0, 12);
-    const runToken = `${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}` + `-${outputToken}`;
-    const tempDirectory = join(this.tempRoot, outputToken);
+    const resumeKey = quickResumeKey(request);
+    const tempDirectory = join(this.tempRoot, `resume-${resumeKey}`);
     await mkdir(tempDirectory, { recursive: true });
+    const receiptPath = join(tempDirectory, QUICK_RESUME_RECEIPT_FILE);
+    let outputToken = taskId.replaceAll('-', '').slice(0, 12);
+    const existingReceipt = await readFile(receiptPath, 'utf8').catch(() => null);
+    if (existingReceipt) {
+      try {
+        const parsed = JSON.parse(existingReceipt) as { outputToken?: unknown };
+        if (typeof parsed.outputToken === 'string' && /^[a-z0-9]{6,24}$/i.test(parsed.outputToken)) {
+          outputToken = parsed.outputToken;
+        }
+      } catch {
+        // receipt hỏng → ghi lại token mới bên dưới
+      }
+    }
+    await writeFile(receiptPath, JSON.stringify({ outputToken }), 'utf8').catch(() => undefined);
+    const runToken = `${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}` + `-${outputToken}`;
     await this.assertQuickDiskSpace([request.outputDirectory, tempDirectory]);
 
     const status: QuickDownloadStatus = {
@@ -601,9 +692,37 @@ export class QuickDownloadService {
     await this.persist();
   }
 
+  private async waitPlatformRateLimitIfNeeded(active: ActiveQuickTask, platform: string | null): Promise<void> {
+    if (!platform || !this.sharedRateLimits) return;
+    while (true) {
+      const gate = this.sharedRateLimits.gate();
+      const now = Date.now();
+      if (gate.isStopped(platform)) {
+        const label = rateLimitPlatformLabel(platform);
+        throw new Error(
+          `${label} vẫn đang giới hạn yêu cầu (HTTP 429). Hãy mở video trong trình duyệt, hoàn tất xác minh nếu có rồi bấm Tiếp tục ở Hàng đợi trước khi tải lại.`
+        );
+      }
+      const otherActive = this.sharedRateLimits.activeOfPlatform?.(platform) ?? 0;
+      if (gate.canStart(platform, otherActive, now)) return;
+
+      const snap = gate.snapshot(now).find((entry) => entry.platform === platform);
+      const waitMs = snap?.resumeAt ? Math.max(250, Math.min(2_000, snap.resumeAt - now)) : 500;
+      const label = rateLimitPlatformLabel(platform);
+      const etaText = snap?.resumeAt ? ` (${formatAutoResumeEta(snap.resumeAt, now)})` : '';
+      active.status.phase = 'preparing';
+      active.status.message = `Đang chờ hết giới hạn yêu cầu từ ${label}${etaText} rồi tự tải tiếp...`;
+      this.publish(active);
+      await cancellableSleep(waitMs, active.controller.signal);
+    }
+  }
+
   private async execute(active: ActiveQuickTask, ytDlpPath: string, ffmpegPath: string): Promise<void> {
+    const platform = detectQuickPlatform(active.request.url);
     try {
       while (true) {
+        await this.waitPlatformRateLimitIfNeeded(active, platform);
+        const attemptStartedAt = Date.now();
         // yt-dlp ghi ngược tệp --cookies: mỗi lượt nhận một bản sao riêng (cookie-jar-store.ts).
         const cookieLease = active.cookiesAttached && this.cookieJar
           ? await this.cookieJar.lease(this.cookieSettings())
@@ -612,6 +731,11 @@ export class QuickDownloadService {
         let cookieOutcome: CookieRunOutcome = 'aborted';
         let result: Awaited<ReturnType<ProcessManager['run']>>;
         try {
+          const appSettings = this.settings?.get();
+          const gate = this.sharedRateLimits?.gate();
+          const samePlatformActive =
+            1 + (platform ? (this.sharedRateLimits?.activeOfPlatform?.(platform) ?? 0) : 0);
+          const rateLimitStrikes = platform && gate ? gate.strikesOf(platform) : 0;
           const args = buildQuickDownloadArguments(
             active.request,
             {
@@ -624,8 +748,14 @@ export class QuickDownloadService {
             {
               compactFilename: active.compactFilename,
               forceGenericExtractor: active.genericFallbackTried,
-              filenameTemplate: this.settings?.get().quickDownloadFilenameTemplate,
-              concurrentFragments: this.concurrentFragments()
+              filenameTemplate: appSettings?.quickDownloadFilenameTemplate,
+              concurrentFragments: this.concurrentFragments(),
+              fragmentsAuto: appSettings?.downloadFragmentsAuto,
+              diskKind: this.resolveQuickDiskKind([active.request.outputDirectory, active.tempDirectory]),
+              rateLimit: appSettings?.rateLimit,
+              proxy: appSettings?.proxy,
+              platform,
+              pacing: { samePlatformActive, rateLimitStrikes }
             }
           );
 
@@ -761,8 +891,59 @@ export class QuickDownloadService {
             await this.cleanupActive(active, true);
             return;
           }
+
+          const classified = classifyYtDlpFailure(active.recentLines.join('\n'));
+          const isRateLimit = classified.category === 'rate_limit' || classified.subtype === 'http_429';
+          if (isRateLimit && platform && this.sharedRateLimits) {
+            const gate = this.sharedRateLimits.gate();
+            const now = Date.now();
+            const hit = gate.recordHit(platform, attemptStartedAt, now);
+            const label = rateLimitPlatformLabel(platform);
+            if (hit.kind === 'stopped') {
+              this.failTask(
+                active,
+                `${label} vẫn giới hạn yêu cầu (HTTP 429) sau nhiều lần chờ. Phần đã tải (.part) được giữ nguyên; hãy mở trình duyệt xác minh rồi bấm Tải lại.`,
+                'SOURCE_RATE_LIMITED'
+              );
+              await this.cleanupActive(active, false);
+              return;
+            }
+            const resumeAt =
+              hit.kind === 'cooldown'
+                ? hit.resumeAt
+                : (gate.snapshot(now).find((entry) => entry.platform === platform)?.resumeAt ?? now + 1_000);
+            active.status.phase = 'preparing';
+            active.status.speed = '';
+            active.status.eta = '';
+            active.status.message = `${label} đang giới hạn yêu cầu (HTTP 429) — Tải nhanh tự chờ ${formatAutoResumeEta(resumeAt, now)} rồi tải tiếp từ phần đã có.`;
+            this.publish(active);
+            this.logger.warn('quick-download', 'QUICK_DOWNLOAD_RATE_LIMIT_WAIT', active.status.message, {
+              jobId: active.status.taskId,
+              metadata: { platform, waitMs: Math.max(0, resumeAt - now) }
+            });
+            await cancellableSleep(Math.max(10, resumeAt - Date.now()), active.controller.signal);
+            continue;
+          }
+
+          if (classified.retryable || isRateLimit) {
+            const detail = this.lastUsefulError(active.recentLines);
+            const contentLabel = active.status.mediaMode === 'audio-only' ? 'âm thanh' : 'video';
+            const message =
+              (detail ? `Tải ${contentLabel} tạm gián đoạn do mạng: ${detail}. ` : `Tải ${contentLabel} tạm gián đoạn do mạng. `) +
+              'Đã giữ lại phần tải dở (.part); hãy bấm Tải lại để nối tiếp.';
+            this.failTask(
+              active,
+              message,
+              isRateLimit ? 'SOURCE_RATE_LIMITED' : 'NETWORK_ERROR'
+            );
+            await this.cleanupActive(active, false);
+            return;
+          }
         }
 
+        if (result.code === 0 && platform && this.sharedRateLimits) {
+          this.sharedRateLimits.gate().recordSuccess(platform);
+        }
         await this.finishTask(active, result.code);
         return;
       }
@@ -813,7 +994,10 @@ export class QuickDownloadService {
       if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
       const folder = join(this.tempRoot, entry.name);
       if (folder.toLowerCase() === activeDirectory) continue;
-      if (now - (await newestModificationDeep(folder)) < QUICK_TEMP_ORPHAN_AFTER_MS) continue;
+      const retentionMs = entry.name.startsWith('resume-')
+        ? QUICK_RESUME_RETENTION_MS
+        : QUICK_TEMP_ORPHAN_AFTER_MS;
+      if (now - (await newestModificationDeep(folder)) < retentionMs) continue;
       await rm(folder, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 })
         .then(() => {
           removed += 1;
@@ -826,6 +1010,11 @@ export class QuickDownloadService {
   private async prepareAutomaticRetry(active: ActiveQuickTask, message: string): Promise<void> {
     await rm(active.tempDirectory, { recursive: true, force: true }).catch(() => undefined);
     await mkdir(active.tempDirectory, { recursive: true });
+    await writeFile(
+      join(active.tempDirectory, QUICK_RESUME_RECEIPT_FILE),
+      JSON.stringify({ outputToken: active.outputToken }),
+      'utf8'
+    ).catch(() => undefined);
     active.status.phase = 'preparing';
     active.status.progress = 0;
     active.status.title = '';

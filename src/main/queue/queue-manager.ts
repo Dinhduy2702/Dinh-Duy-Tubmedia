@@ -1400,6 +1400,20 @@ export class QueueManager {
     if (decision) this.logAdaptiveDecision(decision);
   }
 
+  public sharedRateLimitGate(): PlatformRateLimitGate {
+    return this.rateLimits;
+  }
+
+  public countActiveDownloadsOfPlatform(platform: string): number {
+    let count = 0;
+    for (const entry of this.active.values()) {
+      if (this.holdsDownloadSlot(entry.job) && this.downloadPlatformOf(entry.job) === platform) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
   private platformPacingContext(job: QueueJob): DownloadPacingContext {
     const platform = this.downloadPlatformOf(job);
     if (!platform) return { samePlatformActive: 1, rateLimitStrikes: 0 };

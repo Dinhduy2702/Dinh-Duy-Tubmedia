@@ -13,6 +13,8 @@ export type QuickDownloadErrorCode =
   | 'BROWSER_COOKIE_DATABASE_LOCKED'
   | 'BOT_CHECK'
   | 'DISK_FULL'
+  | 'NETWORK_ERROR'
+  | 'SOURCE_RATE_LIMITED'
   | 'UNSUPPORTED_URL'
   | 'OUTPUT_PATH_INVALID';
 

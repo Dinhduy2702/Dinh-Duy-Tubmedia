@@ -1,4 +1,6 @@
 import { cpus, totalmem } from 'node:os';
+import type { DiskKind } from '@shared/utils/disk-load.js';
+import { downloadPacingArgs, type DownloadPacingContext } from '@shared/utils/download-pacing.js';
 import { recommendedConcurrentFragments } from '@shared/utils/hardware-recommendation.js';
 import {
   formatQuickDownloadTime,
@@ -24,12 +26,26 @@ export interface QuickDownloadCommandOptions {
   filenameTemplate?: string | undefined;
   /** 2026-10-24: số mảnh tải mỗi video (ô Cài đặt dùng chung với Tải danh sách). Bỏ trống → tự dò theo máy đang chạy. */
   concurrentFragments?: number | undefined;
+  /** V7 (1.7.7): ổ HDD khi để tự động co tối đa 2 mảnh (máy yếu 1 mảnh) để không đánh sập I/O ổ cơ. */
+  fragmentsAuto?: boolean | undefined;
+  diskKind?: DiskKind | undefined;
+  rateLimit?: string | undefined;
+  proxy?: string | undefined;
+  platform?: string | null | undefined;
+  pacing?: DownloadPacingContext | undefined;
 }
 
-/** Trước đây cố định 4 mảnh trên mọi máy; giờ theo số truyền vào (1–8) hoặc tự dò theo máy. */
-function quickConcurrentFragments(requested: number | undefined): string {
-  const value = requested ?? recommendedConcurrentFragments(cpus().length, totalmem());
-  return String(Math.max(1, Math.min(8, Math.trunc(Number(value) || 1))));
+/** Trước đây cố định 4 mảnh trên mọi máy; giờ theo số truyền vào (1–8) hoặc tự dò theo máy (co ≤ 2 trên ổ HDD). */
+function quickConcurrentFragments(options: QuickDownloadCommandOptions): string {
+  const auto = recommendedConcurrentFragments(cpus().length, totalmem());
+  const raw =
+    options.concurrentFragments !== undefined
+      ? Math.max(1, Math.min(8, Math.trunc(Number(options.concurrentFragments) || 1)))
+      : auto;
+  if (options.diskKind === 'hdd' && options.fragmentsAuto !== false) {
+    return String(Math.min(2, raw));
+  }
+  return String(raw);
 }
 
 // Giai đoạn 6 mục 7 (2026-09-24) — "Mẫu đặt tên tệp": mặc định GIỮ NGUYÊN đúng tên hiện có (tên video +
@@ -128,14 +144,20 @@ export function buildQuickDownloadArguments(
     '--continue',
     '--no-overwrites',
     '--no-post-overwrites',
+    '--socket-timeout',
+    '30',
     '--retries',
     '10',
     '--fragment-retries',
     '10',
+    '--file-access-retries',
+    '5',
     '--retry-sleep',
     'fragment:exp=1:20',
+    '--retry-sleep',
+    'file_access:exp=1:10',
     '--concurrent-fragments',
-    quickConcurrentFragments(options.concurrentFragments),
+    quickConcurrentFragments(options),
     '--ffmpeg-location',
     paths.ffmpegDirectory,
     '-P',
@@ -199,6 +221,19 @@ export function buildQuickDownloadArguments(
 
   args.push(...buildCookieArguments(authentication));
 
+  const trimmedProxy = options.proxy?.trim();
+  if (trimmedProxy) {
+    args.push('--proxy', trimmedProxy);
+  }
+  const trimmedRateLimit = options.rateLimit?.trim();
+  if (trimmedRateLimit) {
+    args.push('--limit-rate', trimmedRateLimit);
+  }
+  const pacingArgs = downloadPacingArgs(options.platform ?? null, options.pacing);
+  if (pacingArgs.length > 0) {
+    args.push(...pacingArgs);
+  }
+
   if (options.forceGenericExtractor) {
     args.push('--ies', 'generic,default');
   }
@@ -207,3 +242,5 @@ export function buildQuickDownloadArguments(
   args.push('--', request.url);
   return args;
 }
+
+export const buildQuickDownloadYtDlpArgs = buildQuickDownloadArguments;

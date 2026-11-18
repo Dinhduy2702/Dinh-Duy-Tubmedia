@@ -195,6 +195,11 @@ export class AppContext {
     // 2026-11-02 (chống lag): loại ổ thật (HDD/SSD) của máy đang chạy cho ngưỡng ổ bận.
     const diskKindOf = createDiskKindLookup(() => this.settings.detectHardware());
     this.queue.setDiskKindLookup(diskKindOf);
+    this.quickDownload.setDiskKindLookup(diskKindOf);
+    this.quickDownload.setSharedRateLimits({
+      gate: () => this.queue.sharedRateLimitGate(),
+      activeOfPlatform: (platform) => this.queue.countActiveDownloadsOfPlatform(platform)
+    });
     if (E2E_RATE_LIMIT_WAIT_MS !== undefined) this.queue.setRateLimitWaitOverrideMs(E2E_RATE_LIMIT_WAIT_MS);
     if (E2E_GLOBAL_DOWNLOAD_CAP !== undefined) this.queue.setGlobalDownloadCapOverride(E2E_GLOBAL_DOWNLOAD_CAP);
     this.appUpdates = new AppUpdateService(
