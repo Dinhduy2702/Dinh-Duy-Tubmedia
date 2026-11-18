@@ -1,3 +1,54 @@
+# Tubmedia 1.7.6
+
+- Nút "Theo máy", "Chuẩn 1080p" và các mẫu chọn nhanh không còn tự đổi chế độ CapCut của bạn:
+  - Bấm "Theo máy" hay đổi mẫu chất lượng giờ chỉ chỉnh tốc độ và độ phân giải, không còn tự bật lại ô "Tạo thêm bản dựng cho
+    CapCut" (sinh 2 tệp cho mỗi video) ngoài ý muốn.
+  - Khi nâng cấp lên 1.7.6, nếu máy đang mang đúng bộ cài đặt do nút "Theo máy" của bản cũ tự bật thêm bản thứ hai, Tubmedia tự
+    chuyển gọn về chế độ 1 tệp "CapCut trực tiếp"; nếu bạn đã tự chỉnh tay thì giữ nguyên lựa chọn của bạn.
+- Máy ít nhân đỡ nặng hơn khi xử lý và chuyển đổi video:
+  - Toàn bộ các bước lọc hình và xử lý hiệu ứng video giờ cũng tự giới hạn số luồng theo đúng sức máy của bạn (tối đa một nửa số
+    luồng của máy), thay vì chỉ giới hạn bước giải mã/mã hoá chính như trước; số bạn đã tự chỉnh tay trong hồ sơ vẫn được giữ.
+  - Dòng chữ hiển thị số luồng xử lý trên màn hình giờ hiện đúng con số thực tế máy đang dùng.
+- Thông báo về Cookies và chặn tạm từ YouTube rõ ràng, chính xác hơn:
+  - Khi cookies YouTube bị trình duyệt tự làm mới làm mất hiệu lực dù chưa hết hạn ngày, Tubmedia báo rõ nguyên nhân "cookies đã
+    bị trình duyệt xoay mới" (không còn gộp chung vào "cookies hết hạn") và hướng dẫn từng bước lấy lại cookies từ cửa sổ ẩn danh
+    để dùng bền hơn.
+  - Ở mục Tải nhanh (1 video), khi YouTube tạm chặn kiểm tra tự động ("Sign in to confirm you're not a bot"), Tubmedia báo đúng
+    là YouTube đang tạm giới hạn kèm ghi chú "Lỗi này không phải do cookies" — không còn báo nhầm hỏng cookies và không làm mất
+    cookies bạn đã lưu. Nếu bạn đã cài sẵn cookies mà lượt đầu chưa gắn, ứng dụng tự gắn thử lại một lần.
+- Không còn báo lỗi oan ở giây cuối khi phần mềm diệt virus đang quét tệp vừa tạo:
+  - Lúc video vừa tải xong, cắt đoạn xong hoặc chuẩn bị ghép xong mà Windows Defender hay phần mềm diệt virus tạm giữ tệp trong
+    chốc lát, Tubmedia tự chờ vài nhịp ngắn (tối đa khoảng 2 giây) rồi hoàn tất lưu tệp thay vì báo thất bại ngay; nhật ký có ghi
+    lại nếu phải chờ để dễ kiểm tra.
+- Tải danh sách bị rớt mạng giữ lại phần đã tải dở để tải tiếp:
+  - Khi video tải lỗi do mạng chập chờn hoặc máy chủ nguồn trục trặc tạm thời qua hết các lượt tự thử, Tubmedia giữ nguyên tệp
+    tải dở (.part) đúng như thông báo hướng dẫn — bấm "Thử lại" sẽ tải nối tiếp phần còn lại thay vì tải lại từ 0%, kể cả sau
+    hơn 1 giờ hay sau khi tắt mở lại ứng dụng.
+  - Khi tải xong, bấm Huỷ, bấm Xoá video/danh sách, gặp lỗi không thể tải tiếp (như video riêng tư hoặc đã bị xoá), hoặc bỏ quên
+    quá 14 ngày, tệp tải dở vẫn được tự dọn sạch để không làm đầy ổ.
+- Ghép xong, video và Timeline được lưu chung trong một thư mục mang tên thành phẩm — kéo cả thư mục lên Drive là đủ (nếu trùng tên thư mục đã có, ứng dụng tự đánh số `(2)`, `(3)`… cho cả thư mục lẫn 2 tệp bên trong để không bao giờ ghi đè).
+- Ghép không còn treo vô hạn ở video có đoạn im lặng cuối; app tự cứu bằng cách mã hoá lại tiếng:
+  - Khi đang chuẩn hóa video, tạo bản dựng CapCut, cắt đoạn, đổi tỉ lệ hoặc xử lý tiếng mà bộ mã hoá âm thanh bị đứng im ở các đoạn im lặng, Tubmedia tự dừng tiến trình bị kẹt, xoá tệp ghi dở và tự chạy lại một lần bằng chế độ mã hoá tiếng nhanh để đưa quy trình về đích mà không làm giảm chất lượng tiếng của các video bình thường.
+  - Ở mọi bước xử lý dài khác, nếu tiến trình đứng yên không nhích thêm giây hình nào quá 5 phút (hoặc quá 15 phút ở bước hoàn tất tệp lớn trên ổ cứng cơ), ứng dụng tự dừng an toàn và báo rõ tên video, bước xử lý cùng mốc thời gian bị kẹt (kèm hướng dẫn thay video nguồn khác nếu vẫn không qua được) thay vì chờ tới 48 giờ; thời gian bạn bấm Tạm dừng không bị tính vào thời gian đứng im.
+- Chỉ tạo Timeline giờ tự lưu tệp timeline và có nút Sao chép tất cả:
+  - Khi chạy chế độ "Chỉ tạo timeline (không ghép video)", ứng dụng tự tạo thư mục mang tên thành phẩm và lưu sẵn tệp `.timeline.txt` vào đó (đánh số `(2)`, `(3)`… nếu trùng tên, không tạo video MP4) để bạn kéo thẳng lên Drive đúng như luồng ghép video.
+  - Trên khung kết quả Timeline nay có thêm nút "Sao chép tất cả" để chép trọn bộ các dòng mốc thời gian vào bộ nhớ tạm chỉ bằng một lần bấm, cùng nút "Lưu TXT" hiển thị chữ rõ ràng.
+- Bấm Huỷ hoặc gặp lỗi giữa lúc đang ghép vẫn giữ nguyên các video đã chuẩn hóa xong:
+  - Nếu danh sách ghép dở ở các video cuối mà bạn bấm Huỷ hoặc gặp sự cố, toàn bộ các video đã chuẩn hóa và đóng gói xong trước đó vẫn được giữ lại — khi bấm Ghép lại, ứng dụng dùng lại ngay các bản này thay vì phải chờ mã hóa lại từ đầu (nếu bỏ quên quá 14 ngày không dùng tới, ứng dụng vẫn tự dọn sạch để không tốn ổ đĩa).
+- Video Google Drive có chất lượng cao hơn mức đã chọn (vd 4K) không còn bị chặn và chuyển vào khu cách ly; Tubmedia giữ nguyên tệp gốc và ghi chú rõ (áp dụng tương tự cho liên kết tệp trực tiếp không cho chọn chất lượng).
+- Ứng dụng ổn định hơn khi đóng cửa sổ lúc đang dọn tệp tạm ngầm, khi vừa mở màn hình chính hoặc khi bấm mở liên kết trang web
+  bên ngoài: nếu gặp trục trặc, lỗi được ghi gọn vào nhật ký thay vì phát sinh lỗi ngầm.
+
+Giới hạn đã biết của 1.7.6:
+- Trên máy ít nhân (2–4 luồng), dù đã giới hạn thêm luồng lọc hình, mức bận CPU khi tạo bản dựng cho CapCut (nhất là video 4K
+  hoặc HDR dài) chưa được đo lại ở bản 1.7.6; việc đo lại thực tế và bổ sung cơ chế tự kìm trần CPU linh hoạt sẽ được thực hiện
+  ở bản 1.7.7.
+- Video bị kẹt bộ mã hoá tiếng ở đoạn im lặng cần chờ bộ canh đứng tiến độ khoảng 5 phút trước khi ứng dụng tự ngắt và cứu lại bằng
+  chế độ mã hoá tiếng nhanh; bản `ffmpeg` đi kèm ứng dụng hiện tại sẽ được thay bằng bản phát hành ổn định chính thức ở bản 1.7.7.
+- Trên ổ đĩa còn ít chỗ trống (chỉ còn vài GB), nếu nhiều video lớn cùng rớt mạng và giữ lại tệp tải dở (.part) chờ thử lại, dung
+  lượng trống có thể giảm nhanh cho tới khi bạn bấm Thử lại hoặc Xoá mục lỗi; bước kiểm dung lượng trống sát kích thước thật sẽ
+  được bổ sung ở bản 1.7.7.
+
 # Tubmedia 1.7.5
 
 - Mỗi video chỉ một tệp với chế độ "CapCut trực tiếp" (Cài đặt › Tải danh sách › Chế độ tương thích video), không còn hai
