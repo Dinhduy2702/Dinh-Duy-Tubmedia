@@ -132,4 +132,59 @@ describe('V16 — chỉ dùng bản FFmpeg phát hành ổn định chính thứ
     expect(manager.get('ffmpeg').executablePath).toBe(bundledExe);
     expect(manager.get('ffmpeg').source).toBe('bundled');
   });
+
+  it('metadata chỉ có version "N-128433-gdb8537d8cc-20261105" và sourceUrl rỗng (không chứa ffmpeg-master-) vẫn bị nhận diện là nightly và nhường bản ổn định đi kèm', async () => {
+    tempRoot = mkdtempSync(join(tmpdir(), 'tubmedia-v16-regex-'));
+    const exeName = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
+    const managedDir = join(tempRoot, 'userData', 'tools', 'current');
+    const bundledDir = join(tempRoot, 'resources', 'tool');
+    mkdirSync(managedDir, { recursive: true });
+    mkdirSync(bundledDir, { recursive: true });
+
+    const managedExe = join(managedDir, exeName);
+    const bundledExe = join(bundledDir, exeName);
+    writeFileSync(managedExe, 'old-nightly');
+    writeFileSync(bundledExe, 'new-stable-bundled');
+    writeFileSync(
+      join(managedDir, '.vdmsp-tool-metadata.json'),
+      JSON.stringify({
+        packages: {
+          'ffmpeg-suite': {
+            releaseId: 101,
+            version: 'N-128433-gdb8537d8cc-20261105',
+            installedAt: '2026-11-05T00:00:00Z',
+            sourceUrl: ''
+          }
+        }
+      })
+    );
+
+    const processes = {
+      run: (opts: { executablePath: string }) =>
+        Promise.resolve({
+          code: 0,
+          stdoutTail:
+            opts.executablePath === bundledExe
+              ? 'ffmpeg version n8.1.3 Copyright\n'
+              : 'ffmpeg version N-128433-gdb8537d8cc-20261105 Copyright\n',
+          stderrTail: ''
+        })
+    } as unknown as ProcessManager;
+
+    const manager = new ToolManager(
+      processes,
+      silentLogger,
+      () => ({ ...defaultAppSettings }),
+      join(tempRoot, 'resources'),
+      join(tempRoot, 'userData'),
+      join(tempRoot, 'app', 'resources', 'app.asar'),
+      true
+    );
+    (manager as unknown as { toolCapabilities: () => Promise<{ capabilities: string[]; gpuEncoderIssue: null }> }).toolCapabilities =
+      () => Promise.resolve({ capabilities: ['libx264', 'aac'], gpuEncoderIssue: null });
+
+    await manager.healthCheck('ffmpeg');
+    expect(manager.get('ffmpeg').executablePath).toBe(bundledExe);
+    expect(manager.get('ffmpeg').source).toBe('bundled');
+  });
 });

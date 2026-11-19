@@ -302,7 +302,7 @@ export class ToolManager {
       if (!entry || typeof entry !== 'object') return false;
       const sourceUrl = typeof entry.sourceUrl === 'string' ? entry.sourceUrl.toLowerCase() : '';
       const version = typeof entry.version === 'string' ? entry.version.trim() : '';
-      if (sourceUrl.includes('ffmpeg-master-') || /^n-d+/i.test(version)) return false;
+      if (sourceUrl.includes('ffmpeg-master-') || /^n-\d+/i.test(version)) return false;
       return true;
     } catch {
       return false;

@@ -77,9 +77,95 @@ async function defaultTrashItem(filePath: string): Promise<void> {
   await electronModule.shell.trashItem(filePath);
 }
 
+const RECYCLE_BIN_UNVERIFIED_REASON =
+  'Không kiểm tra được sức chứa Thùng rác trên ổ này nên Tubmedia dừng để tránh xóa vĩnh viễn video nguồn';
+
+/**
+ * Phân tích kết quả truy vấn `Win32_Volume` + Registry `BitBucket\Volume` theo nguyên tắc fail-closed:
+ * nếu chuỗi rỗng, `NO_VOL`, sai định dạng hoặc không tính được hạn mức dương thì trả `supported: false` để không bao giờ xoá nhầm vĩnh viễn.
+ */
+export function parseWindowsRecycleBinVolumeLine(
+  rawLine: string,
+  rootDrive: string,
+  fallbackFreeBytes = 0
+): RecycleBinCapacityInfo {
+  const trimmed = rawLine.trim();
+  if (!trimmed || trimmed === 'NO_VOL' || !trimmed.includes('|')) {
+    return {
+      supported: false,
+      maxBytes: 0,
+      reason: RECYCLE_BIN_UNVERIFIED_REASON
+    };
+  }
+  const parts = trimmed.split('|');
+  if (parts.length < 6) {
+    return {
+      supported: false,
+      maxBytes: 0,
+      reason: RECYCLE_BIN_UNVERIFIED_REASON
+    };
+  }
+  const [dtStr, fsRaw, freeStr, capStr, maxMbStr, nukeStr] = parts;
+  const fsName = (fsRaw ?? '').trim().toUpperCase();
+  const driveType = Number(dtStr);
+  const volFree = Number(freeStr) || fallbackFreeBytes;
+  const volCap = Number(capStr) || 0;
+  const maxMb = Number(maxMbStr);
+  const nuke = Number(nukeStr);
+
+  if (!Number.isFinite(driveType) || !fsName) {
+    return {
+      supported: false,
+      maxBytes: 0,
+      reason: RECYCLE_BIN_UNVERIFIED_REASON
+    };
+  }
+
+  if (nuke === 1) {
+    return {
+      supported: false,
+      maxBytes: 0,
+      reason: `Thùng rác trên ổ ${rootDrive} đang bật chế độ "Xóa thẳng không qua Thùng rác". Tubmedia đã dừng để không xóa vĩnh viễn video nguồn.`
+    };
+  }
+  if (driveType !== 3 && driveType !== 2) {
+    return {
+      supported: false,
+      maxBytes: 0,
+      reason: `Ổ ${rootDrive} không hỗ trợ Thùng rác Windows nên Tubmedia dừng để bảo vệ video nguồn.`
+    };
+  }
+  if (fsName === 'EXFAT' || fsName === 'FAT' || fsName === 'FAT32') {
+    if (driveType === 2) {
+      return {
+        supported: false,
+        maxBytes: 0,
+        reason: `Ổ rời ${rootDrive} (${fsName}) không có Thùng rác Windows nên Tubmedia dừng để tránh mất vĩnh viễn tệp nguồn.`
+      };
+    }
+  }
+  // Mặc định Windows cấp ~5%–10% dung lượng ổ nếu khoá MaxCapacity chưa ghi tường minh.
+  const configuredMaxBytes =
+    Number.isFinite(maxMb) && maxMb > 0
+      ? maxMb * 1024 * 1024
+      : volCap > 0
+        ? Math.floor(volCap * 0.05)
+        : volFree;
+  const effectiveMax = volFree > 0 ? Math.min(configuredMaxBytes, volFree) : configuredMaxBytes;
+  if (!(effectiveMax > 0)) {
+    return {
+      supported: false,
+      maxBytes: 0,
+      reason: RECYCLE_BIN_UNVERIFIED_REASON
+    };
+  }
+  return { supported: true, maxBytes: effectiveMax };
+}
+
 /**
  * Đọc hạn mức thực của Thùng rác (`$Recycle.Bin`) trên ổ chứa `folderPath` (Windows BitBucket\Volume + dung lượng trống ổ).
- * Tuyệt đối không cho phép xoá nếu ổ mạng / exFAT không hỗ trợ Thùng rác hoặc người dùng bật xoá thẳng `NukeOnDelete`.
+ * Tuyệt đối không cho phép xoá nếu ổ mạng / exFAT không hỗ trợ Thùng rác, người dùng bật xoá thẳng `NukeOnDelete`,
+ * hoặc không đọc được thông tin Thùng rác (fail-closed).
  */
 export async function defaultReadRecycleBinCapacity(folderPath: string): Promise<RecycleBinCapacityInfo> {
   const resolved = resolve(folderPath);
@@ -163,48 +249,7 @@ Write-Output "$dt|$fs|$free|$cap|$maxMb|$nuke"
     });
   });
 
-  if (!rawLine || rawLine === 'NO_VOL' || !rawLine.includes('|')) {
-    return { supported: true, maxBytes: freeBytes > 0 ? freeBytes : 4 * 1024 ** 3 };
-  }
-  const [dtStr, fsName, freeStr, capStr, maxMbStr, nukeStr] = rawLine.split('|');
-  const driveType = Number(dtStr);
-  const volFree = Number(freeStr) || freeBytes;
-  const volCap = Number(capStr) || 0;
-  const maxMb = Number(maxMbStr);
-  const nuke = Number(nukeStr);
-
-  if (nuke === 1) {
-    return {
-      supported: false,
-      maxBytes: 0,
-      reason: `Thùng rác trên ổ ${rootDrive} đang bật chế độ "Xóa thẳng không qua Thùng rác". Tubmedia đã dừng để không xóa vĩnh viễn video nguồn.`
-    };
-  }
-  if (driveType !== 3 && driveType !== 2) {
-    return {
-      supported: false,
-      maxBytes: 0,
-      reason: `Ổ ${rootDrive} không hỗ trợ Thùng rác Windows nên Tubmedia dừng để bảo vệ video nguồn.`
-    };
-  }
-  if (fsName === 'EXFAT' || fsName === 'FAT' || fsName === 'FAT32') {
-    if (driveType === 2) {
-      return {
-        supported: false,
-        maxBytes: 0,
-        reason: `Ổ rời ${rootDrive} (${fsName}) không có Thùng rác Windows nên Tubmedia dừng để tránh mất vĩnh viễn tệp nguồn.`
-      };
-    }
-  }
-  // Mặc định Windows cấp ~5%–10% dung lượng ổ nếu khoá MaxCapacity chưa ghi tường minh.
-  const configuredMaxBytes =
-    Number.isFinite(maxMb) && maxMb > 0
-      ? maxMb * 1024 * 1024
-      : volCap > 0
-        ? Math.floor(volCap * 0.05)
-        : volFree;
-  const effectiveMax = volFree > 0 ? Math.min(configuredMaxBytes, volFree) : configuredMaxBytes;
-  return { supported: effectiveMax > 0, maxBytes: Math.max(0, effectiveMax) };
+  return parseWindowsRecycleBinVolumeLine(rawLine, rootDrive, freeBytes);
 }
 
 interface InternalCandidate {
