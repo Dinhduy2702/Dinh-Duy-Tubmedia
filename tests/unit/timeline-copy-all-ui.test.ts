@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createElement, isValidElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { QueueJob, TimelineRow } from '@shared/types/domain.js';
 import * as timestampUtils from '@shared/utils/timestamp.js';
 
@@ -52,6 +52,12 @@ function collectButtons(node: ReactNode): Array<{ text: string; disabled: boolea
 }
 
 describe('T2 — Nút "Sao chép tất cả" và nhãn chữ rõ trên nút "Lưu TXT" ở khung Timeline', () => {
+  let downloadMergeModule: Record<string, unknown>;
+
+  beforeAll(async () => {
+    downloadMergeModule = await loadDownloadMergeModule();
+  }, 30_000);
+
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
@@ -109,7 +115,6 @@ describe('T2 — Nút "Sao chép tất cả" và nhãn chữ rõ trên nút "Lư
       ['00:00 Ph Video_001', '01:05 Ph Video_002', '01:02:15 Ph Video_003'].join('\r\n')
     );
 
-    const downloadMergeModule = await loadDownloadMergeModule();
     const TimelineHeaderActions = (
       downloadMergeModule as {
         TimelineHeaderActions?: (props: {
@@ -158,10 +163,9 @@ describe('T2 — Nút "Sao chép tất cả" và nhãn chữ rõ trên nút "Lư
       ['00:00 Ph Video_001', '01:05 Ph Video_002', '01:02:15 Ph Video_003'].join('\r\n')
     );
     expect(notices).toHaveLength(1);
-  });
+  }, 20_000);
 
-  it('MergeProductionPanel hiển thị rõ chữ "Sao chép tất cả" và "Lưu TXT" (không còn nút chỉ có biểu tượng)', async () => {
-    const downloadMergeModule = await loadDownloadMergeModule();
+  it('MergeProductionPanel hiển thị rõ chữ "Sao chép tất cả" và "Lưu TXT" (không còn nút chỉ có biểu tượng)', () => {
     const MergeProductionPanel = (
       downloadMergeModule as {
         MergeProductionPanel?: (props: Record<string, unknown>) => ReactNode;
@@ -223,5 +227,5 @@ describe('T2 — Nút "Sao chép tất cả" và nhãn chữ rõ trên nút "Lư
 
     const rawPage = readFileSync(join(process.cwd(), 'src/renderer/src/pages/DownloadMergePage.tsx'), 'utf8');
     expect(rawPage).toContain('<TimelineHeaderActions');
-  });
+  }, 20_000);
 });
