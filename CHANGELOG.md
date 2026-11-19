@@ -1,3 +1,9 @@
+# Tubmedia 1.7.8
+
+- Khắc phục tận gốc lỗi báo *"Các file vẫn chưa tương thích concat: Video extradata..."* ở cuối bước ghép video:
+  - Khi ghép danh sách trộn nhiều video từ các phần mềm hoặc thiết bị khác nhau (như trộn video H.264 và H.265, video quay màn hình/điện thoại hệ màu mở rộng, video thiếu nhãn màu gốc, video có tốc độ khung hình biến thiên nhẹ hoặc dùng lại bản chuẩn hóa tạm tạo ở mức luồng CPU khác), bước chuẩn hóa nay tự đồng nhất trọn bộ thông số nhận diện đầu tệp cho cả H.264 lẫn H.265 để nối mượt ngay lượt đầu, không còn bị chặn ở 65% sau khi đã chờ chuẩn hóa xong.
+  - Giữ nguyên chất lượng hình ảnh và không gian màu gốc cho cả video thường (SDR) lẫn video dải tương phản cao (HDR), đồng thời vẫn tương thích an toàn với các máy dùng card đồ họa rời (NVIDIA NVENC) cũng như máy chạy bằng CPU.
+
 # Tubmedia 1.7.7
 
 - Máy ít nhân (2–4 luồng) và máy dùng ổ cứng cơ (HDD) chạy nhẹ, êm hơn hẳn khi vừa mở CapCut vừa dùng Tubmedia:

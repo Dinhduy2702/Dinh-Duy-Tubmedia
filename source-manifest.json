@@ -1,6 +1,6 @@
 {
-  "version": "1.7.7",
-  "appVersion": "1.7.7",
+  "version": "1.7.8",
+  "appVersion": "1.7.8",
   "requiredDirectories": [
     "installer",
     "resources",
