@@ -36,6 +36,48 @@ function sleep(milliseconds: number): Promise<void> {
   });
 }
 
+// Lượt Publish 1.7.8 (Run #44575888574) trượt ở đầu bài E2E #15 vì ngay sau khi đóng Electron ở bài #14,
+// máy ảo Windows Server CI cạn tạm thời Desktop Heap khiến spawnSync(ffmpeg) trả mã 3221225794 (0xC0000142 = STATUS_DLL_INIT_FAILED).
+const WINDOWS_DLL_INIT_FAILED_CODES = new Set<number>([3221225794, -1073741502]);
+
+function sleepSync(milliseconds: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+function spawnFfmpegSyncWithCiRetry(
+  executable: string,
+  args: readonly string[],
+  options: Parameters<typeof spawnSync>[2]
+): ReturnType<typeof spawnSync> {
+  let lastResult = spawnSync(executable, args, options);
+  for (let retry = 0; retry < 3; retry += 1) {
+    if (lastResult.status === null || !WINDOWS_DLL_INIT_FAILED_CODES.has(lastResult.status)) {
+      return lastResult;
+    }
+    sleepSync(500);
+    lastResult = spawnSync(executable, args, options);
+  }
+  return lastResult;
+}
+
+function execFfmpegSyncWithCiRetry(
+  executable: string,
+  args: readonly string[],
+  options: { encoding: BufferEncoding; windowsHide?: boolean }
+): string {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return execFileSync(executable, args, options);
+    } catch (error) {
+      const status = (error as { status?: number | null } | null)?.status;
+      if (attempt >= 3 || typeof status !== 'number' || !WINDOWS_DLL_INIT_FAILED_CODES.has(status)) {
+        throw error;
+      }
+      sleepSync(500);
+    }
+  }
+}
+
 // Mở CSDL của sandbox, chờ tối đa 30 giây nếu tệp đang bị khoá (busy timeout của SQLite). Lượt Publish 1.7.1
 // (2026-10-21) trượt vì ngay sau khi đóng app, Defender trên máy GitHub còn giữ studio.sqlite → "database is locked".
 function openStudioDatabase(userDataDirectory: string): DatabaseSync {
@@ -2391,11 +2433,11 @@ test('P2: định dạng có tiếng mà tệp tải về mất luồng tiếng 
   const withAudio = path.join(sandbox, 'du-tieng.mp4');
   const videoOnly = path.join(sandbox, 'chi-hinh.mp4');
   expect(
-    spawnSync(ffmpeg, ['-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=15:duration=4', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=4',
+    spawnFfmpegSyncWithCiRetry(ffmpeg, ['-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=15:duration=4', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=4',
       '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', '-movflags', '+faststart', withAudio],
     { stdio: 'ignore', windowsHide: true, timeout: 60_000 }).status
   ).toBe(0);
-  expect(spawnSync(ffmpeg, ['-y', '-i', withAudio, '-map', '0:v:0', '-c', 'copy', '-movflags', '+faststart', videoOnly], { stdio: 'ignore', windowsHide: true }).status).toBe(0);
+  expect(spawnFfmpegSyncWithCiRetry(ffmpeg, ['-y', '-i', withAudio, '-map', '0:v:0', '-c', 'copy', '-movflags', '+faststart', videoOnly], { stdio: 'ignore', windowsHide: true }).status).toBe(0);
   const streamsOf = (file: string): string =>
     execFileSync(ffprobe, ['-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', file], { encoding: 'utf8', windowsHide: true })
       .trim()
@@ -2571,7 +2613,7 @@ test('P3: chế độ nguồn cao nhất không để tiếng Opus trong MP4 —
   const ffprobe = path.join(toolsDirectory!, 'ffprobe.exe');
   const make = (name: string, args: string[]): Buffer => {
     const file = path.join(sandbox, name);
-    expect(spawnSync(ffmpeg, ['-y', ...args, '-movflags', '+faststart', file], { stdio: 'ignore', windowsHide: true, timeout: 60_000 }).status, name).toBe(0);
+    expect(spawnFfmpegSyncWithCiRetry(ffmpeg, ['-y', ...args, '-movflags', '+faststart', file], { stdio: 'ignore', windowsHide: true, timeout: 60_000 }).status, name).toBe(0);
     return fs.readFileSync(file);
   };
   const videoInput = ['-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=15:duration=4'];
@@ -2585,7 +2627,7 @@ test('P3: chế độ nguồn cao nhất không để tiếng Opus trong MP4 —
   const audioCodecOf = (file: string): string =>
     execFileSync(ffprobe, ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', file], { encoding: 'utf8', windowsHide: true }).trim();
   const videoPacketsMd5 = (file: string): string =>
-    execFileSync(ffmpeg, ['-v', 'error', '-i', file, '-map', '0:v:0', '-c', 'copy', '-f', 'md5', '-'], { encoding: 'utf8', windowsHide: true }).trim();
+    execFfmpegSyncWithCiRetry(ffmpeg, ['-v', 'error', '-i', file, '-map', '0:v:0', '-c', 'copy', '-f', 'md5', '-'], { encoding: 'utf8', windowsHide: true }).trim();
   expect(audioCodecOf(path.join(sandbox, 'chi-opus.mp4'))).toBe('opus');
 
   let server: Server | undefined;
@@ -5562,7 +5604,7 @@ test('Hướng B 429: dính giới hạn thì cả app nghỉ với nguồn đó
   const ffmpeg = path.join(toolsDirectory!, 'ffmpeg.exe');
   const clip = path.join(sandbox, 'clip.mp4');
   expect(
-    spawnSync(ffmpeg, ['-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=15:duration=3', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3',
+    spawnFfmpegSyncWithCiRetry(ffmpeg, ['-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=15:duration=3', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3',
       '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', '-movflags', '+faststart', clip],
     { stdio: 'ignore', windowsHide: true, timeout: 60_000 }).status
   ).toBe(0);
@@ -5748,7 +5790,7 @@ test('Lag bước 1: tối đa N danh sách tải chạy cùng lúc, mỗi danh 
   const ffmpeg = path.join(toolsDirectory!, 'ffmpeg.exe');
   const clip = path.join(sandbox, 'clip.mp4');
   expect(
-    spawnSync(ffmpeg, ['-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=15:duration=3', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3',
+    spawnFfmpegSyncWithCiRetry(ffmpeg, ['-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=15:duration=3', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3',
       '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', '-movflags', '+faststart', clip],
     { stdio: 'ignore', windowsHide: true, timeout: 60_000 }).status
   ).toBe(0);
@@ -5934,7 +5976,7 @@ test('Lag bước 2 + 3: 2 danh sách × 4 luồng bắt đầu dần, vẫn ch�
   const ffmpeg = path.join(toolsDirectory!, 'ffmpeg.exe');
   const clip = path.join(sandbox, 'clip.mp4');
   expect(
-    spawnSync(ffmpeg, ['-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=15:duration=3', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3',
+    spawnFfmpegSyncWithCiRetry(ffmpeg, ['-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=15:duration=3', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3',
       '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', '-movflags', '+faststart', clip],
     { stdio: 'ignore', windowsHide: true, timeout: 60_000 }).status
   ).toBe(0);
