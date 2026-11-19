@@ -314,10 +314,10 @@ export class NormalizeEngine {
     }
     const cacheKey = await this.cacheKey(input, {
       operation: forceVideoTranscode
-        ? 'normalize-v6-force-video-core-resilience'
+        ? 'normalize-v7-force-video-core-resilience'
         : forceAudioTranscode
-          ? 'normalize-v6-force-audio-core-resilience'
-          : 'normalize-v5-core-resilience',
+          ? 'normalize-v7-force-audio-core-resilience'
+          : 'normalize-v7-core-resilience',
       target,
       encoder: profile?.encoder ?? 'cpu_auto',
       crf: profile?.crf ?? 18,
@@ -349,6 +349,12 @@ export class NormalizeEngine {
     const audioCopy = streamMatch.audioCopy && !forceAudioTranscode;
     const addSilentAudio = streamMatch.addSilentAudio;
 
+    const hdrColorTransfer =
+      source.colorTransfer?.toLowerCase() === 'arib-std-b67' ? 'arib-std-b67' : 'smpte2084';
+    const canonicalScaleColorOptions = target.hdr
+      ? 'in_range=auto:out_range=tv:out_color_matrix=bt2020:out_chroma_loc=left'
+      : 'in_range=auto:out_range=tv:out_color_matrix=bt709:out_chroma_loc=left';
+
     const filters: string[] = [];
     if (source.hdr && !target.hdr) {
       if (!caps.includes('zscale') || !caps.includes('tonemap')) {
@@ -367,7 +373,7 @@ export class NormalizeEngine {
       const scaleWidth = allowUpscale ? String(target.width) : `min(iw\\,${target.width})`;
       const scaleHeight = allowUpscale ? String(target.height) : `min(ih\\,${target.height})`;
       filters.push(
-        `scale=w='${scaleWidth}':h='${scaleHeight}':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos`,
+        `scale=w='${scaleWidth}':h='${scaleHeight}':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos:${canonicalScaleColorOptions}`,
         `pad=${target.width}:${target.height}:(ow-iw)/2:(oh-ih)/2:color=black`
       );
 
@@ -388,9 +394,18 @@ export class NormalizeEngine {
           }
         );
       }
+    } else if (!videoCopy) {
+      filters.push(`scale=${canonicalScaleColorOptions}`);
     }
-    if (Math.abs(source.fps - target.fps) >= 0.01) filters.push(`fps=${target.fps}`);
-    if (!videoCopy) filters.push('setsar=1', `format=${target.pixelFormat}`);
+    if (!videoCopy) {
+      filters.push(`fps=${target.fps}`);
+      filters.push('setsar=1', `format=${target.pixelFormat}`);
+      filters.push(
+        target.hdr
+          ? `setparams=range=tv:color_primaries=bt2020:color_trc=${hdrColorTransfer}:colorspace=bt2020nc`
+          : 'setparams=range=tv:color_primaries=bt709:color_trc=bt709:colorspace=bt709'
+      );
+    }
 
     const selection = selectVideoEncoder(target.videoCodec, requested, caps, resource.gpuJobs);
 
@@ -448,6 +463,9 @@ export class NormalizeEngine {
         } else {
           args.push('-preset', preset, '-crf', String(profile?.crf ?? 18));
         }
+        if (encoder === 'libx265') {
+          args.push('-x265-params', 'no-info=1');
+        }
         args.push(
           '-threads', String(resource.ffmpegThreads),
           '-filter_threads', String(resource.filterThreads),
@@ -469,7 +487,25 @@ export class NormalizeEngine {
       }
 
       if (addSilentAudio) args.push('-shortest');
-      if (!target.hdr) {
+      if (!videoCopy) {
+        if (target.hdr) {
+          args.push(
+            '-color_primaries', 'bt2020',
+            '-color_trc', hdrColorTransfer,
+            '-colorspace', 'bt2020nc',
+            '-color_range', 'tv',
+            '-chroma_sample_location', 'left'
+          );
+        } else {
+          args.push(
+            '-color_primaries', 'bt709',
+            '-color_trc', 'bt709',
+            '-colorspace', 'bt709',
+            '-color_range', 'tv',
+            '-chroma_sample_location', 'left'
+          );
+        }
+      } else if (!target.hdr) {
         args.push('-color_primaries', 'bt709', '-color_trc', 'bt709', '-colorspace', 'bt709');
       }
       args.push(

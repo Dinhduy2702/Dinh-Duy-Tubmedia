@@ -560,6 +560,7 @@ tests/integration/migration-attempts-reset.test.ts
 tests/integration/normalize-audio-encoder-fallback.test.ts
 tests/integration/normalize-cache-commit-locked.test.ts
 tests/integration/normalize-cache-corrupt-audio.test.ts
+tests/integration/normalize-concat-extradata-uniformity.test.ts
 tests/integration/post-merge-source-cleanup-v15.test.ts
 tests/integration/quarantine-service.test.ts
 tests/integration/queue-attempts.test.ts
@@ -699,6 +700,7 @@ tests/unit/normalization-match.test.ts
 tests/unit/normalize-audio-encode-fallback.test.ts
 tests/unit/normalize-cache-pending-per-job.test.ts
 tests/unit/normalize-engine-stream-copy.test.ts
+tests/unit/normalize-extradata-safety-v178.test.ts
 tests/unit/notice-components.test.ts
 tests/unit/notice-display-policy.test.ts
 tests/unit/notice-issue.test.ts
