@@ -14,11 +14,15 @@ import { removeSandbox } from '../e2e/helpers/sandbox-cleanup.js';
 const holders: ChildProcess[] = [];
 
 function holdDirectory(directory: string, milliseconds: number): ChildProcess {
-  const child = spawn(process.execPath, ['-e', `setTimeout(() => {}, ${milliseconds})`], {
-    cwd: directory,
-    stdio: 'ignore',
-    windowsHide: true
-  });
+  const child = spawn(
+    process.execPath,
+    ['-e', `process.stdout.write('READY\\n'); setTimeout(() => {}, ${milliseconds});`],
+    {
+      cwd: directory,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true
+    }
+  );
   holders.push(child);
   return child;
 }
@@ -30,10 +34,27 @@ function makeSandbox(): string {
   return directory;
 }
 
-async function waitForSpawn(child: ChildProcess): Promise<void> {
+async function waitForDirectoryHeld(child: ChildProcess, timeoutMs = 15_000): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    child.once('spawn', resolve);
-    child.once('error', reject);
+    let buffer = '';
+    let settled = false;
+    const finish = (err?: Error): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (err) reject(err);
+      else resolve();
+    };
+    const timer = setTimeout(() => {
+      finish(new Error(`Quá ${timeoutMs}ms mà tiến trình con giữ thư mục chưa báo READY.`));
+    }, timeoutMs);
+    child.once('error', (err) => finish(err instanceof Error ? err : new Error(String(err))));
+    child.once('close', (code) => finish(new Error(`Tiến trình con giữ thư mục thoát sớm (mã ${code ?? -1}) trước khi báo READY.`)));
+    child.stdout?.setEncoding('utf8');
+    child.stdout?.on('data', (chunk: string) => {
+      buffer += chunk;
+      if (buffer.includes('READY')) finish();
+    });
   });
 }
 
@@ -44,7 +65,7 @@ afterEach(() => {
 describe.runIf(process.platform === 'win32')('removeSandbox (bước dọn của bài e2e)', () => {
   it('chờ được khóa giữ lâu hơn ~11 giây (ngưỡng cũ) rồi xóa sạch', async () => {
     const sandbox = makeSandbox();
-    await waitForSpawn(holdDirectory(sandbox, 14_000));
+    await waitForDirectoryHeld(holdDirectory(sandbox, 14_000));
     const result = await removeSandbox(sandbox);
     expect(fs.existsSync(sandbox), 'thư mục đã được xóa sau khi khóa nhả').toBe(false);
     expect(result).toMatchObject({ removed: true });
@@ -52,7 +73,7 @@ describe.runIf(process.platform === 'win32')('removeSandbox (bước dọn của
 
   it('khóa giữ mãi quá hạn chờ thì KHÔNG ném lỗi (không đánh rớt bài kiểm), trả về chẩn đoán', async () => {
     const sandbox = makeSandbox();
-    await waitForSpawn(holdDirectory(sandbox, 30_000));
+    await waitForDirectoryHeld(holdDirectory(sandbox, 30_000));
     let result: Awaited<ReturnType<typeof removeSandbox>> | undefined;
     await expect(
       (async () => {
