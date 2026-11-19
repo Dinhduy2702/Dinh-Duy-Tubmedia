@@ -141,11 +141,15 @@ describe.skipIf(!toolsDirectory)('Bản đệm chuẩn hóa đang bị quy trìn
     const cached = await engine.normalizeToTarget(job('merge-a'), input, source, cacheFolder, target, resource, signal, () => undefined, profile);
     corruptMiddleAudioPackets(toolsDirectory!, cached);
 
-    // Quy trình A đang đọc bản đệm (giữ tệp mở ~6 s, như lúc ghép).
-    const reader = spawn(join(toolsDirectory!, 'ffmpeg.exe'), ['-v', 'quiet', '-re', '-i', cached, '-map', '0:v:0', '-f', 'null', '-'], {
-      windowsHide: true,
-      stdio: 'ignore'
-    });
+    // Quy trình A đang đọc bản đệm liên tục (-stream_loop -1 để không tự thoát sớm giữa chừng như lúc ghép thật).
+    const reader = spawn(
+      join(toolsDirectory!, 'ffmpeg.exe'),
+      ['-v', 'quiet', '-re', '-stream_loop', '-1', '-i', cached, '-map', '0:v:0', '-f', 'null', '-'],
+      {
+        windowsHide: true,
+        stdio: 'ignore'
+      }
+    );
     try {
       await new Promise((resolve) => setTimeout(resolve, 800));
 
@@ -156,8 +160,13 @@ describe.skipIf(!toolsDirectory)('Bản đệm chuẩn hóa đang bị quy trìn
       expect(fresh.endsWith('.pending.mp4'), 'không trả tệp tạm').toBe(false);
       expect(existsSync(cached), 'bản đệm đang bị đọc vẫn còn').toBe(true);
     } finally {
-      reader.kill();
-      await new Promise((resolve) => reader.once('close', resolve));
+      if (reader.exitCode === null && reader.signalCode === null) {
+        reader.kill();
+        await Promise.race([
+          new Promise<void>((resolve) => reader.once('close', () => resolve())),
+          new Promise<void>((resolve) => setTimeout(resolve, 5_000))
+        ]);
+      }
     }
   }, 180_000);
 });

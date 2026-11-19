@@ -513,7 +513,11 @@ describe('V3 — Giữ tệp tạm .part khi video tải lỗi do lỗi thử l�
     const clearedWork = downloadWorkFolder(clearedList.project.tempFolder, clearedList.project.id);
     expect(existsSync(clearedWork)).toBe(true);
     expect(manager.clearFinished(clearedList.project.id)).toBe(1);
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    expect(existsSync(clearedWork), 'dọn mục đã kết thúc phải dọn luôn .part của mục lỗi vừa xoá').toBe(false);
+    await expect
+      .poll(() => existsSync(clearedWork), {
+        timeout: 5_000,
+        message: 'dọn mục đã kết thúc phải dọn luôn .part của mục lỗi vừa xoá'
+      })
+      .toBe(false);
   });
 });
