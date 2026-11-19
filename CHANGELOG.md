@@ -1,3 +1,34 @@
+# Tubmedia 1.7.7
+
+- Máy ít nhân (2–4 luồng) và máy dùng ổ cứng cơ (HDD) chạy nhẹ, êm hơn hẳn khi vừa mở CapCut vừa dùng Tubmedia:
+  - Khi tạo bản dựng cho CapCut ở nền trên máy ít nhân, ứng dụng tự điều chỉnh trần CPU linh hoạt theo mức bận thực tế của máy để nhường tài nguyên cho CapCut và các phần mềm bạn đang thao tác, mà vẫn giữ tốc độ xử lý ổn định (không bị chậm quá 2 lần).
+  - Khi ghép video, chuẩn hóa, cắt đoạn có sẵn, đổi tỉ lệ khung hình (9:16, 1:1, 16:9) hoặc kiểm tra tệp trên máy ít nhân và ổ cứng cơ, ứng dụng tự giảm về xử lý tuần tự từng bước và giới hạn số luồng hợp lý để máy không bị vọt 100% CPU hay khựng ổ đĩa.
+- Nâng cấp bộ xử lý video đi kèm lên bản phát hành ổn định chính thức:
+  - Chữa tận gốc lỗi đứng im khi mã hoá âm thanh ở các video có đoạn im lặng cuối — video được xử lý mượt ngay từ lượt đầu mà không cần chờ 5 phút để tự cứu lại như trước, đồng thời giữ nguyên chất lượng hình ảnh và màu sắc (cả video HDR, SDR, cảnh chuyển động nhanh và cảnh tối).
+- Thêm nút "🧹 Dọn video nguồn của danh sách này" sau khi ghép xong:
+  - Ngay trên khung quy trình đã ghép hoàn tất (và trong trang Dự án), bạn có thể bấm dọn gọn các video nguồn lẻ vào Thùng rác của Windows sau khi xem trước rõ số tệp và dung lượng sẽ giải phóng.
+  - Tự động bảo vệ an toàn 100%: không bao giờ đụng tới video thành phẩm vừa ghép, giữ nguyên các tệp bạn tự chép vào từ bên ngoài, giữ nguyên video đang dùng chung với danh sách khác chưa hoàn tất hoặc đang nằm trong bản nháp CapCut, và kiểm tra sức chứa Thùng rác trước khi chuyển (tuyệt đối không tự xoá vĩnh viễn).
+  - Trong **Cài đặt → Lưu trữ**, bạn có thể chọn **Luôn hỏi (mặc định)**, **Luôn tự dọn (vào Thùng rác)** hoặc **Luôn giữ**.
+- Tự dọn sạch tiến trình ngầm ngay cả khi ứng dụng bị tắt đột ngột:
+  - Nếu ứng dụng bị đóng ngang bằng Trình quản lý tác vụ (End Task) hoặc mất điện đột ngột, Windows tự đóng trọn vẹn các tiến trình tải và xử lý video con trong vài giây (không để sót tiến trình chạy ngầm ngốn máy), vẫn giữ nguyên các tệp tải dở (`.part`) để lần mở sau tải tiếp và không ảnh hưởng tới bộ cài đặt nâng cấp ứng dụng.
+- Kiểm tra dung lượng ổ trống thông minh hơn và không làm mất công ghép khi ổ đầy giữa chừng:
+  - Bỏ mức đòi cứng 15–25 GB ổ trống gây chặn oan trên các laptop ổ nhỏ: Tải nhanh và tải lẻ nay chỉ cần từ 3 GB (hoặc gấp đôi dung lượng video ước tính); Ghép và Cắt tệp có sẵn tính sát theo tổng dung lượng các video nguồn (tối thiểu 5 GB) và báo rõ số GB hiện còn so với số GB cần có; công cụ "Cắt tệp có sẵn" nay cũng kiểm tra ổ trống trước khi chạy.
+  - Nếu ổ đĩa chẳng may đầy đúng lúc đang chuẩn hóa, cắt đoạn hoặc ghép danh sách lớn, ứng dụng tự chuyển sang **Tạm dừng** và giữ nguyên toàn bộ các đoạn đã chuẩn hóa xong — bạn chỉ cần dọn bớt ổ đĩa là ứng dụng tự chạy tiếp, không còn bị báo thất bại mất lượt.
+- Máy 4–8 GB RAM đang mở kèm CapCut và trình duyệt không còn bị đứng chờ im lặng:
+  - Khi chưa có tác vụ nào đang chạy, ứng dụng vẫn cho phép bắt đầu tối thiểu 1 việc miễn máy còn trên mức RAM an toàn tối thiểu (chỉ giữ chờ từ việc song song thứ 2 trở đi); nếu RAM trống xuống quá thấp đến mức có nguy cơ đơ máy, màn hình sẽ hiện thông báo tiếng Việt rõ ràng để bạn biết lý do.
+- Mục "Tải nhanh" (1 video) bền bỉ và êm máy ngang với Hàng đợi tải danh sách:
+  - Tự giảm số mảnh tải trên ổ cứng cơ (HDD), áp dụng đúng giới hạn tốc độ mạng và Proxy bạn đặt trong Cài đặt, tự thử lại khi tệp tạm bị khoá ngắn, và dùng chung cổng tự chờ khi YouTube/nền tảng tạm giới hạn yêu cầu (HTTP 429).
+  - Khi rớt mạng tạm thời hoặc tắt mở lại ứng dụng giữa chừng, Tải nhanh giữ lại phần đã tải dở (`.part`) trong tối đa 7 ngày để bạn bấm Tải lại là nối tiếp ngay thay vì tải lại từ đầu (tự dọn sạch khi tải xong hoặc bấm Huỷ).
+- Hoàn thiện chế độ "Chỉ tạo timeline (không ghép video)":
+  - Ô "Chỉ tạo timeline" không còn tự nhớ ngầm qua lần mở ứng dụng mới hoặc sau khi bạn xoá quy trình cũ, kèm bảng nhắc nổi bật ngay trên nút bấm chính để tránh chạy nhầm khi bạn muốn xuất video MP4; nếu danh sách có mốc cắt đoạn hoặc tắt tiếng, màn hình ghi chú rõ độ chênh nhỏ có thể có (~0,1–0,5 giây) so với ghép thật.
+  - Hiển thị tốc độ kiểm tra và thời gian ước tính còn lại thực tế (không còn đứng ở `--:--`), phát hiện sớm tệp nguồn bị cụt hoặc báo sai thời lượng, dừng ngay các nhánh kiểm tra song song nếu một tệp lỗi sớm, và cảnh báo rõ nếu trong danh sách có video nguồn không có tiếng.
+- Nhận diện rõ lỗi video bị chủ kênh chặn theo quốc gia / vùng lãnh thổ (YouTube): báo đúng nguyên nhân bằng tiếng Việt thay vì "lỗi chưa xác định".
+
+Giới hạn đã biết của 1.7.7:
+- Trên các máy 6–16 luồng, mức bận CPU khi vừa tải vừa tạo bản dựng CapCut chưa được đo thực tế như cấu hình 2 và 4 luồng.
+- Số đo CPU khi vừa tải vừa tạo bản dựng CapCut trên cấu hình 2 và 4 luồng được lấy trên lượt đo 7 phút (9 mẫu lúc đang mã hoá).
+- Một số hạng mục hoàn thiện nhỏ (hậu kiểm kênh tiếng 5.1 khi trộn clip không tiếng, giới hạn hàng chờ mã hoá CapCut và tự dò lại ổ đĩa khi lần đầu quá giờ, chia giới hạn băng thông theo tổng luồng tải, làm mới nóng bộ điều tiết khi đổi Cài đặt) được để sang đợt kế tiếp.
+
 # Tubmedia 1.7.6
 
 - Nút "Theo máy", "Chuẩn 1080p" và các mẫu chọn nhanh không còn tự đổi chế độ CapCut của bạn:
