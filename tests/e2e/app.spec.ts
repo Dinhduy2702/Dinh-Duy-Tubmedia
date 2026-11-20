@@ -63,7 +63,7 @@ function spawnFfmpegSyncWithCiRetry(
 function execFfmpegSyncWithCiRetry(
   executable: string,
   args: readonly string[],
-  options: { encoding: BufferEncoding; windowsHide?: boolean }
+  options: { encoding: BufferEncoding; windowsHide?: boolean; timeout?: number }
 ): string {
   for (let attempt = 0; ; attempt += 1) {
     try {
@@ -78,10 +78,21 @@ function execFfmpegSyncWithCiRetry(
   }
 }
 
-// Mở CSDL của sandbox, chờ tối đa 30 giây nếu tệp đang bị khoá (busy timeout của SQLite). Lượt Publish 1.7.1
-// (2026-10-21) trượt vì ngay sau khi đóng app, Defender trên máy GitHub còn giữ studio.sqlite → "database is locked".
+// Mở CSDL của sandbox, chờ tối đa 30 giây nếu tệp đang bị khoá (busy timeout của SQLite) kèm thử lại ngắn tối đa 10 lần
+// nếu chính new DatabaseSync(...) ném database is locked / SQLITE_BUSY khi Defender trên máy GitHub đang quét studio.sqlite.
 function openStudioDatabase(userDataDirectory: string): DatabaseSync {
-  return new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'), { timeout: 30_000 });
+  const databasePath = path.join(userDataDirectory, 'database', 'studio.sqlite');
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return new DatabaseSync(databasePath, { timeout: 30_000 });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (attempt >= 10 || !/database is locked|SQLITE_BUSY/i.test(message)) {
+        throw error;
+      }
+      sleepSync(500);
+    }
+  }
 }
 
 function appendRuntimeLog(message: string): void {
@@ -300,11 +311,14 @@ test('không bắn thông báo nổi khi sửa danh sách link hoặc đổi s�
   const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-notify-spam-'));
   const userDataDirectory = path.join(sandbox, 'userdata');
   fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec(
-    'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
-  );
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec(
+      'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
+    );
+  } finally {
+    db.close();
+  }
 
   try {
     electronApplication = await electron.launch({
@@ -455,10 +469,6 @@ test('Giai đoạn 3: trích khung hình xem trước thật từ một đoạn 
   const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-preview-frame-'));
   const userDataDirectory = path.join(sandbox, 'userdata');
   fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec(
-    'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
-  );
   const seededSettings = {
     theme: 'dark',
     startWithWindows: false,
@@ -468,17 +478,24 @@ test('Giai đoạn 3: trích khung hình xem trước thật từ một đoạn 
     ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
     ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
   };
-  db.prepare(
-    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
-  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
-  // Không có khóa này thì app coi CSDL là mới và ghi cài đặt mặc định đè lên — xem expectSeededSettingsKept.
-  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec(
+      'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
+    );
+    db.prepare(
+      'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+    ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+    // Không có khóa này thì app coi CSDL là mới và ghi cài đặt mặc định đè lên — xem expectSeededSettingsKept.
+    db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  } finally {
+    db.close();
+  }
 
   const clipDirectory = path.join(sandbox, 'nguon-that');
   fs.mkdirSync(clipDirectory, { recursive: true });
   const clipPath = path.join(clipDirectory, 'clip.mp4');
-  const ffmpegResult = spawnSync(
+  const ffmpegResult = spawnFfmpegSyncWithCiRetry(
     path.join(toolsDirectory!, 'ffmpeg.exe'),
     ['-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=10:duration=6', '-c:v', 'libx264', '-preset', 'ultrafast', '-an', clipPath],
     { stdio: 'ignore', windowsHide: true, timeout: 60_000 }
@@ -588,10 +605,6 @@ test('Sửa lỗi 2026-09-23 — tải xong 1 video qua Tải nhanh không làm 
   const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-quickdownload-freeze-'));
   const userDataDirectory = path.join(sandbox, 'userdata');
   fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec(
-    'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
-  );
   const seededSettings = {
     theme: 'dark',
     startWithWindows: false,
@@ -601,17 +614,24 @@ test('Sửa lỗi 2026-09-23 — tải xong 1 video qua Tải nhanh không làm 
     ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
     ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
   };
-  db.prepare(
-    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
-  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
-  // Không có khóa này thì app coi CSDL là mới và ghi cài đặt mặc định đè lên — xem expectSeededSettingsKept.
-  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec(
+      'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
+    );
+    db.prepare(
+      'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+    ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+    // Không có khóa này thì app coi CSDL là mới và ghi cài đặt mặc định đè lên — xem expectSeededSettingsKept.
+    db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  } finally {
+    db.close();
+  }
 
   const clipDirectory = path.join(sandbox, 'nguon-that');
   fs.mkdirSync(clipDirectory, { recursive: true });
   const clipPath = path.join(clipDirectory, 'clip.mp4');
-  const ffmpegResult = spawnSync(
+  const ffmpegResult = spawnFfmpegSyncWithCiRetry(
     path.join(toolsDirectory!, 'ffmpeg.exe'),
     [
       '-y', '-f', 'lavfi', '-i', 'testsrc=size=960x540:rate=24:duration=15',
@@ -763,10 +783,6 @@ test('Giai đoạn 6 mục 2: cắt tệp có sẵn trên máy (không qua tải
   const outputDirectory = path.join(sandbox, 'ra');
   fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
   fs.mkdirSync(outputDirectory, { recursive: true });
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec(
-    'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
-  );
   const seededSettings = {
     theme: 'dark',
     startWithWindows: false,
@@ -775,15 +791,22 @@ test('Giai đoạn 6 mục 2: cắt tệp có sẵn trên máy (không qua tải
     ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
     ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
   };
-  db.prepare(
-    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
-  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
-  // Không có khóa này thì app coi CSDL là mới và ghi cài đặt mặc định đè lên — xem expectSeededSettingsKept.
-  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec(
+      'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
+    );
+    db.prepare(
+      'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+    ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+    // Không có khóa này thì app coi CSDL là mới và ghi cài đặt mặc định đè lên — xem expectSeededSettingsKept.
+    db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  } finally {
+    db.close();
+  }
 
   const sourceFile = path.join(sandbox, 'video-nguon.mp4');
-  const ffmpegResult = spawnSync(
+  const ffmpegResult = spawnFfmpegSyncWithCiRetry(
     path.join(toolsDirectory!, 'ffmpeg.exe'),
     [
       '-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=15:duration=15',
@@ -954,10 +977,6 @@ test('Giai đoạn 6 mục 3: đổi tỉ lệ khung hình khi cắt tệp có s
   const outputDirectory = path.join(sandbox, 'ra');
   fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
   fs.mkdirSync(outputDirectory, { recursive: true });
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec(
-    'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
-  );
   const seededSettings = {
     theme: 'dark',
     startWithWindows: false,
@@ -966,16 +985,23 @@ test('Giai đoạn 6 mục 3: đổi tỉ lệ khung hình khi cắt tệp có s
     ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
     ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
   };
-  db.prepare(
-    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
-  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
-  // Không có khóa này thì app coi CSDL là mới và ghi cài đặt mặc định đè lên — xem expectSeededSettingsKept.
-  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec(
+      'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
+    );
+    db.prepare(
+      'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+    ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+    // Không có khóa này thì app coi CSDL là mới và ghi cài đặt mặc định đè lên — xem expectSeededSettingsKept.
+    db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  } finally {
+    db.close();
+  }
 
   // Nguồn 16:9 (640x360) — chuyển sang 9:16 dọc phải phóng to+mờ làm nền, không được méo/cắt mất video gốc.
   const sourceFile = path.join(sandbox, 'video-nguon.mp4');
-  const ffmpegResult = spawnSync(
+  const ffmpegResult = spawnFfmpegSyncWithCiRetry(
     path.join(toolsDirectory!, 'ffmpeg.exe'),
     [
       '-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=15:duration=10',
@@ -1093,7 +1119,7 @@ test('Giai đoạn 6 mục 3: đổi tỉ lệ khung hình khi cắt tệp có s
     expect(verticalCut.outputPath, 'tên tệp phải có hậu tố tỉ lệ').toMatch(/\[9x16\]/);
 
     // Xác nhận THẬT bằng ffprobe: kích thước đầu ra đúng 1080x1920 (chuẩn xuất Reels/Shorts).
-    const probeOutput = execFileSync(
+    const probeOutput = execFfmpegSyncWithCiRetry(
       path.join(toolsDirectory!, 'ffprobe.exe'),
       ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', verticalCut.outputPath!],
       { encoding: 'utf8', windowsHide: true }
@@ -1109,7 +1135,7 @@ test('Giai đoạn 6 mục 3: đổi tỉ lệ khung hình khi cắt tệp có s
       aspectRatio: '1:1'
     });
     expect(squareCut.phase, 'cắt kèm đổi tỉ lệ 1:1 phải hoàn tất').toBe('completed');
-    const squareProbe = execFileSync(
+    const squareProbe = execFfmpegSyncWithCiRetry(
       path.join(toolsDirectory!, 'ffprobe.exe'),
       ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', squareCut.outputPath!],
       { encoding: 'utf8', windowsHide: true }
@@ -1140,10 +1166,6 @@ test('Giai đoạn 6 mục 6: xem thông tin tệp — media:analyze trả đún
   const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-media-analyze-'));
   const userDataDirectory = path.join(sandbox, 'userdata');
   fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec(
-    'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
-  );
   const seededSettings = {
     theme: 'dark',
     startWithWindows: false,
@@ -1152,16 +1174,23 @@ test('Giai đoạn 6 mục 6: xem thông tin tệp — media:analyze trả đún
     ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
     ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
   };
-  db.prepare(
-    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
-  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
-  // Không có khóa này thì app coi CSDL là mới và ghi cài đặt mặc định đè lên — xem expectSeededSettingsKept.
-  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec(
+      'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
+    );
+    db.prepare(
+      'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+    ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+    // Không có khóa này thì app coi CSDL là mới và ghi cài đặt mặc định đè lên — xem expectSeededSettingsKept.
+    db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  } finally {
+    db.close();
+  }
 
   // Thông số ĐÃ BIẾT trước, dựng bằng ffmpeg thật — dùng để đối chiếu với kết quả media:analyze thật.
   const sourceFile = path.join(sandbox, 'video-thong-tin.mp4');
-  const ffmpegResult = spawnSync(
+  const ffmpegResult = spawnFfmpegSyncWithCiRetry(
     path.join(toolsDirectory!, 'ffmpeg.exe'),
     [
       '-y', '-f', 'lavfi', '-i', 'testsrc=size=960x540:rate=24:duration=6',
@@ -1349,10 +1378,6 @@ test('B1: ghép video tự động tiếp tục đúng sau khi app bị đóng �
   const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-merge-crash-resume-'));
   const userDataDirectory = path.join(sandbox, 'userdata');
   fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec(
-    'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
-  );
   const seededSettings = {
     theme: 'dark',
     startWithWindows: false,
@@ -1362,18 +1387,25 @@ test('B1: ghép video tự động tiếp tục đúng sau khi app bị đóng �
     ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
     ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
   };
-  db.prepare(
-    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
-  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
-  // Không có khóa này thì app coi CSDL là mới và ghi cài đặt mặc định đè lên — xem expectSeededSettingsKept.
-  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec(
+      'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
+    );
+    db.prepare(
+      'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+    ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+    // Không có khóa này thì app coi CSDL là mới và ghi cài đặt mặc định đè lên — xem expectSeededSettingsKept.
+    db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  } finally {
+    db.close();
+  }
 
   const clipDirectory = path.join(sandbox, 'nguon-that');
   fs.mkdirSync(clipDirectory, { recursive: true });
   const makeClip = (name: string, durationSeconds: number): string => {
     const clipPath = path.join(clipDirectory, name);
-    const result = spawnSync(
+    const result = spawnFfmpegSyncWithCiRetry(
       path.join(toolsDirectory!, 'ffmpeg.exe'),
       [
         '-y',
@@ -1530,11 +1562,15 @@ test('B1: ghép video tự động tiếp tục đúng sau khi app bị đóng �
     // Xác nhận THẬT: ngay sau khi giết, CSDL vẫn còn kẹt ở trạng thái đang chạy dở — KHÔNG phải
     // 'interrupted' gọn gàng (trạng thái đó chỉ do queue.stop() ghi, và tiến trình đã chết trước khi kịp
     // chạy tới đó). Nếu giả này sai, bài kiểm chưa mô phỏng đúng kịch bản "tắt máy đột ngột".
-    const dbAfterKill = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-    const rowAfterKill = dbAfterKill.prepare('SELECT status FROM queue_jobs WHERE id = ?').get(mergeJobId) as
-      | { status: string }
-      | undefined;
-    dbAfterKill.close();
+    let rowAfterKill: { status: string } | undefined;
+    const dbAfterKill = openStudioDatabase(userDataDirectory);
+    try {
+      rowAfterKill = dbAfterKill.prepare('SELECT status FROM queue_jobs WHERE id = ?').get(mergeJobId) as
+        | { status: string }
+        | undefined;
+    } finally {
+      dbAfterKill.close();
+    }
     expect(
       statusBeforeKill === 'merging' && rowAfterKill?.status === 'merging',
       `CSDL phải còn kẹt ở 'merging' ngay sau khi giết đột ngột (trước kill: ${String(statusBeforeKill)}, ` +
@@ -1606,7 +1642,7 @@ test('B1: ghép video tự động tiếp tục đúng sau khi app bị đóng �
 
     // Xác nhận THẬT bằng ffprobe: thành phẩm không hỏng, đọc được, thời lượng hợp lý (2 clip 18 giây ghép
     // lại — không thiếu đoạn do checkpoint hỏng, không lặp đoạn do ghép đè lên chính nó).
-    const durationOutput = execFileSync(
+    const durationOutput = execFfmpegSyncWithCiRetry(
       path.join(toolsDirectory!, 'ffprobe.exe'),
       ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', finalOutputPath],
       { encoding: 'utf8', windowsHide: true }
@@ -1643,10 +1679,6 @@ test('B2: hai video cùng tiêu đề khác link đều được tải đầy đ
   const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-duplicate-title-'));
   const userDataDirectory = path.join(sandbox, 'userdata');
   fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec(
-    'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
-  );
   const seededSettings = {
     theme: 'dark',
     startWithWindows: false,
@@ -1656,12 +1688,19 @@ test('B2: hai video cùng tiêu đề khác link đều được tải đầy đ
     ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
     ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
   };
-  db.prepare(
-    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
-  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
-  // Không có khóa này thì app coi CSDL là mới và ghi cài đặt mặc định đè lên — xem expectSeededSettingsKept.
-  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec(
+      'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
+    );
+    db.prepare(
+      'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+    ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+    // Không có khóa này thì app coi CSDL là mới và ghi cài đặt mặc định đè lên — xem expectSeededSettingsKept.
+    db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  } finally {
+    db.close();
+  }
 
   // Hai clip THẬT khác nhau (kích thước khác nhau để phân biệt bằng ffprobe sau khi tải xong — chứng
   // minh không phải cùng một tệp/bị lấy nhầm của nhau).
@@ -1669,7 +1708,7 @@ test('B2: hai video cùng tiêu đề khác link đều được tải đầy đ
   fs.mkdirSync(clipDirectory, { recursive: true });
   const makeClip = (name: string, size: string): string => {
     const clipPath = path.join(clipDirectory, name);
-    const result = spawnSync(
+    const result = spawnFfmpegSyncWithCiRetry(
       path.join(toolsDirectory!, 'ffmpeg.exe'),
       ['-y', '-f', 'lavfi', '-i', `testsrc=size=${size}:rate=15:duration=3`, '-c:v', 'libx264', '-preset', 'ultrafast', clipPath],
       { stdio: 'ignore', windowsHide: true, timeout: 60_000 }
@@ -1815,7 +1854,7 @@ test('B2: hai video cùng tiêu đề khác link đều được tải đầy đ
     // Xác nhận THẬT bằng ffprobe: hai tệp đúng là NỘI DUNG KHÁC NHAU (kích thước khác nhau như đã dựng),
     // không phải một tệp được tải rồi bị coi là "đã có" và dùng lại nhầm cho cả hai.
     const dimensionsOf = (filePath: string): string =>
-      execFileSync(
+      execFfmpegSyncWithCiRetry(
         path.join(toolsDirectory!, 'ffprobe.exe'),
         ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', filePath],
         { encoding: 'utf8', windowsHide: true }
@@ -1848,8 +1887,6 @@ test('S1 + S2: danh sách thứ hai cùng thư mục, cùng link dùng lại t�
   const quarantineRootExisted = fs.existsSync(quarantineRoot);
   const userDataDirectory = path.join(sandbox, 'userdata');
   fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
   const seededSettings = {
     theme: 'dark',
     startWithWindows: false,
@@ -1859,14 +1896,19 @@ test('S1 + S2: danh sách thứ hai cùng thư mục, cùng link dùng lại t�
     ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
     ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
   };
-  db.prepare(
-    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
-  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
-  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
+    db.prepare(
+      'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+    ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+    db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  } finally {
+    db.close();
+  }
 
   const clipPath = path.join(sandbox, 'nguon.mp4');
-  const made = spawnSync(
+  const made = spawnFfmpegSyncWithCiRetry(
     path.join(toolsDirectory!, 'ffmpeg.exe'),
     ['-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=15:duration=4', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=4',
       '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', '-shortest', clipPath],
@@ -1984,7 +2026,7 @@ test('S1 + S2: danh sách thứ hai cùng thư mục, cùng link dùng lại t�
     if (!quarantineRootExisted) {
       expect(fs.existsSync(quarantineRoot), `không được tạo khu cách ly ${quarantineRoot}`).toBe(false);
     }
-    const audio = execFileSync(
+    const audio = execFfmpegSyncWithCiRetry(
       path.join(toolsDirectory!, 'ffprobe.exe'),
       ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', firstPath],
       { encoding: 'utf8', windowsHide: true }
@@ -2031,8 +2073,6 @@ test('S3: ghép thấy tệp nguồn bị thiếu thì tự tải lại video đ
   const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-merge-missing-source-'));
   const userDataDirectory = path.join(sandbox, 'userdata');
   fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
   const seededSettings = {
     theme: 'dark',
     startWithWindows: false,
@@ -2042,15 +2082,20 @@ test('S3: ghép thấy tệp nguồn bị thiếu thì tự tải lại video đ
     ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
     ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
   };
-  db.prepare(
-    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
-  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
-  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
+    db.prepare(
+      'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+    ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+    db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  } finally {
+    db.close();
+  }
 
   const makeClip = (name: string, frequency: number): Buffer => {
     const clipPath = path.join(sandbox, name);
-    const made = spawnSync(
+    const made = spawnFfmpegSyncWithCiRetry(
       path.join(toolsDirectory!, 'ffmpeg.exe'),
       ['-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=15:duration=4', '-f', 'lavfi', '-i', `sine=frequency=${frequency}:duration=4`,
         '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', '-shortest', clipPath],
@@ -2195,7 +2240,7 @@ test('S3: ghép thấy tệp nguồn bị thiếu thì tự tải lại video đ
     const outputPath = typeof merge?.input.outputPath === 'string' ? merge.input.outputPath : '';
     expect(fs.existsSync(outputPath), `thành phẩm phải có trên đĩa: ${outputPath}`).toBe(true);
     const probe = (args: string[]): string =>
-      execFileSync(path.join(toolsDirectory!, 'ffprobe.exe'), ['-v', 'error', ...args, outputPath], { encoding: 'utf8', windowsHide: true }).trim();
+      execFfmpegSyncWithCiRetry(path.join(toolsDirectory!, 'ffprobe.exe'), ['-v', 'error', ...args, outputPath], { encoding: 'utf8', windowsHide: true }).trim();
     const duration = Number(probe(['-show_entries', 'format=duration', '-of', 'csv=p=0']));
     expect(duration, 'thành phẩm đủ 2 video 4 giây').toBeGreaterThan(7);
     expect(duration).toBeLessThan(9.5);
@@ -2222,8 +2267,6 @@ test('P1: video không có tiếng hoặc im lặng từ nguồn được đo th
   const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-audio-issue-'));
   const userDataDirectory = path.join(sandbox, 'userdata');
   fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
   const seededSettings = {
     theme: 'dark',
     startWithWindows: false,
@@ -2233,15 +2276,20 @@ test('P1: video không có tiếng hoặc im lặng từ nguồn được đo th
     ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
     ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
   };
-  db.prepare(
-    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
-  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
-  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
+    db.prepare(
+      'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+    ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+    db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  } finally {
+    db.close();
+  }
 
   const makeClip = (name: string, audioArgs: string[]): Buffer => {
     const clipPath = path.join(sandbox, name);
-    const made = spawnSync(
+    const made = spawnFfmpegSyncWithCiRetry(
       path.join(toolsDirectory!, 'ffmpeg.exe'),
       ['-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=15:duration=4', ...audioArgs,
         '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-shortest', clipPath],
@@ -2411,8 +2459,6 @@ test('P2: định dạng có tiếng mà tệp tải về mất luồng tiếng 
   const realQuarantineRootExisted = fs.existsSync(realQuarantineRoot);
   const userDataDirectory = path.join(sandbox, 'userdata');
   fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
   const seededSettings = {
     theme: 'dark',
     startWithWindows: false,
@@ -2422,11 +2468,16 @@ test('P2: định dạng có tiếng mà tệp tải về mất luồng tiếng 
     ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
     ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
   };
-  db.prepare(
-    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
-  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
-  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
+    db.prepare(
+      'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+    ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+    db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  } finally {
+    db.close();
+  }
 
   const ffmpeg = path.join(toolsDirectory!, 'ffmpeg.exe');
   const ffprobe = path.join(toolsDirectory!, 'ffprobe.exe');
@@ -2439,7 +2490,7 @@ test('P2: định dạng có tiếng mà tệp tải về mất luồng tiếng 
   ).toBe(0);
   expect(spawnFfmpegSyncWithCiRetry(ffmpeg, ['-y', '-i', withAudio, '-map', '0:v:0', '-c', 'copy', '-movflags', '+faststart', videoOnly], { stdio: 'ignore', windowsHide: true }).status).toBe(0);
   const streamsOf = (file: string): string =>
-    execFileSync(ffprobe, ['-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', file], { encoding: 'utf8', windowsHide: true })
+    execFfmpegSyncWithCiRetry(ffprobe, ['-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', file], { encoding: 'utf8', windowsHide: true })
       .trim()
       .split(/\r?\n/)
       .join(',');
@@ -2592,8 +2643,6 @@ test('P3: chế độ nguồn cao nhất không để tiếng Opus trong MP4 —
   const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-opus-mp4-'));
   const userDataDirectory = path.join(sandbox, 'userdata');
   fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
   const seededSettings = {
     theme: 'dark',
     startWithWindows: false,
@@ -2603,11 +2652,16 @@ test('P3: chế độ nguồn cao nhất không để tiếng Opus trong MP4 —
     ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
     ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
   };
-  db.prepare(
-    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
-  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
-  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
+    db.prepare(
+      'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+    ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+    db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  } finally {
+    db.close();
+  }
 
   const ffmpeg = path.join(toolsDirectory!, 'ffmpeg.exe');
   const ffprobe = path.join(toolsDirectory!, 'ffprobe.exe');
@@ -2625,7 +2679,7 @@ test('P3: chế độ nguồn cao nhất không để tiếng Opus trong MP4 —
     '/p3/chi-opus.mp4': make('chi-opus.mp4', [...videoInput, '-f', 'lavfi', '-i', 'sine=frequency=660:duration=4', ...videoCodec, '-c:a', 'libopus', '-b:a', '128k', '-shortest'])
   };
   const audioCodecOf = (file: string): string =>
-    execFileSync(ffprobe, ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', file], { encoding: 'utf8', windowsHide: true }).trim();
+    execFfmpegSyncWithCiRetry(ffprobe, ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', file], { encoding: 'utf8', windowsHide: true }).trim();
   const videoPacketsMd5 = (file: string): string =>
     execFfmpegSyncWithCiRetry(ffmpeg, ['-v', 'error', '-i', file, '-map', '0:v:0', '-c', 'copy', '-f', 'md5', '-'], { encoding: 'utf8', windowsHide: true }).trim();
   expect(audioCodecOf(path.join(sandbox, 'chi-opus.mp4'))).toBe('opus');
@@ -2760,11 +2814,14 @@ test('A1: giới hạn quy trình song song đã tăng đúng từ 4 lên 6 (IPC
   const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-lane-limit-'));
   const userDataDirectory = path.join(sandbox, 'userdata');
   fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec(
-    'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
-  );
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec(
+      'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
+    );
+  } finally {
+    db.close();
+  }
 
   try {
     electronApplication = await electron.launch({
@@ -2850,11 +2907,14 @@ test('A2: 3 đề xuất tinh gọn giao diện đã duyệt hoạt động đú
   const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-a2-declutter-'));
   const userDataDirectory = path.join(sandbox, 'userdata');
   fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec(
-    'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
-  );
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec(
+      'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
+    );
+  } finally {
+    db.close();
+  }
 
   try {
     electronApplication = await electron.launch({
@@ -2957,11 +3017,14 @@ test('Sửa lỗi sau phát hành 2026-09-25: phát hiện bản cập nhật hi
   const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-update-notice-'));
   const userDataDirectory = path.join(sandbox, 'userdata');
   fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec(
-    'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
-  );
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec(
+      'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
+    );
+  } finally {
+    db.close();
+  }
 
   const fakeUpdateStatus = {
     state: 'available',
@@ -3037,11 +3100,14 @@ test('Cập nhật 2026-10-24: nút khởi động lại trong thông báo gọi
   const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-update-restart-'));
   const userDataDirectory = path.join(sandbox, 'userdata');
   fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec(
-    'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
-  );
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec(
+      'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
+    );
+  } finally {
+    db.close();
+  }
 
   const status = (state: 'available' | 'downloaded', version: string): Record<string, unknown> => ({
     state,
@@ -3352,7 +3418,7 @@ test('C1: gợi ý điểm cắt tự động tìm đúng khoảng lặng/đổi
   fs.mkdirSync(path.join(userDataDirectory, 'quick-download'), { recursive: true });
 
   const sourceFile = path.join(sandbox, 'video-mau-c1.mp4');
-  const ffmpegResult = spawnSync(
+  const ffmpegResult = spawnFfmpegSyncWithCiRetry(
     path.join(toolsDirectory!, 'ffmpeg.exe'),
     [
       '-y',
@@ -3369,10 +3435,6 @@ test('C1: gợi ý điểm cắt tự động tìm đúng khoảng lặng/đổi
   );
   expect(ffmpegResult.status, 'ffmpeg phải dựng được video mẫu (đỏ/xanh dương im lặng/xanh lá)').toBe(0);
 
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec(
-    'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
-  );
   const seededSettings = {
     theme: 'dark',
     startWithWindows: false,
@@ -3381,12 +3443,19 @@ test('C1: gợi ý điểm cắt tự động tìm đúng khoảng lặng/đổi
     ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
     ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
   };
-  db.prepare(
-    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
-  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
-  // Không có khóa này thì app coi CSDL là mới và ghi cài đặt mặc định đè lên — xem expectSeededSettingsKept.
-  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec(
+      'CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)'
+    );
+    db.prepare(
+      'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+    ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+    // Không có khóa này thì app coi CSDL là mới và ghi cài đặt mặc định đè lên — xem expectSeededSettingsKept.
+    db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  } finally {
+    db.close();
+  }
 
   // Seed thẳng trạng thái Tải nhanh "vừa hoàn tất" trỏ tới video mẫu — để dùng đúng nút "Cắt đoạn này"
   // có sẵn trên giao diện thay vì hộp thoại chọn tệp gốc hệ điều hành (Playwright không lái được).
@@ -3535,20 +3604,23 @@ test('Mục 5: nhắc khu cách ly khi mở app và trang xem khu cách ly của
     fs.writeFileSync(kept, Buffer.alloc(4096));
 
     const now = new Date().toISOString();
-    const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-    db.prepare(
-      `INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,aspect_ratio,created_at,updated_at,archived_at)
-       VALUES(?,?,NULL,'','draft',?,?,?,?,'x','q','r',0,'original',?,?,NULL)`
-    ).run(projectId, 'Danh sách e2e', path.join(sandbox, 'video'), tempFolder, path.join(sandbox, 'video'), legacy, now, now);
-    db.prepare(
-      `INSERT INTO quarantine_items(id,project_id,job_id,source_id,kind,original_path,quarantine_path,bytes,reason,created_at,replacement_path,replaced_at)
-       VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`
-    ).run(
-      randomUUID(), projectId, 'job-e2e', 'src-e2e', 'outdated-source',
-      path.join(sandbox, 'video', 'Video cũ [LINK_AAAAAAAAAAAA].mp4'), kept, 4096,
-      'Tệp cũ không khớp chính sách.', now, path.join(sandbox, 'video', 'Video cũ [LINK_AAAAAAAAAAAA].mp4'), now
-    );
-    db.close();
+    const db = openStudioDatabase(userDataDirectory);
+    try {
+      db.prepare(
+        `INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,aspect_ratio,created_at,updated_at,archived_at)
+         VALUES(?,?,NULL,'','draft',?,?,?,?,'x','q','r',0,'original',?,?,NULL)`
+      ).run(projectId, 'Danh sách e2e', path.join(sandbox, 'video'), tempFolder, path.join(sandbox, 'video'), legacy, now, now);
+      db.prepare(
+        `INSERT INTO quarantine_items(id,project_id,job_id,source_id,kind,original_path,quarantine_path,bytes,reason,created_at,replacement_path,replaced_at)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`
+      ).run(
+        randomUUID(), projectId, 'job-e2e', 'src-e2e', 'outdated-source',
+        path.join(sandbox, 'video', 'Video cũ [LINK_AAAAAAAAAAAA].mp4'), kept, 4096,
+        'Tệp cũ không khớp chính sách.', now, path.join(sandbox, 'video', 'Video cũ [LINK_AAAAAAAAAAAA].mp4'), now
+      );
+    } finally {
+      db.close();
+    }
 
     const cleanupQuarantine = path.join(userDataDirectory, 'cleanup-quarantine');
     fs.mkdirSync(cleanupQuarantine, { recursive: true });
@@ -3639,15 +3711,18 @@ test('Đợt 3: trang Nhật ký hiện lịch sử ngay khi mở', async () => 
     await closeElectronApplication();
 
     // 300 dòng "thông tin" từ hôm qua — nhiều hơn 100 dòng ứng dụng nạp sẵn lúc mở.
-    const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-    const insertLog = db.prepare(
-      'INSERT INTO event_logs(id,timestamp,level,module,project_id,job_id,attempt_id,event_code,message,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)'
-    );
-    const yesterday = Date.now() - 24 * 60 * 60 * 1000;
-    for (let index = 0; index < 300; index += 1) {
-      insertLog.run(randomUUID(), new Date(yesterday + index * 1000).toISOString(), 'info', 'queue', null, null, null, 'E2E_OLD_INFO', `Sự kiện cũ số ${index}`, null);
+    const db = openStudioDatabase(userDataDirectory);
+    try {
+      const insertLog = db.prepare(
+        'INSERT INTO event_logs(id,timestamp,level,module,project_id,job_id,attempt_id,event_code,message,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)'
+      );
+      const yesterday = Date.now() - 24 * 60 * 60 * 1000;
+      for (let index = 0; index < 300; index += 1) {
+        insertLog.run(randomUUID(), new Date(yesterday + index * 1000).toISOString(), 'info', 'queue', null, null, null, 'E2E_OLD_INFO', `Sự kiện cũ số ${index}`, null);
+      }
+    } finally {
+      db.close();
     }
-    db.close();
 
     await launch();
     await shellWindow!
@@ -3732,24 +3807,27 @@ test('Cảnh báo thư mục tạm dùng chung: không có banner đầu trang, 
   try {
     await launch();
     await closeElectronApplication();
-    const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-    const now = new Date().toISOString();
-    const insertProject = db.prepare(
-      `INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,aspect_ratio,created_at,updated_at,archived_at)
-       VALUES(?,?,?,'','draft',?,?,?,?,'x','quality-source-size','resource-balanced',0,'original',?,?,NULL)`
-    );
-    const laneIds: string[] = [];
-    for (const lane of [1, 2, 3]) {
-      const output = path.join(sandbox, `video-${lane}`);
-      const id = randomUUID();
-      laneIds.push(id);
-      insertProject.run(id, `Danh sách tải ${lane}`, `__WORKBENCH_DOWNLOAD_${lane}__`, output, fakeDownloads, output, path.join(sandbox, 'q'), now, now);
+    const db = openStudioDatabase(userDataDirectory);
+    try {
+      const now = new Date().toISOString();
+      const insertProject = db.prepare(
+        `INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,aspect_ratio,created_at,updated_at,archived_at)
+         VALUES(?,?,?,'','draft',?,?,?,?,'x','quality-source-size','resource-balanced',0,'original',?,?,NULL)`
+      );
+      const laneIds: string[] = [];
+      for (const lane of [1, 2, 3]) {
+        const output = path.join(sandbox, `video-${lane}`);
+        const id = randomUUID();
+        laneIds.push(id);
+        insertProject.run(id, `Danh sách tải ${lane}`, `__WORKBENCH_DOWNLOAD_${lane}__`, output, fakeDownloads, output, path.join(sandbox, 'q'), now, now);
+      }
+      // "Không nhắc lại" đã lưu từ 1.6.0 cho Danh sách tải 2 (đúng thư mục này) — vẫn phải được tôn trọng.
+      db.prepare(
+        'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+      ).run('app_extra', JSON.stringify({ autoResumeInterruptedOnStartup: false, dismissedSharedTempWarnings: { [laneIds[1]!]: fakeDownloads } }), now);
+    } finally {
+      db.close();
     }
-    // "Không nhắc lại" đã lưu từ 1.6.0 cho Danh sách tải 2 (đúng thư mục này) — vẫn phải được tôn trọng.
-    db.prepare(
-      'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
-    ).run('app_extra', JSON.stringify({ autoResumeInterruptedOnStartup: false, dismissedSharedTempWarnings: { [laneIds[1]!]: fakeDownloads } }), now);
-    db.close();
 
     await launch();
     // Đợi danh sách đã nạp xong (thấy tên danh sách đã dựng) rồi mới kiểm banner — kiểm quá sớm thì banner chưa kịp
@@ -3979,15 +4057,18 @@ test('Phần B thông báo: thay thông báo trùng, đã tắt thì không hi�
     await closeElectronApplication();
     const now = new Date().toISOString();
     const db = openStudioDatabase(userDataDirectory);
-    db.prepare(
-      `INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,aspect_ratio,created_at,updated_at,archived_at)
-       VALUES(?,?,NULL,'','failed',?,?,?,?,'x','quality-source-size','resource-balanced',0,'original',?,?,NULL)`
-    ).run(projectId, 'Danh sách e2e', sandbox, sandbox, sandbox, sandbox, now, now);
-    db.prepare(
-      `INSERT INTO queue_jobs(id,project_id,type,status,priority,input_json,progress,attempts,max_attempts,error_code,error_message,created_at,updated_at)
-       VALUES(?,?,'download','failed',0,?,0,3,3,'DISK_FULL','Ổ đầy',?,?)`
-    ).run(jobId, projectId, JSON.stringify({ url: 'https://example.com/video' }), now, now);
-    db.close();
+    try {
+      db.prepare(
+        `INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,aspect_ratio,created_at,updated_at,archived_at)
+         VALUES(?,?,NULL,'','failed',?,?,?,?,'x','quality-source-size','resource-balanced',0,'original',?,?,NULL)`
+      ).run(projectId, 'Danh sách e2e', sandbox, sandbox, sandbox, sandbox, now, now);
+      db.prepare(
+        `INSERT INTO queue_jobs(id,project_id,type,status,priority,input_json,progress,attempts,max_attempts,error_code,error_message,created_at,updated_at)
+         VALUES(?,?,'download','failed',0,?,0,3,3,'DISK_FULL','Ổ đầy',?,?)`
+      ).run(jobId, projectId, JSON.stringify({ url: 'https://example.com/video' }), now, now);
+    } finally {
+      db.close();
+    }
 
     await launch();
     await shellWindow!.mouse.move(5, 5);
@@ -4027,15 +4108,21 @@ test('Phần B thông báo: thay thông báo trùng, đã tắt thì không hi�
     // 6) Tình huống đổi khác (danh sách hết bị chặn) → lần chặn mới HIỆN lại, và tự tắt sau ≥ 12 giây.
     await closeElectronApplication();
     const db2 = openStudioDatabase(userDataDirectory);
-    db2.prepare("UPDATE queue_jobs SET status='completed', error_code=NULL, error_message=NULL WHERE id=?").run(jobId);
-    db2.close();
+    try {
+      db2.prepare("UPDATE queue_jobs SET status='completed', error_code=NULL, error_message=NULL WHERE id=?").run(jobId);
+    } finally {
+      db2.close();
+    }
     await launch(); // mở app lúc danh sách đã hết bị chặn → bỏ ghi nhớ "đã tắt"
     await closeElectronApplication();
     // Lần bị chặn MỚI (thông báo ổ đầy thật chỉ đến khi danh sách đang bị chặn; nếu không, thông báo tự đóng sớm vì
     // vấn đề đã được giải quyết — cơ chế cũ vẫn giữ).
     const db3 = openStudioDatabase(userDataDirectory);
-    db3.prepare("UPDATE queue_jobs SET status='failed', error_code='DISK_FULL', error_message='Ổ đầy lần mới' WHERE id=?").run(jobId);
-    db3.close();
+    try {
+      db3.prepare("UPDATE queue_jobs SET status='failed', error_code='DISK_FULL', error_message='Ổ đầy lần mới' WHERE id=?").run(jobId);
+    } finally {
+      db3.close();
+    }
     await launch();
     await shellWindow!.mouse.move(5, 5);
     await send('events:attention', diskFull('lần 6'));
@@ -4126,12 +4213,15 @@ test('Phần A giao diện: không còn chữ dài cố định, ⓘ hiện đ�
     fs.mkdirSync(legacy, { recursive: true });
     fs.writeFileSync(path.join(legacy, 'ban-cu.mp4'), Buffer.alloc(2048));
     const now = new Date().toISOString();
-    const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-    db.prepare(
-      `INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,aspect_ratio,created_at,updated_at,archived_at)
-       VALUES(?,?,NULL,'','draft',?,?,?,?,'x','q','r',0,'original',?,?,NULL)`
-    ).run(randomUUID(), 'Danh sách e2e', sandbox, path.join(sandbox, 'Downloads'), sandbox, legacy, now, now);
-    db.close();
+    const db = openStudioDatabase(userDataDirectory);
+    try {
+      db.prepare(
+        `INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,aspect_ratio,created_at,updated_at,archived_at)
+         VALUES(?,?,NULL,'','draft',?,?,?,?,'x','q','r',0,'original',?,?,NULL)`
+      ).run(randomUUID(), 'Danh sách e2e', sandbox, path.join(sandbox, 'Downloads'), sandbox, legacy, now, now);
+    } finally {
+      db.close();
+    }
 
     await launch();
     await shellWindow!.waitForTimeout(2000);
@@ -4210,29 +4300,32 @@ test('Phần C: áp dụng thư mục tạm cho tất cả danh sách — xác n
     await launch();
     await closeElectronApplication();
     const now = new Date().toISOString();
-    const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-    const insertProject = db.prepare(
-      `INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,aspect_ratio,created_at,updated_at,archived_at)
-       VALUES(?,?,?,'','draft',?,?,?,?,'x','quality-source-size','resource-balanced',0,'original',?,?,NULL)`
-    );
-    const ids: string[] = [];
-    for (const lane of [1, 2, 3]) {
-      const id = randomUUID();
-      ids.push(id);
-      const output = path.join(sandbox, `video-${lane}`);
-      insertProject.run(id, `Danh sách tải ${lane}`, `__WORKBENCH_DOWNLOAD_${lane}__`, output, path.join(sandbox, `tam-${lane}`), output, path.join(sandbox, 'q'), now, now);
+    const db = openStudioDatabase(userDataDirectory);
+    try {
+      const insertProject = db.prepare(
+        `INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,aspect_ratio,created_at,updated_at,archived_at)
+         VALUES(?,?,?,'','draft',?,?,?,?,'x','quality-source-size','resource-balanced',0,'original',?,?,NULL)`
+      );
+      const ids: string[] = [];
+      for (const lane of [1, 2, 3]) {
+        const id = randomUUID();
+        ids.push(id);
+        const output = path.join(sandbox, `video-${lane}`);
+        insertProject.run(id, `Danh sách tải ${lane}`, `__WORKBENCH_DOWNLOAD_${lane}__`, output, path.join(sandbox, `tam-${lane}`), output, path.join(sandbox, 'q'), now, now);
+      }
+      // Một quy trình ghép ĐÃ CÓ (đã lưu) — phải giữ nguyên thư mục xử lý tạm (phạm vi theo từng trang).
+      const mergeOutput = path.join(sandbox, 'ghep-1');
+      insertProject.run(randomUUID(), 'Quy trình ghép e2e', '__WORKBENCH_MERGE_1__', mergeOutput, path.join(sandbox, 'tam-ghep-1'), mergeOutput, path.join(sandbox, 'q'), now, now);
+      // Danh sách 3 đang tạm dừng → ô thư mục bị khóa → phải được bỏ qua.
+      db.prepare(
+        `INSERT INTO queue_jobs(id,project_id,type,status,priority,input_json,progress,attempts,max_attempts,error_code,error_message,created_at,updated_at)
+         VALUES(?,?,'download','paused',0,?,0,0,3,NULL,NULL,?,?)`
+      ).run(randomUUID(), ids[2]!, JSON.stringify({ url: 'https://example.com/video' }), now, now);
+      const appRow = db.prepare("SELECT value_json FROM app_settings WHERE key='app'").get() as { value_json: string };
+      db.prepare("UPDATE app_settings SET value_json=? WHERE key='app'").run(JSON.stringify({ ...JSON.parse(appRow.value_json), downloadLaneCount: 3 }));
+    } finally {
+      db.close();
     }
-    // Một quy trình ghép ĐÃ CÓ (đã lưu) — phải giữ nguyên thư mục xử lý tạm (phạm vi theo từng trang).
-    const mergeOutput = path.join(sandbox, 'ghep-1');
-    insertProject.run(randomUUID(), 'Quy trình ghép e2e', '__WORKBENCH_MERGE_1__', mergeOutput, path.join(sandbox, 'tam-ghep-1'), mergeOutput, path.join(sandbox, 'q'), now, now);
-    // Danh sách 3 đang tạm dừng → ô thư mục bị khóa → phải được bỏ qua.
-    db.prepare(
-      `INSERT INTO queue_jobs(id,project_id,type,status,priority,input_json,progress,attempts,max_attempts,error_code,error_message,created_at,updated_at)
-       VALUES(?,?,'download','paused',0,?,0,0,3,NULL,NULL,?,?)`
-    ).run(randomUUID(), ids[2]!, JSON.stringify({ url: 'https://example.com/video' }), now, now);
-    const appRow = db.prepare("SELECT value_json FROM app_settings WHERE key='app'").get() as { value_json: string };
-    db.prepare("UPDATE app_settings SET value_json=? WHERE key='app'").run(JSON.stringify({ ...JSON.parse(appRow.value_json), downloadLaneCount: 3 }));
-    db.close();
 
     await launch();
     // Hộp "Có N tác vụ chưa xong" (Đợt 1) có thể hiện vì danh sách 3 đang tạm dừng — chọn Để sau.
@@ -4331,20 +4424,23 @@ test('Đợt 3 mục 7: lọc nhật ký theo mức ở CSDL — đủ lỗi cũ
   try {
     await launch();
     await closeElectronApplication();
-    const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-    const insertLog = db.prepare(
-      'INSERT INTO event_logs(id,timestamp,level,module,project_id,job_id,attempt_id,event_code,message,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)'
-    );
-    const base = Date.now() - 2 * 24 * 60 * 60 * 1000;
-    db.exec('BEGIN');
-    for (let index = 0; index < 150; index += 1) {
-      insertLog.run(randomUUID(), new Date(base + index * 1000).toISOString(), 'error', 'download', null, null, null, 'E2E_OLD_ERROR', `Lỗi cũ số ${index}`, null);
+    const db = openStudioDatabase(userDataDirectory);
+    try {
+      const insertLog = db.prepare(
+        'INSERT INTO event_logs(id,timestamp,level,module,project_id,job_id,attempt_id,event_code,message,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)'
+      );
+      const base = Date.now() - 2 * 24 * 60 * 60 * 1000;
+      db.exec('BEGIN');
+      for (let index = 0; index < 150; index += 1) {
+        insertLog.run(randomUUID(), new Date(base + index * 1000).toISOString(), 'error', 'download', null, null, null, 'E2E_OLD_ERROR', `Lỗi cũ số ${index}`, null);
+      }
+      for (let index = 0; index < 2500; index += 1) {
+        insertLog.run(randomUUID(), new Date(base + 3_600_000 + index * 1000).toISOString(), 'debug', 'queue', null, null, null, 'E2E_DEBUG', `Gỡ lỗi số ${index}`, null);
+      }
+      db.exec('COMMIT');
+    } finally {
+      db.close();
     }
-    for (let index = 0; index < 2500; index += 1) {
-      insertLog.run(randomUUID(), new Date(base + 3_600_000 + index * 1000).toISOString(), 'debug', 'queue', null, null, null, 'E2E_DEBUG', `Gỡ lỗi số ${index}`, null);
-    }
-    db.exec('COMMIT');
-    db.close();
 
     await launch();
     await shellWindow!
@@ -4398,12 +4494,15 @@ test('Đợt 3 mục 8: lỗi cũ nạp từ lịch sử không bật lại thô
   try {
     await launch();
     await closeElectronApplication();
-    const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-    // Giờ ghi lùi về sau vài giây: suốt lúc mở app dòng lỗi vẫn "dưới 12 giây" — đúng trường hợp quy tắc theo giờ bỏ lọt.
-    db.prepare(
-      'INSERT INTO event_logs(id,timestamp,level,module,project_id,job_id,attempt_id,event_code,message,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)'
-    ).run(randomUUID(), new Date(Date.now() + 6_000).toISOString(), 'error', 'app', null, null, null, 'E2E_OLD_APP_ERROR', 'Lỗi cũ của phiên trước', null);
-    db.close();
+    const db = openStudioDatabase(userDataDirectory);
+    try {
+      // Giờ ghi lùi về sau vài giây: suốt lúc mở app dòng lỗi vẫn "dưới 12 giây" — đúng trường hợp quy tắc theo giờ bỏ lọt.
+      db.prepare(
+        'INSERT INTO event_logs(id,timestamp,level,module,project_id,job_id,attempt_id,event_code,message,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)'
+      ).run(randomUUID(), new Date(Date.now() + 6_000).toISOString(), 'error', 'app', null, null, null, 'E2E_OLD_APP_ERROR', 'Lỗi cũ của phiên trước', null);
+    } finally {
+      db.close();
+    }
 
     await launch();
     await shellWindow!.waitForTimeout(2_500);
@@ -4473,24 +4572,27 @@ test('Đợt 3 mục 9: xóa nhật ký hỏi xác nhận — trang Nhật ký, 
     await launch();
     await closeElectronApplication();
     const now = new Date().toISOString();
-    const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-    const insertProject = db.prepare(
-      `INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,aspect_ratio,created_at,updated_at,archived_at)
-       VALUES(?,?,?,'','draft',?,?,?,?,'x','quality-source-size','resource-balanced',0,'original',?,?,NULL)`
-    );
     const downloadId = randomUUID();
     const mergeId = randomUUID();
-    insertProject.run(downloadId, 'Danh sách tải 1', '__WORKBENCH_DOWNLOAD_1__', path.join(sandbox, 'v1'), path.join(sandbox, 't1'), path.join(sandbox, 'v1'), path.join(sandbox, 'q'), now, now);
-    insertProject.run(mergeId, 'Quy trình ghép 1', '__WORKBENCH_MERGE_1__', path.join(sandbox, 'g1'), path.join(sandbox, 'tg1'), path.join(sandbox, 'g1'), path.join(sandbox, 'q'), now, now);
-    const insertLog = db.prepare(
-      'INSERT INTO event_logs(id,timestamp,level,module,project_id,job_id,attempt_id,event_code,message,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)'
-    );
-    for (let index = 0; index < 5; index += 1) {
-      insertLog.run(randomUUID(), now, 'info', 'download', downloadId, null, null, 'E2E', `tải ${index}`, null);
-      insertLog.run(randomUUID(), now, 'info', 'merge', mergeId, null, null, 'E2E', `ghép ${index}`, null);
-      insertLog.run(randomUUID(), now, 'info', 'app', null, null, null, 'E2E', `chung ${index}`, null);
+    const db = openStudioDatabase(userDataDirectory);
+    try {
+      const insertProject = db.prepare(
+        `INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,aspect_ratio,created_at,updated_at,archived_at)
+         VALUES(?,?,?,'','draft',?,?,?,?,'x','quality-source-size','resource-balanced',0,'original',?,?,NULL)`
+      );
+      insertProject.run(downloadId, 'Danh sách tải 1', '__WORKBENCH_DOWNLOAD_1__', path.join(sandbox, 'v1'), path.join(sandbox, 't1'), path.join(sandbox, 'v1'), path.join(sandbox, 'q'), now, now);
+      insertProject.run(mergeId, 'Quy trình ghép 1', '__WORKBENCH_MERGE_1__', path.join(sandbox, 'g1'), path.join(sandbox, 'tg1'), path.join(sandbox, 'g1'), path.join(sandbox, 'q'), now, now);
+      const insertLog = db.prepare(
+        'INSERT INTO event_logs(id,timestamp,level,module,project_id,job_id,attempt_id,event_code,message,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)'
+      );
+      for (let index = 0; index < 5; index += 1) {
+        insertLog.run(randomUUID(), now, 'info', 'download', downloadId, null, null, 'E2E', `tải ${index}`, null);
+        insertLog.run(randomUUID(), now, 'info', 'merge', mergeId, null, null, 'E2E', `ghép ${index}`, null);
+        insertLog.run(randomUUID(), now, 'info', 'app', null, null, null, 'E2E', `chung ${index}`, null);
+      }
+    } finally {
+      db.close();
     }
-    db.close();
     await launch();
 
     // 1) Danh sách tải: hỏi; Quay lại → còn; Xóa → hết.
@@ -4573,30 +4675,33 @@ test('Khám phá #12: Nhật ký riêng của danh sách đọc lịch sử ngay
     await closeElectronApplication();
     const old = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const now = new Date().toISOString();
-    const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-    const insertProject = db.prepare(
-      `INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,aspect_ratio,created_at,updated_at,archived_at)
-       VALUES(?,?,?,'','draft',?,?,?,?,'x','quality-source-size','resource-balanced',0,'original',?,?,NULL)`
-    );
     const downloadId = randomUUID();
     const mergeId = randomUUID();
-    insertProject.run(downloadId, 'Danh sách tải 1', '__WORKBENCH_DOWNLOAD_1__', path.join(sandbox, 'v1'), path.join(sandbox, 't1'), path.join(sandbox, 'v1'), path.join(sandbox, 'q'), now, now);
-    insertProject.run(mergeId, 'Quy trình ghép 1', '__WORKBENCH_MERGE_1__', path.join(sandbox, 'g1'), path.join(sandbox, 'tg1'), path.join(sandbox, 'g1'), path.join(sandbox, 'q'), now, now);
-    const insertLog = db.prepare(
-      'INSERT INTO event_logs(id,timestamp,level,module,project_id,job_id,attempt_id,event_code,message,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)'
-    );
-    db.exec('BEGIN');
-    // Lịch sử CŨ của từng danh sách (hôm qua) + 300 dòng chung MỚI hơn → không lọt vào 100 dòng nạp sẵn lúc mở app.
-    for (let index = 0; index < 7; index += 1) {
-      const at = new Date(old.getTime() + index * 1000).toISOString();
-      insertLog.run(randomUUID(), at, 'info', 'download', downloadId, null, null, 'E2E', `Lịch sử tải ${index}`, null);
-      insertLog.run(randomUUID(), at, 'info', 'merge', mergeId, null, null, 'E2E', `Lịch sử ghép ${index}`, null);
+    const db = openStudioDatabase(userDataDirectory);
+    try {
+      const insertProject = db.prepare(
+        `INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,aspect_ratio,created_at,updated_at,archived_at)
+         VALUES(?,?,?,'','draft',?,?,?,?,'x','quality-source-size','resource-balanced',0,'original',?,?,NULL)`
+      );
+      insertProject.run(downloadId, 'Danh sách tải 1', '__WORKBENCH_DOWNLOAD_1__', path.join(sandbox, 'v1'), path.join(sandbox, 't1'), path.join(sandbox, 'v1'), path.join(sandbox, 'q'), now, now);
+      insertProject.run(mergeId, 'Quy trình ghép 1', '__WORKBENCH_MERGE_1__', path.join(sandbox, 'g1'), path.join(sandbox, 'tg1'), path.join(sandbox, 'g1'), path.join(sandbox, 'q'), now, now);
+      const insertLog = db.prepare(
+        'INSERT INTO event_logs(id,timestamp,level,module,project_id,job_id,attempt_id,event_code,message,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)'
+      );
+      db.exec('BEGIN');
+      // Lịch sử CŨ của từng danh sách (hôm qua) + 300 dòng chung MỚI hơn → không lọt vào 100 dòng nạp sẵn lúc mở app.
+      for (let index = 0; index < 7; index += 1) {
+        const at = new Date(old.getTime() + index * 1000).toISOString();
+        insertLog.run(randomUUID(), at, 'info', 'download', downloadId, null, null, 'E2E', `Lịch sử tải ${index}`, null);
+        insertLog.run(randomUUID(), at, 'info', 'merge', mergeId, null, null, 'E2E', `Lịch sử ghép ${index}`, null);
+      }
+      for (let index = 0; index < 300; index += 1) {
+        insertLog.run(randomUUID(), new Date(Date.now() - 60_000 + index).toISOString(), 'debug', 'queue', null, null, null, 'E2E_NOISE', `chung ${index}`, null);
+      }
+      db.exec('COMMIT');
+    } finally {
+      db.close();
     }
-    for (let index = 0; index < 300; index += 1) {
-      insertLog.run(randomUUID(), new Date(Date.now() - 60_000 + index).toISOString(), 'debug', 'queue', null, null, null, 'E2E_NOISE', `chung ${index}`, null);
-    }
-    db.exec('COMMIT');
-    db.close();
     await launch();
 
     for (const [page, toggleName, rowText] of [
@@ -4707,16 +4812,19 @@ test('Phát hiện phụ Đợt 5: bản chạy từ mã nguồn dùng yt-dlp tr
   const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-source-tool-root-'));
   const userDataDirectory = path.join(sandbox, 'userdata');
   fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
-  const putSetting = db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)');
-  putSetting.run(
-    'app',
-    JSON.stringify({ theme: 'dark', startWithWindows: false, autoCheckAppUpdates: false, autoCheckToolUpdates: false }),
-    new Date().toISOString()
-  );
-  putSetting.run('initialized', 'true', new Date().toISOString());
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
+    const putSetting = db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)');
+    putSetting.run(
+      'app',
+      JSON.stringify({ theme: 'dark', startWithWindows: false, autoCheckAppUpdates: false, autoCheckToolUpdates: false }),
+      new Date().toISOString()
+    );
+    putSetting.run('initialized', 'true', new Date().toISOString());
+  } finally {
+    db.close();
+  }
 
   type ToolRow = { name: string; available: boolean; executablePath: string | null };
   try {
@@ -5042,25 +5150,28 @@ test('Đợt 5 mục 19: link không phải trang video báo đúng "link không
   const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-unsupported-url-'));
   const userDataDirectory = path.join(sandbox, 'userdata');
   fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
-  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run(
-    'app',
-    JSON.stringify({
-      theme: 'dark',
-      startWithWindows: false,
-      autoCheckAppUpdates: false,
-      autoCheckToolUpdates: false,
-      ytdlpPath: path.join(toolsDirectory!, 'yt-dlp.exe'),
-      ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
-      ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
-    }),
-    new Date().toISOString()
-  );
-  // CSDL mới chưa có khóa 'initialized' thì SettingsService.initialize() ghi đè cài đặt mặc định lên cài đặt chèn ở trên
-  // (mất đường dẫn công cụ → app tự tải yt-dlp từ mạng, chậm và phụ thuộc mạng). Đánh dấu đã khởi tạo để giữ cài đặt.
-  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
+    db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run(
+      'app',
+      JSON.stringify({
+        theme: 'dark',
+        startWithWindows: false,
+        autoCheckAppUpdates: false,
+        autoCheckToolUpdates: false,
+        ytdlpPath: path.join(toolsDirectory!, 'yt-dlp.exe'),
+        ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+        ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+      }),
+      new Date().toISOString()
+    );
+    // CSDL mới chưa có khóa 'initialized' thì SettingsService.initialize() ghi đè cài đặt mặc định lên cài đặt chèn ở trên
+    // (mất đường dẫn công cụ → app tự tải yt-dlp từ mạng, chậm và phụ thuộc mạng). Đánh dấu đã khởi tạo để giữ cài đặt.
+    db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  } finally {
+    db.close();
+  }
 
   let server: Server | undefined;
   try {
@@ -5184,18 +5295,21 @@ test('Đợt 5 mục 14: Chẩn đoán "Lỗi gần nhất" nêu đúng nguyên 
   try {
     await launch();
     await closeElectronApplication();
-    const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-    const insert = db.prepare(
-      'INSERT INTO event_logs(id,timestamp,level,module,project_id,job_id,attempt_id,event_code,message,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)'
-    );
-    // Đúng câu chung mà bản 1.5.0–1.6.1 ghi cho MỌI nguyên nhân; nguyên nhân thật chỉ ở metadata.
-    const oldMessage =
-      'yt-dlp không hoàn tất được video. Nguyên nhân đã được phân loại và chi tiết kỹ thuật an toàn được giữ trong nhật ký chẩn đoán.';
-    insert.run(randomUUID(), new Date(Date.now() - 60_000).toISOString(), 'error', 'download', null, null, null, 'YTDLP_DOWNLOAD_FAILED', oldMessage,
-      JSON.stringify({ failureCategory: 'retryable', failureSubtype: 'http_403', httpStatus: 403, technicalSummary: 'ERROR: unable to download video data: HTTP Error 403: Forbidden' }));
-    insert.run(randomUUID(), new Date(Date.now() - 120_000).toISOString(), 'error', 'download', null, null, null, 'YTDLP_DOWNLOAD_FAILED', oldMessage,
-      JSON.stringify({ failureCategory: 'non_retryable', failureSubtype: 'unsupported_url', httpStatus: null }));
-    db.close();
+    const db = openStudioDatabase(userDataDirectory);
+    try {
+      const insert = db.prepare(
+        'INSERT INTO event_logs(id,timestamp,level,module,project_id,job_id,attempt_id,event_code,message,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)'
+      );
+      // Đúng câu chung mà bản 1.5.0–1.6.1 ghi cho MỌI nguyên nhân; nguyên nhân thật chỉ ở metadata.
+      const oldMessage =
+        'yt-dlp không hoàn tất được video. Nguyên nhân đã được phân loại và chi tiết kỹ thuật an toàn được giữ trong nhật ký chẩn đoán.';
+      insert.run(randomUUID(), new Date(Date.now() - 60_000).toISOString(), 'error', 'download', null, null, null, 'YTDLP_DOWNLOAD_FAILED', oldMessage,
+        JSON.stringify({ failureCategory: 'retryable', failureSubtype: 'http_403', httpStatus: 403, technicalSummary: 'ERROR: unable to download video data: HTTP Error 403: Forbidden' }));
+      insert.run(randomUUID(), new Date(Date.now() - 120_000).toISOString(), 'error', 'download', null, null, null, 'YTDLP_DOWNLOAD_FAILED', oldMessage,
+        JSON.stringify({ failureCategory: 'non_retryable', failureSubtype: 'unsupported_url', httpStatus: null }));
+    } finally {
+      db.close();
+    }
 
     await launch();
     await shellWindow!.getByRole('navigation', { name: 'Điều hướng chính' }).getByRole('button', { name: 'Chẩn đoán', exact: true }).click();
@@ -5230,26 +5344,29 @@ test('Khởi động: tác vụ tạo ngay khi vừa mở app không bị giữ 
   const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-startup-new-job-'));
   const userDataDirectory = path.join(sandbox, 'userdata');
   fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
-  const putSetting = db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)');
-  putSetting.run(
-    'app',
-    JSON.stringify({
-      theme: 'dark',
-      startWithWindows: false,
-      autoCheckAppUpdates: false,
-      autoCheckToolUpdates: false,
-      ytdlpPath: path.join(toolsDirectory!, 'yt-dlp.exe'),
-      ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
-      ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
-    }),
-    new Date().toISOString()
-  );
-  // CSDL mới chưa có khóa 'initialized' thì SettingsService.initialize() ghi đè cài đặt mặc định lên cài đặt chèn ở trên
-  // (mất đường dẫn công cụ → app tự tải yt-dlp từ mạng, chậm và phụ thuộc mạng). Đánh dấu đã khởi tạo để giữ cài đặt.
-  putSetting.run('initialized', 'true', new Date().toISOString());
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
+    const putSetting = db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)');
+    putSetting.run(
+      'app',
+      JSON.stringify({
+        theme: 'dark',
+        startWithWindows: false,
+        autoCheckAppUpdates: false,
+        autoCheckToolUpdates: false,
+        ytdlpPath: path.join(toolsDirectory!, 'yt-dlp.exe'),
+        ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+        ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+      }),
+      new Date().toISOString()
+    );
+    // CSDL mới chưa có khóa 'initialized' thì SettingsService.initialize() ghi đè cài đặt mặc định lên cài đặt chèn ở trên
+    // (mất đường dẫn công cụ → app tự tải yt-dlp từ mạng, chậm và phụ thuộc mạng). Đánh dấu đã khởi tạo để giữ cài đặt.
+    putSetting.run('initialized', 'true', new Date().toISOString());
+  } finally {
+    db.close();
+  }
 
   type JobRow = { id: string; type: string; status: string; errorCode: string | null; createdAt: string };
   interface DesktopStartupApi {
@@ -5370,16 +5487,19 @@ test('Đợt 5 mục 13: Xem trước & Cắt liệt kê các video tải xong g
   fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
   fs.mkdirSync(path.join(userDataDirectory, 'quick-download'), { recursive: true });
   fs.mkdirSync(outputDirectory, { recursive: true });
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
-  const putSetting = db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)');
-  putSetting.run(
-    'app',
-    JSON.stringify({ theme: 'dark', startWithWindows: false, autoCheckAppUpdates: false, autoCheckToolUpdates: false }),
-    new Date().toISOString()
-  );
-  putSetting.run('initialized', 'true', new Date().toISOString());
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
+    const putSetting = db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)');
+    putSetting.run(
+      'app',
+      JSON.stringify({ theme: 'dark', startWithWindows: false, autoCheckAppUpdates: false, autoCheckToolUpdates: false }),
+      new Date().toISOString()
+    );
+    putSetting.run('initialized', 'true', new Date().toISOString());
+  } finally {
+    db.close();
+  }
 
   const status = (taskId: string, title: string, phase: string, hour: number, file: string | null): Record<string, unknown> => ({
     taskId,
@@ -5502,16 +5622,19 @@ test('Đợt 5 mục 16: quy trình ghép còn dữ liệu bị ẩn khi bớt s
     await launch();
     await closeElectronApplication();
     const now = new Date().toISOString();
-    const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-    const insertProject = db.prepare(
-      `INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,aspect_ratio,created_at,updated_at,archived_at)
-       VALUES(?,?,?,'','draft',?,?,?,?,?,'quality-source-size','resource-balanced',0,'original',?,?,NULL)`
-    );
-    insertProject.run(randomUUID(), 'Ghep_mot', '__WORKBENCH_MERGE_1__', folder('nguon-1'), folder('tam-1'), folder('xuat-1'), folder('q'), 'Ghep_mot', now, now);
-    insertProject.run(randomUUID(), 'Duy_12_09_2026', '__WORKBENCH_MERGE_2__', folder('nguon-2'), folder('tam-2'), folder('xuat-2'), folder('q'), 'Duy_12_09_2026', now, now);
-    const appRow = db.prepare("SELECT value_json FROM app_settings WHERE key='app'").get() as { value_json: string };
-    db.prepare("UPDATE app_settings SET value_json=? WHERE key='app'").run(JSON.stringify({ ...JSON.parse(appRow.value_json), mergeLaneCount: 1 }));
-    db.close();
+    const db = openStudioDatabase(userDataDirectory);
+    try {
+      const insertProject = db.prepare(
+        `INSERT INTO projects(id,name,code,description,status,source_folder,temp_folder,output_folder,quarantine_folder,final_file_name,quality_profile_id,resource_profile_id,export_timeline_txt,aspect_ratio,created_at,updated_at,archived_at)
+         VALUES(?,?,?,'','draft',?,?,?,?,?,'quality-source-size','resource-balanced',0,'original',?,?,NULL)`
+      );
+      insertProject.run(randomUUID(), 'Ghep_mot', '__WORKBENCH_MERGE_1__', folder('nguon-1'), folder('tam-1'), folder('xuat-1'), folder('q'), 'Ghep_mot', now, now);
+      insertProject.run(randomUUID(), 'Duy_12_09_2026', '__WORKBENCH_MERGE_2__', folder('nguon-2'), folder('tam-2'), folder('xuat-2'), folder('q'), 'Duy_12_09_2026', now, now);
+      const appRow = db.prepare("SELECT value_json FROM app_settings WHERE key='app'").get() as { value_json: string };
+      db.prepare("UPDATE app_settings SET value_json=? WHERE key='app'").run(JSON.stringify({ ...JSON.parse(appRow.value_json), mergeLaneCount: 1 }));
+    } finally {
+      db.close();
+    }
 
     await launch();
     await shellWindow!.getByRole('navigation', { name: 'Điều hướng chính' }).getByRole('button', { name: 'Ghép theo Timeline', exact: true }).click();
@@ -5584,8 +5707,6 @@ test('Hướng B 429: dính giới hạn thì cả app nghỉ với nguồn đó
   const fakeDrive = path.join(sandbox, 'o-dia');
   const userDataDirectory = path.join(sandbox, 'userdata');
   fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
   const seededSettings = {
     theme: 'dark',
     startWithWindows: false,
@@ -5595,11 +5716,16 @@ test('Hướng B 429: dính giới hạn thì cả app nghỉ với nguồn đó
     ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
     ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
   };
-  db.prepare(
-    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
-  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
-  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
+    db.prepare(
+      'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+    ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+    db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  } finally {
+    db.close();
+  }
 
   const ffmpeg = path.join(toolsDirectory!, 'ffmpeg.exe');
   const clip = path.join(sandbox, 'clip.mp4');
@@ -5770,8 +5896,6 @@ test('Lag bước 1: tối đa N danh sách tải chạy cùng lúc, mỗi danh 
   const fakeDrive = path.join(sandbox, 'o-dia');
   const userDataDirectory = path.join(sandbox, 'userdata');
   fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
   const seededSettings = {
     theme: 'dark',
     startWithWindows: false,
@@ -5781,11 +5905,16 @@ test('Lag bước 1: tối đa N danh sách tải chạy cùng lúc, mỗi danh 
     ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
     ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
   };
-  db.prepare(
-    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
-  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
-  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
+    db.prepare(
+      'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+    ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+    db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  } finally {
+    db.close();
+  }
 
   const ffmpeg = path.join(toolsDirectory!, 'ffmpeg.exe');
   const clip = path.join(sandbox, 'clip.mp4');
@@ -5956,8 +6085,6 @@ test('Lag bước 2 + 3: 2 danh sách × 4 luồng bắt đầu dần, vẫn ch�
   const fakeDrive = path.join(sandbox, 'o-dia');
   const userDataDirectory = path.join(sandbox, 'userdata');
   fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
   const seededSettings = {
     theme: 'dark',
     startWithWindows: false,
@@ -5967,11 +6094,16 @@ test('Lag bước 2 + 3: 2 danh sách × 4 luồng bắt đầu dần, vẫn ch�
     ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
     ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
   };
-  db.prepare(
-    'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
-  ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
-  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
+    db.prepare(
+      'INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json'
+    ).run('app', JSON.stringify(seededSettings), new Date().toISOString());
+    db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  } finally {
+    db.close();
+  }
 
   const ffmpeg = path.join(toolsDirectory!, 'ffmpeg.exe');
   const clip = path.join(sandbox, 'clip.mp4');
@@ -6159,15 +6291,18 @@ test('Cài đặt › Tải danh sách: không còn ô aria2c giả (không có 
   const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-aria2-note-'));
   const userDataDirectory = path.join(sandbox, 'userdata');
   fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
-  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run(
-    'app',
-    JSON.stringify({ theme: 'dark', startWithWindows: false, autoCheckAppUpdates: false, autoCheckToolUpdates: false }),
-    new Date().toISOString()
-  );
-  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
+    db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run(
+      'app',
+      JSON.stringify({ theme: 'dark', startWithWindows: false, autoCheckAppUpdates: false, autoCheckToolUpdates: false }),
+      new Date().toISOString()
+    );
+    db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  } finally {
+    db.close();
+  }
   try {
     electronApplication = await electron.launch({
       args: [mainEntry],
@@ -6288,23 +6423,26 @@ test('Lịch sử: video lỗi hiện lý do cụ thể trên bảng và CSV có
   const sandbox = fs.mkdtempSync(path.join(tmpdir(), 'tubmedia-e2e-history-error-'));
   const userDataDirectory = path.join(sandbox, 'userdata');
   fs.mkdirSync(path.join(userDataDirectory, 'database'), { recursive: true });
-  const db = new DatabaseSync(path.join(userDataDirectory, 'database', 'studio.sqlite'));
-  db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
-  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run(
-    'app',
-    JSON.stringify({
-      theme: 'dark',
-      startWithWindows: false,
-      autoCheckAppUpdates: false,
-      autoCheckToolUpdates: false,
-      ytdlpPath: path.join(toolsDirectory!, 'yt-dlp.exe'),
-      ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
-      ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
-    }),
-    new Date().toISOString()
-  );
-  db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
-  db.close();
+  const db = openStudioDatabase(userDataDirectory);
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)');
+    db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run(
+      'app',
+      JSON.stringify({
+        theme: 'dark',
+        startWithWindows: false,
+        autoCheckAppUpdates: false,
+        autoCheckToolUpdates: false,
+        ytdlpPath: path.join(toolsDirectory!, 'yt-dlp.exe'),
+        ffmpegPath: path.join(toolsDirectory!, 'ffmpeg.exe'),
+        ffprobePath: path.join(toolsDirectory!, 'ffprobe.exe')
+      }),
+      new Date().toISOString()
+    );
+    db.prepare('INSERT INTO app_settings(key,value_json,updated_at) VALUES(?,?,?)').run('initialized', 'true', new Date().toISOString());
+  } finally {
+    db.close();
+  }
 
   let server: Server | undefined;
   try {
