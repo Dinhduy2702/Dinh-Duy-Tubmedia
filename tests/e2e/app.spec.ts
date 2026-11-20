@@ -36,12 +36,31 @@ function sleep(milliseconds: number): Promise<void> {
   });
 }
 
-// Lượt Publish 1.7.8 (Run #44575888574) trượt ở đầu bài E2E #15 vì ngay sau khi đóng Electron ở bài #14,
-// máy ảo Windows Server CI cạn tạm thời Desktop Heap khiến spawnSync(ffmpeg) trả mã 3221225794 (0xC0000142 = STATUS_DLL_INIT_FAILED).
+// Lượt Publish 1.7.8 (Run #44575888574 & #44692807854) trượt vì ngay sau khi đóng Electron + yt-dlp bằng taskkill /T /F,
+// máy ảo Windows Server CI cần vài giây để thu hồi Desktop Heap không tương tác (768 KB), khiến spawnSync(ffmpeg) trả mã
+// 3221225794 / -1073741502 (0xC0000142 = STATUS_DLL_INIT_FAILED). Chờ tối đa 20 × 1.000 ms (20 giây); mã khác trả về ngay.
 const WINDOWS_DLL_INIT_FAILED_CODES = new Set<number>([3221225794, -1073741502]);
+const WINDOWS_DLL_INIT_MAX_RETRIES = 20;
+const WINDOWS_DLL_INIT_RETRY_DELAY_MS = 1_000;
 
 function sleepSync(milliseconds: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+function listRelatedProcessesForDiagnostics(): string {
+  try {
+    return execFileSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-Command',
+        "Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'electron|yt-dlp|ffmpeg|ffprobe|crashpad|MsMpEng' } | ForEach-Object { '{0} parent={1} {2} {3}' -f $_.ProcessId, $_.ParentProcessId, $_.Name, $_.CommandLine }"
+      ],
+      { encoding: 'utf8', windowsHide: true, timeout: 20_000 }
+    ).trim();
+  } catch (error) {
+    return `(không liệt kê được tiến trình: ${(error as Error).message})`;
+  }
 }
 
 function spawnFfmpegSyncWithCiRetry(
@@ -50,12 +69,20 @@ function spawnFfmpegSyncWithCiRetry(
   options: Parameters<typeof spawnSync>[2]
 ): ReturnType<typeof spawnSync> {
   let lastResult = spawnSync(executable, args, options);
-  for (let retry = 0; retry < 3; retry += 1) {
+  for (let retry = 0; retry < WINDOWS_DLL_INIT_MAX_RETRIES; retry += 1) {
     if (lastResult.status === null || !WINDOWS_DLL_INIT_FAILED_CODES.has(lastResult.status)) {
       return lastResult;
     }
-    sleepSync(500);
+    sleepSync(WINDOWS_DLL_INIT_RETRY_DELAY_MS);
     lastResult = spawnSync(executable, args, options);
+  }
+  if (lastResult.status !== null && WINDOWS_DLL_INIT_FAILED_CODES.has(lastResult.status)) {
+    console.warn(
+      [
+        `[spawnFfmpegSyncWithCiRetry] Vẫn gặp mã 0xC0000142 (${lastResult.status}) sau ${WINDOWS_DLL_INIT_MAX_RETRIES} lần thử (${executable}):`,
+        listRelatedProcessesForDiagnostics()
+      ].join('\n')
+    );
   }
   return lastResult;
 }
@@ -70,10 +97,20 @@ function execFfmpegSyncWithCiRetry(
       return execFileSync(executable, args, options);
     } catch (error) {
       const status = (error as { status?: number | null } | null)?.status;
-      if (attempt >= 3 || typeof status !== 'number' || !WINDOWS_DLL_INIT_FAILED_CODES.has(status)) {
+      const isDllInitFailed = typeof status === 'number' && WINDOWS_DLL_INIT_FAILED_CODES.has(status);
+      if (!isDllInitFailed) {
         throw error;
       }
-      sleepSync(500);
+      if (attempt >= WINDOWS_DLL_INIT_MAX_RETRIES) {
+        console.warn(
+          [
+            `[execFfmpegSyncWithCiRetry] Vẫn gặp mã 0xC0000142 (${status}) sau ${WINDOWS_DLL_INIT_MAX_RETRIES} lần thử (${executable}):`,
+            listRelatedProcessesForDiagnostics()
+          ].join('\n')
+        );
+        throw error;
+      }
+      sleepSync(WINDOWS_DLL_INIT_RETRY_DELAY_MS);
     }
   }
 }
@@ -139,6 +176,10 @@ async function closeElectronApplication(): Promise<void> {
   shellWindow = undefined;
   mainProcessId = undefined;
 
+  if (!application && !processId) {
+    return;
+  }
+
   if (application) {
     await settleWithin(
       application
@@ -157,6 +198,41 @@ async function closeElectronApplication(): Promise<void> {
   }
 
   forceKillProcessTree(processId);
+
+  if (process.platform === 'win32' && Boolean(process.env.CI)) {
+    await sleep(1_000);
+    const ciElectronExecutable = path.join(projectRoot, 'node_modules', 'electron', 'dist', 'electron.exe');
+    try {
+      const rawOutput = execFileSync(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-Command',
+          'Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and ($_.ExecutablePath -ieq $env:TUBMEDIA_CI_ELECTRON_EXE) } | ForEach-Object { $_.ProcessId }'
+        ],
+        {
+          encoding: 'utf8',
+          windowsHide: true,
+          timeout: 15_000,
+          env: { ...process.env, TUBMEDIA_CI_ELECTRON_EXE: ciElectronExecutable }
+        }
+      );
+      const orphanPids = rawOutput
+        .split(/\r?\n/)
+        .map((line) => Number(line.trim()))
+        .filter((pid) => Number.isInteger(pid) && pid > 0);
+      for (const orphanPid of orphanPids) {
+        forceKillProcessTree(orphanPid);
+      }
+      if (orphanPids.length > 0) {
+        console.warn(
+          `[closeElectronApplication] Đã dọn ${orphanPids.length} tiến trình Electron mồ côi (${ciElectronExecutable}): PID ${orphanPids.join(', ')}`
+        );
+      }
+    } catch {
+      // Không chặn bài kiểm nếu truy vấn WMI trên máy ảo CI bận tạm thời.
+    }
+  }
 }
 
 /**
