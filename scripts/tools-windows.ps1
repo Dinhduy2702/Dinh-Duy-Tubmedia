@@ -145,6 +145,28 @@ function Download-File([string]$Url, [string]$OutFile) {
     Clear-InternetMark $OutFile
 }
 
+function Expand-ZipPortable {
+    param(
+        [Parameter(Mandatory = $true)][string]$LiteralPath,
+        [Parameter(Mandatory = $true)][string]$DestinationPath
+    )
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $fullZip = [System.IO.Path]::GetFullPath($LiteralPath)
+    $fullDest = [System.IO.Path]::GetFullPath($DestinationPath)
+    if (-not (Test-Path -LiteralPath $fullZip -PathType Leaf)) {
+        throw ('Zip archive not found: ' + $fullZip)
+    }
+    if (Test-Path -LiteralPath $fullDest) {
+        Remove-Item -LiteralPath $fullDest -Recurse -Force
+    }
+    $parentDir = Split-Path -Parent $fullDest
+    if (-not [string]::IsNullOrWhiteSpace($parentDir) -and -not (Test-Path -LiteralPath $parentDir -PathType Container)) {
+        New-Item -ItemType Directory -Path $parentDir -Force | Out-Null
+    }
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($fullZip, $fullDest)
+}
+
 function Add-Candidate([System.Collections.Generic.List[string]]$List, [string]$Path) {
     if ([string]::IsNullOrWhiteSpace($Path)) { return }
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return }
@@ -287,7 +309,7 @@ function Update-FfmpegSuite {
     $Extracted = Join-Path $TempDir 'ffmpeg-extracted'
     try {
         Download-File 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-8.1.zip' $Zip
-        Expand-Archive -LiteralPath $Zip -DestinationPath $Extracted -Force
+        Expand-ZipPortable -LiteralPath $Zip -DestinationPath $Extracted
         Clear-InternetMarksInTree $Extracted
 
         $Installed = @()
@@ -328,7 +350,7 @@ function Update-Aria2 {
     $Zip = Join-Path $TempDir 'aria2.zip'
     $Extracted = Join-Path $TempDir 'aria2-extracted'
     Download-File $Asset.browser_download_url $Zip
-    Expand-Archive -LiteralPath $Zip -DestinationPath $Extracted -Force
+    Expand-ZipPortable -LiteralPath $Zip -DestinationPath $Extracted
     Clear-InternetMarksInTree $Extracted
     $Candidate = Get-ChildItem -LiteralPath $Extracted -Recurse -File -Filter 'aria2c.exe' | Select-Object -First 1
     if (-not $Candidate) { throw 'aria2 package missing aria2c.exe.' }

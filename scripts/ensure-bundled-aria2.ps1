@@ -30,6 +30,28 @@ function Get-FileHashPortable {
   }
 }
 
+function Expand-ZipPortable {
+  param(
+    [Parameter(Mandatory = $true)][string]$LiteralPath,
+    [Parameter(Mandatory = $true)][string]$DestinationPath
+  )
+
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  $fullZip = [System.IO.Path]::GetFullPath($LiteralPath)
+  $fullDest = [System.IO.Path]::GetFullPath($DestinationPath)
+  if (-not (Test-Path -LiteralPath $fullZip -PathType Leaf)) {
+    throw "Zip archive not found: $fullZip"
+  }
+  if (Test-Path -LiteralPath $fullDest) {
+    Remove-Item -LiteralPath $fullDest -Recurse -Force
+  }
+  $parentDir = Split-Path -Parent $fullDest
+  if (-not [string]::IsNullOrWhiteSpace($parentDir) -and -not (Test-Path -LiteralPath $parentDir -PathType Container)) {
+    New-Item -ItemType Directory -Path $parentDir -Force | Out-Null
+  }
+  [System.IO.Compression.ZipFile]::ExtractToDirectory($fullZip, $fullDest)
+}
+
 $Project = Split-Path -Parent $PSScriptRoot
 $ToolDir = Join-Path $Project "tool"
 $Dest = Join-Path $ToolDir "aria2c.exe"
@@ -123,7 +145,7 @@ try {
     throw "aria2 archive SHA-256 mismatch. Expected=$ExpectedZipSha256 Actual=$zipSha"
   }
 
-  Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
+  Expand-ZipPortable -LiteralPath $zip -DestinationPath $extract
 
   $aria = Get-ChildItem `
     -LiteralPath $extract `
