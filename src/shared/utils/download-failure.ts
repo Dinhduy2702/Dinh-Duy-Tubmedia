@@ -8,6 +8,7 @@ export type YtDlpFailureSubtype =
   | 'authentication'
   | 'bot_check'
   | 'cookies_invalid'
+  | 'browser_cookie_dpapi'
   | 'removed'
   | 'unsupported_url'
   | 'unavailable'
@@ -56,6 +57,7 @@ const ALL_FAILURE_SUBTYPES: ReadonlySet<YtDlpFailureSubtype> = new Set([
   'authentication',
   'bot_check',
   'cookies_invalid',
+  'browser_cookie_dpapi',
   'removed',
   'unsupported_url',
   'unavailable',
@@ -165,6 +167,8 @@ const YTDLP_FAILURE_CAUSES: Record<YtDlpFailureSubtype, string> = {
   authentication: 'nền tảng yêu cầu đăng nhập hoặc cookies hợp lệ',
   bot_check: 'YouTube tạm chặn vì nghi tải tự động ("Sign in to confirm you’re not a bot") — giới hạn theo lượng yêu cầu, không phải cookie hỏng',
   cookies_invalid: 'cookies không còn hợp lệ (yt-dlp báo cookie đã bị xoay/thu hồi)',
+  browser_cookie_dpapi:
+    'trình duyệt Chrome/Edge 127+ khóa giải mã cookie trực tiếp (DPAPI / App-Bound Encryption)',
   removed: 'video đã bị xóa khỏi nền tảng',
   unsupported_url: 'liên kết không phải trang video (yt-dlp báo Unsupported URL)',
   unavailable: 'video không khả dụng (riêng tư, bị chặn theo vùng hoặc không còn định dạng phù hợp)',
@@ -295,6 +299,19 @@ export const GEO_RESTRICTED_PHRASES: readonly string[] = [
   'georestricted'
 ];
 
+export const BROWSER_COOKIE_DPAPI_PHRASES: readonly string[] = [
+  'failed to decrypt with dpapi',
+  'app-bound encryption',
+  'app bound encryption',
+  'yt-dlp/issues/10927',
+  'issues/10927'
+];
+
+export function isBrowserCookieDpapiErrorText(text: string): boolean {
+  const lower = text.toLowerCase();
+  return includesAny(lower, BROWSER_COOKIE_DPAPI_PHRASES) || (lower.includes('dpapi') && lower.includes('cookie'));
+}
+
 export function isGeoRestrictedText(text: string): boolean {
   return includesAny(text.toLowerCase(), GEO_RESTRICTED_PHRASES);
 }
@@ -372,6 +389,11 @@ export function classifyYtDlpFailure(text: string): YtDlpFailureDetail {
     ])
   ) {
     return { category: 'tool', subtype: 'tool_missing', httpStatus: null, retryable: false };
+  }
+
+  // #13: Chrome/Edge 127+ bật App-Bound Encryption khiến yt-dlp báo Failed to decrypt with DPAPI (issues/10927).
+  if (isBrowserCookieDpapiErrorText(lower)) {
+    return { category: 'authentication', subtype: 'browser_cookie_dpapi', httpStatus: null, retryable: false };
   }
 
   // 2026-10-27 (điều tra "cookie hỏng sau vài phút"): yt-dlp nói RÕ cookie YouTube không còn hợp lệ (bị xoay/thu hồi) — đây

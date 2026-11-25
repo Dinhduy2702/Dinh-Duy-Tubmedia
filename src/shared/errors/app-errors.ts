@@ -154,15 +154,21 @@ export class ProcessCancelledError extends AppError {
 }
 
 export class BrowserCookieLockedError extends AppError {
-  public constructor(browser: string, profile = '') {
+  public constructor(
+    browser: string,
+    profile = '',
+    customMessage?: string,
+    details?: Record<string, unknown>
+  ) {
     const profileLabel = profile ? ` (profile: ${profile})` : '';
     super(
       'BROWSER_COOKIE_DATABASE_LOCKED',
-      `${browser}${profileLabel} đang khóa cơ sở dữ liệu đăng nhập nên ứng dụng không thể đọc cookies trực tiếp. ` +
-        `Hãy đóng hoàn toàn mọi cửa sổ và tiến trình ${browser} (nếu vẫn lỗi, mở Task Manager để kết thúc tác vụ ` +
-        `còn sót lại), sau đó thử lại; hoặc dùng phương án Dán cookies / Chọn file cookies.txt.`,
+      customMessage ??
+        `${browser}${profileLabel} đang khóa cơ sở dữ liệu đăng nhập nên ứng dụng không thể đọc cookies trực tiếp. ` +
+          `Hãy đóng hoàn toàn mọi cửa sổ và tiến trình ${browser} (nếu vẫn lỗi, mở Task Manager để kết thúc tác vụ ` +
+          `còn sót lại), sau đó thử lại; hoặc dùng phương án Dán cookies / Chọn file cookies.txt.`,
       false,
-      { browser, profile }
+      { browser, profile, ...details }
     );
   }
 }

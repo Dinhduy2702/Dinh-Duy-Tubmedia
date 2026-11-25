@@ -48,6 +48,7 @@ import {
   finalDownloadFailureMessage
 } from '@shared/utils/download-failure.js';
 import { rateLimitPlatformLabel } from '@shared/utils/rate-limit-backoff.js';
+import { browserCookieDpapiMessage } from '@shared/utils/cookie-guidance.js';
 import { hasConfiguredCookies, shouldAttachConfiguredCookies } from '@shared/utils/cookie-policy.js';
 import { cleanExternalText } from '@shared/utils/text-encoding.js';
 import { downloadLinkTag } from '@shared/utils/url.js';
@@ -2048,6 +2049,15 @@ export class DownloadEngine {
             metadata: { ...failureDetails, cookiesAttached: attachConfiguredCookies }
           });
           this.cookieRequiredJobs.add(job.id);
+          if (failure.subtype === 'browser_cookie_dpapi') {
+            const browser = appSettings.cookiesBrowser === 'none' ? 'trình duyệt Chromium' : appSettings.cookiesBrowser;
+            throw new BrowserCookieLockedError(
+              browser,
+              appSettings.cookiesBrowserProfile,
+              browserCookieDpapiMessage(appSettings.cookiesBrowser),
+              failureDetails
+            );
+          }
           if (!attachConfiguredCookies && hasConfiguredCookies(appSettings)) {
             throw new RetryWithConfiguredCookiesError(failureDetails);
           }

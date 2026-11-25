@@ -637,6 +637,7 @@ tests/unit/color-tokens.test.ts
 tests/unit/compact-operational-ui.test.ts
 tests/unit/concat.test.ts
 tests/unit/cookie-auto-resume.test.ts
+tests/unit/cookie-dpapi-error-v180.test.ts
 tests/unit/cookie-jar-wiring.test.ts
 tests/unit/cookie-normalization.test.ts
 tests/unit/cookie-policy.test.ts

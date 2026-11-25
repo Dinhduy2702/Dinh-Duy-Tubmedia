@@ -37,11 +37,12 @@ import type { CookieJarStore, CookieRunOutcome } from '../cookies/cookie-jar-sto
 import {
   classifyYtDlpFailure,
   finalDownloadFailureMessage,
+  isBrowserCookieDpapiErrorText,
   isCookieRotationText,
   isExplicitlyRemovedYoutubeSource,
   isGeoRestrictedText
 } from '@shared/utils/download-failure.js';
-import { cookieRotatedMessage } from '@shared/utils/cookie-guidance.js';
+import { browserCookieDpapiMessage, cookieRotatedMessage } from '@shared/utils/cookie-guidance.js';
 
 interface PersistedQuickDownloadState {
   version: 1;
@@ -162,6 +163,7 @@ function classifyCookieFailure(lines: string[], cookiesAttached: boolean): Quick
   const lower = text.toLowerCase();
 
   if (
+    isBrowserCookieDpapiErrorText(text) ||
     lower.includes('could not copy chrome cookie database') ||
     lower.includes('cookie database is locked') ||
     (lower.includes('permission denied') && lower.includes('cookie'))
@@ -193,8 +195,16 @@ function quickBotCheckFailureMessage(cookiesAttached: boolean): string {
 }
 
 /** 1.7.6 việc B: `lines` là các dòng yt-dlp vừa in — có câu "cookie bị xoay" thì nói đúng lý do + cách xuất từ cửa sổ ẩn danh. */
-export function quickCookieFailureMessage(code: QuickDownloadErrorCode, lines: readonly string[]): string {
-  if (code === 'COOKIES_EXPIRED' && isCookieRotationText(lines.join('\n'))) {
+export function quickCookieFailureMessage(
+  code: QuickDownloadErrorCode,
+  lines: readonly string[],
+  cookiesBrowser?: string | null
+): string {
+  const joined = lines.join('\n');
+  if (code === 'BROWSER_COOKIE_DATABASE_LOCKED' && isBrowserCookieDpapiErrorText(joined)) {
+    return browserCookieDpapiMessage(cookiesBrowser);
+  }
+  if (code === 'COOKIES_EXPIRED' && isCookieRotationText(joined)) {
     return `${cookieRotatedMessage()} Tải nhanh sẽ tự tiếp tục tác vụ này sau khi bạn lưu cookies mới.`;
   }
   return cookieFailureMessage(code);
@@ -471,6 +481,10 @@ export class QuickDownloadService {
 
   private async startLocked(rawRequest: unknown, forceCookies: boolean): Promise<QuickDownloadStatus> {
     const request = validateQuickDownloadRequest(rawRequest);
+
+    if (this.activeTask && TERMINAL_PHASES.has(this.activeTask.status.phase)) {
+      await this.activeTask.done.catch(() => undefined);
+    }
 
     if (this.isActive()) {
       throw new Error('Một video đang được tải nhanh. Hãy chờ hoàn tất hoặc hủy tác vụ hiện tại.');
@@ -833,7 +847,11 @@ export class QuickDownloadService {
 
           if (cookieCode) {
             this.cookieBlockedRequest = active.request;
-            this.failTask(active, quickCookieFailureMessage(cookieCode, active.recentLines), cookieCode);
+            this.failTask(
+              active,
+              quickCookieFailureMessage(cookieCode, active.recentLines, this.cookieSettings().cookiesBrowser),
+              cookieCode
+            );
             // 2026-10-24: thử lại bằng cookies là một lượt Tải nhanh MỚI (thư mục tạm mới) → tệp tạm lượt này không dùng lại.
             await this.cleanupActive(active, true);
             return;

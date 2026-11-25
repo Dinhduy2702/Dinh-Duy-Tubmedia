@@ -3017,7 +3017,7 @@ export class QueueManager {
         // Ghi lại cookies lúc bị chặn: chỉ khi cookies THẬT SỰ đổi so với lúc này mới tự chạy lại (mục 3).
         const cookieFingerprint = cookieBlocking ? await computeCookieFingerprint(this.settings.get(), this.cookieJar) : null;
         const pausedMessage =
-          cookieFingerprint?.mode === 'browser'
+          cookieFingerprint?.mode === 'browser' && appError.details?.failureSubtype !== 'browser_cookie_dpapi'
             ? `${message} Hãy đăng nhập lại tài khoản trên trình duyệt ${cookieFingerprint.browser}, rồi bấm Tiếp tục ở ` +
               'danh sách — Tubmedia không tự chạy lại vì không biết khi nào cookies của trình duyệt được làm mới.'
             : message;
