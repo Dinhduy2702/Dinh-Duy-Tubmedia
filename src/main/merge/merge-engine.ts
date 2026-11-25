@@ -18,6 +18,7 @@ import type {
   TimelineRow
 } from '@shared/types/domain.js';
 import { compareForConcat } from '@shared/utils/concat-compatibility.js';
+import { isNvencEncoder, type ResolvedVideoEncoder } from '@shared/utils/encoder-selection.js';
 import { blockedOutputProblemLabel } from '@shared/utils/ffmpeg-decode-failure.js';
 import { matchNormalizationTarget } from '@shared/utils/normalization-match.js';
 import { sanitizeFilename } from '@shared/utils/filename.js';
@@ -1214,6 +1215,8 @@ export class MergeEngine {
     if (normalizationRequired) {
       const target: NormalizeTarget = mergeTarget;
       const progressByItem = new Array<number>(prepared.length).fill(0);
+      const encoderByItem = new Array<ResolvedVideoEncoder | null>(prepared.length).fill(null);
+      let anyCpuFallback = false;
       let finishedItems = 0;
       const normalizeConcurrency = Math.max(1, Math.min(resource.normalizeWorkers, prepared.length));
 
@@ -1288,7 +1291,14 @@ export class MergeEngine {
             undefined,
             forceUniformVideo,
             forceUniformAudio,
-            { sourceIndex: index + 1, sourceLabel: current.label }
+            {
+              sourceIndex: index + 1,
+              sourceLabel: current.label,
+              onEncoderUsed: (usedEncoder, fellBack) => {
+                encoderByItem[index] = usedEncoder;
+                if (fellBack) anyCpuFallback = true;
+              }
+            }
           );
 
           progressByItem[index] = 100;
@@ -1302,6 +1312,64 @@ export class MergeEngine {
           return { ...current, path, info };
         }
       );
+
+      // Lỗi #16: nếu trong cùng mẻ ghép có clip rơi xuống CPU (fallback) hoặc trộn GPU/CPU
+      // (hoặc dùng NVENC mà vẫn lệch extradata video), đồng bộ toàn bộ clip chưa ở CPU về cùng
+      // bộ mã hóa CPU trước khi concatCopy để extradata đồng nhất tuyệt đối.
+      const usedEncoders = encoderByItem.filter((value): value is ResolvedVideoEncoder => value !== null);
+      const hasNvencInBatch = usedEncoders.some(isNvencEncoder);
+      const hasMixedGpuCpu =
+        hasNvencInBatch && (anyCpuFallback || usedEncoders.some((value) => !isNvencEncoder(value)));
+      const hasNvencExtradataMismatch =
+        hasNvencInBatch &&
+        prepared.length > 1 &&
+        prepared.some((item, idx) => idx > 0 && hasVideoBitstreamMismatch(prepared[0]!.info, item.info));
+
+      if (hasMixedGpuCpu || hasNvencExtradataMismatch) {
+        const syncIndexes = prepared
+          .map((_, idx) => idx)
+          .filter((idx) => {
+            const used = encoderByItem[idx];
+            return !used || isNvencEncoder(used);
+          });
+        if (syncIndexes.length > 0) {
+          let synced = 0;
+          emit(65, `Đồng bộ ${syncIndexes.length} video về cùng bộ mã hóa CPU để ghép an toàn`, {
+            totalSeconds: knownTotalDuration
+          });
+          await mapLimit(syncIndexes, normalizeConcurrency, async (idx) => {
+            const original = visualReferenceInputs[idx]!;
+            const syncedPath = await this.normalizer.normalizeToTarget(
+              job,
+              original.path,
+              original.info,
+              normalizeCacheFolder,
+              target,
+              resource,
+              signal,
+              () => undefined,
+              profile,
+              undefined,
+              true,
+              forceUniformAudio,
+              {
+                sourceIndex: idx + 1,
+                sourceLabel: original.label,
+                forceCpuEncoder: true
+              }
+            );
+            const syncedInfo =
+              syncedPath === original.path ? original.info : await this.analyzer.analyze(syncedPath, job.id);
+            prepared[idx] = { ...original, path: syncedPath, info: syncedInfo };
+            synced += 1;
+            emit(65 + synced / syncIndexes.length, `Đã đồng bộ CPU ${synced}/${syncIndexes.length}`, {
+              currentItem: synced,
+              totalSeconds: knownTotalDuration
+            });
+            return true;
+          });
+        }
+      }
     } else {
       emit(20, 'Tất cả nguồn tương thích · bỏ qua mã hóa lại', {
         totalSeconds: knownTotalDuration

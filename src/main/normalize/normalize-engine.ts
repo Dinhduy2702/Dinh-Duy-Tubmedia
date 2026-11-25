@@ -74,6 +74,9 @@ function cachePendingPath(final: string): string {
 }
 
 export class NormalizeEngine {
+  private activeGpuJobs = 0;
+  private readonly gpuWaiters: Array<() => void> = [];
+
   public constructor(
     private readonly tools: ToolManager,
     private readonly processes: ProcessManager,
@@ -82,6 +85,37 @@ export class NormalizeEngine {
     private readonly quarantine: QuarantineService,
     private readonly logger: Logger
   ) {}
+
+  private async withGpuSlot<T>(limit: number, signal: AbortSignal, run: () => Promise<T>): Promise<T> {
+    const safeLimit = Math.max(1, Math.floor(limit));
+    if (this.activeGpuJobs >= safeLimit) {
+      await new Promise<void>((resolve, reject) => {
+        if (signal.aborted) {
+          reject(signal.reason instanceof Error ? signal.reason : new Error('Đã dừng khi đang chờ lượt GPU.'));
+          return;
+        }
+        const onAbort = (): void => {
+          const index = this.gpuWaiters.indexOf(wake);
+          if (index >= 0) this.gpuWaiters.splice(index, 1);
+          reject(signal.reason instanceof Error ? signal.reason : new Error('Đã dừng khi đang chờ lượt GPU.'));
+        };
+        const wake = (): void => {
+          signal.removeEventListener('abort', onAbort);
+          resolve();
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+        this.gpuWaiters.push(wake);
+      });
+    }
+    this.activeGpuJobs += 1;
+    try {
+      return await run();
+    } finally {
+      this.activeGpuJobs = Math.max(0, this.activeGpuJobs - 1);
+      const next = this.gpuWaiters.shift();
+      if (next) next();
+    }
+  }
 
   public async normalize(
     job: QueueJob,
@@ -293,7 +327,12 @@ export class NormalizeEngine {
     existingDecision?: QualityDecision,
     forceVideoTranscode = false,
     forceAudioTranscode = false,
-    context?: { sourceIndex?: number; sourceLabel?: string }
+    context?: {
+      sourceIndex?: number;
+      sourceLabel?: string;
+      forceCpuEncoder?: boolean;
+      onEncoderUsed?: (encoder: ResolvedVideoEncoder, fellBackToCpu: boolean) => void;
+    }
   ): Promise<string> {
     /* TUBMEDIA FORCE VIDEO NORMALIZE R33 */
     const streamMatch = matchNormalizationTarget(source, target);
@@ -312,42 +351,52 @@ export class NormalizeEngine {
     if (isReservedTubmediaDirectory(outputFolder)) {
       await ensureTubmediaOwnedDirectory(outputFolder, 'normalize-cache');
     }
-    const cacheKey = await this.cacheKey(input, {
-      operation: forceVideoTranscode
-        ? 'normalize-v7-force-video-core-resilience'
-        : forceAudioTranscode
-          ? 'normalize-v7-force-audio-core-resilience'
-          : 'normalize-v7-core-resilience',
-      target,
-      encoder: profile?.encoder ?? 'cpu_auto',
-      crf: profile?.crf ?? 18,
-      cq: profile?.cq ?? 20,
-      bitrateMode: profile?.bitrateMode ?? 'quality',
-      preset: profile?.preset ?? 'veryfast',
-      audioMode: profile?.audioMode ?? 'aac_256'
-    });
+
+    const caps = ffmpeg.capabilities;
+    const requested = context?.forceCpuEncoder ? 'cpu_auto' : (profile?.encoder ?? 'cpu_auto');
+    const effectiveGpuJobs = context?.forceCpuEncoder ? 0 : resource.gpuJobs;
+    const videoCopy = streamMatch.videoCopy && !forceVideoTranscode;
+    const audioCopy = streamMatch.audioCopy && !forceAudioTranscode;
+    const addSilentAudio = streamMatch.addSilentAudio;
+    const selection = selectVideoEncoder(target.videoCodec, requested, caps, effectiveGpuJobs);
+
     const safe = sanitizeFilename(basename(input).replace(/\.[^.]+$/, ''));
-    const final = join(
-      outputFolder,
-      `${safe}.${cacheKey}.normalized-${target.width}x${target.height}-${Math.round(target.fps * 100) / 100}fps.mp4`
-    );
-    const pending = cachePendingPath(final);
+    const resolveCachePath = async (resolvedEncoder: ResolvedVideoEncoder | 'copy'): Promise<string> => {
+      const cacheKey = await this.cacheKey(input, {
+        operation: forceVideoTranscode
+          ? 'normalize-v7-force-video-core-resilience'
+          : forceAudioTranscode
+            ? 'normalize-v7-force-audio-core-resilience'
+            : 'normalize-v7-core-resilience',
+        target,
+        encoder: requested,
+        resolvedEncoder,
+        crf: profile?.crf ?? 18,
+        cq: profile?.cq ?? 20,
+        bitrateMode: profile?.bitrateMode ?? 'quality',
+        preset: profile?.preset ?? 'veryfast',
+        audioMode: profile?.audioMode ?? 'aac_256'
+      });
+      return join(
+        outputFolder,
+        `${safe}.${cacheKey}.normalized-${target.width}x${target.height}-${Math.round(target.fps * 100) / 100}fps.mp4`
+      );
+    };
+
+    let encoder: ResolvedVideoEncoder = selection.encoder;
+    let final = await resolveCachePath(videoCopy ? 'copy' : encoder);
+    let pending = cachePendingPath(final);
 
     if (await this.validNormalizeCache(final, target, job, signal)) {
       this.logger.info('normalize', 'NORMALIZE_CACHE_HIT', 'Đã dùng lại video chuẩn hóa hợp lệ trong bộ nhớ đệm.', {
         ...(job.projectId ? { projectId: job.projectId } : {}),
         jobId: job.id,
-        metadata: { input, cached: final }
+        metadata: { input, cached: final, resolvedEncoder: videoCopy ? 'copy' : encoder }
       });
+      if (!videoCopy) context?.onEncoderUsed?.(encoder, false);
       onProgress(100);
       return final;
     }
-
-    const caps = ffmpeg.capabilities;
-    const requested = profile?.encoder ?? 'cpu_auto';
-    const videoCopy = streamMatch.videoCopy && !forceVideoTranscode;
-    const audioCopy = streamMatch.audioCopy && !forceAudioTranscode;
-    const addSilentAudio = streamMatch.addSilentAudio;
 
     const hdrColorTransfer =
       source.colorTransfer?.toLowerCase() === 'arib-std-b67' ? 'arib-std-b67' : 'smpte2084';
@@ -406,8 +455,6 @@ export class NormalizeEngine {
           : 'setparams=range=tv:color_primaries=bt709:color_trc=bt709:colorspace=bt709'
       );
     }
-
-    const selection = selectVideoEncoder(target.videoCodec, requested, caps, resource.gpuJobs);
 
     if (!videoCopy && selection.usedCpuFallback && selection.reason) {
       this.logger.warn('normalize', 'ENCODER_CPU_FALLBACK', selection.reason, {
@@ -590,12 +637,19 @@ export class NormalizeEngine {
       );
     };
 
-    let encoder = selection.encoder;
-    let result = await runEncoder(encoder);
+    let fellBackToCpu = false;
+    let result =
+      !videoCopy && isNvencEncoder(encoder)
+        ? await this.withGpuSlot(effectiveGpuJobs, signal, () => runEncoder(encoder))
+        : await runEncoder(encoder);
 
     if (!videoCopy && result.code !== 0 && isNvencEncoder(encoder) && !isDiskFullOutput(result.stderrTail)) {
       const failedEncoder = encoder;
       encoder = selection.cpuEncoder;
+      fellBackToCpu = true;
+      await rm(pending, { force: true }).catch(() => undefined);
+      final = await resolveCachePath(encoder);
+      pending = cachePendingPath(final);
       this.logger.warn(
         'normalize',
         'NVENC_RUNTIME_FAILED_CPU_RETRY',
@@ -610,6 +664,11 @@ export class NormalizeEngine {
           }
         }
       );
+      if (await this.validNormalizeCache(final, target, job, signal)) {
+        context?.onEncoderUsed?.(encoder, true);
+        onProgress(100);
+        return final;
+      }
       onProgress(0);
       result = await runEncoder(encoder);
     }
@@ -661,6 +720,7 @@ export class NormalizeEngine {
     }
 
     const committed = await this.commitCacheFile(pending, final, job);
+    if (!videoCopy) context?.onEncoderUsed?.(encoder, fellBackToCpu);
     onProgress(100);
     return committed;
   }
