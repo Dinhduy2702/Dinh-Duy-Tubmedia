@@ -44,6 +44,7 @@ export interface NormalizeTarget {
   height: number;
   fps: number;
   hdr: boolean;
+  colorTransfer?: 'smpte2084' | 'arib-std-b67' | null;
   videoCodec: 'h264' | 'hevc';
   pixelFormat: string;
   audioCodec: 'aac' | null;
@@ -398,8 +399,15 @@ export class NormalizeEngine {
       return final;
     }
 
+    const targetTransfer = target.colorTransfer?.toLowerCase();
     const hdrColorTransfer =
-      source.colorTransfer?.toLowerCase() === 'arib-std-b67' ? 'arib-std-b67' : 'smpte2084';
+      targetTransfer === 'arib-std-b67'
+        ? 'arib-std-b67'
+        : targetTransfer === 'smpte2084'
+          ? 'smpte2084'
+          : source.colorTransfer?.toLowerCase() === 'arib-std-b67'
+            ? 'arib-std-b67'
+            : 'smpte2084';
     const canonicalScaleColorOptions = target.hdr
       ? 'in_range=auto:out_range=tv:out_color_matrix=bt2020:out_chroma_loc=left'
       : 'in_range=auto:out_range=tv:out_color_matrix=bt709:out_chroma_loc=left';

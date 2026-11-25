@@ -5,6 +5,7 @@ export interface MergeTargetDecision {
   height: number;
   fps: number;
   hdr: boolean;
+  colorTransfer?: 'smpte2084' | 'arib-std-b67' | null;
   videoCodec: 'h264' | 'hevc';
   pixelFormat: string;
   audioCodec: 'aac' | null;
@@ -218,11 +219,18 @@ export function chooseMergeTarget(
         ? 'yuv420p10le'
         : 'yuv420p';
 
+  const colorTransfer: 'smpte2084' | 'arib-std-b67' | null = keepHdr
+    ? dominant.colorTransfer?.toLowerCase() === 'arib-std-b67'
+      ? 'arib-std-b67'
+      : 'smpte2084'
+    : null;
+
   return {
     width: canvas.width,
     height: canvas.height,
     fps,
     hdr: keepHdr,
+    colorTransfer,
     videoCodec,
     pixelFormat: preferredPixelFormat,
     audioCodec,

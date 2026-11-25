@@ -5,6 +5,7 @@ export interface NormalizationTargetLike {
   height: number;
   fps: number;
   hdr: boolean;
+  colorTransfer?: string | null;
   videoCodec: 'h264' | 'hevc';
   pixelFormat: string;
   audioCodec: 'aac' | null;
@@ -26,6 +27,15 @@ function videoCodecMatches(sourceCodec: string, targetCodec: NormalizationTarget
     : ['hevc', 'h265'].includes(sourceCodec);
 }
 
+function displayAspectRatioMatches(dar: string | null | undefined, width: number, height: number): boolean {
+  if (!dar || dar === '0:1' || dar.toUpperCase() === 'N/A' || height <= 0) return true;
+  const parts = dar.split(':').map(Number);
+  if (parts.length !== 2 || !Number.isFinite(parts[0]) || !Number.isFinite(parts[1]) || parts[0]! <= 0 || parts[1]! <= 0) {
+    return true;
+  }
+  return Math.abs(parts[0]! / parts[1]! - width / height) < 0.02;
+}
+
 /**
  * Decide stream-copy independently for video and audio.
  *
@@ -37,15 +47,22 @@ export function matchNormalizationTarget(
   source: MediaInfo,
   target: NormalizationTargetLike
 ): NormalizationMatch {
+  const hdrTransferMatches =
+    !target.hdr ||
+    !target.colorTransfer ||
+    (source.colorTransfer ?? '').toLowerCase() === target.colorTransfer.toLowerCase();
   const videoMatches =
     source.width === target.width &&
     source.height === target.height &&
     Math.abs(source.fps - target.fps) < 0.01 &&
+    !source.variableFrameRate &&
     videoCodecMatches(source.videoCodec, target.videoCodec) &&
     source.pixelFormat === target.pixelFormat &&
     source.hdr === target.hdr &&
+    hdrTransferMatches &&
     (source.rotation ?? 0) === 0 &&
-    (!source.sampleAspectRatio || source.sampleAspectRatio === '1:1');
+    (!source.sampleAspectRatio || source.sampleAspectRatio === '1:1') &&
+    displayAspectRatioMatches(source.displayAspectRatio, target.width, target.height);
   const audioMatches =
     source.audioCodec === target.audioCodec &&
     (target.audioCodec === null || source.sampleRate === target.sampleRate) &&

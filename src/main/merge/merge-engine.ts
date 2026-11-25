@@ -1059,8 +1059,6 @@ export class MergeEngine {
     const mergeTarget: NormalizeTarget = chooseMergeTarget(infos, profile);
     const expectedAudio = mergeTarget.audioCodec !== null;
     const allCompatible = infos.every((info) => compareForConcat(reference, info).compatible);
-    const forceUniformVideo = infos.some((info) => hasVideoBitstreamMismatch(reference, info));
-    const forceUniformAudio = infos.some((info) => hasAudioBitstreamMismatch(reference, info));
     const canonicalizeTimeBase = infos.some((info) => hasTimeBaseMismatch(reference, info));
     const profileRequiresNormalization = [
       'compatible_1080p',
@@ -1069,6 +1067,19 @@ export class MergeEngine {
       'custom'
     ].includes(profile.mode);
     const normalizationRequired = !allCompatible || profileRequiresNormalization;
+    // Lỗi #17: nếu bất kỳ clip nào trong mẻ phải mã hóa lại hình hoặc tiếng so với mergeTarget,
+    // bật forceUniformVideo / forceUniformAudio cho toàn mẻ để mọi clip có cùng extradata/tham số
+    // trước khi concatCopy (tránh clip giữ nguyên bị lệch extradata với clip vừa mã hóa lại ở 65%).
+    const anyVideoNeedsTranscode =
+      normalizationRequired &&
+      infos.some((info) => !matchNormalizationTarget(info, mergeTarget).videoMatches);
+    const anyAudioNeedsTranscode =
+      normalizationRequired &&
+      infos.some((info) => !matchNormalizationTarget(info, mergeTarget).audioMatches);
+    const forceUniformVideo =
+      infos.some((info) => hasVideoBitstreamMismatch(reference, info)) || anyVideoNeedsTranscode;
+    const forceUniformAudio =
+      infos.some((info) => hasAudioBitstreamMismatch(reference, info)) || anyAudioNeedsTranscode;
 
     /* TUBMEDIA VERIFIED MERGE RECOVERY HOTFIX12 */
     const desiredOutput = join(outputFolder, safeName, `${safeName}.mp4`);
@@ -1421,6 +1432,49 @@ export class MergeEngine {
           { currentItem: verifiedSources, totalSeconds: knownTotalDuration }
         );
         return true;
+      });
+    }
+    // Lỗi #17: chốt an toàn kiểm compareForConcat sau chuẩn hóa — nếu vẫn còn clip lệch
+    // (vd. do thông số bitstream ẩn hoặc khác biệt nhỏ sau remux/normalize), tự mã hóa đồng nhất
+    // toàn bộ các clip bằng CPU thay vì ném lỗi giữa chừng ở 65%.
+    if (
+      prepared.length > 1 &&
+      prepared.some((item, idx) => idx > 0 && !compareForConcat(prepared[0]!.info, item.info).compatible)
+    ) {
+      const safetyConcurrency = Math.max(1, Math.min(resource.normalizeWorkers, prepared.length));
+      emit(67, 'Phát hiện chênh lệch thông số sau chuẩn hóa · đang đồng bộ tự động để ghép an toàn', {
+        totalSeconds: knownTotalDuration
+      });
+      let safetyDone = 0;
+      prepared = await mapLimit(prepared, safetyConcurrency, async (_current, idx): Promise<PreparedInput> => {
+        const original = visualReferenceInputs[idx]!;
+        const unifiedPath = await this.normalizer.normalizeToTarget(
+          job,
+          original.path,
+          original.info,
+          normalizeCacheFolder,
+          mergeTarget,
+          resource,
+          signal,
+          () => undefined,
+          profile,
+          undefined,
+          true,
+          expectedAudio,
+          {
+            sourceIndex: idx + 1,
+            sourceLabel: original.label,
+            forceCpuEncoder: true
+          }
+        );
+        const unifiedInfo =
+          unifiedPath === original.path ? original.info : await this.analyzer.analyze(unifiedPath, job.id);
+        safetyDone += 1;
+        emit(67 + (safetyDone / prepared.length) * 0.8, `Đã đồng bộ an toàn ${safetyDone}/${prepared.length}`, {
+          currentItem: safetyDone,
+          totalSeconds: knownTotalDuration
+        });
+        return { ...original, path: unifiedPath, info: unifiedInfo };
       });
     }
     this.assertConcatCompatible(prepared);
