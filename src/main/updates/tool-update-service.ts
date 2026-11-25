@@ -219,8 +219,12 @@ async function tubmediaGitHubHtmlReleaseFallback(apiUrl: string): Promise<Respon
     };
   });
 
+  const idDigest = createHash('sha256').update(`${owner}/${repository}:${tagName}`, 'utf8').digest();
+  const fallbackId = (idDigest.readUInt32BE(0) & 0x7fffffff) || 1;
+
   return new Response(
     JSON.stringify({
+      id: fallbackId,
       tag_name: tagName,
       name: tagName,
       html_url: pageResponse.url,
@@ -719,9 +723,36 @@ export class ToolUpdateService {
         );
       }
     }
+    if (packageName !== 'yt-dlp' && this.processes.isToolActive('yt-dlp')) {
+      throw new UpdateFailedError(
+        'yt-dlp đang được sử dụng (có thể dùng kèm FFmpeg/aria2c). Hãy tạm dừng hoặc hoàn tất tác vụ trước khi cập nhật.'
+      );
+    }
+  }
+
+  private async cleanupStaleNewFiles(targetFolder: string): Promise<void> {
+    const entries = await readdir(targetFolder, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (!entry.isFile() || !/\.new(?:-[0-9a-f-]+)?$/i.test(entry.name)) continue;
+      await rm(join(targetFolder, entry.name), { force: true }).catch(() => undefined);
+    }
+  }
+
+  private async prunePackageBackups(targetFolder: string, packageName: ToolPackage, keepCount = 2): Promise<void> {
+    const backupRoot = join(targetFolder, '.backups');
+    const entries = await readdir(backupRoot, { withFileTypes: true }).catch(() => []);
+    const packageBackups = entries
+      .filter((entry) => entry.isDirectory() && entry.name.startsWith(`${packageName}-`))
+      .sort((left, right) => right.name.localeCompare(left.name, 'en', { numeric: true }));
+    for (const obsolete of packageBackups.slice(keepCount)) {
+      await rm(join(backupRoot, obsolete.name), { recursive: true, force: true }).catch(() => undefined);
+    }
   }
 
   private async updatePackage(packageName: ToolPackage, requiredOnly = false): Promise<void> {
+    if (this.activeOperations > 0) {
+      throw new UpdateFailedError('Đang có tiến trình cập nhật hoặc sửa chữa công cụ khác đang chạy.');
+    }
     this.assertPackageIdle(packageName);
     this.activeOperations += 1;
     let staging = '';
@@ -753,6 +784,10 @@ export class ToolUpdateService {
         candidates.set(executableName, candidate);
       }
 
+      // Kiểm lại trước khi tráo tệp thật: người dùng có thể đã bắt đầu tải trong lúc chờ tải gói mới.
+      this.assertPackageIdle(packageName);
+      await this.cleanupStaleNewFiles(targetFolder);
+
       const backupFolder = join(targetFolder, '.backups', `${packageName}-${Date.now()}`);
       await mkdir(backupFolder, { recursive: true });
       const installed: string[] = [];
@@ -770,11 +805,16 @@ export class ToolUpdateService {
           }
 
           const temporary = `${destination}.new-${randomUUID()}`;
-          await copyFile(candidate, temporary);
-          await this.clearWindowsInternetMark(temporary);
-          await rm(destination, { force: true });
-          await rename(temporary, destination);
-          await this.clearWindowsInternetMark(destination);
+          try {
+            await copyFile(candidate, temporary);
+            await this.clearWindowsInternetMark(temporary);
+            await rm(destination, { force: true });
+            await rename(temporary, destination);
+            await this.clearWindowsInternetMark(destination);
+          } catch (swapError) {
+            await rm(temporary, { force: true }).catch(() => undefined);
+            throw swapError;
+          }
           installed.push(executableName);
 
           const toolName = executableName.replace(/\.exe$/i, '') as ToolName;
@@ -805,6 +845,7 @@ export class ToolUpdateService {
         if (broken.length > 0) {
           throw new UpdateFailedError(`Kiểm tra sau cập nhật thất bại: ${broken.join(', ')}.`);
         }
+        await this.prunePackageBackups(targetFolder, packageName, 2);
         this.logger.info('update', 'TOOL_UPDATED', `${packageName} đã cập nhật vào ${targetFolder}.`);
       } catch (error) {
         if (metadataWritten) {

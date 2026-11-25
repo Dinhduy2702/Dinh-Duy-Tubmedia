@@ -92,18 +92,48 @@ export function UpdatesPage(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
+    const current = status?.currentVersion;
+    if (!current || !lastKnownRelease) return;
+    const relation = compareAppVersions(lastKnownRelease.version, current);
+    if (relation !== null && relation <= 0) {
+      setLastKnownRelease(null);
+      try {
+        window.localStorage.removeItem(LAST_KNOWN_RELEASE_KEY);
+      } catch {
+        // Storage cleanup is optional.
+      }
+    }
+  }, [lastKnownRelease, status?.currentVersion]);
+
+  useEffect(() => {
     if (!status?.info?.version) return;
+    const current = status.currentVersion;
+    const relation = current ? compareAppVersions(status.info.version, current) : null;
+    if (relation !== null && relation <= 0) {
+      setLastKnownRelease(null);
+      try {
+        window.localStorage.removeItem(LAST_KNOWN_RELEASE_KEY);
+      } catch {
+        // Storage cleanup is optional.
+      }
+      return;
+    }
     setLastKnownRelease(status.info);
     try {
       window.localStorage.setItem(LAST_KNOWN_RELEASE_KEY, JSON.stringify(status.info));
     } catch {
       // Cache is optional. Update UX must stay usable when storage is unavailable.
     }
-  }, [status?.info]);
+  }, [status?.currentVersion, status?.info]);
 
   const state = stableState(status);
   const currentVersion = status?.currentVersion ?? '—';
-  const latestInfo = status?.info ?? lastKnownRelease;
+  const validCachedRelease =
+    lastKnownRelease &&
+    (!status?.currentVersion || (compareAppVersions(lastKnownRelease.version, status.currentVersion) ?? 1) > 0)
+      ? lastKnownRelease
+      : null;
+  const latestInfo = status?.info ?? validCachedRelease;
   const latestVersion = latestInfo?.version ?? currentVersion;
   const releaseRelation = compareAppVersions(latestVersion, currentVersion);
   const remoteIsNewer = releaseRelation === 1;

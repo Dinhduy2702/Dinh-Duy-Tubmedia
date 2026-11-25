@@ -282,7 +282,7 @@ function Invoke-WingetInstall([string]$PackageId) {
 }
 
 function Update-YtDlp {
-    if (Import-ExistingTool 'yt-dlp' @('--version')) { return }
+    if ($Mode -ne 'update' -and (Import-ExistingTool 'yt-dlp' @('--version'))) { return }
 
     $Out = Join-Path $TempDir 'yt-dlp.exe'
     try {
@@ -303,7 +303,7 @@ function Update-YtDlp {
 }
 
 function Update-FfmpegSuite {
-    if (Import-ExistingFfmpegSuite) { return }
+    if ($Mode -ne 'update' -and (Import-ExistingFfmpegSuite)) { return }
 
     $Zip = Join-Path $TempDir 'ffmpeg.zip'
     $Extracted = Join-Path $TempDir 'ffmpeg-extracted'
@@ -343,7 +343,7 @@ Open Windows Security or the organization policy log to allow a trusted FFmpeg b
 }
 
 function Update-Aria2 {
-    if (Import-ExistingTool 'aria2c' @('-v')) { return }
+    if ($Mode -ne 'update' -and (Import-ExistingTool 'aria2c' @('-v'))) { return }
     $Release = Invoke-RestMethod -Uri 'https://api.github.com/repos/aria2/aria2/releases/latest' -Headers @{ 'User-Agent' = 'Download-video-Tubmedia' }
     $Asset = $Release.assets | Where-Object { $_.name -match '^aria2-.*-win-64bit-build\d+\.zip$' } | Select-Object -First 1
     if (-not $Asset) { throw 'Could not find aria2 Windows x64 asset.' }
