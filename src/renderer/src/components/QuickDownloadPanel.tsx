@@ -18,6 +18,8 @@ import type {
 } from '@shared/quick-download';
 import { CookieManagerDialog } from './CookieManagerDialog';
 import { InfoHint } from './InfoHint';
+import { friendlyIssue } from '../utils/ui-error';
+import { FriendlyIssueCard } from './FriendlyIssueCard';
 import { UnifiedDownloadProgress } from './UnifiedDownloadProgress';
 import { Card } from './ui/Card';
 import { InfoDisclosure } from './InfoDisclosure';
@@ -712,7 +714,20 @@ export function QuickDownloadPanel(): ReactElement {
             </div>
           </div>
         )}
-        {error && <div className="quick-download-error">{error}</div>}
+        {error && (
+          <FriendlyIssueCard
+            issue={friendlyIssue(error)}
+            {...(canStart ? { onRetry: () => void start() } : {})}
+            className="mb-3"
+          />
+        )}
+        {!error && !cookieBlocked && !unsupportedLink && !outputPathBlocked && status?.phase === 'failed' && status.error && (
+          <FriendlyIssueCard
+            issue={friendlyIssue(status.error)}
+            {...(canStart ? { onRetry: () => void start() } : {})}
+            className="mb-3"
+          />
+        )}
 
         {status ? (
           <UnifiedDownloadProgress

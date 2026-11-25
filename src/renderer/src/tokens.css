@@ -763,3 +763,135 @@ a,
 .diagnostics-error-list b {
   color: var(--tone-error-text);
 }
+
+/* 1.8.0: thẻ lỗi dùng chung (FriendlyIssueCard) — phân biệt lỗi cần người dùng xử lý vs lỗi ứng dụng, đạt WCAG AA. */
+.friendly-issue-card {
+  gap: 0.75rem;
+}
+
+.friendly-issue-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.friendly-issue-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.friendly-issue-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1.3;
+  border: 1px solid currentColor;
+}
+
+.friendly-issue-badge.is-app-fault {
+  background: var(--tone-error-bg);
+  color: var(--tone-error-text);
+}
+
+.friendly-issue-badge.is-user-action {
+  background: var(--tone-warning-bg);
+  color: var(--tone-warning-text);
+}
+
+.friendly-issue-dismiss {
+  margin-left: auto;
+  padding: 0.2rem;
+  min-width: 28px;
+  min-height: 28px;
+}
+
+.friendly-issue-steps {
+  margin: 0.45rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.friendly-issue-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.65rem;
+}
+
+.friendly-issue-details {
+  margin-top: 0.6rem;
+}
+
+.friendly-issue-details summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--tone-text);
+  list-style: none;
+  padding: 0.15rem 0.35rem;
+  border-radius: 6px;
+}
+
+.friendly-issue-details summary:focus-visible {
+  outline: 2px solid var(--tone-text);
+  outline-offset: 2px;
+}
+
+.friendly-issue-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.friendly-issue-details[open] summary svg {
+  transform: rotate(180deg);
+}
+
+.friendly-issue-technical {
+  margin-top: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+
+.friendly-issue-technical pre {
+  margin: 0;
+  width: 100%;
+  max-height: 180px;
+  overflow: auto;
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 1.8.0: cảnh báo vàng khi CapCut tải bản thấp hơn 1080p (ô Cho phép thấp hơn bật). */
+.quality-fallback-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  background: var(--tone-warning-bg);
+  color: var(--tone-warning-text);
+  border: 1px solid var(--tone-warning-border);
+  white-space: nowrap;
+}

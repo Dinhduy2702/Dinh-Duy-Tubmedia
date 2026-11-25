@@ -22,13 +22,15 @@ import { displayedAttempt } from '@shared/utils/attempt-display';
 import { progressFillStyle } from '../utils/progress-style';
 import { StatusBadge } from '../components/StatusBadge';
 import { AudioIssueBadge } from '../components/AudioIssueNotice';
+import { QualityFallbackBadge, QualityFallbackDetailBanner } from '../components/QualityFallbackNotice';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CompactDetail } from '../components/CompactDetail';
 import { UnifiedDownloadProgress } from '../components/UnifiedDownloadProgress';
 import { useVirtualTableWindow } from '../components/VirtualTableWindow';
 import { jobTypeLabel, statusLabel } from '../utils/vi-labels';
 import { createUiEventId } from '../utils/ui-id';
-import { friendlyIssue, safeUiText } from '../utils/ui-error';
+import { friendlyIssue, jobFriendlyIssue, safeUiText } from '../utils/ui-error';
+import { FriendlyIssueCard } from '../components/FriendlyIssueCard';
 
 const ACTIVE = new Set<QueueJob['status']>([
   'pending',
@@ -260,7 +262,7 @@ function QueueChildRows({
       {virtual.visibleItems.map((job) => {
         const selected = selectedIds.has(job.id);
         const outputPath = inputText(job, 'outputPath');
-        const issue = job.errorMessage ? friendlyIssue(job.errorMessage) : null;
+        const issue = job.errorMessage ? jobFriendlyIssue(job) : null;
         const resultMessage = inputText(job, 'resultMessage');
         const messageTitle =
           issue?.title ??
@@ -295,6 +297,7 @@ function QueueChildRows({
                   {outputPath && <small title={outputPath}>{outputPath}</small>}
                 </div>
                 <AudioIssueBadge job={job} />
+                <QualityFallbackBadge job={job} />
                 <StatusBadge status={job.status} fixed />
               </div>
 
@@ -607,16 +610,7 @@ function QuickDownloadAccordion({
                 <dd>{status.eta || '—'}</dd>
               </div>
             </dl>
-            {status.error &&
-              (() => {
-                const issue = friendlyIssue(status.error);
-                return (
-                  <div className={`queue-detail-error queue-detail-${issue.tone}`}>
-                    <b>{issue.title}</b>
-                    <p>{issue.message}</p>
-                  </div>
-                );
-              })()}
+            {status.error && <FriendlyIssueCard issue={friendlyIssue(status.error)} className="mt-3" />}
           </div>
         </div>
       </div>
@@ -630,7 +624,6 @@ export function QueuePage({ mode }: { mode: 'downloads' | 'processing' | 'all' }
   const refreshJobs = useAppStore((state) => state.refreshJobs);
   const refreshProjects = useAppStore((state) => state.refreshProjects);
   const setError = useAppStore((state) => state.setError);
-  const setPage = useAppStore((state) => state.setPage);
   const setAttention = useAppStore((state) => state.setAttention);
 
   const [query, setQuery] = useState('');
@@ -1179,28 +1172,18 @@ export function QueuePage({ mode }: { mode: 'downloads' | 'processing' | 'all' }
                 <dd>{new Date(detailJob.updatedAt).toLocaleString('vi-VN')}</dd>
               </div>
             </dl>
-            {detailJob.errorMessage &&
-              (() => {
-                const issue = friendlyIssue(detailJob.errorMessage);
-                return (
-                  <div className={`queue-detail-error queue-detail-${issue.tone}`}>
-                    <b>{issue.title}</b>
-                    <p>{issue.message}</p>
-                    {issue.steps.length > 0 && (
-                      <ol>
-                        {issue.steps.map((step) => (
-                          <li key={step}>{step}</li>
-                        ))}
-                      </ol>
-                    )}
-                    {issue.action && (
-                      <button className="btn btn-small mt-2" onClick={() => setPage(issue.action!.page)}>
-                        {issue.action.label}
-                      </button>
-                    )}
-                  </div>
-                );
-              })()}
+            <QualityFallbackDetailBanner job={detailJob} />
+            {detailJob.errorMessage && (
+              <FriendlyIssueCard
+                issue={jobFriendlyIssue(detailJob)}
+                {...(detailJob.status === 'failed' || detailJob.status === 'cancelled'
+                  ? {
+                      onRetry: () => void runOne('retry', detailJob),
+                      retryDisabled: busy !== null
+                    }
+                  : {})}
+              />
+            )}
             {!ACTIVE.has(detailJob.status) && (
               <button className="btn btn-danger" title="Xóa tác vụ" onClick={() => setConfirm('remove-one')}>
                 <Trash2 size={15} />

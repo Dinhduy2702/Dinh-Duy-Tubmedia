@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import {
-  AlertTriangle,
   ChevronDown,
   ChevronUp,
   ClipboardPaste,
@@ -45,6 +44,7 @@ import { ToolReadinessPanel } from '../components/ToolReadinessPanel';
 import { FolderField } from '../components/FolderField';
 import { StatusBadge } from '../components/StatusBadge';
 import { AudioIssueSummary } from '../components/AudioIssueNotice';
+import { QualityFallbackSummary } from '../components/QualityFallbackNotice';
 import { LaneWaitNotice } from '../components/LaneWaitNotice';
 import { CompactLogRow } from '../components/CompactLogRow';
 import { useAppStore } from '../stores/app-store';
@@ -52,7 +52,8 @@ import { useLaneLogs } from '../hooks/use-lane-logs';
 import { showNotice } from '../utils/notify';
 import { createUiEventId } from '../utils/ui-id';
 import { loadWorkbenchPath, saveWorkbenchPath } from '../utils/workbench-path-memory';
-import { friendlyIssue, safeUiText } from '../utils/ui-error';
+import { jobFriendlyIssue, safeUiText } from '../utils/ui-error';
+import { FriendlyIssueCard } from '../components/FriendlyIssueCard';
 import { statusLabel } from '../utils/vi-labels';
 import { QuickDownloadPanel } from '../components/QuickDownloadPanel';
 import { progressFillStyle } from '../utils/progress-style';
@@ -1157,6 +1158,7 @@ function LaneCard({
           </div>
           <LaneWaitNotice projectId={jobs.find((job) => job.projectId)?.projectId} kind="download" />
           <AudioIssueSummary jobs={jobs} />
+          <QualityFallbackSummary jobs={jobs} />
         </div>
         <div className="lane-primary-actions">
           <button
@@ -1249,32 +1251,11 @@ function FriendlyBlockingCard({
   job: QueueJob;
   onCookies: () => void;
 }): React.JSX.Element {
-  const issue = friendlyIssue(job.errorMessage ?? job.errorCode ?? '');
+  const issue = jobFriendlyIssue(job);
   const cookie = ['AUTHENTICATION_REQUIRED', 'COOKIES_EXPIRED', 'BROWSER_COOKIE_DATABASE_LOCKED'].includes(
     job.errorCode ?? ''
   );
-  return (
-    <div className={`blocking-card blocking-${issue.tone}`}>
-      <AlertTriangle size={21} />
-      <div className="min-w-0 flex-1">
-        <b>{issue.title}</b>
-        <p>{issue.message}</p>
-        <ol>
-          {issue.steps.map((step, index) => (
-            <li key={step}>
-              {index + 1}. {step}
-            </li>
-          ))}
-        </ol>
-        {cookie && (
-          <button className="btn btn-primary mt-3" onClick={onCookies}>
-            <Cookie size={16} />
-            Mở 3 cách thêm cookies
-          </button>
-        )}
-      </div>
-    </div>
-  );
+  return <FriendlyIssueCard issue={issue} {...(cookie ? { onCookies } : {})} />;
 }
 
 function LaneLogPanel({

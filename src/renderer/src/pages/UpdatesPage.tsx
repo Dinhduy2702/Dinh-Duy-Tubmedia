@@ -13,6 +13,8 @@ import type { AppUpdateReleaseInfo, AppUpdateStatus } from '@shared/types/domain
 import { useAppStore } from '../stores/app-store';
 import type { NoticeTone } from '@shared/utils/notice-tone';
 import { Notice } from '../components/ui/Notice';
+import { FriendlyIssueCard } from '../components/FriendlyIssueCard';
+import { friendlyIssue } from '../utils/ui-error';
 import { InfoHint } from '../components/InfoHint';
 import { ToneIcon } from '../components/ui/ToneIcon';
 import { compareAppVersions } from '../../../shared/app-version';
@@ -213,18 +215,33 @@ export function UpdatesPage(): React.JSX.Element {
           <div className="update-message mt-4">
             <div>
               <b>{headline}</b>
-              {status?.message && state === 'error' && (
-                <Notice
-                  tone="warning"
-                  title="Chưa cập nhật được"
-                  steps={[
-                    'Tubmedia hiện tại vẫn dùng bình thường, không mất dữ liệu.',
-                    'Kiểm tra kết nối mạng rồi bấm Thử kiểm tra lại.'
-                  ]}
-                >
-                  {status.message}
-                </Notice>
-              )}
+              {status?.message && state === 'error' && (() => {
+                const parsed = friendlyIssue(status.message);
+                const updateIssue =
+                  parsed.kind === 'app-fault'
+                    ? parsed
+                    : {
+                        ...parsed,
+                        tone: 'warning' as const,
+                        title: parsed.kind === 'user-action' ? parsed.title : 'Chưa cập nhật được',
+                        steps:
+                          parsed.steps.length > 0
+                            ? parsed.steps
+                            : [
+                                'Tubmedia hiện tại vẫn dùng bình thường, không mất dữ liệu.',
+                                'Kiểm tra kết nối mạng rồi bấm Thử kiểm tra lại.'
+                              ]
+                      };
+                return (
+                  <FriendlyIssueCard
+                    issue={updateIssue}
+                    onRetry={() => void runCheck()}
+                    retryLabel="Thử kiểm tra lại"
+                    retryDisabled={busy !== null}
+                    className="mt-2"
+                  />
+                );
+              })()}
               {status?.message && state === 'disabled' && (
                 <Notice tone="neutral" title="Cập nhật tự động chưa bật">
                   {status.message}

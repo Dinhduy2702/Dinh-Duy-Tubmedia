@@ -288,6 +288,7 @@ src/main/database/repositories/quarantine-repository.ts
 src/main/database/repositories/queue-repository.ts
 src/main/database/repositories/settings-repository.ts
 src/main/database/sqlite.ts
+src/main/diagnostics/auto-error-report.ts
 src/main/diagnostics/error-report.ts
 src/main/download/preview-frame-command.ts
 src/main/download/preview-frame-service.ts
@@ -380,6 +381,7 @@ src/renderer/src/components/DiagnosticDock.tsx
 src/renderer/src/components/ErrorBanner.tsx
 src/renderer/src/components/ErrorReportButton.tsx
 src/renderer/src/components/FolderField.tsx
+src/renderer/src/components/FriendlyIssueCard.tsx
 src/renderer/src/components/GpuEncoderIssueNotice.tsx
 src/renderer/src/components/HoverTip.tsx
 src/renderer/src/components/InfoDisclosure.tsx
@@ -388,6 +390,7 @@ src/renderer/src/components/JobProgressList.tsx
 src/renderer/src/components/LaneWaitNotice.tsx
 src/renderer/src/components/NotificationCenter.tsx
 src/renderer/src/components/ProjectQuarantinePanel.tsx
+src/renderer/src/components/QualityFallbackNotice.tsx
 src/renderer/src/components/quarantine-anchors.ts
 src/renderer/src/components/QuickDownloadPanel.tsx
 src/renderer/src/components/RateLimitWaitBadges.tsx
@@ -450,6 +453,7 @@ src/renderer/src/tubmedia-theme.css
 src/renderer/src/typography.css
 src/renderer/src/utils/notify.ts
 src/renderer/src/utils/progress-style.ts
+src/renderer/src/utils/report-renderer-crash.ts
 src/renderer/src/utils/ui-error.ts
 src/renderer/src/utils/ui-id.ts
 src/renderer/src/utils/update-notice.ts
@@ -573,6 +577,7 @@ tests/integration/normalize-cache-corrupt-audio.test.ts
 tests/integration/normalize-concat-extradata-uniformity.test.ts
 tests/integration/post-merge-source-cleanup-v15.test.ts
 tests/integration/quarantine-service.test.ts
+tests/integration/queue-app-fault-report.test.ts
 tests/integration/queue-attempts.test.ts
 tests/integration/queue-audio-issue.test.ts
 tests/integration/queue-cleanup-db-closed.test.ts
@@ -609,6 +614,7 @@ tests/unit/app-update-version.test.ts
 tests/unit/apply-temp-folder.test.ts
 tests/unit/attempt-display.test.ts
 tests/unit/audio-presence.test.ts
+tests/unit/auto-error-report.test.ts
 tests/unit/batch-error-aggregation-r18.test.ts
 tests/unit/brand-layout.test.ts
 tests/unit/brand-logo.test.ts
@@ -652,6 +658,7 @@ tests/unit/electron-fuses.test.ts
 tests/unit/encode-cpu-cap-v177.test.ts
 tests/unit/encode-cpu-monitor.test.ts
 tests/unit/encoder-selection.test.ts
+tests/unit/error-classification-v180.test.ts
 tests/unit/existing-download.test.ts
 tests/unit/failure-reason-coverage.test.ts
 tests/unit/failure-reason-notice.test.ts
@@ -664,6 +671,7 @@ tests/unit/fix10-timestamp-error-detail.test.ts
 tests/unit/fix11-path-and-retry.test.ts
 tests/unit/fix6-diagnostics-ui.test.ts
 tests/unit/format-availability.test.ts
+tests/unit/format-probe-guard.test.ts
 tests/unit/gitignore-secrets.test.ts
 tests/unit/hardware-cpu-count.test.ts
 tests/unit/hardware-recommendation.test.ts
@@ -674,6 +682,7 @@ tests/unit/independent-workflow-accordion-1.3.0.test.ts
 tests/unit/inject-changelog-release-notes.test.ts
 tests/unit/input-parser.test.ts
 tests/unit/installer-upgrade.test.ts
+tests/unit/ipc-app-fault.test.ts
 tests/unit/ipc-wire-error.test.ts
 tests/unit/job-resume-race.test.ts
 tests/unit/job-state-machine.test.ts

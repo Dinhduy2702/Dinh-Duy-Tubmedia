@@ -76,7 +76,8 @@ import { useLaneLogs } from '../hooks/use-lane-logs';
 import { showNotice } from '../utils/notify';
 import { createUiEventId } from '../utils/ui-id';
 import { loadWorkbenchPath, saveWorkbenchPath } from '../utils/workbench-path-memory';
-import { friendlyIssue } from '../utils/ui-error';
+import { jobFriendlyIssue } from '../utils/ui-error';
+import { FriendlyIssueCard } from '../components/FriendlyIssueCard';
 import { audioModeLabel, jobTypeLabel, statusLabel } from '../utils/vi-labels';
 import { progressFillStyle } from '../utils/progress-style';
 import { hiddenLanesNote, hiddenLanesWithData, laneFormWhenShown } from '@shared/utils/merge-lane-visibility';
@@ -2007,27 +2008,34 @@ function MergeErrorDetailPanel({
 }): React.JSX.Element {
   const technical = useMemo(() => mergeErrorTechnical(job, log), [job, log]);
   const time = log?.timestamp ?? job.finishedAt ?? job.updatedAt;
-  const issue = friendlyIssue(job.errorMessage ?? log?.message ?? job.errorCode ?? '');
+  const rawIssue = jobFriendlyIssue({
+    errorMessage: job.errorMessage ?? log?.message ?? null,
+    errorCode: job.errorCode
+  });
+  const issue = { ...rawIssue, technical: technical || rawIssue.technical };
 
   return (
-    <section className={`merge-error-detail merge-error-${issue.tone}`} role="alert" aria-live="assertive">
-      <header className="merge-error-detail-head">
-        <span className="merge-error-detail-icon">
-          <AlertTriangle size={18} />
-        </span>
-        <div className="min-w-0 flex-1">
-          <b>{issue.title}</b>
-          <small>Cập nhật lúc {new Date(time).toLocaleString('vi-VN')}</small>
-        </div>
-        <StatusBadge status="failed" fixed />
-      </header>
-      <p className="merge-error-message">{issue.message}</p>
-      {issue.steps.length > 0 && (
-        <ol className="merge-error-user-steps">
-          {issue.steps.map((step) => <li key={step}>{step}</li>)}
-        </ol>
-      )}
-      <div className="merge-error-summary-grid">
+    <section className={`merge-error-detail merge-error-${issue.tone}`}>
+      <FriendlyIssueCard
+        issue={issue}
+        extraActions={
+          <>
+            <button type="button" className="btn btn-small" onClick={onOpenLogs}>
+              <FileText size={14} aria-hidden="true" />
+              Mở nhật ký quy trình
+            </button>
+            <button
+              type="button"
+              className="btn btn-small btn-ghost"
+              onClick={() => void window.desktop.app.writeClipboard(technical)}
+            >
+              <Copy size={14} aria-hidden="true" />
+              Sao chép thông tin hỗ trợ
+            </button>
+          </>
+        }
+      />
+      <div className="merge-error-summary-grid mt-3">
         <div>
           <span>Công đoạn</span>
           <b>{jobTypeLabel(job.type)}</b>
@@ -2041,51 +2049,20 @@ function MergeErrorDetailPanel({
           <b>{displayedAttempt(job)}/{job.maxAttempts}</b>
         </div>
         <div>
-          <span>Trạng thái</span>
-          <b>{statusLabel(job.status)}</b>
+          <span>Cập nhật lúc</span>
+          <b>{new Date(time).toLocaleString('vi-VN')}</b>
         </div>
-      </div>
-      <div className="merge-error-actions">
-        <button className="btn btn-small" onClick={onOpenLogs}>
-          <FileText size={14} />
-          Mở nhật ký quy trình
-        </button>
-        <button className="btn btn-small btn-ghost" onClick={() => void window.desktop.app.writeClipboard(technical)}>
-          <Copy size={14} />
-          Sao chép thông tin hỗ trợ
-        </button>
       </div>
     </section>
   );
 }
 
 function MergeBlockingCard({ job, onCookies }: { job: QueueJob; onCookies: () => void }): React.JSX.Element {
-  const issue = friendlyIssue(job.errorMessage ?? job.errorCode ?? '');
+  const issue = jobFriendlyIssue(job);
   const cookie = ['AUTHENTICATION_REQUIRED', 'COOKIES_EXPIRED', 'BROWSER_COOKIE_DATABASE_LOCKED'].includes(
     job.errorCode ?? ''
   );
-  return (
-    <div className={`blocking-card blocking-${issue.tone}`}>
-      <AlertTriangle size={21} />
-      <div className="min-w-0 flex-1">
-        <b>{issue.title}</b>
-        <p>{issue.message}</p>
-        <ol>
-          {issue.steps.map((step, index) => (
-            <li key={step}>
-              {index + 1}. {step}
-            </li>
-          ))}
-        </ol>
-        {cookie && (
-          <button className="btn btn-primary mt-3" onClick={onCookies}>
-            <Cookie size={16} />
-            Mở 3 cách thêm cookies
-          </button>
-        )}
-      </div>
-    </div>
-  );
+  return <FriendlyIssueCard issue={issue} {...(cookie ? { onCookies } : {})} />;
 }
 
 function MergeLogPanel({
