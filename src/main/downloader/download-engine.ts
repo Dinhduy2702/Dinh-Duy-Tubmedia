@@ -401,7 +401,8 @@ export class DownloadEngine {
     const desiredOutput = input.slice(0, -extname(input).length) + '.mp4';
     // Tệp đã là MP4 thì ghi đè đúng tệp đó (tệp vừa tải, chưa danh sách nào dùng) qua tệp tạm bên cạnh.
     const output = alreadyMp4 ? input : await nonConflictingPath(desiredOutput);
-    const pending = output.replace(/\.mp4$/i, `.tubmedia-${job.id}.pending.mp4`);
+    const shortTag = job.id.slice(0, 5);
+    const pending = output.replace(/\.mp4$/i, `.${shortTag}.pending.mp4`);
     const remuxStepLabel = convertAudio ? 'chuyển đổi âm thanh sang AAC' : 'đóng gói sang MP4';
     const result = await runFfmpegWithFastAacRescue(
       this.processes,
@@ -511,7 +512,7 @@ export class DownloadEngine {
     let committedOutput: string;
     if (alreadyMp4) {
       // Thay tệp gốc bằng bản đã chuyển tiếng: giữ bản gốc tới khi bản mới đã vào đúng chỗ.
-      const original = input.replace(/\.mp4$/i, `.tubmedia-${job.id}.original.mp4`);
+      const original = input.replace(/\.mp4$/i, `.${shortTag}.orig.mp4`);
       await renameWithRetry(input, original, commitContext);
       try {
         await renameWithRetry(pending, input, commitContext);
@@ -738,7 +739,10 @@ export class DownloadEngine {
     const extension = extname(input);
     const stem = extension ? input.slice(0, -extension.length) : input;
     const output = `${stem}.capcut-edit-${Date.now()}.mp4`;
-    const pending = output.replace(/\.mp4$/i, '.pending.mp4');
+    const pending =
+      output.length + '.pending'.length > 259
+        ? `${stem}.capcut-edit-${Date.now().toString().slice(-4)}.pending.mp4`
+        : output.replace(/\.mp4$/i, '.pending.mp4');
     await rm(pending, { force: true });
     await this.removeStalePendingEditCopies(input, job);
 
@@ -976,7 +980,7 @@ export class DownloadEngine {
       const target = `${stem}.mp4`;
       let committed: string;
       if (resolve(target) === resolve(input)) {
-        const original = `${stem}.tubmedia-${job.id}.original${extension}`;
+        const original = `${stem}.${job.id.slice(0, 5)}.orig${extension}`;
         await renameWithRetry(input, original, commitContext);
         try {
           await renameWithRetry(pending, input, commitContext);

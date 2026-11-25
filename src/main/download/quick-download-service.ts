@@ -1,6 +1,6 @@
 import { malformedYouTubeVideoUrlMessage } from '@shared/utils/youtube-url-validation.js';
 import { formatDiskShortfall } from '@shared/utils/disk-shortfall-format.js';
-import { requiredFreeDiskBytesForDownload } from '@shared/utils/disk-space-policy.js';
+import { isDiskFullOutput, requiredFreeDiskBytesForDownload } from '@shared/utils/disk-space-policy.js';
 import { app, shell } from 'electron';
 import { createHash, randomUUID } from 'node:crypto';
 import { access, mkdir, readFile, readdir, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
@@ -58,6 +58,7 @@ interface ActiveQuickTask {
   runToken: string;
   cookiesAttached: boolean;
   compactFilename: boolean;
+  skipSubtitlesFallback: boolean;
   genericFallbackTried: boolean;
   /** Giai đoạn 6 mục 1: tên kênh/nguồn lấy từ yt-dlp (--print before_dl) để ghi credit metadata. */
   uploaderName: string;
@@ -275,6 +276,7 @@ export class QuickDownloadService {
   private readonly tempRoot: string;
   private cookieBlockedRequest: ValidatedQuickDownloadRequest | null = null;
   private cookieJar: CookieJarStore | null = null;
+  private creditTask: Promise<void> | null = null;
   private diskKindOf: (letter: string) => DiskKind = () => 'unknown';
   private sharedRateLimits: {
     gate: () => PlatformRateLimitGate;
@@ -577,6 +579,7 @@ export class QuickDownloadService {
       runToken,
       cookiesAttached: forceCookies && hasConfiguredCookies(this.cookieSettings()),
       compactFilename: false,
+      skipSubtitlesFallback: false,
       genericFallbackTried: false,
       uploaderName: '',
       recentLines: [],
@@ -688,6 +691,7 @@ export class QuickDownloadService {
       // 2026-10-27: lượt vừa kết thúc có thể còn đang dọn thư mục tạm + ghi trạng thái — chờ xong rồi mới coi là đã thoát
       // (trước đây thoát luôn, bước ghi trạng thái chạy sau khi thư mục đã bị dọn → lỗi EPERM không ai bắt).
       if (active) await active.done.catch(() => undefined);
+      if (this.creditTask) await this.creditTask.catch(() => undefined);
       await this.persist().catch(() => undefined);
       return;
     }
@@ -762,6 +766,7 @@ export class QuickDownloadService {
             authentication,
             {
               compactFilename: active.compactFilename,
+              skipSubtitles: active.skipSubtitlesFallback,
               forceGenericExtractor: active.genericFallbackTried,
               filenameTemplate: appSettings?.quickDownloadFilenameTemplate,
               concurrentFragments: this.concurrentFragments(),
@@ -841,7 +846,7 @@ export class QuickDownloadService {
 
           if (isBotCheck) {
             this.failTask(active, quickBotCheckFailureMessage(active.cookiesAttached), 'BOT_CHECK');
-            await this.cleanupActive(active, true);
+            await this.cleanupActive(active, false);
             return;
           }
 
@@ -912,7 +917,42 @@ export class QuickDownloadService {
             return;
           }
 
-          const classified = classifyYtDlpFailure(active.recentLines.join('\n'));
+          const joinedOutput = active.recentLines.join('\n');
+          if (
+            active.request.downloadSubtitles &&
+            !active.skipSubtitlesFallback &&
+            /(?:unable to download|failed to download).*subtitles|timedtext.*429|subtitles.*(?:429|too many requests)/i.test(
+              joinedOutput
+            )
+          ) {
+            active.skipSubtitlesFallback = true;
+            active.status.warnings.push(
+              'Không tải được phụ đề do nền tảng giới hạn yêu cầu (HTTP 429); đã tải tiếp video không kèm phụ đề.'
+            );
+            active.status.phase = 'preparing';
+            active.status.speed = '';
+            active.status.eta = '';
+            active.status.message = 'Phụ đề bị giới hạn (HTTP 429) — đang tải lại video không kèm phụ đề.';
+            this.publish(active);
+            this.logger.warn(
+              'quick-download',
+              'QUICK_DOWNLOAD_SUBTITLE_429_FALLBACK',
+              'Tải phụ đề bị giới hạn (HTTP 429); tự thử lại không kèm phụ đề để giữ nguyên video.',
+              { jobId: active.status.taskId }
+            );
+            continue;
+          }
+
+          const classified = classifyYtDlpFailure(joinedOutput);
+          if (classified.category === 'disk' || classified.subtype === 'disk_full') {
+            this.failTask(
+              active,
+              `Ổ đĩa chứa ${active.request.outputDirectory} hoặc thư mục tạm đã hết dung lượng trống. Đã giữ nguyên phần tải dở (.part); hãy dọn dung lượng rồi bấm Tải lại.`,
+              'DISK_FULL'
+            );
+            await this.cleanupActive(active, false);
+            return;
+          }
           const isRateLimit = classified.category === 'rate_limit' || classified.subtype === 'http_429';
           if (isRateLimit && platform && this.sharedRateLimits) {
             const gate = this.sharedRateLimits.gate();
@@ -988,9 +1028,11 @@ export class QuickDownloadService {
         return;
       }
 
-      this.failTask(active, error instanceof Error ? error.message : String(error), null);
-      // 2026-10-24: Tải nhanh không tải tiếp từ phần dở (lượt sau luôn tạo thư mục tạm mới) → lỗi thì dọn ngay.
-      await this.cleanupActive(active, true);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const isDiskError = isDiskFullOutput(errorMessage);
+      this.failTask(active, errorMessage, isDiskError ? 'DISK_FULL' : null);
+      // 2026-10-24: lỗi thông thường dọn thư mục tạm; riêng đầy ổ thì giữ nguyên .part để tải tiếp sau khi dọn đĩa.
+      await this.cleanupActive(active, !isDiskError);
     }
   }
 
@@ -1298,7 +1340,7 @@ export class QuickDownloadService {
     // "running") sẽ bị khóa suốt thời gian đó — đúng như bị báo "app đơ, vòng xoay quay mãi". Giờ chạy
     // NGẦM sau khi đã báo hoàn tất: người dùng dùng được ứng dụng ngay, credit ghi thêm phía sau.
     if (active.request.embedCredit) {
-      void this.embedCreditMetadata(active, active.status.outputPath)
+      const creditPromise = this.embedCreditMetadata(active, active.status.outputPath)
         .then(() => this.publish(active))
         .catch((error: unknown) => {
           this.logger.warn(
@@ -1307,7 +1349,11 @@ export class QuickDownloadService {
             error instanceof Error ? error.message : String(error),
             { jobId: active.status.taskId }
           );
+        })
+        .finally(() => {
+          if (this.creditTask === creditPromise) this.creditTask = null;
         });
+      this.creditTask = creditPromise;
     }
   }
 

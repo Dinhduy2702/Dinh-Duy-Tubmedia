@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { lstat, mkdir, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import type { CookieArgumentSettings } from '../downloader/ytdlp-cookie-arguments.js';
+import { renameWithRetry } from '../files/non-conflicting-path.js';
 
 /**
  * Quản lý tệp cookies Netscape mà yt-dlp dùng (Đợt 1 mục 3, 2026-10-02).
@@ -121,7 +122,7 @@ export function mergeCookieRun(baseText: string, updatedText: string, currentTex
       }
       continue;
     }
-    if (othersChanged && current && current.expires > after.expires) continue; // lượt khác đã có bản cấp sau
+    if (othersChanged && current && current.expires >= after.expires) continue; // lượt khác đã có bản cấp sau hoặc ngang hạn
     if (current?.line !== after.line) {
       merged.set(key, after);
       changed = true;
@@ -173,7 +174,7 @@ export class CookieJarStore {
     const temporary = `${path}.${randomUUID()}.tmp`;
     await writeFile(temporary, content, { mode: 0o600 });
     try {
-      await rename(temporary, path);
+      await renameWithRetry(temporary, path);
     } catch (error) {
       await rm(temporary, { force: true });
       throw error;
@@ -252,8 +253,10 @@ export class CookieJarStore {
           if (outcome === 'success' || outcome === 'other-failure') {
             await this.writeBack(original, copyPath, content, generationAtLease);
           }
+        } catch {
+          // Ghi ngược cookie thất bại không được làm gãy luồng kết thúc của yt-dlp.
         } finally {
-          await rm(copyPath, { force: true });
+          await rm(copyPath, { force: true }).catch(() => undefined);
         }
       }
     };

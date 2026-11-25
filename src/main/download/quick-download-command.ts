@@ -21,6 +21,7 @@ export interface QuickDownloadCommandPaths {
 
 export interface QuickDownloadCommandOptions {
   compactFilename?: boolean;
+  skipSubtitles?: boolean;
   forceGenericExtractor?: boolean;
   /** Giai đoạn 6 mục 7 (2026-09-24): mẫu đặt tên tệp do người dùng cấu hình trong Cài đặt. */
   filenameTemplate?: string | undefined;
@@ -197,7 +198,7 @@ export function buildQuickDownloadArguments(
     args.push('--extract-audio', '--audio-format', 'm4a', '--audio-quality', '0');
   }
 
-  if (request.downloadSubtitles) {
+  if (request.downloadSubtitles && !options.skipSubtitles) {
     args.push(
       '--write-subs',
       '--write-auto-subs',
