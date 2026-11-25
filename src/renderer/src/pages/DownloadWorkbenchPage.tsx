@@ -179,7 +179,11 @@ function workflowState(jobs: QueueJob[]): 'idle' | 'running' | 'paused' | 'faile
   if (jobs.some((job) => ACTIVE.includes(job.status))) return 'running';
   if (jobs.some((job) => job.status === 'paused' || job.status === 'interrupted')) return 'paused';
   if (jobs.some((job) => job.status === 'failed')) return 'failed';
-  if (jobs.length > 0 && jobs.every((job) => ['completed', 'skipped', 'cancelled'].includes(job.status)))
+  if (
+    jobs.length > 0 &&
+    jobs.every((job) => ['completed', 'skipped', 'cancelled'].includes(job.status)) &&
+    jobs.some((job) => job.status === 'completed' || job.status === 'skipped')
+  )
     return 'completed';
   return 'idle';
 }

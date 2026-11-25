@@ -2968,7 +2968,17 @@ export class QueueManager {
 
         if (job.projectId) {
           const projectJobs = this.repo.list(job.projectId);
+          const projectJobById = new Map(projectJobs.map((entry) => [entry.id, entry] as const));
           const blocked = new Set<string>([job.id]);
+          const isRemovedDependency = (depId: string): boolean => {
+            if (blocked.has(depId)) return true;
+            const dep = projectJobById.get(depId);
+            return Boolean(
+              dep &&
+                dep.status === 'skipped' &&
+                (dep.input.sourceRemoved === true || dep.input.sourceRemovedDependency === true)
+            );
+          };
           let discovered = true;
 
           while (discovered) {
@@ -2983,10 +2993,21 @@ export class QueueManager {
 
               if (!dependsOn.some((id) => blocked.has(id))) continue;
 
+              // #12: Với tác vụ ghép, chỉ bỏ qua nếu TẤT CẢ video nguồn đều đã bị xóa;
+              // nếu còn ít nhất 1 video hợp lệ thì giữ nguyên tác vụ ghép để ghép các mục còn lại.
+              if (dependent.type === 'merge' && !dependsOn.every((id) => isRemovedDependency(id))) {
+                continue;
+              }
+
               this.repo.updateInput(dependent.id, {
-                progressStage: 'Bỏ qua vì video nguồn đã bị xóa',
+                progressStage:
+                  dependent.type === 'merge'
+                    ? 'Bỏ qua ghép vì tất cả video nguồn đã bị xóa'
+                    : 'Bỏ qua vì video nguồn đã bị xóa',
                 resultMessage:
-                  'Không thể tiếp tục xử lý tác vụ này vì một video nguồn đã bị xóa khỏi YouTube.',
+                  dependent.type === 'merge'
+                    ? 'Không còn video nguồn hợp lệ nào để ghép vì các video nguồn đã bị xóa khỏi YouTube.'
+                    : 'Không thể tiếp tục xử lý tác vụ này vì một video nguồn đã bị xóa khỏi YouTube.',
                 sourceRemovedDependency: true,
                 resumeStatus: null
               });
@@ -3005,7 +3026,9 @@ export class QueueManager {
               this.logger.warn(
                 'queue',
                 'JOB_SKIPPED_SOURCE_REMOVED_DEPENDENCY',
-                'Bỏ qua tác vụ phụ thuộc vì video nguồn đã bị xóa khỏi YouTube.',
+                dependent.type === 'merge'
+                  ? 'Bỏ qua tác vụ ghép vì tất cả video nguồn đã bị xóa khỏi YouTube.'
+                  : 'Bỏ qua tác vụ phụ thuộc vì video nguồn đã bị xóa khỏi YouTube.',
                 {
                   jobId: dependent.id,
                   projectId: job.projectId,
@@ -3198,11 +3221,49 @@ export class QueueManager {
     this.emit();
     return true;
   }
+  private removedSourceIdsForProject(projectId: string): Set<string> {
+    const latest = new Map<string, QueueJob>();
+    for (const entry of this.repo.list(projectId)) {
+      if (entry.type !== 'download' || !entry.sourceId) continue;
+      const known = latest.get(entry.sourceId);
+      if (!known || entry.updatedAt > known.updatedAt) latest.set(entry.sourceId, entry);
+    }
+    const removed = new Set<string>();
+    for (const [sourceId, entry] of latest) {
+      if (entry.status === 'skipped' && entry.input.sourceRemoved === true) removed.add(sourceId);
+    }
+    return removed;
+  }
+
   private async runMerge(job: QueueJob, profile: ResourceProfile, signal: AbortSignal): Promise<boolean | 'requeued'> {
     if (!job.projectId) throw new Error('Tác vụ ghép thiếu thông tin dự án.');
     const project = this.projects.get(job.projectId);
     if (!project) throw new Error('Dự án không tồn tại.');
-    const allItems = this.items.list(project.id).filter((x) => x.enabled && x.validity !== 'invalid');
+    const enabledItems = this.items.list(project.id).filter((x) => x.enabled && x.validity !== 'invalid');
+    const removedSourceIds = this.removedSourceIdsForProject(project.id);
+    const removedItems = enabledItems.filter((item) => item.sourceId !== null && removedSourceIds.has(item.sourceId));
+    const allItems = enabledItems.filter((item) => item.sourceId === null || !removedSourceIds.has(item.sourceId));
+    if (allItems.length === 0) {
+      throw new ProcessingFailedError(
+        'Không còn video hợp lệ nào để ghép vì các video nguồn đã bị xóa khỏi YouTube.'
+      );
+    }
+    const removedWarning =
+      removedItems.length > 0
+        ? `Đã bỏ qua ${removedItems.length} video nguồn đã bị xóa khỏi YouTube (${removedItems
+            .map((item) => {
+              const source = item.sourceId ? this.sources.get(item.sourceId) : null;
+              return `vị trí ${item.position} "${source?.title ?? `Video_${String(item.position).padStart(3, '0')}`}"`;
+            })
+            .join(', ')}) và vẫn ghép ${allItems.length} video hợp lệ còn lại.`
+        : null;
+    if (removedWarning) {
+      this.logger.warn('merge', 'MERGE_SKIPPED_REMOVED_SOURCES', removedWarning, {
+        jobId: job.id,
+        projectId: project.id,
+        metadata: { removedPositions: removedItems.map((item) => item.position), remainingCount: allItems.length }
+      });
+    }
     const timelineOnly = job.input.timelineOnly === true;
     if (await this.requeueMissingMergeSources(job, project.id, allItems, timelineOnly)) return 'requeued';
     const audioIssues = this.mergeAudioIssues(project.id, allItems);
@@ -3253,9 +3314,12 @@ export class QueueManager {
         outputPath: null,
         timelineTxt: timeline.txt,
         exportTimelineTxt: Boolean(timeline.txt),
-        resultMessage: timeline.txt
-          ? `Đã tạo và tự lưu Timeline tại ${timeline.txt}. Không có video thành phẩm nào được tạo.`
-          : 'Timeline đã sẵn sàng. Không có video thành phẩm nào được tạo.',
+        resultMessage:
+          (timeline.txt
+            ? `Đã tạo và tự lưu Timeline tại ${timeline.txt}. Không có video thành phẩm nào được tạo.`
+            : 'Timeline đã sẵn sàng. Không có video thành phẩm nào được tạo.') +
+          (removedWarning ? ` Lưu ý: ${removedWarning}` : ''),
+        ...(removedWarning ? { mergeWarnings: [removedWarning] } : {}),
         timelineItemCount: timeline.itemCount,
         totalDuration: timeline.totalDuration,
         timelineRows: timeline.rows
@@ -3361,10 +3425,11 @@ export class QueueManager {
             : 'Đã ghép mới và hậu kiểm thành phẩm đầy đủ.') +
         (audioIssues.length > 0
           ? ` Lưu ý: ${audioIssues.map((entry) => `đoạn video vị trí ${entry.position} ("${entry.title}") ${entry.issue === 'missing' ? 'không có tiếng' : 'im lặng'}`).join('; ')} — do nguồn không có tiếng.`
-          : ''),
+          : '') +
+        (removedWarning ? ` Lưu ý: ${removedWarning}` : ''),
       timelineTxt: result.timeline.txt,
       exportTimelineTxt,
-      mergeWarnings: result.warnings,
+      mergeWarnings: removedWarning ? [...result.warnings, removedWarning] : result.warnings,
       mergeVisualBoundaryTransitions: result.visualBoundaryTransitions,
       timelineItemCount: result.timeline.itemCount,
       totalDuration: result.timeline.totalDuration,

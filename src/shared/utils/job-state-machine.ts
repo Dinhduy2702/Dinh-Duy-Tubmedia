@@ -1,4 +1,4 @@
-import type { JobStatus, JobType } from '../types/domain.js';
+import type { JobStatus, JobType, QueueJob } from '../types/domain.js';
 import { InvalidInputError } from '../errors/app-errors.js';
 
 const allowedTransitions: Readonly<Record<JobStatus, ReadonlySet<JobStatus>>> = {
@@ -10,6 +10,7 @@ const allowedTransitions: Readonly<Record<JobStatus, ReadonlySet<JobStatus>>> = 
     'verifying',
     'merging',
     'paused',
+    'skipped',
     'cancelled',
     'failed',
     'interrupted'
@@ -21,6 +22,7 @@ const allowedTransitions: Readonly<Record<JobStatus, ReadonlySet<JobStatus>>> = 
     'verifying',
     'retrying',
     'paused',
+    'skipped',
     'cancelled',
     'failed',
     'interrupted'
@@ -33,6 +35,7 @@ const allowedTransitions: Readonly<Record<JobStatus, ReadonlySet<JobStatus>>> = 
     'verifying',
     'merging',
     'paused',
+    'skipped',
     'cancelled',
     'failed'
   ]),
@@ -154,4 +157,37 @@ export function assertJobTransition(from: JobStatus, to: JobStatus): void {
   if (!canTransitionJob(from, to)) {
     throw new InvalidInputError(`Không thể chuyển tác vụ từ ${from} sang ${to}.`);
   }
+}
+
+export type AggregatedWorkflowState = 'idle' | 'running' | 'paused' | 'failed' | 'completed';
+
+const ACTIVE_WORKFLOW_STATUSES: ReadonlySet<JobStatus> = new Set([
+  'pending',
+  'analyzing',
+  'ready',
+  'downloading',
+  'downloaded',
+  'verifying',
+  'normalizing',
+  'processing',
+  'merging',
+  'retrying'
+]);
+
+/**
+ * #12: Trạng thái tổng hợp của một danh sách / quy trình ghép.
+ * Khi mọi tác vụ đều 'cancelled' (không có mục nào completed/skipped), trả 'idle' thay vì báo nhầm 'completed'.
+ */
+export function resolveWorkflowState(jobs: ReadonlyArray<Pick<QueueJob, 'status'>>): AggregatedWorkflowState {
+  if (jobs.some((job) => ACTIVE_WORKFLOW_STATUSES.has(job.status))) return 'running';
+  if (jobs.some((job) => job.status === 'paused' || job.status === 'interrupted')) return 'paused';
+  if (jobs.some((job) => job.status === 'failed')) return 'failed';
+  if (
+    jobs.length > 0 &&
+    jobs.every((job) => job.status === 'completed' || job.status === 'skipped' || job.status === 'cancelled') &&
+    jobs.some((job) => job.status === 'completed' || job.status === 'skipped')
+  ) {
+    return 'completed';
+  }
+  return 'idle';
 }
