@@ -26,15 +26,16 @@ export class AppDatabase {
   public readonly db: SqliteDatabase;
   /** Các migration vừa chạy trong LẦN MỞ này (rỗng nếu CSDL đã ở phiên bản mới nhất). */
   public readonly migrationReports: MigrationReport[] = [];
+  private closed = false;
 
   public constructor(public readonly path: string) {
     mkdirSync(dirname(path), { recursive: true });
-    this.db = new DatabaseSync(path);
+    this.db = new DatabaseSync(path, { timeout: 5000 });
     this.db.exec(`
+      PRAGMA busy_timeout = 5000;
       PRAGMA foreign_keys = ON;
       PRAGMA journal_mode = WAL;
       PRAGMA synchronous = NORMAL;
-      PRAGMA busy_timeout = 5000;
     `);
     this.migrate();
   }
@@ -73,6 +74,10 @@ export class AppDatabase {
     this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
   }
 
+  public checkpointPassive(): void {
+    this.db.exec('PRAGMA wal_checkpoint(PASSIVE)');
+  }
+
   public integrityCheck(): string[] {
     const rows = this.db.prepare('PRAGMA integrity_check').all() as Array<{
       integrity_check: string;
@@ -81,6 +86,8 @@ export class AppDatabase {
   }
 
   public close(): void {
+    if (this.closed) return;
+    this.closed = true;
     try {
       this.checkpoint();
     } finally {
