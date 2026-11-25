@@ -6,6 +6,7 @@
 import { cpus } from 'node:os';
 import type { LocalCutAspectRatio } from '@shared/local-cut.js';
 import { defaultFfmpegThreadArgs } from '@shared/utils/machine-threads.js';
+import { even } from '@shared/utils/quality-decision.js';
 // Giai đoạn 6 mục 4 (2026-09-24): bộ lọc nền mờ kiểu CapCut được tách ra tệp dùng chung để "preset xuất
 // theo nền tảng" ở Ghép theo Timeline tái dùng nguyên vẹn — không định nghĩa lại.
 import {
@@ -57,6 +58,8 @@ export interface LocalCutArgumentsInput {
   logicalCpus?: number;
   hdrToSdr?: boolean;
   capabilities?: readonly string[];
+  sourceWidth?: number | null;
+  sourceHeight?: number | null;
 }
 
 /**
@@ -92,13 +95,31 @@ export function buildLocalCutArguments(input: LocalCutArgumentsInput): string[] 
       ];
     }
 
+    const oddWidth = typeof input.sourceWidth === 'number' && input.sourceWidth > 0 && input.sourceWidth % 2 !== 0;
+    const oddHeight = typeof input.sourceHeight === 'number' && input.sourceHeight > 0 && input.sourceHeight % 2 !== 0;
+    const vfParts: string[] = [];
+    if (input.hdrToSdr) {
+      vfParts.push(buildHdrToSdrFilterChain(input.capabilities));
+    }
+    if (oddWidth || oddHeight) {
+      const targetWidth =
+        typeof input.sourceWidth === 'number' && input.sourceWidth > 0 ? even(input.sourceWidth) : null;
+      const targetHeight =
+        typeof input.sourceHeight === 'number' && input.sourceHeight > 0 ? even(input.sourceHeight) : null;
+      vfParts.push(
+        targetWidth !== null && targetHeight !== null
+          ? `scale=${targetWidth}:${targetHeight}`
+          : 'scale=trunc(iw/2)*2:trunc(ih/2)*2'
+      );
+    }
+
     return [
       ...base,
       '-map',
       '0:v:0',
       '-map',
       '0:a:0?',
-      ...(input.hdrToSdr ? ['-vf', buildHdrToSdrFilterChain(input.capabilities)] : []),
+      ...(vfParts.length > 0 ? ['-vf', vfParts.join(',')] : []),
       '-c:v',
       'libx264',
       '-preset',

@@ -9,6 +9,7 @@ import {
   parseFfmpegOutTimeSeconds
 } from '@shared/utils/ffmpeg-progress.js';
 import { sanitizeProgress } from '@shared/utils/progress-policy.js';
+import { even } from '@shared/utils/quality-decision.js';
 import { buildDiskFullWriteMessage, isDiskFullOutput } from '@shared/utils/disk-space-policy.js';
 import type { ProjectItem, QueueJob, ResourceProfile } from '@shared/types/domain.js';
 import { DiskFullError, ToolNotFoundError, ProcessingFailedError } from '@shared/errors/app-errors.js';
@@ -112,8 +113,20 @@ export class ClipEngine {
       args.push('-c:v', 'copy');
     } else {
       const hdrToSdr = isHdrVideoSource(sourceInfo);
+      const oddDimensions =
+        sourceInfo !== null &&
+        sourceInfo.width > 0 &&
+        sourceInfo.height > 0 &&
+        (sourceInfo.width % 2 !== 0 || sourceInfo.height % 2 !== 0);
+      const vfParts: string[] = [];
       if (hdrToSdr) {
-        args.push('-vf', buildHdrToSdrFilterChain(ffmpeg.capabilities));
+        vfParts.push(buildHdrToSdrFilterChain(ffmpeg.capabilities));
+      }
+      if (oddDimensions) {
+        vfParts.push(`scale=${even(sourceInfo.width)}:${even(sourceInfo.height)}`);
+      }
+      if (vfParts.length > 0) {
+        args.push('-vf', vfParts.join(','));
       }
       args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18');
       if (hdrToSdr) {

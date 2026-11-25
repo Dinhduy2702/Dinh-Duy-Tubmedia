@@ -1,5 +1,10 @@
 import type { MediaInfo, QualityDecision, QualityProfile } from '../types/domain.js';
 
+export function even(value: number): number {
+  const rounded = Math.max(2, Math.round(value));
+  return rounded - (rounded % 2);
+}
+
 function sourceTarget(source: MediaInfo) {
   return {
     width: source.width,
@@ -20,8 +25,8 @@ export function decideQuality(source: MediaInfo, profile: QualityProfile): Quali
   if (profile.mode === 'highest_source') return { action: 'COPY', reasons: ['Giữ nguyên chất lượng nguồn.'], target };
   const maxWidth = profile.maxWidth ?? source.width;
   const maxHeight = profile.maxHeight ?? source.height;
-  const width = profile.allowUpscale ? maxWidth : Math.min(source.width, maxWidth);
-  const height = profile.allowUpscale ? maxHeight : Math.min(source.height, maxHeight);
+  const width = even(profile.allowUpscale ? maxWidth : Math.min(source.width, maxWidth));
+  const height = even(profile.allowUpscale ? maxHeight : Math.min(source.height, maxHeight));
   const fps = profile.fpsMode === 'source' ? source.fps : profile.fpsMode === 'custom' ? profile.customFps ?? source.fps : Number(profile.fpsMode);
   const videoCodec = profile.videoCodec === 'copy' ? source.videoCodec : profile.videoCodec;
   const audioCodec = profile.audioMode === 'copy_if_compatible' ? source.audioCodec : profile.audioMode === 'mute' ? null : 'aac';

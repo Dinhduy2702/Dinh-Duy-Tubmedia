@@ -367,7 +367,9 @@ export class LocalCutService {
       aspectRatio: request.aspectRatio,
       outputPath: pendingOutput,
       hdrToSdr: isReencode && isHdrVideoSource(sourceInfo),
-      capabilities: ffmpeg.capabilities
+      capabilities: ffmpeg.capabilities,
+      sourceWidth: sourceInfo?.width ?? null,
+      sourceHeight: sourceInfo?.height ?? null
     });
 
     let result: Awaited<ReturnType<ProcessManager['run']>>;
