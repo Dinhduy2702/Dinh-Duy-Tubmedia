@@ -16,6 +16,7 @@ import type { VideoLinkFilterRequest, VideoLinkFilterResult } from '@shared/vide
 import { FolderField } from '../components/FolderField';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useAppStore } from '../stores/app-store';
+import { friendlyIssue } from '../utils/ui-error';
 
 type RunMode = VideoLinkFilterRequest['mode'];
 
@@ -125,7 +126,7 @@ export function VideoLinkFilterPage(): React.JSX.Element {
           <Filter size={27} />
         </div>
         <div>
-          <span>LỌC FILE THEO DANH SÁCH URL</span>
+          <span>LỌC TỆP VIDEO THEO DANH SÁCH LINK</span>
           <h1>Lọc video theo link</h1>
           <p>
             Đối chiếu ID và tiêu đề từ danh sách link với video đã tải, xem trước chính xác rồi mới chuyển file.
@@ -295,7 +296,7 @@ export function VideoLinkFilterPage(): React.JSX.Element {
 
           <div className="video-filter-stats">
             <div>
-              <span>URL đầu vào</span>
+              <span>Link đầu vào</span>
               <b>{result.inputUrls}</b>
             </div>
             <div>
@@ -345,7 +346,7 @@ export function VideoLinkFilterPage(): React.JSX.Element {
                       <b title={move.source}>{move.relativePath}</b>
                       <small title={move.destination}>→ {move.destination}</small>
                     </td>
-                    <td>{move.matchReason}</td>
+                    <td>{move.matchReason === 'ID' ? 'Theo ID' : 'Theo tiêu đề'}</td>
                     <td>{move.platform || '—'}</td>
                     <td><code>{move.videoId}</code></td>
                     <td>
@@ -354,7 +355,9 @@ export function VideoLinkFilterPage(): React.JSX.Element {
                         {move.status === 'moved' && <><CheckCircle2 size={14} /> Đã chuyển</>}
                         {move.status === 'failed' && 'Lỗi'}
                       </span>
-                      {move.error && <small className="video-filter-error">{move.error}</small>}
+                      {move.error && (
+                        <small className="video-filter-error">{friendlyIssue(move.error).message}</small>
+                      )}
                     </td>
                   </tr>
                 ))}

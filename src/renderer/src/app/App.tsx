@@ -80,7 +80,10 @@ export function App(): React.JSX.Element {
   const page = useAppStore((state) => state.page);
   const settings = useAppStore((state) => state.settings);
   const error = useAppStore((state) => state.error);
-  const processing = useAppStore((state) => state.jobs.some((job) => ACTIVE_STATUSES.has(job.status)));
+  const processing = useAppStore(
+    (state) =>
+      state.jobs.some((job) => ACTIVE_STATUSES.has(job.status)) || Boolean(state.stats?.quickDownloadActive)
+  );
   const startupToolMessage = useAppStore(
     (state) => state.logs.find((entry) => entry.module === 'tools' || entry.module === 'update')?.message
   );

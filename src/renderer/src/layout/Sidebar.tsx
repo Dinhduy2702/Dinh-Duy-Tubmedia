@@ -105,7 +105,7 @@ export function Sidebar(): React.JSX.Element {
           'merging',
           'retrying'
         ].includes(job.status)
-      ).length
+      ).length + (state.stats?.quickDownloadActive ? 1 : 0)
   );
 
   return (

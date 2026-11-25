@@ -168,10 +168,22 @@ export class AppContext {
     this.sourceRepo
   );
   public readonly sender = new SenderValidator();
-  public readonly systemStats = new SystemStatsService(this.queue, this.processes, () => {
-    const s = this.settings.get();
-    return [s.defaultSourceFolder, s.defaultTempFolder, s.defaultOutputFolder].map((x) => parse(x).root || x);
-  });
+  public readonly systemStats = new SystemStatsService(
+    this.queue,
+    this.processes,
+    () => {
+      const s = this.settings.get();
+      return [s.defaultSourceFolder, s.defaultTempFolder, s.defaultOutputFolder].map((x) => parse(x).root || x);
+    },
+    () => {
+      const current = this.quickDownload.currentStatus();
+      const paused = current?.phase === 'paused';
+      return {
+        active: this.quickDownload.isActive() && !paused,
+        paused
+      };
+    }
+  );
   public constructor(prepareForAppUpdate: () => Promise<void> = () => Promise.resolve()) {
     setFileLockRetryLogger((event) => {
       this.logger.warn(

@@ -451,6 +451,8 @@ export interface SystemStats {
   rateLimitWaits: RateLimitWaitState[];
   /** Lag bước 1: danh sách tải / quy trình ghép đang chờ lượt và trần đang áp dụng. */
   laneWaits: LaneWaitState;
+  quickDownloadActive?: boolean;
+  quickDownloadPaused?: boolean;
   sampledAt: string;
 }
 

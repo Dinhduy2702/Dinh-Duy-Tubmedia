@@ -145,11 +145,11 @@ function groupStatus(jobs: QueueJob[]): QueueJob['status'] {
 
 function workflowSubtitle(mode: 'downloads' | 'processing' | 'all', jobs: QueueJob[]): string {
   if (mode === 'downloads') return 'Danh sách tải độc lập · chạy song song với các danh sách khác';
-  if (mode === 'processing') return 'Workflow xử lý video';
+  if (mode === 'processing') return 'Quy trình xử lý video';
   const types = new Set(jobs.map((job) => job.type));
   return types.size > 1
-    ? 'Workflow đầy đủ của dự án'
-    : `${jobTypeLabel(jobs[0]?.type ?? 'download')} workflow`;
+    ? 'Quy trình đầy đủ của dự án'
+    : `Quy trình ${jobTypeLabel(jobs[0]?.type ?? 'download').toLowerCase()}`;
 }
 
 function aggregateWorkflowGroups(
@@ -467,7 +467,7 @@ function WorkflowAccordion({
           <div className="queue-group-child-heading">
             <div>
               <b>Tiến trình thành phần</b>
-              <span>Mỗi dòng là một video hoặc công đoạn bên trong workflow tổng.</span>
+              <span>Mỗi dòng là một video hoặc công đoạn bên trong quy trình tổng.</span>
             </div>
             <strong>{group.total} tác vụ</strong>
           </div>
@@ -514,7 +514,7 @@ function QuickDownloadAccordion({
           compact
           className="queue-workflow-total-progress"
           title={status.title || 'Tải nhanh 1 video'}
-          subtitle={`Tải nhanh · ${quickPhaseLabel(status.phase)} · ProcessManager chung`}
+          subtitle={`Tải nhanh · ${quickPhaseLabel(status.phase)} · Quản lý tiến trình chung`}
           status={mappedStatus}
           progress={status.progress}
           completed={completed ? 1 : 0}
@@ -789,9 +789,15 @@ export function QueuePage({ mode }: { mode: 'downloads' | 'processing' | 'all' }
       const results = await Promise.allSettled(candidates.map((job) => window.desktop.queue[kind](job.id)));
       await refreshJobs();
       const completed = results.filter((result) => result.status === 'fulfilled').length;
+      const actionLabel: Record<QueueAction, string> = {
+        pause: 'tạm dừng',
+        resume: 'tiếp tục',
+        retry: 'thử lại',
+        cancel: 'hủy'
+      };
       notify(
         'Đã xử lý tác vụ đã chọn',
-        `${completed}/${candidates.length} tác vụ hoàn tất thao tác ${kind}.`,
+        `${completed}/${candidates.length} tác vụ hoàn tất thao tác ${actionLabel[kind]}.`,
         completed === candidates.length ? 'success' : 'warning'
       );
     } catch (error) {
@@ -877,7 +883,7 @@ export function QueuePage({ mode }: { mode: 'downloads' | 'processing' | 'all' }
       await refreshJobs();
       notify(
         allPaused ? 'Đã tiếp tục tất cả' : 'Đã tạm dừng tất cả',
-        'Lệnh áp dụng cho download, clip, normalize, merge và Quick Download đang được quản lý.',
+        'Lệnh áp dụng cho tác vụ tải, cắt, chuẩn hóa, ghép và Tải nhanh đang được quản lý.',
         allPaused ? 'success' : 'neutral'
       );
     } catch (error) {
@@ -920,7 +926,7 @@ export function QueuePage({ mode }: { mode: 'downloads' | 'processing' | 'all' }
         <div>
           <h1 className="text-2xl font-black">Trung tâm tiến trình</h1>
           <p className="mt-1 text-sm" style={{ color: 'var(--muted)' }}>
-            Mỗi danh sách là một workflow độc lập, chạy song song và có thể mở từng tiến trình con.
+            Mỗi danh sách là một quy trình độc lập, chạy song song và có thể mở từng tiến trình con.
           </p>
         </div>
         <div className="queue-global-actions">
@@ -949,7 +955,7 @@ export function QueuePage({ mode }: { mode: 'downloads' | 'processing' | 'all' }
 
       <div className="queue-stat-strip mt-4">
         <div>
-          <span>Workflow đang chạy</span>
+          <span>Quy trình đang chạy</span>
           <b>{workflowGroups.filter((group) => group.running > 0).length + (quickIsActive ? 1 : 0)}</b>
         </div>
         <div>
@@ -1001,7 +1007,7 @@ export function QueuePage({ mode }: { mode: 'downloads' | 'processing' | 'all' }
           </select>
         </label>
         <select className="select" value={projectId} onChange={(event) => setProjectId(event.target.value)}>
-          <option value="all">Tất cả workflow</option>
+          <option value="all">Tất cả quy trình</option>
           {projects.map((project) => (
             <option key={project.id} value={project.id}>
               {project.name}
@@ -1051,7 +1057,7 @@ export function QueuePage({ mode }: { mode: 'downloads' | 'processing' | 'all' }
       </div>
 
       <div className={`queue-studio-layout mt-4 ${detailJob ? 'has-detail' : ''}`}>
-        <section className="queue-workflow-stack" aria-label="Các workflow tiến trình">
+        <section className="queue-workflow-stack" aria-label="Các quy trình tiến trình">
           {mode !== 'processing' && quickStatus && (
             <QuickDownloadAccordion
               status={quickStatus}
@@ -1118,7 +1124,7 @@ export function QueuePage({ mode }: { mode: 'downloads' | 'processing' | 'all' }
                         onClick={() => void runGroup('cancel', group)}
                       >
                         <Square size={14} />
-                        Hủy workflow
+                        Hủy quy trình
                       </button>
                     )}
                   </>
@@ -1128,7 +1134,7 @@ export function QueuePage({ mode }: { mode: 'downloads' | 'processing' | 'all' }
           })}
 
           {!quickStatus && workflowGroups.length === 0 && (
-            <div className="queue-empty card">Không có workflow phù hợp với bộ lọc.</div>
+            <div className="queue-empty card">Không có quy trình phù hợp với bộ lọc.</div>
           )}
         </section>
 
@@ -1228,7 +1234,7 @@ export function QueuePage({ mode }: { mode: 'downloads' | 'processing' | 'all' }
       <ConfirmDialog
         open={confirm === 'cancel-selected'}
         title="Hủy các tác vụ đã chọn?"
-        message="ProcessManager sẽ dừng cây tiến trình thật của từng tác vụ trước khi cập nhật trạng thái."
+        message="Ứng dụng sẽ dừng cây tiến trình thật của từng tác vụ trước khi cập nhật trạng thái."
         details={[
           'Không xóa tệp đầu ra đã hoàn tất.',
           'Tệp tạm chỉ được dọn trong phạm vi sở hữu của tác vụ.',
@@ -1243,11 +1249,11 @@ export function QueuePage({ mode }: { mode: 'downloads' | 'processing' | 'all' }
       <ConfirmDialog
         open={confirm === 'remove-one'}
         title="Xóa tác vụ này?"
-        message="Bạn có thể chỉ xóa dữ liệu khỏi danh sách hoặc xóa cả tệp đầu ra khi ownership đã được backend xác minh."
+        message="Bạn có thể chỉ xóa dữ liệu khỏi danh sách hoặc xóa cả tệp đầu ra khi quyền sở hữu tệp đã được xác minh."
         details={[
           'Tác vụ đang chạy không thể bị xóa.',
-          'Không xóa source dùng chung hoặc tệp ngoài thư mục được quản lý.',
-          'Khi ownership không khớp, backend chỉ xóa record và giữ tệp.'
+          'Không xóa tệp nguồn dùng chung hoặc tệp ngoài thư mục được quản lý.',
+          'Khi không thuộc tệp do tác vụ tạo ra, ứng dụng chỉ xóa dòng khỏi danh sách và giữ nguyên tệp.'
         ]}
         confirmLabel="Chỉ xóa khỏi danh sách"
         secondaryLabel="Xóa khỏi danh sách và xóa tệp"
@@ -1274,10 +1280,10 @@ export function QueuePage({ mode }: { mode: 'downloads' | 'processing' | 'all' }
       />
       <ConfirmDialog
         open={confirm === 'remove-all'}
-        title="Xóa toàn bộ dữ liệu danh sách và workflow?"
+        title="Xóa toàn bộ dữ liệu danh sách và quy trình?"
         message="Thao tác xóa mọi khu vực làm việc và dòng tiến trình khỏi cơ sở dữ liệu ứng dụng."
         details={[
-          'Video, source cache và thành phẩm trên ổ đĩa không bị xóa.',
+          'Video, tệp nguồn lưu tạm và thành phẩm trên ổ đĩa không bị xóa.',
           'Không thể hoàn tác dữ liệu dự án sau khi xác nhận.'
         ]}
         confirmLabel="Xóa toàn bộ dữ liệu ứng dụng"

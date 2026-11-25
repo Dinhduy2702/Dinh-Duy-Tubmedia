@@ -51,9 +51,10 @@ export function Topbar(): React.JSX.Element {
   const systemLoadThrottled = useAppStore((state) => state.stats?.systemLoadThrottled ?? false);
   const queueSummary = useAppStore(
     useShallow((state) => {
-      let activeJobs = 0;
-      let controllableCount = 0;
-      let pausedCount = 0;
+      let activeJobs = state.stats?.quickDownloadActive ? 1 : 0;
+      let controllableCount =
+        state.stats?.quickDownloadActive || state.stats?.quickDownloadPaused ? 1 : 0;
+      let pausedCount = state.stats?.quickDownloadPaused ? 1 : 0;
       for (const job of state.jobs) {
         if (ACTIVE.has(job.status)) activeJobs += 1;
         if (CONTROLLABLE.has(job.status)) {

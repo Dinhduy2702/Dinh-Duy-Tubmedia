@@ -5,7 +5,12 @@ import type { QueueManager } from '../queue/queue-manager.js';
 import type { ProcessManager } from '../processes/process-manager.js';
 export class SystemStatsService {
   private previous = cpus();
-  public constructor(private readonly queue: QueueManager, private readonly processes: ProcessManager, private readonly mounts: () => string[]) {}
+  public constructor(
+    private readonly queue: QueueManager,
+    private readonly processes: ProcessManager,
+    private readonly mounts: () => string[],
+    private readonly quickDownloadState?: () => { active: boolean; paused: boolean }
+  ) {}
   private cpuPercent(): number {
     const current = cpus(); let idle = 0; let total = 0;
     const sumTimes = (times: { user:number; nice:number; sys:number; idle:number; irq:number }): number => times.user + times.nice + times.sys + times.idle + times.irq;
@@ -15,6 +20,7 @@ export class SystemStatsService {
   public async sample(): Promise<SystemStats> {
     const total = totalmem(); const used = total - freemem(); const disks: SystemStats['disks'] = [];
     for (const mount of [...new Set(this.mounts())]) { try { const fs = await statfs(mount); const totalBytes = Number(fs.blocks) * Number(fs.bsize); const freeBytes = Number(fs.bavail) * Number(fs.bsize); disks.push({ mount, freeBytes, totalBytes, usedPercent: totalBytes ? (1 - freeBytes / totalBytes) * 100 : 0 }); } catch { /* ổ không tồn tại */ } }
-    return { cpuPercent: this.cpuPercent(), memoryUsedBytes: used, memoryTotalBytes: total, memoryPercent: used / total * 100, disks, activeProcesses: this.processes.count(), activeJobs: this.queue.activeCount(), downloadSpeedBytes: 0, encodeFps: 0, systemLoadThrottled: this.queue.isSystemLoadThrottled(), rateLimitWaits: this.queue.rateLimitWaits(), laneWaits: this.queue.waitingLanes(), sampledAt: new Date().toISOString() };
+    const quick = this.quickDownloadState?.() ?? { active: false, paused: false };
+    return { cpuPercent: this.cpuPercent(), memoryUsedBytes: used, memoryTotalBytes: total, memoryPercent: used / total * 100, disks, activeProcesses: this.processes.count(), activeJobs: this.queue.activeCount(), downloadSpeedBytes: 0, encodeFps: 0, systemLoadThrottled: this.queue.isSystemLoadThrottled(), rateLimitWaits: this.queue.rateLimitWaits(), laneWaits: this.queue.waitingLanes(), quickDownloadActive: quick.active, quickDownloadPaused: quick.paused, sampledAt: new Date().toISOString() };
   }
 }
