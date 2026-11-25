@@ -1,3 +1,18 @@
+# Tubmedia 1.8.0
+
+- Tải YouTube ổn định hơn trên mọi máy, không còn lỗi thiếu bản 1080p–4K và chế độ CapCut linh hoạt hơn:
+  - Đóng gói sẵn bộ chạy JavaScript Deno đi kèm công cụ tải để mọi máy (kể cả máy chưa cài thêm gì) đều lấy đủ định dạng chất lượng cao từ YouTube.
+  - Chế độ **CapCut trực tiếp 1080p/2K** nay tôn trọng ô *"Cho phép tải chất lượng thấp hơn"* (nguồn chỉ có 720p vẫn tải được kèm cảnh báo vàng trên dòng tác vụ, không phóng to giả) và hỗ trợ đầy đủ video dọc 9:16 lẫn khung siêu rộng 21:9.
+  - Khi lỗi *"không có định dạng khớp"*, màn hình báo rõ nguồn chỉ có tối đa bao nhiêu p / FPS hay máy đang bị giới hạn ở mức nào kèm phiên bản công cụ tải.
+- Hiển thị lỗi trực quan toàn ứng dụng & tự lưu báo cáo lỗi ứng dụng:
+  - Mọi lỗi người dùng tự xử lý được (cài đặt quá chặt, cookie Chrome/Edge mới bị khóa, YouTube chặn tạm 429, ổ đầy, đường dẫn dài...) đều hiện tiêu đề ngắn gọn, các bước làm đánh số và nút mở thẳng đúng trang cần chỉnh.
+  - Các lỗi bất thường do ứng dụng sẽ tự lưu báo cáo kỹ thuật vào thư mục chẩn đoán để sửa sau (không đổ cho người dùng, phần chi tiết kỹ thuật thu gọn mặc định).
+- Toàn bộ 30 ô nhập số trong trang **Cài đặt** được chuyển sang ô xổ xuống chọn sẵn theo mức chuẩn tiếng Việt (vẫn giữ hiển thị giá trị cũ nếu máy đang lưu trước đó), kèm thanh nhắc chưa lưu và hỏi xác nhận trước khi chuyển trang để không mất thay đổi.
+- Khắc phục trọn bộ 50 lỗi từ đợt tổng rà soát 1.7.8 trên cả 3 mảng:
+  - **Hệ thống, cập nhật & hàng đợi tải:** sửa nút *"Cập nhật tất cả"* không báo bản mới giả cho aria2; gia cố bộ cài chống ghi đè dở dang và kích hoạt cập nhật vi sai; chống khóa cơ sở dữ liệu; gom đủ việc bận để không tắt nhầm khi đang cắt/lọc/dọn rác; bảo toàn dữ liệu khi khôi phục sao lưu; bỏ qua 1 video bị gỡ vẫn ghép phần hợp lệ; bấm Tiếp tục/Thử lại tự mở khóa và khôi phục tác vụ phụ thuộc; tạm dừng không làm kẹt danh sách khác; dừng đồng bộ các danh sách cùng ổ khi đầy ổ.
+  - **Cắt đoạn, chuẩn hóa, ghép & xuất 9:16:** tách bộ đệm chuẩn hóa theo đúng bộ mã hóa và tự đồng bộ CPU khi GPU rơi về CPU để không đứng ghép ở 65%; cắt video không tiếng không báo lỗi; xuất 9:16 vào đúng thư mục thành phẩm kèm kiểm tệp thật và chuyển màu HDR về SDR; bảo vệ tuyệt đối nguồn của danh sách tải độc lập/chỉ xuất timeline khỏi bị dọn nhầm; kẹp đường dẫn tạm ≤ 250 ký tự; chẵn hóa kích thước lẻ và nhận diện video lật/xoay.
+  - **Giao diện & lưu nháp:** giữ nháp không mất link khi chuyển trang; nút *"Mở thư mục"* báo đúng khi thư mục chưa tạo; giữ dòng ghi chú khi kéo-thả; hỏi xác nhận khi ẩn danh sách còn dữ liệu; tối ưu tốc độ trang Nhật ký, Việt hóa 100% nhãn và đồng bộ trạng thái Tải nhanh lên thanh trên.
+
 # Tubmedia 1.7.8
 
 - Khắc phục tận gốc lỗi báo *"Các file vẫn chưa tương thích concat: Video extradata..."* ở cuối bước ghép video:
