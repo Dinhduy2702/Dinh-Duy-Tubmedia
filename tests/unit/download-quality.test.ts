@@ -23,6 +23,7 @@ import {
   validateSelectedDownloadSize
 } from '../../src/shared/utils/download-quality.js';
 import type { AppSettings, MediaInfo } from '../../src/shared/types/domain.js';
+import { capCutFilterChain } from '../../src/shared/utils/capcut-encode.js';
 import { defaultAppSettings } from '../../src/main/settings/defaults.js';
 
 const info: MediaInfo = {
@@ -268,7 +269,7 @@ describe('download quality', () => {
   it('builds a strict 1080p-to-2K selector for direct CapCut editing', () => {
     const configured = settings({
       downloadCompatibilityMode: 'capcut_sdr_2k',
-      downloadAllowBelowMinimum: true,
+      downloadAllowBelowMinimum: false,
       downloadCodecPreference: 'hevc',
       downloadContainerPreference: 'mkv'
     });
@@ -277,10 +278,31 @@ describe('download quality', () => {
     expect(selector).toContain('[height=1440]');
     expect(selector).toContain('[height>=1080][height<=1440]');
     expect(selector).not.toContain('bv*+ba');
+    expect(selector.split('/').some((branch) => branch.includes('[height<=1440][fps<=?60]') && !branch.includes('[height>=1080]'))).toBe(false);
     expect(mergeOutputFormat(configured)).toBe('mp4');
   });
 
-  it('never accepts a source below 1080p in CapCut mode', () => {
+  it('1.8.0 việc B: CapCut + ô "Cho phép thấp hơn" → thêm nhánh dưới 1080p (H.264+AAC trước, ≤60 FPS, ≤ mức tối đa), cuối cùng bv*+ba/b', () => {
+    for (const [mode, max] of [['capcut_sdr_1080p', 1080], ['capcut_sdr_2k', 1440]] as const) {
+      const branches = buildDownloadFormatSelector(
+        settings({ downloadCompatibilityMode: mode, downloadAllowBelowMinimum: true })
+      ).split('/');
+      const below = `[height<=${max}][fps<=?60]`;
+      const firstBelow = branches.findIndex((branch) => branch.includes(below) && !branch.includes('[height>=1080]'));
+      const lastStrict = Math.max(
+        ...branches.map((branch, index) => (branch.includes('[height>=1080]') || branch.includes(`[height=${max}]`) ? index : -1))
+      );
+      expect(firstBelow, mode).toBeGreaterThan(-1);
+      // Mọi nhánh ≥1080p có tiếng vẫn đứng trước nhánh dự phòng thấp hơn.
+      expect(branches.slice(0, firstBelow).some((branch) => branch.includes('[height>=1080]'))).toBe(true);
+      expect(branches[firstBelow]).toBe(`bv*${below}[vcodec~='^avc1|^h264']+ba[acodec~='^mp4a|^aac']`);
+      expect(branches).toContain('bv*+ba');
+      expect(branches.at(-1)).toBe('b');
+      expect(lastStrict).toBeGreaterThan(-1);
+    }
+  });
+
+  it('1.8.0 việc B: CapCut + ô "Cho phép thấp hơn" → bản dưới 1080p chỉ là cảnh báo, không chặn', () => {
     const result = validateDownloadedQuality(
       settings({
         downloadCompatibilityMode: 'capcut_sdr_1080p',
@@ -288,8 +310,32 @@ describe('download quality', () => {
       }),
       { ...info, width: 1280, height: 720 }
     );
+    expect(result.ok).toBe(true);
+    expect(result.warnings.join(' ')).toContain('thấp hơn 1080p');
+  });
+
+  it('CapCut khi TẮT ô "Cho phép thấp hơn": vẫn chặn bản dưới 1080p và chỉ rõ ô cần bật để lấy bản 720p', () => {
+    const result = validateDownloadedQuality(
+      settings({
+        downloadCompatibilityMode: 'capcut_sdr_1080p',
+        downloadAllowBelowMinimum: false
+      }),
+      { ...info, width: 1280, height: 720 }
+    );
     expect(result.ok).toBe(false);
     expect(result.blockingReasons.join(' ')).toContain('thấp hơn 1080p');
+    expect(result.blockingReasons.join(' ')).toContain('Cho phép fallback thấp hơn mức tối thiểu khi nguồn không có');
+    expect(result.blockingReasons.join(' ')).toContain('720p');
+  });
+
+  it('1.8.0 việc B: bản CapCut từ nguồn 720p KHÔNG bị phóng to giả (không có bộ lọc scale)', () => {
+    const source = { ...info, width: 1280, height: 720, videoCodec: 'vp9', pixelFormat: 'yuv420p' };
+    const plan = planCapCutCompatibility(settings({ downloadCompatibilityMode: 'capcut_sdr_1080p', downloadAllowBelowMinimum: true }), source);
+    const chain = capCutFilterChain(plan, source);
+    expect(chain.some((filter) => filter.startsWith('scale=') || filter.includes('zscale=w='))).toBe(false);
+    const hdr = { ...source, hdr: true, colorTransfer: 'smpte2084', colorPrimaries: 'bt2020', colorSpace: 'bt2020nc' };
+    const hdrChain = capCutFilterChain(planCapCutCompatibility(settings({ downloadCompatibilityMode: 'capcut_sdr_2k' }), hdr), hdr);
+    expect(hdrChain.some((filter) => filter.startsWith('scale=') || filter.includes('zscale=w='))).toBe(false);
   });
 
   it('reuses a higher-resolution cache when CapCut preparation can downscale it', () => {
@@ -365,11 +411,13 @@ describe('download quality', () => {
 
   it('P3: CapCut — mọi nhánh có tiếng (+ba hoặc bản gộp b) đứng trước nhánh chỉ có hình bv* không kèm tiếng', () => {
     for (const mode of ['capcut_sdr_1080p', 'capcut_sdr_2k'] as const) {
-      const branches = buildDownloadFormatSelector(settings({ downloadCompatibilityMode: mode })).split('/');
-      const videoOnly = branches.map((branch, index) => ({ branch, index })).filter(({ branch }) => branch.startsWith('bv*') && !branch.includes('+ba'));
-      const withAudio = branches.map((branch, index) => ({ branch, index })).filter(({ branch }) => branch.includes('+ba') || branch.startsWith('b['));
-      expect(videoOnly.length, mode).toBeGreaterThan(0);
-      expect(Math.min(...videoOnly.map(({ index }) => index)), `${mode}: ${branches.join(' / ')}`).toBeGreaterThan(Math.max(...withAudio.map(({ index }) => index)));
+      for (const allowBelow of [false, true]) {
+        const branches = buildDownloadFormatSelector(settings({ downloadCompatibilityMode: mode, downloadAllowBelowMinimum: allowBelow })).split('/');
+        const videoOnly = branches.map((branch, index) => ({ branch, index })).filter(({ branch }) => branch.startsWith('bv*') && !branch.includes('+ba'));
+        const withAudio = branches.map((branch, index) => ({ branch, index })).filter(({ branch }) => branch.includes('+ba') || branch.startsWith('b['));
+        expect(videoOnly.length, mode).toBeGreaterThan(0);
+        expect(Math.min(...videoOnly.map(({ index }) => index)), `${mode}: ${branches.join(' / ')}`).toBeGreaterThan(Math.max(...withAudio.map(({ index }) => index)));
+      }
     }
   });
 });

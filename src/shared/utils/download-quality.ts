@@ -31,6 +31,8 @@ export const MERGE_SOURCE_FORMAT_SELECTOR = 'bv*+ba/b';
 export const HIGHEST_SOURCE_FORMAT_SORT = 'res,fps,size,tbr,vbr,hdr,vcodec,abr,acodec';
 export const MERGE_SOURCE_FORMAT_SORT: string | null = null;
 export const MIN_SELECTED_SIZE_RATIO = 0.8;
+/** Nhãn đúng như ô trong Cài đặt › Tải danh sách (SettingsPage) — dùng trong thông báo hướng dẫn người dùng. */
+export const ALLOW_BELOW_MINIMUM_LABEL = 'Cho phép fallback thấp hơn mức tối thiểu khi nguồn không có';
 
 export interface DownloadQualityValidation {
   ok: boolean;
@@ -143,7 +145,8 @@ export function effectiveDownloadBounds(settings: AppSettings): EffectiveDownloa
       maxHeight: capCutHeight,
       minFps: 0,
       maxFps: 60,
-      allowBelowMinimum: false
+      // 1.8.0 việc B: CapCut tôn trọng ô "Cho phép fallback thấp hơn mức tối thiểu" như chế độ thủ công.
+      allowBelowMinimum: settings.downloadAllowBelowMinimum
     };
   }
   return {
@@ -224,13 +227,25 @@ function buildCapCutFormatSelector(settings: AppSettings): string {
     `b${exact}${h264}`,
     `b${exact}`,
     `b${range}${h264}`,
-    `b${range}`,
-    `bv*${exact}${h264}`,
-    `bv*${exact}`,
-    `bv*${range}${h264}`,
-    `bv*${range}`
+    `b${range}`
   ];
-  return branches.join('/');
+  const videoOnly = [`bv*${exact}${h264}`, `bv*${exact}`, `bv*${range}${h264}`, `bv*${range}`];
+  if (!settings.downloadAllowBelowMinimum) return [...branches, ...videoOnly].join('/');
+  // 1.8.0 việc B: ô "Cho phép thấp hơn" bật → nguồn/máy không có bản ≥1080p thì lấy bản tốt nhất dưới 1080p (ưu tiên
+  // H.264 + AAC, vẫn ≤ 60 FPS và ≤ mức tối đa); bước chuyển CapCut giữ nguyên chiều cao, không phóng to giả. Cuối cùng bv*+ba/b.
+  const below = `[height<=${maxHeight}][fps<=?60]`;
+  return [
+    ...branches,
+    `bv*${below}${h264}+ba${aac}`,
+    `bv*${below}${h264}+ba`,
+    `bv*${below}+ba${aac}`,
+    `bv*${below}+ba`,
+    `b${below}${h264}`,
+    `b${below}`,
+    'bv*+ba',
+    ...videoOnly,
+    'b'
+  ].join('/');
 }
 
 /**
@@ -571,7 +586,12 @@ export function validateDownloadedQuality(
   if (belowMinimum.length > 0) {
     const message = `Nguồn không đạt mức tối thiểu: ${belowMinimum.join(', ')}.`;
     if (bounds.allowBelowMinimum) warnings.push(message);
-    else blockingReasons.push(message);
+    else if (bounds.minHeight > 0 && info.height > 0 && info.height < bounds.minHeight) {
+      // 1.8.0 việc B: nói rõ ô cần bật và bản sẽ nhận được, thay vì chỉ báo "không đạt".
+      blockingReasons.push(
+        `${message} Bật ô "${ALLOW_BELOW_MINIMUM_LABEL}" trong Cài đặt › Tải danh sách để lấy bản ${info.height}p.`
+      );
+    } else blockingReasons.push(message);
   }
 
   if (capCutMode && enforceCompatibility) {

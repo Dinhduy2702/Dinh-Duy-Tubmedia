@@ -18,7 +18,9 @@ import {
 import type { AppSettings, MediaInfo, ProcessPriority, QueueJob, ResourceProfile, VerificationLevel } from '@shared/types/domain.js';
 import { audioIssueFor, audioIssueNote, audioNeedsAacForMp4, formatPromisesAudio, type AudioIssue } from '@shared/utils/audio-presence.js';
 import {
+  ALLOW_BELOW_MINIMUM_LABEL,
   downloadPolicyForWorkflow,
+  effectiveDownloadBounds,
   formatSelectorForWorkflow,
   formatSortForWorkflow,
   isCapCutDownloadMode,
@@ -1899,7 +1901,7 @@ export class DownloadEngine {
           lower.includes('requested format is not available, use --list-formats');
         if (isCapCutDownloadMode(appSettings.downloadCompatibilityMode) && requestedFormatUnavailable) {
           throw new DownloadFailedError(
-            'Nguồn không có định dạng video từ 1080p đến mức CapCut đã chọn. Ứng dụng không tải 720p và không phóng lớn giả.',
+            `Nguồn không có định dạng video từ 1080p đến mức CapCut đã chọn. Ứng dụng không phóng lớn giả. Bật ô "${ALLOW_BELOW_MINIMUM_LABEL}" trong Cài đặt › Tải danh sách để lấy bản thấp hơn.`,
             false,
             failureDetails
           );
@@ -2137,7 +2139,8 @@ export class DownloadEngine {
     }
     for (const warning of quality.warnings) {
       const acceptedMinimumFallback =
-        appSettings.downloadAllowBelowMinimum && warning.startsWith('Nguồn không đạt mức tối thiểu:');
+        effectiveDownloadBounds(appSettings).allowBelowMinimum && warning.startsWith('Nguồn không đạt mức tối thiểu:');
+      const requestedMinHeight = effectiveDownloadBounds(appSettings).minHeight;
       const metadata = {
         path: finalPath,
         width: info.width,
@@ -2147,7 +2150,7 @@ export class DownloadEngine {
         audioBitrate: info.audioBitrate,
         selectedFormatId,
         selectedHeight,
-        requestedMinHeight: appSettings.downloadMinHeight,
+        requestedMinHeight,
         fallbackAccepted: acceptedMinimumFallback
       };
 
@@ -2155,7 +2158,7 @@ export class DownloadEngine {
         this.logger.info(
           'download',
           'DOWNLOAD_QUALITY_FALLBACK',
-          `Định dạng tốt nhất phù hợp chính sách chỉ đạt ${info.height}p, thấp hơn mức mong muốn ${appSettings.downloadMinHeight}p. Tệp vẫn được giữ vì danh sách cho phép dùng chất lượng thấp hơn khi nguồn không đáp ứng.`,
+          `Định dạng tốt nhất phù hợp chính sách chỉ đạt ${info.height}p, thấp hơn mức mong muốn ${requestedMinHeight}p. Tệp vẫn được giữ vì danh sách cho phép dùng chất lượng thấp hơn khi nguồn không đáp ứng.`,
           { jobId: job.id, projectId: project.id, metadata }
         );
       } else {
