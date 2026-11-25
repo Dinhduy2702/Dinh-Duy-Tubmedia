@@ -63,12 +63,14 @@ export class PreviewFrameService {
     const cookieLease = this.cookieJar ? await this.cookieJar.lease(this.settings.get()) : null;
     let cookieOutcome: CookieRunOutcome = 'aborted';
     try {
+      const currentSettings = this.settings.get();
       const args = buildPreviewFrameDownloadArguments(
         request.url,
         request.timestampSeconds,
         { ffmpegDirectory: dirname(ffmpeg.executablePath), workDirectory },
-        cookieLease?.settings ?? this.settings.get(),
-        ytDlpJsRuntimeArguments(ytdlp)
+        cookieLease?.settings ?? currentSettings,
+        ytDlpJsRuntimeArguments(ytdlp),
+        currentSettings.proxy
       );
 
       const downloadResult = await this.processes.run({

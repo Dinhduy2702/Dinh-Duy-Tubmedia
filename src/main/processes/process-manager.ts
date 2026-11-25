@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { constants as osConstants, setPriority as osSetPriority } from 'node:os';
 import type { ProcessPriority } from '@shared/types/domain.js';
 import {
   ProcessCancelledError,
@@ -556,30 +557,21 @@ export class ProcessManager {
     if (timedOut) throw new ProcessTimeoutError(options.tool, options.timeoutMs ?? 0);
     return result;
   }
-  public async setPriority(pid: number, priority: ProcessPriority): Promise<void> {
-    if (process.platform !== 'win32') return;
-    const map: Record<ProcessPriority, string> = {
-      idle: 'Idle',
-      below_normal: 'BelowNormal',
-      normal: 'Normal',
-      above_normal: 'AboveNormal',
-      high: 'High'
+  public setPriority(pid: number, priority: ProcessPriority): Promise<void> {
+    if (process.platform !== 'win32') return Promise.resolve();
+    const map: Record<ProcessPriority, number> = {
+      idle: osConstants.priority.PRIORITY_LOW,
+      below_normal: osConstants.priority.PRIORITY_BELOW_NORMAL,
+      normal: osConstants.priority.PRIORITY_NORMAL,
+      above_normal: osConstants.priority.PRIORITY_ABOVE_NORMAL,
+      high: osConstants.priority.PRIORITY_HIGH
     };
-    const child = spawn(
-      'powershell.exe',
-      [
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        `Get-Process -Id ${pid} -ErrorAction Stop | ForEach-Object { $_.PriorityClass='${map[priority]}' }`
-      ],
-      { shell: false, windowsHide: true, stdio: 'ignore' }
-    );
-    // Thiếu listener 'error' (ví dụ không khởi chạy được powershell.exe) sẽ làm sập main process.
-    await new Promise<void>((resolve) => {
-      child.once('error', () => resolve());
-      child.once('close', () => resolve());
-    });
+    try {
+      osSetPriority(pid, map[priority]);
+    } catch {
+      // Tiến trình đã thoát hoặc không đủ quyền đổi ưu tiên — bỏ qua an toàn.
+    }
+    return Promise.resolve();
   }
   private matchesJobFamily(candidateJobId: string, jobId: string): boolean {
     return candidateJobId === jobId || candidateJobId.startsWith(`${jobId}-`);
@@ -614,11 +606,33 @@ export class ProcessManager {
         stdio: 'ignore'
       });
       await new Promise<void>((resolve, reject) => {
-        child.once('error', reject);
+        let settled = false;
+        const finish = (error?: Error): void => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          if (error) reject(error);
+          else resolve();
+        };
+        const timer = setTimeout(() => {
+          try {
+            child.kill();
+          } catch {
+            // ignore
+          }
+          try {
+            m.process.kill('SIGKILL');
+          } catch {
+            // ignore
+          }
+          finish(new Error('taskkill quá thời gian 12 giây.'));
+        }, 12_000);
+        timer.unref?.();
+        child.once('error', (error) => finish(error instanceof Error ? error : new Error(String(error))));
         child.once('close', (code) =>
           code === 0 || code === 128
-            ? resolve()
-            : reject(new Error(`taskkill thất bại với mã ${code ?? -1}.`))
+            ? finish()
+            : finish(new Error(`taskkill thất bại với mã ${code ?? -1}.`))
         );
       });
     } else m.process.kill('SIGKILL');
@@ -683,14 +697,31 @@ export class ProcessManager {
       stderr += chunk;
     });
     await new Promise<void>((resolve, reject) => {
-      child.once('error', reject);
+      let settled = false;
+      const finish = (error?: Error): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (error) reject(error);
+        else resolve();
+      };
+      const timer = setTimeout(() => {
+        try {
+          child.kill();
+        } catch {
+          // ignore
+        }
+        finish(new Error(`${failureMessage} (quá thời gian 15 giây).`));
+      }, 15_000);
+      timer.unref?.();
+      child.once('error', (error) => finish(error instanceof Error ? error : new Error(String(error))));
       child.once('close', (code) => {
         if (code === 0) {
-          resolve();
+          finish();
           return;
         }
         const detail = stderr.trim();
-        reject(new Error(detail ? `${failureMessage}: ${detail}` : `${failureMessage} (mã ${code ?? -1}).`));
+        finish(new Error(detail ? `${failureMessage}: ${detail}` : `${failureMessage} (mã ${code ?? -1}).`));
       });
     });
   }

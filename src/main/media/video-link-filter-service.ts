@@ -28,6 +28,7 @@ import { InvalidInputError, ProcessingFailedError } from '@shared/errors/app-err
 const YTDLP_SEPARATOR = '|||TUBMEDIA_VIDEO_FILTER|||';
 const MAX_YTDLP_OUTPUT_BYTES = 64 * 1024 * 1024;
 const YTDLP_TIMEOUT_MS = 20 * 60 * 1000;
+const YTDLP_INACTIVITY_TIMEOUT_MS = 60 * 1000;
 
 function comparablePath(value: string): string {
   return resolve(value).replace(/[\\/]+$/g, '').toLocaleLowerCase('en-US');
@@ -62,8 +63,13 @@ export class VideoLinkFilterService {
 
   public constructor(
     private readonly tools: ToolManager,
-    private readonly logger: Logger
+    private readonly logger: Logger,
+    private readonly getProxyUrl?: () => string | undefined
   ) {}
+
+  public isActive(): boolean {
+    return this.running;
+  }
 
   public async run(request: VideoLinkFilterRequest): Promise<VideoLinkFilterResult> {
     if (this.running) {
@@ -253,6 +259,7 @@ export class VideoLinkFilterService {
       const template = ['%(id)s', '%(title)s', '%(webpage_url)s', '%(extractor_key)s'].join(YTDLP_SEPARATOR);
       // Danh sách link nằm trong --batch-file nên không có URL nào trên dòng lệnh; --ignore-config
       // chặn tệp cấu hình yt-dlp trên máy chèn thêm tùy chọn (như --exec).
+      const trimmedProxy = this.getProxyUrl?.()?.trim();
       const args = [
         '--ignore-config',
         '--ignore-errors',
@@ -260,6 +267,9 @@ export class VideoLinkFilterService {
         '--no-warnings',
         '--skip-download',
         '--flat-playlist',
+        '--socket-timeout',
+        '20',
+        ...(trimmedProxy ? ['--proxy', trimmedProxy] : []),
         '--batch-file',
         batchFile,
         '--print',
@@ -267,7 +277,7 @@ export class VideoLinkFilterService {
         ...jsRuntimeArgs
       ];
 
-      const { code, stdout, stderr } = await this.runYtDlp(executablePath, args);
+      const { code, stdout, stderr } = await this.runYtDlp(executablePath, args, YTDLP_INACTIVITY_TIMEOUT_MS);
       if (code !== 0 && stdout.trim().length === 0) {
         throw new ProcessingFailedError(stderr.trim() || 'yt-dlp không thể đọc danh sách link.');
       }
@@ -293,7 +303,8 @@ export class VideoLinkFilterService {
 
   private async runYtDlp(
     executablePath: string,
-    args: string[]
+    args: string[],
+    inactivityTimeoutMs = YTDLP_INACTIVITY_TIMEOUT_MS
   ): Promise<{ code: number; stdout: string; stderr: string }> {
     // Thư mục tạm riêng: bị kill (quá giờ / quá nhiều dữ liệu) thì không để sót %TEMP%\_MEIxxxx (xem ytdlp-runtime-temp.ts).
     const runtimeTemp = await defaultYtDlpRuntimeTemp.allocate().catch(() => null);
@@ -323,20 +334,35 @@ export class VideoLinkFilterService {
       let outputBytes = 0;
       let settled = false;
       let timeout: ReturnType<typeof setTimeout> | null = null;
+      let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const clearTimers = (): void => {
+        if (timeout) clearTimeout(timeout);
+        if (inactivityTimer) clearTimeout(inactivityTimer);
+      };
 
       const settle = (callback: () => void): void => {
         if (settled) return;
         settled = true;
-        if (timeout) clearTimeout(timeout);
+        clearTimers();
         callback();
       };
 
       const abortProcessTree = (message: string): void => {
         if (settled) return;
         settled = true;
-        if (timeout) clearTimeout(timeout);
+        clearTimers();
         killTreeDone = killProcessTreeBestEffort(child);
         void killTreeDone.finally(() => reject(new ProcessingFailedError(message)));
+      };
+
+      const resetInactivityTimer = (): void => {
+        if (settled || inactivityTimeoutMs <= 0) return;
+        if (inactivityTimer) clearTimeout(inactivityTimer);
+        inactivityTimer = setTimeout(() => {
+          abortProcessTree('yt-dlp không phản hồi quá lâu khi nhận diện danh sách link.');
+        }, inactivityTimeoutMs);
+        inactivityTimer.unref?.();
       };
 
       // StringDecoder giữ lại byte UTF-8 dang dở giữa hai chunk; giải mã từng chunk riêng lẻ sẽ
@@ -345,6 +371,7 @@ export class VideoLinkFilterService {
       const stderrDecoder = new StringDecoder('utf8');
       const append = (current: string, chunk: Buffer, decoder: StringDecoder): string => {
         if (settled) return current;
+        resetInactivityTimer();
         outputBytes += chunk.length;
         if (outputBytes > MAX_YTDLP_OUTPUT_BYTES) {
           abortProcessTree('yt-dlp trả về quá nhiều dữ liệu khi nhận diện link.');
@@ -372,6 +399,7 @@ export class VideoLinkFilterService {
         );
       });
 
+      resetInactivityTimer();
       timeout = setTimeout(() => {
         abortProcessTree('yt-dlp quá thời gian khi nhận diện danh sách link.');
       }, YTDLP_TIMEOUT_MS);

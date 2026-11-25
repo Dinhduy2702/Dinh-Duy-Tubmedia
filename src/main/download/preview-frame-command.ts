@@ -21,19 +21,24 @@ export function buildPreviewFrameDownloadArguments(
   timestampSeconds: number,
   paths: PreviewFrameCommandPaths,
   cookies?: PreviewFrameCookieSettings,
-  jsRuntimeArgs: readonly string[] = []
+  jsRuntimeArgs: readonly string[] = [],
+  proxyUrl?: string
 ): string[] {
   const start = Math.max(0, timestampSeconds);
   const end = start + PREVIEW_WINDOW_SECONDS;
+  const trimmedProxy = proxyUrl?.trim();
   return [
     '--ignore-config',
     '--no-playlist',
     '--no-color',
     '--windows-filenames',
+    '--socket-timeout',
+    '20',
     '--retries',
     '3',
     '--fragment-retries',
     '3',
+    ...(trimmedProxy ? ['--proxy', trimmedProxy] : []),
     '--ffmpeg-location',
     paths.ffmpegDirectory,
     '-P',

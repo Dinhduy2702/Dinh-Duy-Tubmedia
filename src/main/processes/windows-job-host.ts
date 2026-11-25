@@ -285,7 +285,8 @@ while ($true) {
     if ([int]::TryParse($parts[1], [ref]$targetPid) -and $targetPid -gt 0) {
       [Tubmedia.WindowsJobHostNative]::AssignTree($targetPid, ($parts[2] -eq 'ENCODE'))
     }
-    [Console]::Out.WriteLine('OK')
+    $reqId = if ($parts.Length -ge 4) { $parts[3] } else { '' }
+    if ($reqId) { [Console]::Out.WriteLine("OK|$reqId") } else { [Console]::Out.WriteLine('OK') }
     [Console]::Out.Flush()
     continue
   }
@@ -321,7 +322,8 @@ export class WindowsJobHost {
   private child: ChildProcess | null = null;
   private readyPromise: Promise<void> | null = null;
   private systemLogicalCpus = 0;
-  private readonly pendingAcks: Array<() => void> = [];
+  private nextReqId = 1;
+  private readonly pendingAcks = new Map<number, () => void>();
   private desiredCap: { percentOfAppCpus: number | null; appLogicalCpus: number } = {
     percentOfAppCpus: null,
     appLogicalCpus: 0
@@ -348,7 +350,7 @@ export class WindowsJobHost {
         if (settled) return;
         settled = true;
         clearTimeout(startupTimer);
-        if (this.pendingAcks.length === 0) {
+        if (this.pendingAcks.size === 0) {
           setStreamRef(this.child?.stdout, false);
         }
         resolve();
@@ -382,9 +384,21 @@ export class WindowsJobHost {
               finish();
               return;
             }
+            if (line.startsWith('OK|')) {
+              const reqId = Number(line.slice('OK|'.length));
+              const ack = this.pendingAcks.get(reqId);
+              if (ack) {
+                this.pendingAcks.delete(reqId);
+                ack();
+              }
+              return;
+            }
             if (line === 'OK') {
-              const ack = this.pendingAcks.shift();
-              ack?.();
+              const first = this.pendingAcks.entries().next().value;
+              if (first) {
+                this.pendingAcks.delete(first[0]);
+                first[1]();
+              }
             }
           });
         }
@@ -394,9 +408,10 @@ export class WindowsJobHost {
             this.readyPromise = null;
             this.appliedCapRate = 0;
           }
-          while (this.pendingAcks.length > 0) {
-            this.pendingAcks.shift()?.();
+          for (const ack of this.pendingAcks.values()) {
+            ack();
           }
+          this.pendingAcks.clear();
           finish();
         };
         child.once('error', onDead);
@@ -417,31 +432,29 @@ export class WindowsJobHost {
     const stdin = this.child?.stdin;
     if (!stdin || stdin.destroyed || !stdin.writable) return;
 
+    const reqId = this.nextReqId++;
     await new Promise<void>((resolve) => {
       let done = false;
       const complete = (): void => {
         if (done) return;
         done = true;
         clearTimeout(ackTimer);
-        if (this.pendingAcks.length === 0) {
+        this.pendingAcks.delete(reqId);
+        if (this.pendingAcks.size === 0) {
           setStreamRef(this.child?.stdout, false);
         }
         resolve();
       };
       const ackTimer = setTimeout(() => {
-        const idx = this.pendingAcks.indexOf(complete);
-        if (idx >= 0) this.pendingAcks.splice(idx, 1);
         complete();
       }, 1_500);
 
-      this.pendingAcks.push(complete);
+      this.pendingAcks.set(reqId, complete);
       setStreamRef(this.child?.stdout, true);
       const tag = group === 'background-encode' ? 'ENCODE' : 'DEFAULT';
       try {
-        stdin.write(`ASSIGN ${pid} ${tag}\n`);
+        stdin.write(`ASSIGN ${pid} ${tag} ${reqId}\n`);
       } catch {
-        const idx = this.pendingAcks.indexOf(complete);
-        if (idx >= 0) this.pendingAcks.splice(idx, 1);
         complete();
       }
     });
@@ -463,9 +476,10 @@ export class WindowsJobHost {
 
   public dispose(): void {
     this.disposed = true;
-    while (this.pendingAcks.length > 0) {
-      this.pendingAcks.shift()?.();
+    for (const ack of this.pendingAcks.values()) {
+      ack();
     }
+    this.pendingAcks.clear();
     const child = this.child;
     this.child = null;
     this.readyPromise = null;
