@@ -75,7 +75,21 @@ export function buildLocalCutArguments(input: LocalCutArgumentsInput): string[] 
   const threadArgs = defaultFfmpegThreadArgs(input.logicalCpus ?? cpus().length);
   if (input.aspectRatio === 'original') {
     if (!input.accurateCut) {
-      return [...base, '-map', '0', '-c', 'copy', '-progress', 'pipe:1', '-nostats', input.outputPath];
+      return [
+        ...base,
+        '-map',
+        '0:v:0',
+        '-map',
+        '0:a:0?',
+        '-c',
+        'copy',
+        '-avoid_negative_ts',
+        'make_zero',
+        '-progress',
+        'pipe:1',
+        '-nostats',
+        input.outputPath
+      ];
     }
 
     return [

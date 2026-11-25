@@ -13,7 +13,7 @@ describe('Giai đoạn 6 mục 2 — lệnh ffmpeg cắt tệp có sẵn (local-
     expect(args).not.toContain('-5');
   });
 
-  it('sao chép nhanh (accurateCut=false): -c copy, -map 0 (giữ mọi luồng), không có tham số mã hóa lại', () => {
+  it('sao chép nhanh (accurateCut=false): -c copy, -map 0:v:0 -map 0:a:0? -avoid_negative_ts make_zero, không mã hóa lại', () => {
     const args = buildLocalCutArguments({
       filePath: 'C:\\in.mp4',
       startSeconds: 10,
@@ -24,8 +24,11 @@ describe('Giai đoạn 6 mục 2 — lệnh ffmpeg cắt tệp có sẵn (local-
     });
 
     expect(args).toEqual(
-      expect.arrayContaining(['-ss', '10', '-i', 'C:\\in.mp4', '-t', '15', '-map', '0', '-c', 'copy'])
+      expect.arrayContaining([
+        '-ss', '10', '-i', 'C:\\in.mp4', '-t', '15', '-map', '0:v:0', '-map', '0:a:0?', '-c', 'copy', '-avoid_negative_ts', 'make_zero'
+      ])
     );
+    expect(args).not.toContain('0');
     expect(args.some((arg) => ['-crf', '-preset', 'libx264', 'aac'].includes(arg))).toBe(false);
     expect(args).toContain('C:\\out.mp4');
   });

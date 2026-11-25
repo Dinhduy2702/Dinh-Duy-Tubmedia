@@ -1293,11 +1293,14 @@ export class QuickDownloadService {
         ? active.status.requestedEndSeconds - active.status.requestedStartSeconds
         : undefined;
 
+    const durationToleranceExtraSeconds =
+      active.status.mode === 'range' && !active.request.accurateCut ? 15 : undefined;
     const verifyWith = (audio: boolean): ReturnType<FileVerifier['verify']> =>
       this.verifier.verify(active.status.outputPath!, 'standard', expectedDuration, {
         jobId: active.status.taskId,
         signal: active.controller.signal,
-        expectedStreams: { video: active.status.mediaMode !== 'audio-only', audio }
+        expectedStreams: { video: active.status.mediaMode !== 'audio-only', audio },
+        ...(durationToleranceExtraSeconds !== undefined ? { durationToleranceExtraSeconds } : {})
       });
     let checked = await verifyWith(active.status.mediaMode !== 'video-only');
 

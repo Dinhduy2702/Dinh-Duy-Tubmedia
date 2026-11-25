@@ -142,24 +142,34 @@ export class LocalCutService {
     if (!ffmpeg.available || !ffmpeg.executablePath) throw new ToolNotFoundError('ffmpeg');
 
     try {
+      const sourceInfo = this.probeSourceInfo
+        ? await this.probeSourceInfo(trimmedPath).catch(() => null)
+        : null;
       const silenceLines: string[] = [];
-      const silenceResult = await this.processes.run({
-        jobId: `cut-suggest-silence-${randomUUID()}`,
-        tool: 'ffmpeg',
-        executablePath: ffmpeg.executablePath,
-        args: buildSilenceDetectArguments(trimmedPath),
-        priority: 'below_normal',
-        timeoutMs: CUT_SUGGESTION_ANALYSIS_TIMEOUT_MS,
-        onStderrLine: (line) => silenceLines.push(line)
-      });
-      if (silenceResult.code !== 0) {
-        throw new Error('Không thể phân tích âm thanh của video để gợi ý điểm cắt.');
+      let silences: ReturnType<typeof parseSilenceIntervals> = [];
+      const shouldProbeSilence = !sourceInfo || sourceInfo.audioCodec !== null;
+      if (shouldProbeSilence) {
+        const silenceResult = await this.processes.run({
+          jobId: `cut-suggest-silence-${randomUUID()}`,
+          tool: 'ffmpeg',
+          executablePath: ffmpeg.executablePath,
+          args: buildSilenceDetectArguments(trimmedPath),
+          priority: 'below_normal',
+          timeoutMs: CUT_SUGGESTION_ANALYSIS_TIMEOUT_MS,
+          onStderrLine: (line) => silenceLines.push(line)
+        });
+        const noAudioInOutput =
+          silenceResult.code !== 0 &&
+          /does not contain any stream|matches no streams/i.test(
+            `${silenceResult.stderrTail}\n${silenceLines.join('\n')}`
+          );
+        if (silenceResult.code !== 0 && !noAudioInOutput) {
+          throw new Error('Không thể phân tích âm thanh của video để gợi ý điểm cắt.');
+        }
+        if (silenceResult.code === 0) {
+          silences = parseSilenceIntervals(silenceLines);
+        }
       }
-      const durationSeconds = parseFfmpegDurationSeconds(silenceLines);
-      if (durationSeconds === null) {
-        throw new Error('Không đọc được thời lượng video để gợi ý điểm cắt.');
-      }
-      const silences = parseSilenceIntervals(silenceLines);
 
       const sceneLines: string[] = [];
       const sceneResult = await this.processes.run({
@@ -173,6 +183,13 @@ export class LocalCutService {
       });
       if (sceneResult.code !== 0) {
         throw new Error('Không thể phân tích hình ảnh của video để gợi ý điểm cắt.');
+      }
+      const durationSeconds =
+        (sourceInfo?.duration && sourceInfo.duration > 0 ? sourceInfo.duration : null) ??
+        parseFfmpegDurationSeconds(silenceLines) ??
+        parseFfmpegDurationSeconds(sceneLines);
+      if (durationSeconds === null) {
+        throw new Error('Không đọc được thời lượng video để gợi ý điểm cắt.');
       }
       const sceneTimestamps = parseSceneTimestamps(sceneLines);
 
@@ -339,10 +356,9 @@ export class LocalCutService {
     const pendingOutput = `${finalOutput}.pending${extension}`;
 
     const expectedDuration = request.endSeconds - request.startSeconds;
-    const sourceInfo =
-      isReencode && this.probeSourceInfo
-        ? await this.probeSourceInfo(request.filePath).catch(() => null)
-        : null;
+    const sourceInfo = this.probeSourceInfo
+      ? await this.probeSourceInfo(request.filePath).catch(() => null)
+      : null;
     const args = buildLocalCutArguments({
       filePath: request.filePath,
       startSeconds: request.startSeconds,
@@ -447,7 +463,8 @@ export class LocalCutService {
       checked = await this.verifier.verify(pendingOutput, 'standard', expectedDuration, {
         jobId: status.taskId,
         signal: active.controller.signal,
-        expectedStreams: { video: true, audio: false }
+        expectedStreams: { video: true, audio: Boolean(sourceInfo?.audioCodec) },
+        ...(!isReencode ? { durationToleranceExtraSeconds: 15 } : {})
       });
     } catch (error) {
       if (error instanceof ProcessCancelledError || active.controller.signal.aborted) {

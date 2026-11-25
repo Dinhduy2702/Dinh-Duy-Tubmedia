@@ -53,6 +53,7 @@ export interface VisualIntegrityResult {
 export interface VerificationOptions {
   jobId?: string;
   expectedStreams?: { video: boolean; audio: boolean };
+  durationToleranceExtraSeconds?: number;
   projectId?: string | null;
   signal?: AbortSignal;
   onProgress?: (percent: number) => void;
@@ -661,11 +662,18 @@ export class FileVerifier {
       const info = expectedStreams.video
         ? await this.analyzer.analyze(path, verifyJobId)
         : await this.analyzeAudioOnly(path, verifyJobId, options);
+      const extraDurationTolerance =
+        typeof options.durationToleranceExtraSeconds === 'number' &&
+        Number.isFinite(options.durationToleranceExtraSeconds) &&
+        options.durationToleranceExtraSeconds > 0
+          ? options.durationToleranceExtraSeconds
+          : 0;
+      const allowedDurationTolerance =
+        expectedDuration !== undefined ? Math.max(3, expectedDuration * 0.02) + extraDurationTolerance : 0;
       if (expectedDuration !== undefined) {
-        const durationTolerance = Math.max(3, expectedDuration * 0.02);
-        if (Math.abs(info.duration - expectedDuration) > durationTolerance) {
+        if (Math.abs(info.duration - expectedDuration) > allowedDurationTolerance) {
           reasons.push(
-            `Thời lượng lệch ${Math.abs(info.duration - expectedDuration).toFixed(2)}s: thực tế ${info.duration.toFixed(2)}s / dự kiến ${expectedDuration.toFixed(2)}s (cho phép ${durationTolerance.toFixed(2)}s).`
+            `Thời lượng lệch ${Math.abs(info.duration - expectedDuration).toFixed(2)}s: thực tế ${info.duration.toFixed(2)}s / dự kiến ${expectedDuration.toFixed(2)}s (cho phép ${allowedDurationTolerance.toFixed(2)}s).`
           );
         }
       }
@@ -682,7 +690,7 @@ export class FileVerifier {
         const sampleDuration = expectedDuration !== undefined &&
           Number.isFinite(expectedDuration) &&
           expectedDuration > 0 &&
-          Math.abs(info.duration - expectedDuration) > Math.max(3, expectedDuration * 0.02)
+          Math.abs(info.duration - expectedDuration) > allowedDurationTolerance
           ? expectedDuration
           : info.duration;
         const endOffset = Math.min(2, Math.max(0.25, sampleDuration * 0.08));
