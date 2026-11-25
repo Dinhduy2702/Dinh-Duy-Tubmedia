@@ -156,6 +156,7 @@ export class AppContext {
     this.processes
   );
   public readonly appUpdates: AppUpdateService;
+  private readonly extraActiveWorkProbes = new Map<string, () => boolean>();
   public readonly workbench = new WorkbenchService(
     this.projectRepo,
     this.projects,
@@ -224,13 +225,29 @@ export class AppContext {
       this.backups,
       this.logger,
       prepareForAppUpdate,
-      () => {
-        // Tiến trình công cụ của hàng đợi và Tải nhanh đã nằm trong hai mục đầu — chỉ báo riêng khi còn tiến trình lẻ khác.
-        const queueJobs = this.queue.activeCount();
-        const quickDownload = this.quickDownload.isActive();
-        return { queueJobs, quickDownload, otherProcesses: queueJobs === 0 && !quickDownload ? this.processes.count() : 0 };
-      }
+      () => this.activeWorkSummary()
     );
+  }
+
+  public registerActiveWorkProbe(name: string, probe: () => boolean): void {
+    this.extraActiveWorkProbes.set(name, probe);
+  }
+
+  public activeWorkSummary(): { queueJobs: number; quickDownload: boolean; otherProcesses: number } {
+    // Tiến trình công cụ của hàng đợi và Tải nhanh đã nằm trong hai mục đầu; gom thêm các dịch vụ nền khác.
+    const queueJobs = this.queue.activeCount();
+    const quickDownload = this.quickDownload.isActive();
+    let extraActive = this.toolUpdates.isActive() ? 1 : 0;
+    for (const probe of this.extraActiveWorkProbes.values()) {
+      if (probe()) extraActive += 1;
+    }
+    const rawProcesses = queueJobs === 0 && !quickDownload ? this.processes.count() : 0;
+    return { queueJobs, quickDownload, otherProcesses: Math.max(extraActive, rawProcesses) };
+  }
+
+  public activeWorkCount(): number {
+    const summary = this.activeWorkSummary();
+    return summary.queueJobs + (summary.quickDownload ? 1 : 0) + summary.otherProcesses;
   }
   public initialize(): void {
     // Trước mọi bước khác và trước khi đăng ký IPC: tác vụ có lúc mở app (chỉ những tác vụ này mới bị giữ "dở dang").

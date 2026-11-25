@@ -46,7 +46,7 @@ export class BackupService {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const prefix = category === 'update' ? 'Tubmedia-before-update' : 'VideoStudioPro';
     const path = join(targetFolder, `${prefix}-${stamp}.vdmsp-backup.sqlite`);
-    this.database.checkpoint();
+    this.database.checkpointPassive();
     await backupSqliteDatabase(this.database.db, path);
     await writeFile(
       `${path}.json`,
@@ -160,20 +160,22 @@ export class BackupService {
    */
   private sanitizeRestoredSettings(): void {
     const target = this.database.db;
-    const row = target.prepare("SELECT value_json FROM main.app_settings WHERE key='app'").get() as
-      | { value_json: string }
-      | undefined;
-    if (!row) return;
-    const { value, dropped } = sanitizeRestoredAppSettings(parseJsonOr<unknown>(row.value_json, null));
-    if (dropped.length === 0) return;
-    target
-      .prepare("UPDATE main.app_settings SET value_json=? WHERE key='app'")
-      .run(JSON.stringify(value));
-    this.logger.warn(
-      'backup',
-      'BACKUP_SETTINGS_SANITIZED',
-      `Bỏ qua ${dropped.length} cài đặt trong bản sao lưu vì không đạt yêu cầu an toàn: ${dropped.join(', ')}.`
-    );
+    for (const settingKey of ['app', 'app_extra'] as const) {
+      const row = target.prepare('SELECT value_json FROM main.app_settings WHERE key=?').get(settingKey) as
+        | { value_json: string }
+        | undefined;
+      if (!row) continue;
+      const { value, dropped } = sanitizeRestoredAppSettings(parseJsonOr<unknown>(row.value_json, null));
+      if (dropped.length === 0) continue;
+      target
+        .prepare('UPDATE main.app_settings SET value_json=? WHERE key=?')
+        .run(JSON.stringify(value), settingKey);
+      this.logger.warn(
+        'backup',
+        'BACKUP_SETTINGS_SANITIZED',
+        `Bỏ qua ${dropped.length} cài đặt trong bản sao lưu (${settingKey}) vì không đạt yêu cầu an toàn: ${dropped.join(', ')}.`
+      );
+    }
   }
 
   /**
@@ -242,10 +244,13 @@ export class BackupService {
       'source_files',
       'queue_jobs',
       'output_files',
+      'quarantine_items',
       'resource_profiles',
       'quality_profiles',
       'app_settings'
     ];
+    // Các bảng có cột UNIQUE phụ ngoài khóa chính: khi merge dùng INSERT OR IGNORE để không xóa dòng cũ (tránh ON DELETE CASCADE).
+    const mergeInsertOrIgnoreTables = new Set(['media_sources', 'source_files']);
 
     target.exec(`ATTACH DATABASE '${safePath}' AS backupdb`);
     if (mode === 'replace') target.exec('PRAGMA foreign_keys = OFF');
@@ -253,6 +258,7 @@ export class BackupService {
       runInTransaction(target, () => {
         if (mode === 'replace') {
           for (const table of [
+            'quarantine_items',
             'output_files',
             'queue_jobs',
             'project_items',
@@ -273,11 +279,11 @@ export class BackupService {
             )
             .get(table);
           if (!exists) continue;
-          const columns = (
-            target.prepare(`PRAGMA main.table_info(${table})`).all() as Array<{
-              name: string;
-            }>
-          ).map((column) => column.name);
+          const mainInfo = target.prepare(`PRAGMA main.table_info(${table})`).all() as Array<{
+            name: string;
+            pk: number;
+          }>;
+          const columns = mainInfo.map((column) => column.name);
           const backupColumns = new Set(
             (
               target.prepare(`PRAGMA backupdb.table_info(${table})`).all() as Array<{
@@ -287,9 +293,34 @@ export class BackupService {
           );
           const common = columns.filter((column) => backupColumns.has(column));
           if (common.length === 0) continue;
-          target.exec(
-            `INSERT OR REPLACE INTO main.${table}(${common.join(',')}) SELECT ${common.join(',')} FROM backupdb.${table}`
-          );
+
+          if (mode === 'replace') {
+            target.exec(
+              `INSERT OR REPLACE INTO main.${table}(${common.join(',')}) SELECT ${common.join(',')} FROM backupdb.${table}`
+            );
+            continue;
+          }
+
+          const pkCols = mainInfo
+            .filter((column) => column.pk > 0 && backupColumns.has(column.name))
+            .sort((left, right) => left.pk - right.pk)
+            .map((column) => column.name);
+
+          if (mergeInsertOrIgnoreTables.has(table) || pkCols.length === 0) {
+            target.exec(
+              `INSERT OR IGNORE INTO main.${table}(${common.join(',')}) SELECT ${common.join(',')} FROM backupdb.${table}`
+            );
+          } else {
+            const pkSet = new Set(pkCols);
+            const nonPkCols = common.filter((column) => !pkSet.has(column));
+            const conflictClause =
+              nonPkCols.length > 0
+                ? `ON CONFLICT(${pkCols.join(',')}) DO UPDATE SET ${nonPkCols.map((col) => `${col}=excluded.${col}`).join(',')}`
+                : `ON CONFLICT(${pkCols.join(',')}) DO NOTHING`;
+            target.exec(
+              `INSERT INTO main.${table}(${common.join(',')}) SELECT ${common.join(',')} FROM backupdb.${table} WHERE true ${conflictClause}`
+            );
+          }
         }
 
         this.sanitizeRestoredSettings();

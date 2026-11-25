@@ -146,7 +146,7 @@ export function registerIpc(ctx: AppContext): void {
     resolveCleanupEnvironmentOverride() ?? resolveCleanupEnvironmentPaths,
     cleanupQuarantine
   );
-  const videoLinkFilter = new VideoLinkFilterService(ctx.tools, ctx.logger);
+  const videoLinkFilter = new VideoLinkFilterService(ctx.tools, ctx.logger, () => ctx.settings.get().proxy);
   const localCut = new LocalCutService(
     ctx.processes,
     ctx.tools,
@@ -167,6 +167,12 @@ export function registerIpc(ctx: AppContext): void {
     hardware: () => ctx.settings.detectHardware(),
     listAutoReports: (jobId) => ctx.autoErrorReports.listForJob(jobId)
   });
+
+  // Gom các dịch vụ nền ngoài QueueManager/QuickDownload vào hàm đếm việc bận dùng chung (#8).
+  ctx.registerActiveWorkProbe('localCut', () => localCut.isActive());
+  ctx.registerActiveWorkProbe('videoLinkFilter', () => videoLinkFilter.isActive());
+  ctx.registerActiveWorkProbe('systemCleanup', () => systemCleanup.isActive());
+  ctx.registerActiveWorkProbe('errorReports', () => errorReports.isActive());
 
   const recordIpcFault = (channel: string) => (error: Error): void => {
     void ctx.autoErrorReports.record({ source: 'ipc', error, context: { channel } });
@@ -548,13 +554,31 @@ export function registerIpc(ctx: AppContext): void {
   );
   handle(IPC.backups.preview, showPathSchema, ({ path }) => ctx.backups.preview(path));
   handle(IPC.backups.restore, backupRestoreSchema, ({ path, mode }) => {
-    if (ctx.queue.activeCount() > 0 || ctx.processes.count() > 0 || ctx.quickDownload.isActive()) {
-      throw new InvalidInputError('Không thể phục hồi khi còn tác vụ, tiến trình hoặc Tải nhanh đang chạy.');
+    if (ctx.activeWorkCount() > 0) {
+      throw new InvalidInputError('Không thể phục hồi khi còn tác vụ, tiến trình hoặc công việc nền đang chạy.');
     }
     const result = ctx.backups.restore(path, mode);
     setTimeout(() => {
-      app.relaunch();
-      app.exit(0);
+      void (async () => {
+        try {
+          await ctx.queue.stop(true);
+        } catch {
+          // ignore
+        }
+        try {
+          await ctx.logger.flush();
+        } catch {
+          // ignore
+        }
+        try {
+          ctx.database.close();
+        } catch {
+          // ignore
+        }
+        const relaunchArgs = process.argv.slice(1).filter((arg) => arg !== '--relaunch');
+        app.relaunch({ args: [...relaunchArgs, '--relaunch'] });
+        app.exit(0);
+      })();
     }, 150);
     return result;
   });
