@@ -777,6 +777,7 @@ tests/unit/quick-download.test.ts
 tests/unit/rate-limit-backoff.test.ts
 tests/unit/recycle-bin-capacity-v15.test.ts
 tests/unit/release-update-system.test.ts
+tests/unit/resource-auto-profile-floor-v180.test.ts
 tests/unit/resource-machine-threads.test.ts
 tests/unit/resource-memory-r56.test.ts
 tests/unit/retry.test.ts

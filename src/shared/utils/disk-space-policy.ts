@@ -7,7 +7,16 @@ export const DOWNLOAD_DISK_FLOOR_BYTES = 3 * GIB;
 export const MERGE_DISK_FLOOR_BYTES = 5 * GIB;
 export const LOCAL_CUT_DISK_FLOOR_BYTES = 5 * GIB;
 
-const AUTO_RESOURCE_PROFILE_ID = 'resource-auto-hardware';
+const AUTO_RESOURCE_PROFILE_ID = 'resource-auto';
+
+export function isManagedAutoOrDownloadProfileId(id: string | null | undefined): boolean {
+  if (!id) return false;
+  return (
+    id === AUTO_RESOURCE_PROFILE_ID ||
+    id.startsWith(`${AUTO_RESOURCE_PROFILE_ID}-`) ||
+    /^resource-download-.+-custom$/.test(id)
+  );
+}
 
 const DISK_FULL_OUTPUT_PATTERN =
   /no space left on device|\benospc\b|disk full|there is not enough space on the disk|không đủ dung lượng/i;
@@ -15,7 +24,7 @@ const DISK_FULL_OUTPUT_PATTERN =
 export function isStandardDiskFloorProfile(
   profile?: Pick<ResourceProfile, 'id' | 'builtIn'> | null
 ): boolean {
-  return !profile || profile.builtIn || profile.id === AUTO_RESOURCE_PROFILE_ID;
+  return !profile || profile.builtIn || isManagedAutoOrDownloadProfileId(profile.id);
 }
 
 export function requiredFreeDiskBytesForDownload(

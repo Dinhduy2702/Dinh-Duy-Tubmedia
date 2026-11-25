@@ -1,4 +1,5 @@
 import type { ResourceProfile } from '../types/domain.js';
+import { isManagedAutoOrDownloadProfileId } from './disk-space-policy.js';
 
 /**
  * 1.7.5 (sửa A) + 1.7.6 (việc A0, người dùng duyệt 2026-11-07): MỌI tham số luồng của ffmpeg theo máy đang chạy — số luồng
@@ -28,13 +29,15 @@ export function machineThreadCap(logicalCpus: number): number {
 
 export function withMachineThreads<T extends ResourceProfile>(profile: T, logicalCpus: number): T {
   const original = profile.builtIn ? BUILT_IN_RESOURCE_THREADS[profile.id] : undefined;
-  if (!original) return profile;
+  const managedAutoOrDownload = !original && isManagedAutoOrDownloadProfileId(profile.id);
+  if (!original && !managedAutoOrDownload) return profile;
   const cap = machineThreadCap(logicalCpus);
   let changed = false;
   const next = { ...profile };
   for (const field of FFMPEG_THREAD_FIELDS) {
-    if (profile[field] !== original[field]) continue; // người dùng đã tự chỉnh trường này
-    const value = Math.min(original[field], cap);
+    if (original && profile[field] !== original[field]) continue; // người dùng đã tự chỉnh trường này
+    const limit = original ? Math.min(original[field], cap) : cap;
+    const value = Math.min(profile[field], limit);
     if (value !== profile[field]) {
       next[field] = value;
       changed = true;
