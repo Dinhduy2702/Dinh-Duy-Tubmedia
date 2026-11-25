@@ -1472,7 +1472,7 @@ function MergeLaneCard({
   onApplyTempToAll: () => void;
   onCookies: () => void;
   onNotice: (title: string, message: string, severity?: 'info' | 'success' | 'warning') => void;
-  setError: (error: string | null) => void;
+  setError: (error: unknown) => void;
 }): React.JSX.Element {
   const dismissedSharedTemp = useAppStore((state) => state.settings?.dismissedSharedTempWarnings);
   const postMergeCleanupMode = useAppStore((state) => state.settings?.postMergeSourceCleanupMode ?? 'ask');

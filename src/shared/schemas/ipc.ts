@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_QUICK_DOWNLOAD_SECONDS } from '../quick-download.js';
 
 export const idSchema = z.string().uuid();
 export const pathSchema = z.string().trim().min(1).max(32_768);
@@ -366,7 +367,7 @@ export const quickDownloadTaskSchema = z
 export const previewFrameRequestSchema = z
   .object({
     url: z.string().trim().min(1).max(4096),
-    timestampSeconds: z.number().min(0).max(86_400)
+    timestampSeconds: z.number().min(0).max(MAX_QUICK_DOWNLOAD_SECONDS)
   })
   .strict();
 
@@ -376,7 +377,7 @@ export const previewFrameRequestSchema = z
 export const localCutPreviewFrameRequestSchema = z
   .object({
     filePath: z.string().trim().min(1).max(4096),
-    timestampSeconds: z.number().min(0).max(86_400),
+    timestampSeconds: z.number().min(0).max(MAX_QUICK_DOWNLOAD_SECONDS),
     aspectRatio: aspectRatioSchema
   })
   .strict();

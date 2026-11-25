@@ -51,10 +51,6 @@ function formatBytes(value: number): string {
   return `${(value / 1024 ** index).toFixed(index >= 3 ? 2 : 1)} ${units[index]}`;
 }
 
-function readableError(value: unknown, fallback: string): string {
-  return safeUiText(value, fallback);
-}
-
 function quickPhaseLabel(phase: QuickDownloadStatus['phase']): string {
   const labels: Record<QuickDownloadStatus['phase'], string> = {
     queued: 'Đang xếp hàng',
@@ -139,7 +135,7 @@ export function QuickDownloadPanel(): ReactElement {
   const previewInvalidationKey = `${url.trim()}|${startTime}|${endTime}`;
   const previewInvalidationKeyRef = useRef(previewInvalidationKey);
   const [status, setStatus] = useState<QuickDownloadStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [cookieOpen, setCookieOpen] = useState(false);
   const openedCookieTask = useRef<string | null>(null);
   const setPage = useAppStore((state) => state.setPage);
@@ -216,7 +212,7 @@ export function QuickDownloadPanel(): ReactElement {
         if (current) setStatus(current);
       })
       .catch((loadError) => {
-        if (mounted) setError(readableError(loadError, 'Không đọc được trạng thái Tải nhanh.'));
+        if (mounted) setError(loadError);
       });
     return () => {
       mounted = false;
@@ -232,7 +228,7 @@ export function QuickDownloadPanel(): ReactElement {
           if (next) setStatus(next);
         })
         .catch((pollError) => {
-          setError(readableError(pollError, 'Không đọc được tiến trình tải.'));
+          setError(pollError);
         });
     }, 500);
     return () => window.clearInterval(timer);
@@ -288,7 +284,7 @@ export function QuickDownloadPanel(): ReactElement {
       setPreviewFrames({ start: startFrame.dataUrl, end: endFrame.dataUrl });
     } catch (previewErr) {
       setPreviewError(
-        readableError(
+        safeUiText(
           previewErr,
           'Không lấy được khung hình xem trước. Nguồn có thể chặn, mốc thời gian vượt quá thời lượng video, hoặc cần Cookies.'
         )
@@ -303,7 +299,7 @@ export function QuickDownloadPanel(): ReactElement {
       const selected = await window.desktop.quickDownload.chooseDirectory(outputDirectory);
       if (selected) setOutputDirectory(selected);
     } catch (chooseError) {
-      setError(readableError(chooseError, 'Không chọn được thư mục.'));
+      setError(chooseError);
     }
   }
 
@@ -326,7 +322,7 @@ export function QuickDownloadPanel(): ReactElement {
       });
       setStatus(next);
     } catch (startError) {
-      setError(readableError(startError, 'Không thể bắt đầu tải nhanh.'));
+      setError(startError);
     }
   }
 
@@ -336,7 +332,7 @@ export function QuickDownloadPanel(): ReactElement {
       const next = await window.desktop.quickDownload.pause(status.taskId);
       if (next) setStatus(next);
     } catch (pauseError) {
-      setError(readableError(pauseError, 'Không thể tạm dừng Tải nhanh.'));
+      setError(pauseError);
     }
   }
 
@@ -346,7 +342,7 @@ export function QuickDownloadPanel(): ReactElement {
       const next = await window.desktop.quickDownload.resume(status.taskId);
       if (next) setStatus(next);
     } catch (resumeError) {
-      setError(readableError(resumeError, 'Không thể tiếp tục Tải nhanh.'));
+      setError(resumeError);
     }
   }
 
@@ -356,7 +352,7 @@ export function QuickDownloadPanel(): ReactElement {
       const next = await window.desktop.quickDownload.cancel(status.taskId);
       if (next) setStatus(next);
     } catch (cancelError) {
-      setError(readableError(cancelError, 'Không thể hủy tải nhanh.'));
+      setError(cancelError);
     }
   }
 
@@ -714,7 +710,7 @@ export function QuickDownloadPanel(): ReactElement {
             </div>
           </div>
         )}
-        {error && (
+        {Boolean(error) && (
           <FriendlyIssueCard
             issue={friendlyIssue(error)}
             {...(canStart ? { onRetry: () => void start() } : {})}

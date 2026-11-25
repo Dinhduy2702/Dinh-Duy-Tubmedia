@@ -55,7 +55,7 @@ import { useLaneLogs } from '../hooks/use-lane-logs';
 import { showNotice } from '../utils/notify';
 import { createUiEventId } from '../utils/ui-id';
 import { loadWorkbenchPath, saveWorkbenchPath } from '../utils/workbench-path-memory';
-import { jobFriendlyIssue, safeUiText } from '../utils/ui-error';
+import { jobFriendlyIssue } from '../utils/ui-error';
 import { FriendlyIssueCard } from '../components/FriendlyIssueCard';
 import { statusLabel } from '../utils/vi-labels';
 import { QuickDownloadPanel } from '../components/QuickDownloadPanel';
@@ -103,9 +103,6 @@ const BLOCKING_CODES = [
   'NETWORK_CIRCUIT_OPEN'
 ] as const;
 
-function messageOf(error: unknown): string {
-  return safeUiText(error, 'Không thể hoàn tất thao tác.');
-}
 function laneNumber(slot: DownloadLaneId): number {
   return Number(slot.slice('download-'.length));
 }
@@ -436,7 +433,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
         `${profile.downloadWorkers} video tối đa trong danh sách này; danh sách bắt đầu độc lập và chạy song song; nếu đã đủ số danh sách chạy cùng lúc (Cài đặt) thì danh sách này chờ lượt rồi tự bắt đầu.`
       );
     } catch (error) {
-      setError(messageOf(error));
+      setError(error);
     } finally {
       setBusy(null);
     }
@@ -457,7 +454,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
         action === 'resume' ? 'success' : 'neutral'
       );
     } catch (error) {
-      setError(messageOf(error));
+      setError(error);
     } finally {
       setBusy(null);
     }
@@ -475,7 +472,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
         'info'
       );
     } catch (error) {
-      setError(messageOf(error));
+      setError(error);
     } finally {
       setBusy(null);
     }
@@ -494,7 +491,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
         'info'
       );
     } catch (error) {
-      setError(messageOf(error));
+      setError(error);
     } finally {
       setBusy(null);
     }
@@ -512,7 +509,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
         count > 0 ? 'success' : 'neutral'
       );
     } catch (error) {
-      setError(messageOf(error));
+      setError(error);
     } finally {
       setBusy(null);
     }
@@ -538,7 +535,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
       setDeleteTarget(null);
     } catch (error) {
       deletedSlotsRef.current.delete(slot);
-      setError(messageOf(error));
+      setError(error);
     } finally {
       setBusy(null);
     }
@@ -606,7 +603,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
       // VẤN ĐỀ 1 (2026-09-22): đổi số danh sách hiện ngay trên giao diện (tab mới xuất hiện/mất ngay lập
       // tức) — không cần thêm thông báo nổi cho một thay đổi đã tự thấy rõ; tránh spam khi bấm nhiều lần.
     } catch (error) {
-      setError(messageOf(error));
+      setError(error);
     } finally {
       setBusy(null);
     }
@@ -648,7 +645,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
         `${plan.workersPerList} luồng/danh sách; tổng video tải cùng lúc tự theo máy (hiện tối đa ${recommendation.maximumSafeGlobalWorkers}). Chất lượng và chế độ CapCut giữ nguyên.`
       );
     } catch (error) {
-      setError(messageOf(error));
+      setError(error);
     } finally {
       setRecommendBusy(false);
     }
@@ -666,7 +663,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
           : 'H.264/MP4, 720p–1080p, fallback thông minh, số mảnh tải mỗi video tự theo máy; mỗi danh sách vẫn chạy độc lập.'
       );
     } catch (error) {
-      setError(messageOf(error));
+      setError(error);
     }
   };
 
@@ -1016,7 +1013,7 @@ function LaneCard({
   onApplyTempToAll: () => void;
   onCookies: () => void;
   onNotice: (title: string, message: string, severity?: 'info' | 'success' | 'warning') => void;
-  setError: (error: string | null) => void;
+  setError: (error: unknown) => void;
 }): React.JSX.Element {
   const [showLogs, setShowLogs] = useState(false);
   const combinedLogs = useLaneLogs(projectId, logs, logsVersion, setError);
@@ -1052,7 +1049,7 @@ function LaneCard({
         );
       }
     } catch (error) {
-      setError(messageOf(error));
+      setError(error);
     }
   };
   const importText = async (): Promise<void> => {
@@ -1063,7 +1060,7 @@ function LaneCard({
         onNotice(`Đã nhập TXT vào danh sách ${number}`, `Đã đọc danh sách từ ${file.path}.`, 'info');
       }
     } catch (error) {
-      setError(messageOf(error));
+      setError(error);
     }
   };
   const openOutput = async (): Promise<void> => {
@@ -1071,7 +1068,7 @@ function LaneCard({
       await window.desktop.app.showPath(form.outputFolder);
       onNotice(`Đã mở thư mục danh sách ${number}`, form.outputFolder, 'info');
     } catch (error) {
-      setError(messageOf(error));
+      setError(error);
     }
   };
   const selectProfile = (id: string): void => {

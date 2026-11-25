@@ -258,6 +258,8 @@ export function safeUiText(value: unknown, fallback = 'Không thể hoàn tất 
   const completed = completedResult(structured);
   if (completed) return userMessage(completed.message, 'Tác vụ đã hoàn tất thành công.');
   const preferred = preferredMessage(structured);
+  const validation = describeValidationIssues(preferred);
+  if (validation) return validation;
   const update = updaterNotice(preferred);
   if (update) return update.message;
   return userMessage(preferred, fallback);

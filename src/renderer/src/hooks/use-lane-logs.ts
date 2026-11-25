@@ -11,7 +11,7 @@ export function useLaneLogs(
   projectId: string | undefined,
   liveLogs: readonly LogEntry[],
   reloadKey: number,
-  onError: (message: string) => void
+  onError: (error: unknown) => void
 ): LogEntry[] {
   const [persisted, setPersisted] = useState<LogEntry[]>([]);
 
@@ -25,7 +25,7 @@ export function useLaneLogs(
         if (!cancelled) setPersisted(entries);
       })
       .catch((error: unknown) => {
-        if (!cancelled) onError(error instanceof Error ? error.message : String(error));
+        if (!cancelled) onError(error);
       });
     return () => {
       cancelled = true;

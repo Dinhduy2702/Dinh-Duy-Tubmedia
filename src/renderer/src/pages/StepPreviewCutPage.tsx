@@ -10,8 +10,9 @@ import { StepTabs } from '../components/StepTabs';
 import { Card } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
 import { InfoHint } from '../components/InfoHint';
+import { FriendlyIssueCard } from '../components/FriendlyIssueCard';
 import { showNotice } from '../utils/notify';
-import { safeUiText } from '../utils/ui-error';
+import { friendlyIssue, safeUiText } from '../utils/ui-error';
 import { useAppStore } from '../stores/app-store';
 
 const TERMINAL_PHASES = new Set<LocalCutStatus['phase']>(['completed', 'cancelled', 'failed']);
@@ -97,7 +98,7 @@ export function StepPreviewCutPage(): React.JSX.Element {
   const [suggestAttempted, setSuggestAttempted] = useState(false);
 
   const [status, setStatus] = useState<LocalCutStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -130,7 +131,7 @@ export function StepPreviewCutPage(): React.JSX.Element {
           if (next) setStatus(next);
         })
         .catch((pollError) => {
-          setError(safeUiText(pollError, 'Không đọc được tiến trình cắt.'));
+          setError(pollError);
         });
     }, 500);
     return () => window.clearInterval(timer);
@@ -163,7 +164,7 @@ export function StepPreviewCutPage(): React.JSX.Element {
         setSuggestAttempted(false);
       }
     } catch (chooseError) {
-      setError(safeUiText(chooseError, 'Không chọn được tệp.'));
+      setError(chooseError);
     }
   }
 
@@ -204,7 +205,7 @@ export function StepPreviewCutPage(): React.JSX.Element {
       const selected = await window.desktop.quickDownload.chooseDirectory(outputDirectory ?? undefined);
       if (selected) setOutputDirectory(selected);
     } catch (chooseError) {
-      setError(safeUiText(chooseError, 'Không chọn được thư mục lưu.'));
+      setError(chooseError);
     }
   }
 
@@ -265,7 +266,7 @@ export function StepPreviewCutPage(): React.JSX.Element {
       });
       setStatus(next);
     } catch (startError) {
-      setError(safeUiText(startError, 'Không thể bắt đầu cắt.'));
+      setError(startError);
     }
   }
 
@@ -275,7 +276,7 @@ export function StepPreviewCutPage(): React.JSX.Element {
       const next = await window.desktop.localCut.cancel(status.taskId);
       if (next) setStatus(next);
     } catch (cancelError) {
-      setError(safeUiText(cancelError, 'Không gửi được yêu cầu dừng.'));
+      setError(cancelError);
     }
   }
 
@@ -293,7 +294,7 @@ export function StepPreviewCutPage(): React.JSX.Element {
         );
       }
     } catch (revealError) {
-      setError(safeUiText(revealError, 'Không mở được vị trí tệp đầu ra.'));
+      setError(revealError);
     }
   }
 
@@ -546,11 +547,9 @@ export function StepPreviewCutPage(): React.JSX.Element {
             </button>
           </div>
 
-          {error && (
-            <div className="quick-download-error" role="alert">
-              <AlertTriangle size={15}/>
-              {error}
-            </div>
+          {Boolean(error) && <FriendlyIssueCard issue={friendlyIssue(error)} className="mt-3" />}
+          {!error && status?.phase === 'failed' && (status.error || status.message) && (
+            <FriendlyIssueCard issue={friendlyIssue(status.error ?? status.message)} className="mt-3" />
           )}
 
           <div className="local-cut-actions">

@@ -42,7 +42,13 @@ const FIELD_LABELS: Record<string, string> = {
   sourceFolder: 'Thư mục nguồn',
   url: 'Liên kết',
   outputDirectory: 'Thư mục lưu',
-  subtitleLanguage: 'Ngôn ngữ phụ đề'
+  subtitleLanguage: 'Ngôn ngữ phụ đề',
+  timestampSeconds: 'Mốc thời gian',
+  startTime: 'Mốc bắt đầu',
+  endTime: 'Mốc kết thúc',
+  filePath: 'Đường dẫn tệp',
+  aspectRatio: 'Tỉ lệ khung hình',
+  quickDownloadFilenameTemplate: 'Mẫu đặt tên tệp Tải nhanh'
 };
 
 const MAX_LISTED_ISSUES = 3;
