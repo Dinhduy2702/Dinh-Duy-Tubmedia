@@ -1029,10 +1029,14 @@ export class QuickDownloadService {
       }
 
       const errorMessage = error instanceof Error ? error.message : String(error);
-      const isDiskError = isDiskFullOutput(errorMessage);
-      this.failTask(active, errorMessage, isDiskError ? 'DISK_FULL' : null);
-      // 2026-10-24: lỗi thông thường dọn thư mục tạm; riêng đầy ổ thì giữ nguyên .part để tải tiếp sau khi dọn đĩa.
-      await this.cleanupActive(active, !isDiskError);
+      if (isDiskFullOutput(errorMessage)) {
+        this.failTask(active, errorMessage, 'DISK_FULL');
+        await this.cleanupActive(active, false);
+        return;
+      }
+      this.failTask(active, error instanceof Error ? error.message : String(error), null);
+      // 2026-10-24: Tải nhanh không tải tiếp từ phần dở (lượt sau luôn tạo thư mục tạm mới) → lỗi thì dọn ngay.
+      await this.cleanupActive(active, true);
     }
   }
 
