@@ -18,7 +18,6 @@ import {
 import type { AppSettings, MediaInfo, ProcessPriority, QueueJob, ResourceProfile, VerificationLevel } from '@shared/types/domain.js';
 import { audioIssueFor, audioIssueNote, audioNeedsAacForMp4, formatPromisesAudio, type AudioIssue } from '@shared/utils/audio-presence.js';
 import {
-  ALLOW_BELOW_MINIMUM_LABEL,
   downloadPolicyForWorkflow,
   effectiveDownloadBounds,
   formatSelectorForWorkflow,
@@ -69,6 +68,8 @@ import type { ToolManager } from '../tools/tool-manager.js';
 import { parseYtDlpProgress, YTDLP_PROGRESS_FLAGS, YTDLP_UTF8_FLAGS } from './ytdlp-progress.js';
 import { buildSafeYtDlpArguments } from './ytdlp-arguments.js';
 import { ytDlpJsRuntimeArguments } from './ytdlp-js-runtime.js';
+import { probeAvailableFormats, type FormatProbeResult } from './format-probe.js';
+import { diagnoseFormatUnavailable, type FormatUnavailableDiagnosis } from '@shared/utils/format-availability.js';
 // Rà soát toàn diện (2026-09-24) — mục 2.2: logic dựng tham số cookie gộp về dùng chung với các luồng
 // yt-dlp khác (quick-download-command.ts, preview-frame-command.ts) — không đổi hành vi, chỉ tổ chức
 // lại code.
@@ -558,6 +559,57 @@ export class DownloadEngine {
       return candidate;
     }
     return null;
+  }
+
+  /**
+   * 1.8.0 việc C: một lượt đọc danh sách định dạng (cùng cookie/proxy/bộ chạy JS, có timeout) sau lỗi "Requested format
+   * is not available" → chẩn đoán 1 trong 3 nguyên nhân. Không bao giờ ném lỗi: đọc thất bại thì vẫn có câu trường hợp 3.
+   */
+  private async diagnoseUnavailableFormat(input: {
+    jobId: string;
+    projectId: string;
+    url: string;
+    ytdlp: ReturnType<ToolManager['get']>;
+    appSettings: AppSettings;
+    platform: string | null;
+    attachConfiguredCookies: boolean;
+    downloadText: string;
+    signal: AbortSignal;
+  }): Promise<FormatUnavailableDiagnosis> {
+    const jsRuntimeArgs = ytDlpJsRuntimeArguments(input.ytdlp);
+    const extraArgs = [
+      ...(input.attachConfiguredCookies ? buildCookieArguments(input.appSettings) : []),
+      ...(input.appSettings.proxy ? ['--proxy', input.appSettings.proxy] : []),
+      ...jsRuntimeArgs
+    ];
+    const cookieLease =
+      input.attachConfiguredCookies && this.cookieJar ? await this.cookieJar.lease(input.appSettings).catch(() => null) : null;
+    let probe: FormatProbeResult = { summary: null, text: '', exitCode: null };
+    try {
+      probe = await probeAvailableFormats(this.processes, {
+        jobId: input.jobId,
+        projectId: input.projectId,
+        executablePath: input.ytdlp.executablePath ?? 'yt-dlp',
+        url: input.url,
+        extraArgs: cookieLease ? withLeasedCookieFile(extraArgs, cookieLease) : extraArgs,
+        signal: input.signal
+      });
+    } finally {
+      await cookieLease?.release(probe.exitCode === 0 ? 'success' : 'unclassified-failure').catch(() => undefined);
+    }
+    const diagnosis = diagnoseFormatUnavailable({
+      summary: probe.summary,
+      settings: input.appSettings,
+      platform: input.platform,
+      platformLabel: input.platform ? rateLimitPlatformLabel(input.platform) : null,
+      ytdlpVersion: input.ytdlp.version,
+      jsRuntime: jsRuntimeArgs.length > 0,
+      diagnosticText: `${input.downloadText}\n${probe.text}`
+    });
+    return {
+      ...diagnosis,
+      details: { ...diagnosis.details, formatProbeExitCode: probe.exitCode, formatProbeNotes: sanitizeYtDlpDiagnostic(probe.text) }
+    };
   }
 
   private async makeCapCutCompatible(
@@ -1899,12 +1951,26 @@ export class DownloadEngine {
         const requestedFormatUnavailable =
           lower.includes('requested format is not available') ||
           lower.includes('requested format is not available, use --list-formats');
-        if (isCapCutDownloadMode(appSettings.downloadCompatibilityMode) && requestedFormatUnavailable) {
-          throw new DownloadFailedError(
-            `Nguồn không có định dạng video từ 1080p đến mức CapCut đã chọn. Ứng dụng không phóng lớn giả. Bật ô "${ALLOW_BELOW_MINIMUM_LABEL}" trong Cài đặt › Tải danh sách để lấy bản thấp hơn.`,
-            false,
-            failureDetails
-          );
+        if (requestedFormatUnavailable || failure.subtype === 'format_unavailable') {
+          // 1.8.0 việc C: đọc danh sách định dạng thật một lần rồi nói đúng nguyên nhân + các bước tự xử lý.
+          const diagnosis = await this.diagnoseUnavailableFormat({
+            jobId: job.id,
+            projectId: project.id,
+            url: source.originalUrl,
+            ytdlp,
+            appSettings,
+            platform: source.platform ?? null,
+            attachConfiguredCookies,
+            downloadText: text,
+            signal
+          });
+          const details = { ...failureDetails, ...diagnosis.details };
+          this.logger.error('download', 'YTDLP_DOWNLOAD_FAILED', ytDlpFailureLogMessage('format_unavailable', text), {
+            jobId: job.id,
+            projectId: project.id,
+            metadata: details
+          });
+          throw new DownloadFailedError(diagnosis.message, false, details);
         }
 
         const browserCookieDatabaseLocked =

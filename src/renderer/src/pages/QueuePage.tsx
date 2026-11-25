@@ -630,6 +630,7 @@ export function QueuePage({ mode }: { mode: 'downloads' | 'processing' | 'all' }
   const refreshJobs = useAppStore((state) => state.refreshJobs);
   const refreshProjects = useAppStore((state) => state.refreshProjects);
   const setError = useAppStore((state) => state.setError);
+  const setPage = useAppStore((state) => state.setPage);
   const setAttention = useAppStore((state) => state.setAttention);
 
   const [query, setQuery] = useState('');
@@ -1191,6 +1192,11 @@ export function QueuePage({ mode }: { mode: 'downloads' | 'processing' | 'all' }
                           <li key={step}>{step}</li>
                         ))}
                       </ol>
+                    )}
+                    {issue.action && (
+                      <button className="btn btn-small mt-2" onClick={() => setPage(issue.action!.page)}>
+                        {issue.action.label}
+                      </button>
                     )}
                   </div>
                 );

@@ -294,6 +294,7 @@ src/main/download/preview-frame-service.ts
 src/main/download/quick-download-command.ts
 src/main/download/quick-download-service.ts
 src/main/downloader/download-engine.ts
+src/main/downloader/format-probe.ts
 src/main/downloader/ytdlp-arguments.ts
 src/main/downloader/ytdlp-cookie-arguments.ts
 src/main/downloader/ytdlp-js-runtime.ts
@@ -493,6 +494,7 @@ src/shared/utils/failure-reason.ts
 src/shared/utils/ffmpeg-decode-failure.ts
 src/shared/utils/ffmpeg-progress.ts
 src/shared/utils/filename.ts
+src/shared/utils/format-availability.ts
 src/shared/utils/hardware-recommendation.ts
 src/shared/utils/history-export.ts
 src/shared/utils/input-parser.ts
@@ -523,6 +525,7 @@ src/shared/utils/timestamp.ts
 src/shared/utils/tooltip-placement.ts
 src/shared/utils/ui-error.ts
 src/shared/utils/url.ts
+src/shared/utils/user-action-message.ts
 src/shared/utils/validation-message.ts
 src/shared/utils/video-link-filter.ts
 src/shared/utils/video-stream-shortfall.ts
@@ -532,6 +535,9 @@ src/shared/video-link-filter.ts
 TEST_RESULTS.md
 tests/e2e/app.spec.ts
 tests/e2e/helpers/sandbox-cleanup.ts
+tests/fixtures/ytdlp-formats/7tZjr118TBs.json
+tests/fixtures/ytdlp-formats/KBMTSf8_-K4.json
+tests/fixtures/ytdlp-formats/xXUk_wQr0WI.json
 tests/integration/auto-resource-profile-duplicates.test.ts
 tests/integration/cookie-jar-concurrent-rotation.test.ts
 tests/integration/cookie-jar-safety.test.ts
@@ -543,6 +549,7 @@ tests/integration/cookie-rotated-notice.test.ts
 tests/integration/database.test.ts
 tests/integration/download-bot-check.test.ts
 tests/integration/download-existing-file-reuse.test.ts
+tests/integration/download-format-unavailable-v180.test.ts
 tests/integration/download-native-source-quality-v17.test.ts
 tests/integration/download-pacing-args.test.ts
 tests/integration/download-path-too-long.test.ts
@@ -656,6 +663,7 @@ tests/unit/filename.test.ts
 tests/unit/fix10-timestamp-error-detail.test.ts
 tests/unit/fix11-path-and-retry.test.ts
 tests/unit/fix6-diagnostics-ui.test.ts
+tests/unit/format-availability.test.ts
 tests/unit/gitignore-secrets.test.ts
 tests/unit/hardware-cpu-count.test.ts
 tests/unit/hardware-recommendation.test.ts

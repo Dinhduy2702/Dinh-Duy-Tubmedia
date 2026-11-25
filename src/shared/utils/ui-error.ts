@@ -5,6 +5,7 @@ import {
   stripTypedMarker,
   type NoticeTone
 } from './notice-tone.js';
+import { parseUserActionMessage, userActionShortcut, type UserActionShortcut } from './user-action-message.js';
 
 export type UiTone = NoticeTone;
 
@@ -16,6 +17,8 @@ export interface FriendlyIssue {
   tone: UiTone;
   /** Mã lỗi nghiệp vụ khi lỗi đến từ tiến trình chính (có dấu kiểu). */
   code?: string;
+  /** 1.8.0: nút đường tắt mở đúng trang để người dùng tự xử lý (user-action-message.ts). */
+  action?: UserActionShortcut;
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -272,6 +275,20 @@ function classifyIssue(value: unknown): FriendlyIssue {
     };
   }
   const lower = cleaned.toLowerCase();
+  // 1.8.0 việc C: câu dựng bằng formatUserActionMessage (lỗi người dùng tự xử lý được) → tiêu đề + các bước đánh số + nút
+  // mở đúng chỗ, không đoán theo nội dung.
+  const userAction = parseUserActionMessage(cleaned);
+  if (userAction) {
+    const action = userActionShortcut(userAction.steps);
+    return {
+      title: userAction.title,
+      message: userAction.summary,
+      steps: userAction.steps,
+      technical,
+      tone: 'warning',
+      ...(action ? { action } : {})
+    };
+  }
   const update = updaterNotice(cleaned);
   if (update) {
     return {

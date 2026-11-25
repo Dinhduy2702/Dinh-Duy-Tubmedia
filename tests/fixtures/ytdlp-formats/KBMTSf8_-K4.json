@@ -1,0 +1,136 @@
+{
+ "id": "KBMTSf8_-K4",
+ "extractor_key": "Youtube",
+ "formats": [
+  {
+   "format_id": "sb2",
+   "ext": "mhtml",
+   "vcodec": "none",
+   "acodec": "none",
+   "width": 48,
+   "height": 27,
+   "fps": 0.0556792873051225,
+   "format_note": "storyboard"
+  },
+  {
+   "format_id": "sb1",
+   "ext": "mhtml",
+   "vcodec": "none",
+   "acodec": "none",
+   "width": 80,
+   "height": 45,
+   "fps": 0.10077951002227171,
+   "format_note": "storyboard"
+  },
+  {
+   "format_id": "sb0",
+   "ext": "mhtml",
+   "vcodec": "none",
+   "acodec": "none",
+   "width": 160,
+   "height": 90,
+   "fps": 0.10077951002227171,
+   "format_note": "storyboard"
+  },
+  {
+   "format_id": "233",
+   "ext": "mp4",
+   "vcodec": "none",
+   "acodec": null,
+   "width": null,
+   "height": null,
+   "fps": null,
+   "format_note": "Default, low"
+  },
+  {
+   "format_id": "234",
+   "ext": "mp4",
+   "vcodec": "none",
+   "acodec": null,
+   "width": null,
+   "height": null,
+   "fps": null,
+   "format_note": "Default, high"
+  },
+  {
+   "format_id": "139",
+   "ext": "m4a",
+   "vcodec": "none",
+   "acodec": "mp4a.40.5",
+   "width": null,
+   "height": null,
+   "fps": null,
+   "format_note": "low"
+  },
+  {
+   "format_id": "140",
+   "ext": "m4a",
+   "vcodec": "none",
+   "acodec": "mp4a.40.2",
+   "width": null,
+   "height": null,
+   "fps": null,
+   "format_note": "medium"
+  },
+  {
+   "format_id": "251",
+   "ext": "webm",
+   "vcodec": "none",
+   "acodec": "opus",
+   "width": null,
+   "height": null,
+   "fps": null,
+   "format_note": "medium"
+  },
+  {
+   "format_id": "269",
+   "ext": "mp4",
+   "vcodec": "avc1.4D400B",
+   "acodec": "none",
+   "width": 256,
+   "height": 144,
+   "fps": 30,
+   "format_note": null
+  },
+  {
+   "format_id": "230",
+   "ext": "mp4",
+   "vcodec": "avc1.4D401E",
+   "acodec": "none",
+   "width": 640,
+   "height": 358,
+   "fps": 30,
+   "format_note": null
+  },
+  {
+   "format_id": "134",
+   "ext": "mp4",
+   "vcodec": "avc1.4D401E",
+   "acodec": "none",
+   "width": 640,
+   "height": 358,
+   "fps": 30,
+   "format_note": "360p"
+  },
+  {
+   "format_id": "231",
+   "ext": "mp4",
+   "vcodec": "avc1.4D401F",
+   "acodec": "none",
+   "width": 854,
+   "height": 478,
+   "fps": 30,
+   "format_note": null
+  },
+  {
+   "format_id": "135",
+   "ext": "mp4",
+   "vcodec": "avc1.4D401F",
+   "acodec": "none",
+   "width": 854,
+   "height": 478,
+   "fps": 30,
+   "format_note": "480p"
+  }
+ ]
+}
