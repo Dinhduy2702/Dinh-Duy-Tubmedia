@@ -79,6 +79,7 @@ function validVideoFilterId(value: string | null | undefined): string | null {
     .replace(/[^A-Za-z0-9_-]+$/g, '');
 
   if (id.length < 4 || id.length > 160) return null;
+  if (/^\d+$/.test(id) && id.length < 8) return null;
   if (/^(watch|video|videos|shorts|live|embed|reel|status)$/i.test(id)) return null;
   return id;
 }
@@ -181,6 +182,7 @@ export function combineVideoFilterLinks(
 
   const unique = new Map<string, VideoLinkFilterLink>();
   for (const item of combined) {
+    if (/^\d+$/.test(item.id) && item.id.length < 8 && !item.title) continue;
     const key = item.id.toLowerCase();
     const current = unique.get(key);
     if (!current || (!current.title && item.title)) unique.set(key, item);
@@ -234,6 +236,7 @@ export function matchVideoByLinks(
   allowTitle: boolean
 ): VideoLinkMatch | null {
   for (const link of links) {
+    if (/^\d+$/.test(link.id) && link.id.length < 8) continue;
     if (videoFilenameContainsId(video.stem, link.id)) return { link, reason: 'ID' };
   }
 

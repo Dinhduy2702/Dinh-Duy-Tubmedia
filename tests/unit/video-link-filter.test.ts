@@ -87,4 +87,42 @@ describe('video link filter', () => {
     );
     expect(match?.reason).toBe('TITLE');
   });
+
+  it('chặn tách nhầm ID số ngắn dưới 8 chữ số từ URL và không khớp nhầm tên tệp theo số ngắn', () => {
+    expect(directVideoFilterIds('https://example.com/2025/04/1234567')).toEqual([]);
+    expect(directVideoFilterIds('https://vimeo.com/123456')).toEqual([]);
+    expect(directVideoFilterIds('https://example.com/watch?v=12345')).toEqual([]);
+    // ID chữ+số hoặc ID số >= 8 chữ số vẫn được nhận
+    expect(directVideoFilterIds('https://example.com/videos/clip99a')).toContain('clip99a');
+    expect(directVideoFilterIds('https://vimeo.com/12345678')).toContain('12345678');
+
+    const links = combineVideoFilterLinks(
+      ['https://example.com/clip/1234567'],
+      [{ id: '12345', title: '', url: 'https://vimeo.com/12345', platform: 'Vimeo' }]
+    );
+    expect(
+      matchVideoByLinks(
+        {
+          fullPath: 'E:/video/clip 1234567.mp4',
+          relativePath: 'clip 1234567.mp4',
+          name: 'clip 1234567.mp4',
+          stem: 'clip 1234567'
+        },
+        links,
+        false
+      )
+    ).toBeNull();
+    expect(
+      matchVideoByLinks(
+        {
+          fullPath: 'E:/video/clip 12345.mp4',
+          relativePath: 'clip 12345.mp4',
+          name: 'clip 12345.mp4',
+          stem: 'clip 12345'
+        },
+        links,
+        false
+      )
+    ).toBeNull();
+  });
 });
