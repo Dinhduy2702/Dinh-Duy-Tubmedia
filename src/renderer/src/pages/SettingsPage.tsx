@@ -45,6 +45,8 @@ import {
   withSavedSelectOption,
   type SelectOption
 } from '@shared/utils/settings-select-options';
+import { hasUnsavedSettingsChanges, mergeExternalSettingsUpdate } from '@shared/utils/settings-draft';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CookieManagerDialog } from '../components/CookieManagerDialog';
 import { FolderField } from '../components/FolderField';
 import { InfoDisclosure } from '../components/InfoDisclosure';
@@ -66,35 +68,64 @@ export function SettingsPage(): React.JSX.Element | null {
   const setSettings = useAppStore((state) => state.setSettings);
   const setError = useAppStore((state) => state.setError);
   const setAttention = useAppStore((state) => state.setAttention);
+  const setPage = useAppStore((state) => state.setPage);
+  const pendingNavigationPage = useAppStore((state) => state.pendingNavigationPage);
+  const setSettingsDirty = useAppStore((state) => state.setSettingsDirty);
+  const cancelPendingNavigation = useAppStore((state) => state.cancelPendingNavigation);
   const [settings, setLocal] = useState<AppSettings | null>(current);
   const [section, setSection] = useState<Section>('Chung');
   const [saving, setSaving] = useState(false);
   const [settingsAction, setSettingsAction] = useState<'detect' | 'recommend' | 'apply' | null>(null);
   const [recommended, setRecommended] = useState<ResourceProfile | null>(null);
   const lastSaveFailed = useRef(false);
+  const prevCurrentRef = useRef<AppSettings | null>(current);
   const concurrency = hardware ? recommendDownloadConcurrency(hardware) : null;
   const currentPlan = concurrency && settings
     ? planForListCount(concurrency, settings.downloadLaneCount, settings.downloadVerifyEntireFile)
     : null;
+  const isDirty = hasUnsavedSettingsChanges(settings, current);
 
-  useEffect(() => setLocal(current), [current]);
+  useEffect(() => {
+    if (!current) {
+      prevCurrentRef.current = null;
+      return;
+    }
+    const prev = prevCurrentRef.current;
+    prevCurrentRef.current = current;
+    setLocal((local) => mergeExternalSettingsUpdate(local, prev, current));
+  }, [current]);
+
+  useEffect(() => {
+    setSettingsDirty(isDirty);
+  }, [isDirty, setSettingsDirty]);
+
+  useEffect(() => {
+    return () => {
+      setSettingsDirty(false);
+      cancelPendingNavigation();
+    };
+  }, [cancelPendingNavigation, setSettingsDirty]);
   if (!settings) return null;
 
   const patch: Patch = (key, value) => setLocal((snapshot) => snapshot ? { ...snapshot, [key]: value } : snapshot);
-  const save = async (): Promise<void> => {
+  const save = async (): Promise<boolean> => {
     setSaving(true);
     try {
       const next = await window.desktop.settings.update(settings);
+      prevCurrentRef.current = next;
       setSettings(next);
+      setLocal(next);
       // Lỗi cố định của lần lưu trước còn treo trên màn hình sẽ che mất thông báo thành công này.
       if (lastSaveFailed.current) {
         lastSaveFailed.current = false;
         setError(null);
       }
       setAttention({ id: createUiEventId('settings-save'), severity: 'success', title: 'Đã lưu cài đặt', message: 'Các thiết lập mới sẽ được áp dụng cho tác vụ tiếp theo.', sticky: false });
+      return true;
     } catch (error) {
       lastSaveFailed.current = true;
       setError(messageOf(error));
+      return false;
     }
     finally { setSaving(false); }
   };
@@ -162,6 +193,36 @@ export function SettingsPage(): React.JSX.Element | null {
       <button className="btn btn-primary" onClick={() => void save()} disabled={saving}><Save size={17}/>{saving ? 'Đang lưu...' : 'Lưu cài đặt'}</button>
     </div>
 
+    {isDirty && (
+      <div
+        className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3 text-sm"
+        data-testid="settings-unsaved-bar"
+        role="status"
+        style={{ borderColor: 'var(--warn)', background: 'color-mix(in srgb,var(--warn) 10%,var(--panel2))' }}
+      >
+        <div>
+          <b>Bạn có thay đổi cài đặt chưa lưu.</b>{' '}
+          <span style={{ color: 'var(--muted)' }}>Nhấn Lưu cài đặt để áp dụng cho các tác vụ tiếp theo.</span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="btn btn-small"
+            disabled={saving}
+            onClick={() => {
+              if (current) setLocal(current);
+            }}
+          >
+            Hủy thay đổi
+          </button>
+          <button type="button" className="btn btn-primary btn-small" disabled={saving} onClick={() => void save()}>
+            <Save size={15} />
+            Lưu ngay
+          </button>
+        </div>
+      </div>
+    )}
+
     <div className="settings-layout mt-5 grid gap-4 2xl:grid-cols-[250px_1fr_360px]">
       <aside className="card settings-nav h-fit p-2">
         {sections.map((item) => <button key={item} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-bold" style={section === item ? { background: 'color-mix(in srgb,var(--accent) 16%,var(--panel))', color: 'var(--accent)' } : { color: 'var(--muted)' }} onClick={() => setSection(item)}><SectionIcon name={item}/>{item}</button>)}
@@ -190,6 +251,36 @@ export function SettingsPage(): React.JSX.Element | null {
         </details>
       </aside>
     </div>
+
+    <ConfirmDialog
+      open={pendingNavigationPage !== null}
+      title="Bạn có thay đổi cài đặt chưa lưu"
+      message="Nếu rời khỏi trang Cài đặt ngay bây giờ, các chỉnh sửa chưa lưu sẽ bị mất."
+      cancelLabel="Ở lại trang Cài đặt"
+      secondaryLabel="Bỏ thay đổi và chuyển"
+      secondaryDanger
+      confirmLabel="Lưu và chuyển trang"
+      busy={saving}
+      onCancel={cancelPendingNavigation}
+      onSecondary={() => {
+        const nextPage = pendingNavigationPage;
+        if (current) setLocal(current);
+        setSettingsDirty(false);
+        cancelPendingNavigation();
+        if (nextPage) setPage(nextPage, { force: true });
+      }}
+      onConfirm={() => {
+        const nextPage = pendingNavigationPage;
+        void save().then((ok) => {
+          if (ok && nextPage) {
+            setSettingsDirty(false);
+            setPage(nextPage, { force: true });
+          } else if (!ok) {
+            cancelPendingNavigation();
+          }
+        });
+      }}
+    />
   </div>;
 }
 

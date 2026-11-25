@@ -79,8 +79,13 @@ interface State {
   updateStatus: AppUpdateStatus | null;
   /** 2026-10-24: người dùng đã mở trang Cập nhật trong phiên này → không hiện lại thông báo cập nhật tới lần mở app sau. */
   updateCenterVisited: boolean;
+  /** #27: Cài đặt đang có thay đổi chưa lưu → giữ người dùng lại hỏi xác nhận trước khi rời trang. */
+  settingsDirty: boolean;
+  pendingNavigationPage: PageId | null;
   bootstrap(): Promise<void>;
-  setPage(page: PageId): void;
+  setPage(page: PageId, options?: { force?: boolean }): void;
+  setSettingsDirty(dirty: boolean): void;
+  cancelPendingNavigation(): void;
   selectProject(id: string | null): void;
   refreshProjects(): Promise<void>;
   refreshJobs(): Promise<void>;
@@ -449,6 +454,8 @@ export const useAppStore = create<State>((set, get) => ({
   notificationCenterOpen: false,
   updateStatus: null,
   updateCenterVisited: false,
+  settingsDirty: false,
+  pendingNavigationPage: null,
   bootstrap: async () => {
     set({ loading: true, error: null });
     try {
@@ -484,15 +491,26 @@ export const useAppStore = create<State>((set, get) => ({
       set({ loading: false, error });
     }
   },
-  setPage: (page) =>
+  setPage: (page, options) =>
     set((state) => {
-      if (page !== 'updates') return { page };
+      if (!options?.force && state.page === 'settings' && state.settingsDirty && page !== 'settings') {
+        return { pendingNavigationPage: page };
+      }
+      if (page !== 'updates') return { page, pendingNavigationPage: null };
       // Vào trang Cập nhật: đóng luôn thông báo cập nhật đang hiện / đang chờ hiện, và không hiện lại trong phiên này.
       const current = isUpdateAttention(state.attention) ? null : state.attention;
       const queue = state.attentionQueue.filter((notice) => !isUpdateAttention(notice));
       const [next, ...rest] = current ? [current, ...queue] : queue;
-      return { page, updateCenterVisited: true, attention: next ?? null, attentionQueue: rest };
+      return {
+        page,
+        pendingNavigationPage: null,
+        updateCenterVisited: true,
+        attention: next ?? null,
+        attentionQueue: rest
+      };
     }),
+  setSettingsDirty: (settingsDirty) => set({ settingsDirty }),
+  cancelPendingNavigation: () => set({ pendingNavigationPage: null }),
   selectProject: (id) => set({ selectedProjectId: id, page: get().page }),
   refreshProjects: async () => set({ projects: await window.desktop.projects.list() }),
   refreshJobs: async () => {
