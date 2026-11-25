@@ -315,6 +315,7 @@ src/main/files/temporary-cleanup.ts
 src/main/files/zip-writer.ts
 src/main/index.ts
 src/main/input/input-service.ts
+src/main/ipc/open-local-path.ts
 src/main/ipc/register-ipc.ts
 src/main/ipc/wire-error.ts
 src/main/logging/diagnostic-exporter.ts
@@ -507,6 +508,7 @@ src/shared/utils/machine-threads.ts
 src/shared/utils/media-info-format.ts
 src/shared/utils/merge-lane-visibility.ts
 src/shared/utils/merge-target.ts
+src/shared/utils/merge-timeline-preview.ts
 src/shared/utils/normalization-match.ts
 src/shared/utils/notice-issue.ts
 src/shared/utils/notice-tone.ts
@@ -521,6 +523,7 @@ src/shared/utils/resource-memory.ts
 src/shared/utils/retry.ts
 src/shared/utils/safe-json.ts
 src/shared/utils/secret-redaction.ts
+src/shared/utils/settings-draft.ts
 src/shared/utils/settings-select-options.ts
 src/shared/utils/sha256-sums.ts
 src/shared/utils/shared-folder-policy.ts
@@ -534,6 +537,7 @@ src/shared/utils/user-action-message.ts
 src/shared/utils/validation-message.ts
 src/shared/utils/video-link-filter.ts
 src/shared/utils/video-stream-shortfall.ts
+src/shared/utils/workbench-draft.ts
 src/shared/utils/youtube-url-validation.ts
 src/shared/utils/ytdlp-notes.ts
 src/shared/video-link-filter.ts
@@ -656,6 +660,7 @@ tests/unit/diagnostic-policy.test.ts
 tests/unit/diagnostics-recent-error-cause.test.ts
 tests/unit/disk-full-recovery.test.ts
 tests/unit/disk-shortfall-format.test.ts
+tests/unit/download-lane-visibility-v180.test.ts
 tests/unit/download-pacing.test.ts
 tests/unit/download-path-budget.test.ts
 tests/unit/download-performance.test.ts
@@ -730,6 +735,7 @@ tests/unit/merge-remux-verify-level.test.ts
 tests/unit/merge-target-and-anullsrc-v180.test.ts
 tests/unit/merge-target.test.ts
 tests/unit/merge-timeline-reorder.test.ts
+tests/unit/merge-timeline-state-v180.test.ts
 tests/unit/merge-uniform-transcode-and-match-v180.test.ts
 tests/unit/merge-visual-boundary-hotfix11.test.ts
 tests/unit/motion-system.test.ts
@@ -752,6 +758,7 @@ tests/unit/notification-center.test.ts
 tests/unit/notification-policy.test.ts
 tests/unit/notification-spam-lane-count.test.ts
 tests/unit/nvenc-diagnosis.test.ts
+tests/unit/open-path-error-v180.test.ts
 tests/unit/open-path-policy.test.ts
 tests/unit/output-path-containment.test.ts
 tests/unit/platform-rate-limit-gate.test.ts
@@ -786,6 +793,7 @@ tests/unit/quick-download-sync.test.ts
 tests/unit/quick-download-temp-cleanup.test.ts
 tests/unit/quick-download-video-only.test.ts
 tests/unit/quick-download.test.ts
+tests/unit/quick-stats-and-vi-labels-v180.test.ts
 tests/unit/rate-limit-backoff.test.ts
 tests/unit/recycle-bin-capacity-v15.test.ts
 tests/unit/release-update-system.test.ts
@@ -797,11 +805,13 @@ tests/unit/runtime-performance-policy.test.ts
 tests/unit/runtime-recovery-upgrade.test.ts
 tests/unit/safe-json.test.ts
 tests/unit/save-text-file-policy.test.ts
+tests/unit/schema-notice-and-remove-v180.test.ts
 tests/unit/secret-redaction.test.ts
 tests/unit/security-guard-open-external.test.ts
 tests/unit/settings-policy.test.ts
 tests/unit/settings-save-stale-error.test.ts
 tests/unit/settings-select-options.test.ts
+tests/unit/settings-unsaved-and-merge-v180.test.ts
 tests/unit/sha256-sums.test.ts
 tests/unit/shared-folder-policy.test.ts
 tests/unit/shutdown-sequence.test.ts
@@ -841,6 +851,7 @@ tests/unit/tool-update-rate-limit.test.ts
 tests/unit/tooltip-placement.test.ts
 tests/unit/typography-system.test.ts
 tests/unit/ui-density.test.ts
+tests/unit/ui-perf-and-quick-time-v180.test.ts
 tests/unit/ui-screenshot-script.test.ts
 tests/unit/unhandled-call-sites.test.ts
 tests/unit/unified-download-progress-1.3.0.test.ts
@@ -852,6 +863,7 @@ tests/unit/url.test.ts
 tests/unit/user-facing-notifications.test.ts
 tests/unit/user-runtime-hardening-r55.test.ts
 tests/unit/validation-message.test.ts
+tests/unit/validation-preview-ui-error-v180.test.ts
 tests/unit/version-tools.test.ts
 tests/unit/video-duration-input.test.ts
 tests/unit/video-duration-persistence.test.ts
@@ -861,6 +873,7 @@ tests/unit/video-stream-shortfall.test.ts
 tests/unit/weak-machine-merge-threads-v4.test.ts
 tests/unit/window-close-policy.test.ts
 tests/unit/windows-process-control.test.ts
+tests/unit/workbench-draft-autosave-v180.test.ts
 tests/unit/workbench-storage.test.ts
 tests/unit/workflow-state.test.ts
 tests/unit/youtube-cookie-check.test.ts
