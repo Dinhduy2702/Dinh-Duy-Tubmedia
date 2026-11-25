@@ -75,6 +75,7 @@ import {
 import { InvalidInputError, ProcessCancelledError, ProcessingFailedError, type AppError } from '@shared/errors/app-errors.js';
 import { computeBackgroundEncodeCpuCapPercent, editEncodeLimit } from '@shared/utils/capcut-encode.js';
 import { buildCleanupProtection } from '../files/cleanup-protection.js';
+import { mergeItemMatchKey } from '@shared/utils/merge-timeline-preview.js';
 import { cleanupTemporaryArtifacts } from '../files/temporary-cleanup.js';
 import { executePostMergeSourceCleanup } from '../files/post-merge-source-cleanup.js';
 import { sanitizeNullableSeconds, sanitizeProgress } from '@shared/utils/progress-policy.js';
@@ -3688,6 +3689,7 @@ export class QueueManager {
         outputFolder: project.outputFolder,
         exportTimelineTxt: project.exportTimelineTxt,
         timelineOnly,
+        mergedItemKeys: items.map(mergeItemMatchKey),
         mergeRequestSignature: options.requestSignature ?? null,
         trustedOutputPath: options.trustedOutputPath ?? null,
         legacyPendingPaths: options.legacyPendingPaths ?? [],

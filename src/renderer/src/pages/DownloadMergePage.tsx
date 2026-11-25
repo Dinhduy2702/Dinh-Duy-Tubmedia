@@ -81,6 +81,10 @@ import { FriendlyIssueCard } from '../components/FriendlyIssueCard';
 import { audioModeLabel, jobTypeLabel, statusLabel } from '../utils/vi-labels';
 import { progressFillStyle } from '../utils/progress-style';
 import { hiddenLanesNote, hiddenLanesWithData, laneFormWhenShown } from '@shared/utils/merge-lane-visibility';
+import {
+  doesTimelineMatchCurrentLinks,
+  reorderLinksTextPreservingComments
+} from '@shared/utils/merge-timeline-preview';
 import { mergeLoadedLaneForms } from '@shared/utils/workbench-draft';
 
 interface MergeForm {
@@ -382,7 +386,7 @@ function formatBytes(bytes: number): string {
 }
 
 function MergeDetailedProgress({ jobs, timelineOnly }: { jobs: QueueJob[]; timelineOnly: boolean }): React.JSX.Element {
-  const job = jobs.find((item) => item.type === 'merge');
+  const job = jobs.filter((item) => item.type === 'merge').at(-1);
   const stage = jobInputText(job, 'progressStage') ?? (job ? statusLabel(job.status) : 'Chờ tạo tác vụ ghép');
   const elapsed = numberFromJob(job, 'progressElapsedSeconds');
   const processed = numberFromJob(job, 'progressProcessedSeconds');
@@ -500,7 +504,10 @@ export function MergeProductionPanel({
    * từng dòng — chỉ đổi thứ tự). Không có thì danh sách hiện chỉ để xem, giữ hành vi cũ. */
   onReorder?: (nextLinksText: string) => void;
 }): React.JSX.Element {
-  const items = parseInputText(form.linksText).filter((item) => item.validity !== 'invalid');
+  const items = useMemo(
+    () => parseInputText(form.linksText).filter((item) => item.validity !== 'invalid'),
+    [form.linksText]
+  );
   // dragIndex chỉ để TÔ hiệu ứng (opacity dòng đang kéo) — không dùng để tính thứ tự khi thả, vì state
   // React có thể chưa kịp cập nhật giữa dragstart và drop (nhất là khi thả rất nhanh). Vị trí nguồn khi
   // thả lấy trực tiếp từ event.dataTransfer, không phụ thuộc thời điểm re-render.
@@ -510,22 +517,18 @@ export function MergeProductionPanel({
 
   function reorderTo(sourceIndex: number, targetIndex: number): void {
     if (!onReorder || Number.isNaN(sourceIndex) || sourceIndex === targetIndex) return;
-    const next = items.map((item) => item.originalText);
-    const [moved] = next.splice(sourceIndex, 1);
-    if (moved === undefined) return;
-    next.splice(targetIndex, 0, moved);
-    onReorder(next.join('\n'));
+    onReorder(reorderLinksTextPreservingComments(form.linksText, items, sourceIndex, targetIndex));
   }
   const downloadJobs = jobs.filter((job) => job.type === 'download');
   const clipJobs = jobs.filter((job) => job.type === 'clip' || job.type === 'normalize');
-  const mergeJob = jobs.find((job) => job.type === 'merge');
+  const mergeJob = jobs.filter((job) => job.type === 'merge').at(-1);
   const timelineOnly = form.timelineOnly || mergeJob?.input.timelineOnly === true;
   /* TUBMEDIA VERIFIED MERGE RECOVERY HOTFIX12 */
   const recoveryMode = jobInputText(mergeJob, 'mergeRecoveryMode');
   const resultMessage = jobInputText(mergeJob, 'resultMessage');
   const savedTimelineTxt = jobInputText(mergeJob, 'timelineTxt');
   const timelineRows = timelineRowsOf(mergeJob);
-  const hasActualTimeline = timelineRows.length > 0;
+  const hasActualTimeline = doesTimelineMatchCurrentLinks(items, mergeJob, downloadJobs, timelineRows);
   const safeName = sanitizeFilename(form.finalFileName.replace(/\.mp4$/i, ''), 'Thành phẩm');
   const video =
     jobInputText(mergeJob, 'outputPath') ??

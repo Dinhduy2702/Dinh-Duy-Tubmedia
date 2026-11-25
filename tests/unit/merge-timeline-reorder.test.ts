@@ -24,15 +24,12 @@ describe('Kéo-thả sắp lại thứ tự ghép (GĐ 2b) — Ghép theo Timeli
     expect(panel).toContain('<GripVertical');
   });
 
-  it('chỉ đổi THỨ TỰ dòng (item.originalText), không đổi nội dung/cú pháp từng dòng hay cách phân tích (parseInputText)', () => {
+  it('chỉ đổi THỨ TỰ dòng (item.originalText), giữ ghi chú và không đổi cách phân tích (parseInputText)', () => {
     const panel = block('function MergeProductionPanel');
     expect(panel).toContain('function reorderTo(sourceIndex: number, targetIndex: number): void {');
-    expect(panel).toContain('const next = items.map((item) => item.originalText);');
-    expect(panel).toContain('const [moved] = next.splice(sourceIndex, 1);');
-    expect(panel).toContain('next.splice(targetIndex, 0, moved);');
-    expect(panel).toContain("onReorder(next.join('\\n'));");
-    // items vẫn lấy từ parseInputText(form.linksText) y hệt trước đây — không viết lại logic phân tích.
-    expect(panel).toContain('const items = parseInputText(form.linksText).filter((item) => item.validity !== \'invalid\');');
+    expect(panel).toContain('reorderLinksTextPreservingComments(form.linksText, items, sourceIndex, targetIndex)');
+    // items vẫn lấy từ parseInputText(form.linksText) y hệt trước đây (bọc useMemo) — không viết lại logic phân tích.
+    expect(panel).toContain("parseInputText(form.linksText).filter((item) => item.validity !== 'invalid')");
   });
 
   it('lấy vị trí nguồn từ event.dataTransfer khi thả (KHÔNG đọc dragIndex trong React state) — tránh sai do state chưa kịp cập nhật giữa dragstart và drop', () => {

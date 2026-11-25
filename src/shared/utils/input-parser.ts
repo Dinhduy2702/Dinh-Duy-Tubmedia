@@ -77,7 +77,11 @@ export function parseInputText(text: string): ParsedInputLine[] {
       continue;
     }
     for (const url of urls) {
-      const parsed = parseOne(raw, index + 1, url.replace(/[),.;]+$/, ''));
+      const cleanUrl = url.replace(/[),.;]+$/, '');
+      const parsed = parseOne(raw, index + 1, cleanUrl);
+      if (urls.length > 1) {
+        parsed.originalText = parsed.note ? `${cleanUrl} ${parsed.note}` : cleanUrl;
+      }
       if (parsed.normalizedUrl) {
         const duplicateKey = parsed.mediaId && parsed.platform && parsed.extractorKey
           ? `${parsed.platform}:${parsed.extractorKey}:${parsed.mediaId}`
