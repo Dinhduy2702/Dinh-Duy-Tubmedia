@@ -137,10 +137,25 @@ function logOpenExternalFailure(error: unknown): void {
   context?.logger.warn('app', 'OPEN_EXTERNAL_FAILED', error instanceof Error ? error.message : String(error));
 }
 
+function stopSchedulers(): void {
+  if (statsTimer) {
+    clearInterval(statsTimer);
+    statsTimer = null;
+  }
+  if (updateTimer) {
+    clearInterval(updateTimer);
+    updateTimer = null;
+  }
+  if (updateInitialTimer) {
+    clearTimeout(updateInitialTimer);
+    updateInitialTimer = null;
+  }
+}
+
 async function requestClose(window: BrowserWindow): Promise<void> {
   if (!context || allowWindowClose) return;
   const settings = context.settings.get();
-  const active = context.queue.activeCount() + (context.quickDownload.isActive() ? 1 : 0);
+  const active = context.activeWorkCount();
   let action = decideCloseAction({ closeBehavior: settings.closeBehavior, activeCount: active });
 
   if (action === 'hide-to-tray') {
@@ -260,7 +275,7 @@ async function runBackgroundUpdateChecks(current: AppContext): Promise<void> {
 }
 
 function syncPowerSaveBlocker(current: AppContext): void {
-  const hasActiveWork = current.queue.activeCount() > 0 || current.quickDownload.isActive();
+  const hasActiveWork = current.activeWorkCount() > 0;
   if (hasActiveWork && powerSaveBlockerId === null) {
     powerSaveBlockerId = powerSaveBlocker.start('prevent-app-suspension');
     current.logger.info(
@@ -283,6 +298,7 @@ function syncPowerSaveBlocker(current: AppContext): void {
 
 function startStatsTimer(): void {
   statsTimer = setInterval(() => {
+    if (shutdownStarted) return;
     const currentWindow = mainWindow;
     const currentContext = context;
     if (!currentContext) return;
@@ -317,6 +333,7 @@ function startStatsTimer(): void {
  */
 function startUpdateScheduler(current: AppContext): void {
   const check = (): void => {
+    if (shutdownStarted) return;
     current.appUpdates.refreshIfStale(MIN_BACKGROUND_CHECK_GAP_MS);
   };
   updateInitialTimer = setTimeout(check, 25_000);
@@ -339,18 +356,24 @@ function initializeApplication(): void {
     shutdownStarted = true;
     shutdownMode = 'preserve';
     allowWindowClose = true;
-    if (statsTimer) clearInterval(statsTimer);
-    if (updateTimer) clearInterval(updateTimer);
-    if (updateInitialTimer) clearTimeout(updateInitialTimer);
+    stopSchedulers();
     // Cùng các bước có giới hạn thời gian như khi thoát thường: một bước treo không được chặn việc cài bản cập nhật.
     const trail = createShutdownTrail(activeContext.userData);
     trail('BẮT ĐẦU THOÁT để cài bản cập nhật');
-    const report = await runShutdownSequence(buildShutdownSteps(activeContext, true), {
-      totalTimeoutMs: SHUTDOWN_TOTAL_TIMEOUT_MS,
-      trail
-    });
-    trail(`THOÁT XONG (cài bản cập nhật) sau ${report.totalMs} ms`);
-    tray = null;
+    try {
+      const report = await runShutdownSequence(buildShutdownSteps(activeContext, true), {
+        totalTimeoutMs: SHUTDOWN_TOTAL_TIMEOUT_MS,
+        trail
+      });
+      trail(`THOÁT XONG (cài bản cập nhật) sau ${report.totalMs} ms`);
+    } finally {
+      try {
+        activeContext.database.close();
+      } catch {
+        // ignore
+      }
+      tray = null;
+    }
   };
   const current = new AppContext(prepareForAppUpdate);
   context = current;
@@ -380,6 +403,7 @@ function initializeApplication(): void {
     // Chỉ khi chạy e2e từ mã nguồn (mặc định 0): mô phỏng kết nối công cụ lâu lúc mở app.
     .then(() => (e2eQueueStartDelayMs > 0 ? new Promise<void>((resolve) => setTimeout(resolve, e2eQueueStartDelayMs)) : undefined))
     .finally(() => {
+      if (shutdownStarted) return;
       // Hàng đợi chỉ được khôi phục sau khi trạng thái công cụ đã được xác định.
       // Cổng canExecute trong QueueManager tiếp tục giữ tác vụ nếu công cụ bắt buộc vẫn thiếu.
       // start() giữ mọi tác vụ dở ở trạng thái tạm dừng và chờ người dùng chọn Tiếp tục (trừ khi bật tự tiếp tục).
@@ -444,7 +468,25 @@ function initializeApplication(): void {
   });
 }
 
-const lock = isE2E || app.requestSingleInstanceLock();
+/**
+ * Khi khởi động lại ngay sau cập nhật (--force-run) hoặc sau khôi phục sao lưu (--relaunch),
+ * tiến trình cũ có thể còn đang đóng vài trăm mili-giây nên thử xin khóa đơn thể nhiều lần.
+ */
+function acquireSingleInstanceLock(): boolean {
+  if (isE2E) return true;
+  const isRelaunch = process.argv.includes('--force-run') || process.argv.includes('--relaunch');
+  const maxAttempts = isRelaunch ? 12 : 1;
+  const waitBuffer = isRelaunch ? new Int32Array(new SharedArrayBuffer(4)) : null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    if (app.requestSingleInstanceLock()) return true;
+    if (attempt < maxAttempts && waitBuffer) {
+      Atomics.wait(waitBuffer, 0, 0, 250);
+    }
+  }
+  return false;
+}
+
+const lock = acquireSingleInstanceLock();
 if (!lock) {
   app.quit();
 } else {
@@ -474,9 +516,7 @@ app.on('before-quit', (event: ElectronEvent) => {
   shutdownStarted = true;
   const current = context;
   context = null;
-  if (statsTimer) clearInterval(statsTimer);
-  if (updateTimer) clearInterval(updateTimer);
-  if (updateInitialTimer) clearTimeout(updateInitialTimer);
+  stopSchedulers();
 
   // Sau phát hành 1.6.0 (2026-10-06): bấm X mà app không thoát hẳn. Mỗi bước dọn dẹp giờ có giới hạn thời gian (bước
   // treo thì chuyển sang bước sau — bước giết tiến trình con vẫn chạy), tổng tối đa 15 giây, và mọi diễn biến ghi
@@ -485,6 +525,11 @@ app.on('before-quit', (event: ElectronEvent) => {
   trail(`BẮT ĐẦU THOÁT (chế độ ${shutdownMode}, ${current.queue.activeCount()} tác vụ hàng đợi đang chạy)`);
   const watchdog = setTimeout(() => {
     trail(`QUÁ ${SHUTDOWN_WATCHDOG_MS} ms mà chuỗi dọn dẹp chưa trả về — BUỘC THOÁT`);
+    try {
+      current.database.close();
+    } catch {
+      // ignore
+    }
     app.exit(0);
   }, SHUTDOWN_WATCHDOG_MS);
 
@@ -498,6 +543,11 @@ app.on('before-quit', (event: ElectronEvent) => {
     } catch (error) {
       trail(`LỖI ngoài dự kiến khi dọn dẹp: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
+      try {
+        current.database.close();
+      } catch {
+        // ignore
+      }
       clearTimeout(watchdog);
       app.exit(0);
     }

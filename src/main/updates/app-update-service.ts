@@ -1,5 +1,5 @@
 import { app, type BrowserWindow } from 'electron';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import type { AppUpdater, ProgressInfo, UpdateInfo } from 'electron-updater';
@@ -112,6 +112,7 @@ export class AppUpdateService {
   private feedUnavailableForSession = false;
   private feedUnavailableLogged = false;
   private configuredChannel = '';
+  private downloadedInstallerPath: string | null = null;
   private readonly activeWorkSummary: () => AppUpdateActiveWork;
 
   public constructor(
@@ -227,6 +228,8 @@ export class AppUpdateService {
     });
     updater.on('update-downloaded', (info: UpdateInfo) => {
       const currentVersion = app.getVersion();
+      const downloadedFile = (info as UpdateInfo & { downloadedFile?: unknown }).downloadedFile;
+      this.downloadedInstallerPath = typeof downloadedFile === 'string' && downloadedFile.trim() ? downloadedFile.trim() : null;
 
       if (!isNewerAppVersion(info.version, currentVersion)) {
         const message = `Đã bỏ qua gói Tubmedia ${info.version} vì phiên bản đang chạy là ${currentVersion}.`;
@@ -533,9 +536,14 @@ export class AppUpdateService {
       message: 'Đang sao lưu và chuẩn bị khởi động lại...'
     });
     try {
+      const updater = this.getUpdater();
+      if (this.downloadedInstallerPath) {
+        if (!existsSync(this.downloadedInstallerPath) || statSync(this.downloadedInstallerPath).size <= 0) {
+          throw new Error(`Tệp bộ cài đã tải không còn tồn tại hoặc rỗng: ${this.downloadedInstallerPath}`);
+        }
+      }
       await this.backups.create(undefined, false, 'update');
       await this.prepareForInstall();
-      const updater = this.getUpdater();
       // electron-updater 6.x positional API: isSilent=true, isForceRunAfter=true.
       // The NSIS installer also recognizes --updated and forces silent mode as a second safety layer.
       updater.quitAndInstall(true, true);

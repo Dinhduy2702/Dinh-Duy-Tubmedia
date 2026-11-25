@@ -608,6 +608,7 @@ tests/integration/workbench-draft-busy-guard.test.ts
 tests/integration/ytdlp-killed-download-error.test.ts
 tests/integration/ytdlp-mei-temp-cleanup.test.ts
 tests/unit/active-download-workers-label.test.ts
+tests/unit/active-work-guard-v180.test.ts
 tests/unit/adapt-to-user-machine.test.ts
 tests/unit/adaptive-download.test.ts
 tests/unit/app-update-restart-flow.test.ts
@@ -616,6 +617,7 @@ tests/unit/apply-temp-folder.test.ts
 tests/unit/attempt-display.test.ts
 tests/unit/audio-presence.test.ts
 tests/unit/auto-error-report.test.ts
+tests/unit/backup-restore-hardening-v180.test.ts
 tests/unit/batch-error-aggregation-r18.test.ts
 tests/unit/brand-layout.test.ts
 tests/unit/brand-logo.test.ts
@@ -638,6 +640,7 @@ tests/unit/cookie-rotated-guidance.test.ts
 tests/unit/core-resilience-r35.test.ts
 tests/unit/csv-export.test.ts
 tests/unit/cut-suggestion.test.ts
+tests/unit/database-busy-timeout.test.ts
 tests/unit/detached-task.test.ts
 tests/unit/diagnostic-live-only.test.ts
 tests/unit/diagnostic-policy.test.ts
@@ -676,12 +679,15 @@ tests/unit/format-probe-guard.test.ts
 tests/unit/gitignore-secrets.test.ts
 tests/unit/hardware-cpu-count.test.ts
 tests/unit/hardware-recommendation.test.ts
+tests/unit/hardware-settings-hardening-v180.test.ts
 tests/unit/hdd-anti-lag-wiring.test.ts
 tests/unit/hdd-anti-lag.test.ts
 tests/unit/history-export.test.ts
 tests/unit/independent-workflow-accordion-1.3.0.test.ts
+tests/unit/index-lifecycle-hardening-v180.test.ts
 tests/unit/inject-changelog-release-notes.test.ts
 tests/unit/input-parser.test.ts
+tests/unit/installer-nsis-hardening.test.ts
 tests/unit/installer-upgrade.test.ts
 tests/unit/ipc-app-fault.test.ts
 tests/unit/ipc-wire-error.test.ts
@@ -740,6 +746,7 @@ tests/unit/process-callback-safety.test.ts
 tests/unit/process-encoding.test.ts
 tests/unit/process-error-taxonomy.test.ts
 tests/unit/process-fast-exit-job-host-race.test.ts
+tests/unit/process-hardening-v180.test.ts
 tests/unit/progress-policy.test.ts
 tests/unit/quality.test.ts
 tests/unit/quarantine-location.test.ts
@@ -809,6 +816,7 @@ tests/unit/tool-manager-cwd.test.ts
 tests/unit/tool-manager-managed-ffmpeg-trust.test.ts
 tests/unit/tool-manager-nvenc-issue.test.ts
 tests/unit/tool-manager-source-root.test.ts
+tests/unit/tool-update-aria2-sha256.test.ts
 tests/unit/tool-update-managed-metadata-order.test.ts
 tests/unit/tool-update-rate-limit.test.ts
 tests/unit/tooltip-placement.test.ts
