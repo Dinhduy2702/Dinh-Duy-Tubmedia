@@ -152,7 +152,8 @@ export function registerIpc(ctx: AppContext): void {
     ctx.tools,
     ctx.verifier,
     ctx.logger,
-    async (filePath) => (await ctx.analyzer.analyze(filePath, 'local-cut-duration')).duration
+    async (filePath) => (await ctx.analyzer.analyze(filePath, 'local-cut-duration')).duration,
+    async (filePath) => ctx.analyzer.analyze(filePath, 'local-cut-info')
   );
   const errorReports = new ErrorReportService({
     getJob: (id) => ctx.queue.list().find((job) => job.id === id) ?? null,

@@ -36,7 +36,9 @@ import {
   type ValidatedLocalCutRequest
 } from '@shared/local-cut.js';
 import { DiskFullError, ProcessCancelledError, ToolNotFoundError } from '@shared/errors/app-errors.js';
+import type { MediaInfo } from '@shared/types/domain.js';
 import type { FileVerifier } from './file-verifier.js';
+import { isHdrVideoSource } from './aspect-ratio-filter.js';
 import type { Logger } from '../logging/logger.js';
 import type { ProcessManager } from '../processes/process-manager.js';
 import { runFfmpegWithFastAacRescue } from '../processes/ffmpeg-aac-rescue.js';
@@ -74,7 +76,9 @@ export class LocalCutService {
     private readonly verifier: FileVerifier,
     private readonly logger: Logger,
     /** Đo thời lượng tệp nguồn (giây) để chặn mốc vượt thời lượng trước khi chạy ffmpeg (#9); null = không đo được. */
-    private readonly probeSourceDuration?: (filePath: string) => Promise<number | null>
+    private readonly probeSourceDuration?: (filePath: string) => Promise<number | null>,
+    /** Đọc MediaInfo nguồn để phát hiện HDR cần tonemap sang SDR trước libx264 (#19). */
+    private readonly probeSourceInfo?: (filePath: string) => Promise<MediaInfo | null>
   ) {}
 
   public isActive(): boolean {
@@ -335,13 +339,19 @@ export class LocalCutService {
     const pendingOutput = `${finalOutput}.pending${extension}`;
 
     const expectedDuration = request.endSeconds - request.startSeconds;
+    const sourceInfo =
+      isReencode && this.probeSourceInfo
+        ? await this.probeSourceInfo(request.filePath).catch(() => null)
+        : null;
     const args = buildLocalCutArguments({
       filePath: request.filePath,
       startSeconds: request.startSeconds,
       endSeconds: request.endSeconds,
       accurateCut: request.accurateCut,
       aspectRatio: request.aspectRatio,
-      outputPath: pendingOutput
+      outputPath: pendingOutput,
+      hdrToSdr: isReencode && isHdrVideoSource(sourceInfo),
+      capabilities: ffmpeg.capabilities
     });
 
     let result: Awaited<ReturnType<ProcessManager['run']>>;

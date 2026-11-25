@@ -62,7 +62,12 @@ import {
 // không đụng tới bất kỳ bất biến nào của hệ thống checkpoint/phục hồi ghép đã có (đã kiểm chứng qua hàng
 // chục bài "Hotfix" trong npm run check).
 import type { LocalCutAspectRatio } from '@shared/local-cut.js';
-import { ASPECT_RATIO_DIMENSIONS, buildAspectRatioFilter } from '../media/aspect-ratio-filter.js';
+import {
+  ASPECT_RATIO_DIMENSIONS,
+  buildAspectRatioFilter,
+  isHdrVideoSource,
+  SDR_BT709_COLOR_ARGS
+} from '../media/aspect-ratio-filter.js';
 
 export interface MergeInput {
   path: string;
@@ -2308,15 +2313,60 @@ export class MergeEngine {
     const safeName = sanitizeFilename(finalFileName.replace(/\.mp4$/i, ''), 'Thanh-pham');
     const tag = aspectRatio.replace(':', 'x');
     const desiredOutput = join(outputFolder, `${safeName} [${tag}].mp4`);
-
-    const alreadyOk = await this.verifier
-      .verify(desiredOutput, 'standard', undefined, { jobId, signal })
-      .then((result) => result.ok)
-      .catch(() => false);
-    if (alreadyOk) return desiredOutput;
+    const receiptPath = `${desiredOutput}.tubmedia-checkpoint.json`;
 
     const info = await this.analyzer.analyze(inputPath, jobId);
     const { width, height } = ASPECT_RATIO_DIMENSIONS[aspectRatio];
+    const inputStat = await stat(inputPath).catch(() => null);
+    const aspectSignature = createHash('sha256')
+      .update(
+        JSON.stringify([
+          inputPath.replaceAll('\\', '/').toLowerCase(),
+          inputStat?.size ?? 0,
+          inputStat ? Math.round(inputStat.mtimeMs) : 0,
+          aspectRatio,
+          width,
+          height
+        ]),
+        'utf8'
+      )
+      .digest('hex');
+
+    const existingStat = await stat(desiredOutput).catch(() => null);
+    let canReuseExisting = Boolean(
+      existingStat?.isFile() && (!inputStat || existingStat.mtimeMs >= inputStat.mtimeMs)
+    );
+    if (canReuseExisting) {
+      try {
+        const receipt = JSON.parse(await readFile(receiptPath, 'utf8')) as { signature?: unknown };
+        if (typeof receipt.signature === 'string' && receipt.signature !== aspectSignature) {
+          canReuseExisting = false;
+        }
+      } catch {
+        // Không có receipt cũ → tiếp tục kiểm tra thời lượng, luồng âm thanh và kích thước thật
+      }
+    }
+    if (canReuseExisting) {
+      const alreadyOk = await this.verifier
+        .verify(desiredOutput, 'standard', info.duration > 0 ? info.duration : undefined, {
+          jobId,
+          signal,
+          expectedStreams: { video: true, audio: info.audioCodec !== null }
+        })
+        .then((verified) => verified.ok)
+        .catch(() => false);
+      if (alreadyOk) {
+        const existingInfo = await this.analyzer.analyze(desiredOutput, jobId).catch(() => null);
+        const dimensionsMatch =
+          !existingInfo ||
+          !existingInfo.width ||
+          !existingInfo.height ||
+          (existingInfo.width === width && existingInfo.height === height);
+        if (dimensionsMatch) return desiredOutput;
+      }
+    }
+
+    const hdrToSdr = isHdrVideoSource(info);
     const pending = join(outputFolder, `${safeName} [${tag}].pending.mp4`);
     await rm(pending, { force: true }).catch(() => undefined);
 
@@ -2333,7 +2383,7 @@ export class MergeEngine {
           '-i',
           inputPath,
           '-filter_complex',
-          buildAspectRatioFilter(width, height),
+          buildAspectRatioFilter(width, height, { hdrToSdr, capabilities: ffmpeg.capabilities }),
           '-map',
           '0:a:0?',
           '-c:v',
@@ -2342,6 +2392,7 @@ export class MergeEngine {
           'veryfast',
           '-crf',
           '18',
+          ...(hdrToSdr ? [...SDR_BT709_COLOR_ARGS] : []),
           ...defaultFfmpegThreadArgs(cpus().length, resource),
           '-c:a',
           'aac',
@@ -2426,6 +2477,12 @@ export class MergeEngine {
       throw new MergeFailedError(`Thành phẩm sau khi đổi tỉ lệ không đạt kiểm tra: ${checked.reasons.join('; ')}`);
     }
 
-    return commitFileWithoutOverwrite(pending, desiredOutput);
+    const committed = await commitFileWithoutOverwrite(pending, desiredOutput);
+    await writeFile(
+      `${committed}.tubmedia-checkpoint.json`,
+      JSON.stringify({ version: 1, signature: aspectSignature, createdAt: new Date().toISOString() }, null, 2) + '\n',
+      'utf8'
+    ).catch(() => undefined);
+    return committed;
   }
 }

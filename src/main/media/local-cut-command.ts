@@ -8,7 +8,12 @@ import type { LocalCutAspectRatio } from '@shared/local-cut.js';
 import { defaultFfmpegThreadArgs } from '@shared/utils/machine-threads.js';
 // Giai đoạn 6 mục 4 (2026-09-24): bộ lọc nền mờ kiểu CapCut được tách ra tệp dùng chung để "preset xuất
 // theo nền tảng" ở Ghép theo Timeline tái dùng nguyên vẹn — không định nghĩa lại.
-import { ASPECT_RATIO_DIMENSIONS, buildAspectRatioFilter } from './aspect-ratio-filter.js';
+import {
+  ASPECT_RATIO_DIMENSIONS,
+  buildAspectRatioFilter,
+  buildHdrToSdrFilterChain,
+  SDR_BT709_COLOR_ARGS
+} from './aspect-ratio-filter.js';
 
 /** Trích một khung hình tại đúng mốc thời gian của MỘT TỆP CỤC BỘ — không cần yt-dlp/mạng. Khi
  * aspectRatio khác 'original', khung hình xem trước phản ánh ĐÚNG kết quả sau khi đổi tỉ lệ (nền mờ +
@@ -50,6 +55,8 @@ export interface LocalCutArgumentsInput {
   aspectRatio: LocalCutAspectRatio;
   outputPath: string;
   logicalCpus?: number;
+  hdrToSdr?: boolean;
+  capabilities?: readonly string[];
 }
 
 /**
@@ -77,12 +84,14 @@ export function buildLocalCutArguments(input: LocalCutArgumentsInput): string[] 
       '0:v:0',
       '-map',
       '0:a:0?',
+      ...(input.hdrToSdr ? ['-vf', buildHdrToSdrFilterChain(input.capabilities)] : []),
       '-c:v',
       'libx264',
       '-preset',
       'veryfast',
       '-crf',
       '18',
+      ...(input.hdrToSdr ? [...SDR_BT709_COLOR_ARGS] : []),
       ...threadArgs,
       '-c:a',
       'aac',
@@ -102,7 +111,7 @@ export function buildLocalCutArguments(input: LocalCutArgumentsInput): string[] 
   return [
     ...base,
     '-filter_complex',
-    buildAspectRatioFilter(width, height),
+    buildAspectRatioFilter(width, height, { hdrToSdr: input.hdrToSdr, capabilities: input.capabilities }),
     '-map',
     '0:a:0?',
     '-c:v',
@@ -111,6 +120,7 @@ export function buildLocalCutArguments(input: LocalCutArgumentsInput): string[] 
     'veryfast',
     '-crf',
     '18',
+    ...(input.hdrToSdr ? [...SDR_BT709_COLOR_ARGS] : []),
     ...threadArgs,
     '-c:a',
     'aac',

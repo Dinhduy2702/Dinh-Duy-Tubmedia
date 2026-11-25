@@ -17,6 +17,7 @@ import type { ProcessManager } from '../processes/process-manager.js';
 import { runFfmpegWithFastAacRescue } from '../processes/ffmpeg-aac-rescue.js';
 import type { FileVerifier } from '../media/file-verifier.js';
 import type { MediaAnalyzer } from '../media/media-analyzer.js';
+import { buildHdrToSdrFilterChain, isHdrVideoSource, SDR_BT709_COLOR_ARGS } from '../media/aspect-ratio-filter.js';
 import type { QuarantineService } from '../media/quarantine-service.js';
 import { ensureDirectory } from '../files/ensure-directory.js';
 import { ensureTubmediaOwnedDirectory, isReservedTubmediaDirectory } from '../files/file-ownership.js';
@@ -110,7 +111,15 @@ export class ClipEngine {
     if (muteOnly) {
       args.push('-c:v', 'copy');
     } else {
-      args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-threads', String(resource.ffmpegThreads), '-filter_threads', String(resource.filterThreads));
+      const hdrToSdr = isHdrVideoSource(sourceInfo);
+      if (hdrToSdr) {
+        args.push('-vf', buildHdrToSdrFilterChain(ffmpeg.capabilities));
+      }
+      args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18');
+      if (hdrToSdr) {
+        args.push(...SDR_BT709_COLOR_ARGS);
+      }
+      args.push('-threads', String(resource.ffmpegThreads), '-filter_threads', String(resource.filterThreads));
       if (item.audioMode !== 'mute') args.push('-c:a', 'aac', '-ar', '48000');
       args.push('-movflags', '+faststart');
     }

@@ -66,13 +66,9 @@ async function createFixture(behaviour: Behaviour = {}) {
   const analyzer = {
     analyze: vi.fn(() => Promise.resolve({ duration: 5, audioCodec: 'aac' }) as never)
   };
-  let verifyCallCount = 0;
   const verifier = {
-    verify: vi.fn(() => {
-      verifyCallCount += 1;
-      // Lần gọi đầu là kiểm tra "đã có kết quả hợp lệ từ trước chưa" (resumable) — chỉ trả ok khi test
-      // yêu cầu mô phỏng đã có sẵn tệp đích hợp lệ.
-      if (verifyCallCount === 1) {
+    verify: vi.fn((path: string) => {
+      if (!path.includes('.pending.mp4')) {
         return Promise.resolve({
           ok: behaviour.alreadyValid ?? false,
           reasons: [],

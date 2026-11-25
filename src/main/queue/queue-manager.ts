@@ -3520,7 +3520,7 @@ export class QueueManager {
         job.id,
         result.video,
         project.aspectRatio,
-        project.outputFolder,
+        dirname(result.video),
         project.finalFileName,
         profile,
         signal,
