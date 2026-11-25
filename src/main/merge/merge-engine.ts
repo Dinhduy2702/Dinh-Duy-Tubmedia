@@ -2313,39 +2313,14 @@ export class MergeEngine {
     const safeName = sanitizeFilename(finalFileName.replace(/\.mp4$/i, ''), 'Thanh-pham');
     const tag = aspectRatio.replace(':', 'x');
     const desiredOutput = join(outputFolder, `${safeName} [${tag}].mp4`);
-    const receiptPath = `${desiredOutput}.tubmedia-checkpoint.json`;
 
     const info = await this.analyzer.analyze(inputPath, jobId);
     const { width, height } = ASPECT_RATIO_DIMENSIONS[aspectRatio];
     const inputStat = await stat(inputPath).catch(() => null);
-    const aspectSignature = createHash('sha256')
-      .update(
-        JSON.stringify([
-          inputPath.replaceAll('\\', '/').toLowerCase(),
-          inputStat?.size ?? 0,
-          inputStat ? Math.round(inputStat.mtimeMs) : 0,
-          aspectRatio,
-          width,
-          height
-        ]),
-        'utf8'
-      )
-      .digest('hex');
-
     const existingStat = await stat(desiredOutput).catch(() => null);
-    let canReuseExisting = Boolean(
+    const canReuseExisting = Boolean(
       existingStat?.isFile() && (!inputStat || existingStat.mtimeMs >= inputStat.mtimeMs)
     );
-    if (canReuseExisting) {
-      try {
-        const receipt = JSON.parse(await readFile(receiptPath, 'utf8')) as { signature?: unknown };
-        if (typeof receipt.signature === 'string' && receipt.signature !== aspectSignature) {
-          canReuseExisting = false;
-        }
-      } catch {
-        // Không có receipt cũ → tiếp tục kiểm tra thời lượng, luồng âm thanh và kích thước thật
-      }
-    }
     if (canReuseExisting) {
       const alreadyOk = await this.verifier
         .verify(desiredOutput, 'standard', info.duration > 0 ? info.duration : undefined, {
@@ -2477,12 +2452,6 @@ export class MergeEngine {
       throw new MergeFailedError(`Thành phẩm sau khi đổi tỉ lệ không đạt kiểm tra: ${checked.reasons.join('; ')}`);
     }
 
-    const committed = await commitFileWithoutOverwrite(pending, desiredOutput);
-    await writeFile(
-      `${committed}.tubmedia-checkpoint.json`,
-      JSON.stringify({ version: 1, signature: aspectSignature, createdAt: new Date().toISOString() }, null, 2) + '\n',
-      'utf8'
-    ).catch(() => undefined);
-    return committed;
+    return commitFileWithoutOverwrite(pending, desiredOutput);
   }
 }

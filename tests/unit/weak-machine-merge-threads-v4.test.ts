@@ -143,13 +143,8 @@ describe('V4 — Co worker Ghép/Chuẩn hoá theo máy yếu + HDD & truyền �
       } as never,
       analyzer,
       {
-        verify: (() => {
-          let n = 0;
-          return () => {
-            n += 1;
-            return Promise.resolve({ ok: n > 1, reasons: [], duration: 5 });
-          };
-        })()
+        verify: (path: string) =>
+          Promise.resolve({ ok: path.includes('.pending.mp4'), reasons: [], duration: 5 })
       } as never,
       {} as never,
       {} as never,

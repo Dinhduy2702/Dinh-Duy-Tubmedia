@@ -673,7 +673,7 @@ describe('V13 — Thư mục riêng cho mỗi thành phẩm ghép (video + timel
     expect(tlDone.input.timelineTxt).toBe(join(h.outputFolder, 'Chi_Timeline', 'Chi_Timeline.timeline.txt'));
     expect(await readdir(join(h.outputFolder, 'Chi_Timeline'))).toEqual(['Chi_Timeline.timeline.txt']);
 
-    // Bản đổi tỉ lệ 9:16 -> giữ nguyên hành vi applyAspectRatio cạnh ngoài, thư mục gốc vẫn có đủ 2 tệp
+    // Bản đổi tỉ lệ 9:16 (#19) -> xuất vào đúng thư mục thành phẩm riêng dirname(result.video), giữ đủ cả 3 tệp sạch
     const portrait = await h.seedProjectWithClips(
       'Video_Doc',
       [
@@ -686,8 +686,9 @@ describe('V13 — Thư mục riêng cho mỗi thành phẩm ghép (video + timel
     await h.executeJob(portraitJob);
     const portraitDone = h.queueRepo.get(portraitJob.id)!;
     expect(portraitDone.status).toBe('completed');
-    expect(portraitDone.input.outputPath).toBe(join(h.outputFolder, 'Video_Doc [9x16].mp4'));
+    expect(portraitDone.input.outputPath).toBe(join(h.outputFolder, 'Video_Doc', 'Video_Doc [9x16].mp4'));
     expect((await readdir(join(h.outputFolder, 'Video_Doc'))).sort()).toEqual([
+      'Video_Doc [9x16].mp4',
       'Video_Doc.mp4',
       'Video_Doc.timeline.txt'
     ]);
