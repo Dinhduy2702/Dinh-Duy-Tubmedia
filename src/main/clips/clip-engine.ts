@@ -16,12 +16,19 @@ import type { ToolManager } from '../tools/tool-manager.js';
 import type { ProcessManager } from '../processes/process-manager.js';
 import { runFfmpegWithFastAacRescue } from '../processes/ffmpeg-aac-rescue.js';
 import type { FileVerifier } from '../media/file-verifier.js';
+import type { MediaAnalyzer } from '../media/media-analyzer.js';
 import type { QuarantineService } from '../media/quarantine-service.js';
 import { ensureDirectory } from '../files/ensure-directory.js';
 import { ensureTubmediaOwnedDirectory, isReservedTubmediaDirectory } from '../files/file-ownership.js';
 import { renameWithRetry } from '../files/non-conflicting-path.js';
 export class ClipEngine {
-  public constructor(private readonly tools: ToolManager, private readonly processes: ProcessManager, private readonly verifier: FileVerifier, private readonly quarantine: QuarantineService) {}
+  public constructor(
+    private readonly tools: ToolManager,
+    private readonly processes: ProcessManager,
+    private readonly verifier: FileVerifier,
+    private readonly quarantine: QuarantineService,
+    private readonly analyzer?: MediaAnalyzer
+  ) {}
   public async create(job: QueueJob, item: ProjectItem, input: string, tempFolder: string, resource: ResourceProfile, signal: AbortSignal, onProgress: (percent: number) => void): Promise<string> {
     const ffmpeg = this.tools.get('ffmpeg'); if (!ffmpeg.available || !ffmpeg.executablePath) throw new ToolNotFoundError('ffmpeg');
     if (item.timestampStartSeconds === null && item.timestampEndSeconds === null && item.audioMode !== 'mute') return input;
@@ -41,9 +48,23 @@ export class ClipEngine {
     ) {
       throw new ProcessingFailedError('Mốc cắt không hợp lệ: thời điểm kết thúc phải lớn hơn thời điểm bắt đầu và các mốc không được âm.');
     }
-    const expected = item.timestampEndSeconds !== null
-      ? item.timestampEndSeconds - (item.timestampStartSeconds ?? 0)
+    const sourceInfo = this.analyzer
+      ? await this.analyzer.analyze(input, job.id).catch(() => null)
+      : null;
+    const expectAudio = item.audioMode !== 'mute' && (sourceInfo ? sourceInfo.audioCodec !== null : true);
+    const availableDuration =
+      sourceInfo && Number.isFinite(sourceInfo.duration) && sourceInfo.duration > 0
+        ? Math.max(0, sourceInfo.duration - rangeStart)
+        : null;
+    const requestedDuration = item.timestampEndSeconds !== null
+      ? item.timestampEndSeconds - rangeStart
       : 0;
+    const expected =
+      availableDuration !== null
+        ? item.timestampEndSeconds !== null
+          ? Math.min(requestedDuration, availableDuration)
+          : availableDuration
+        : requestedDuration;
     const receiptPath = `${final}.tubmedia-checkpoint.json`;
     const inputFile = await stat(input);
     const checkpointSignature = createHash('sha256')
@@ -68,7 +89,7 @@ export class ClipEngine {
         final, 'standard', expected > 0 ? expected : undefined,
         {
           jobId: job.id + '-clip-checkpoint', projectId: job.projectId, signal,
-          expectedStreams: { video: true, audio: item.audioMode !== 'mute' }
+          expectedStreams: { video: true, audio: expectAudio }
         }
       );
       if (existingCheck.ok) {
@@ -149,7 +170,7 @@ export class ClipEngine {
     }
     let check: Awaited<ReturnType<FileVerifier['verify']>>;
     try {
-      check = await this.verifier.verify(pending, 'standard', expected > 0 ? expected : undefined, { jobId: job.id, projectId: job.projectId, signal, expectedStreams: { video: true, audio: item.audioMode !== 'mute' } });
+      check = await this.verifier.verify(pending, 'standard', expected > 0 ? expected : undefined, { jobId: job.id, projectId: job.projectId, signal, expectedStreams: { video: true, audio: expectAudio } });
     } catch (error) {
       await rm(pending, { force: true }).catch(() => undefined);
       throw error;

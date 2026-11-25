@@ -115,7 +115,7 @@ export class AppContext {
     this.quarantine,
     this.logger
   );
-  public readonly clips = new ClipEngine(this.tools, this.processes, this.verifier, this.quarantine);
+  public readonly clips = new ClipEngine(this.tools, this.processes, this.verifier, this.quarantine, this.analyzer);
   public readonly normalizer = new NormalizeEngine(
     this.tools,
     this.processes,
