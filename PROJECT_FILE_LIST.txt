@@ -521,6 +521,7 @@ src/shared/utils/resource-memory.ts
 src/shared/utils/retry.ts
 src/shared/utils/safe-json.ts
 src/shared/utils/secret-redaction.ts
+src/shared/utils/settings-select-options.ts
 src/shared/utils/sha256-sums.ts
 src/shared/utils/shared-folder-policy.ts
 src/shared/utils/text-encoding.ts
@@ -775,6 +776,7 @@ tests/unit/secret-redaction.test.ts
 tests/unit/security-guard-open-external.test.ts
 tests/unit/settings-policy.test.ts
 tests/unit/settings-save-stale-error.test.ts
+tests/unit/settings-select-options.test.ts
 tests/unit/sha256-sums.test.ts
 tests/unit/shared-folder-policy.test.ts
 tests/unit/shutdown-sequence.test.ts
