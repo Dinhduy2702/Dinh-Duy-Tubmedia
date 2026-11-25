@@ -11,10 +11,11 @@ import {
   Square,
   Wrench
 } from 'lucide-react';
-import type {
-  QuickDownloadMediaMode,
-  QuickDownloadQuality,
-  QuickDownloadStatus
+import {
+  parseQuickDownloadTime,
+  type QuickDownloadMediaMode,
+  type QuickDownloadQuality,
+  type QuickDownloadStatus
 } from '@shared/quick-download';
 import { CookieManagerDialog } from './CookieManagerDialog';
 import { InfoHint } from './InfoHint';
@@ -28,12 +29,15 @@ import { useAppStore } from '../stores/app-store';
 import { showNotice } from '../utils/notify';
 import { ImagePlay, Link2, Save, Scissors, Settings2 } from 'lucide-react';
 
-/** "hh:mm:ss" → giây; null nếu không đúng khuôn dạng — dùng để ước tính độ dài đoạn đã chọn. */
-function parseDurationToSeconds(value: string): number | null {
-  const match = /^(\d{2,4}):([0-5]\d):([0-5]\d)$/.exec(value.trim());
-  if (!match) return null;
-  const [, h, m, s] = match;
-  return Number(h) * 3600 + Number(m) * 60 + Number(s);
+/** Phân tích "MM:SS", "H:MM:SS" hoặc "HH:MM:SS" → giây qua parseQuickDownloadTime dùng chung. */
+function tryParseDurationSeconds(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed || !trimmed.includes(':')) return null;
+  try {
+    return parseQuickDownloadTime(trimmed);
+  } catch {
+    return null;
+  }
 }
 
 function formatSecondsShort(totalSeconds: number): string {
@@ -113,7 +117,7 @@ export function QuickDownloadPanel(): ReactElement {
   const [startTime, setStartTime] = useState(() => {
     try {
       const stored = window.localStorage.getItem('tubmedia.quick-download.start-duration');
-      return stored && /^\d{2,4}:[0-5]\d:[0-5]\d$/.test(stored) ? stored : '00:10:00';
+      return stored && tryParseDurationSeconds(stored) !== null ? stored : '00:10:00';
     } catch {
       return '00:10:00';
     }
@@ -121,7 +125,7 @@ export function QuickDownloadPanel(): ReactElement {
   const [endTime, setEndTime] = useState(() => {
     try {
       const stored = window.localStorage.getItem('tubmedia.quick-download.end-duration');
-      return stored && /^\d{2,4}:[0-5]\d:[0-5]\d$/.test(stored) ? stored : '00:13:00';
+      return stored && tryParseDurationSeconds(stored) !== null ? stored : '00:13:00';
     } catch {
       return '00:13:00';
     }
@@ -149,7 +153,7 @@ export function QuickDownloadPanel(): ReactElement {
   }, [useTimeline]);
 
   useEffect(() => {
-    if (!/^\d{2,4}:[0-5]\d:[0-5]\d$/.test(startTime)) return;
+    if (tryParseDurationSeconds(startTime) === null) return;
     try {
       window.localStorage.setItem('tubmedia.quick-download.start-duration', startTime);
     } catch {
@@ -158,7 +162,7 @@ export function QuickDownloadPanel(): ReactElement {
   }, [startTime]);
 
   useEffect(() => {
-    if (!/^\d{2,4}:[0-5]\d:[0-5]\d$/.test(endTime)) return;
+    if (tryParseDurationSeconds(endTime) === null) return;
     try {
       window.localStorage.setItem('tubmedia.quick-download.end-duration', endTime);
     } catch {
@@ -197,8 +201,8 @@ export function QuickDownloadPanel(): ReactElement {
   }, [status]);
 
   const rangeDurationSeconds = useMemo(() => {
-    const start = parseDurationToSeconds(startTime);
-    const end = parseDurationToSeconds(endTime);
+    const start = tryParseDurationSeconds(startTime);
+    const end = tryParseDurationSeconds(endTime);
     if (start === null || end === null || end <= start) return null;
     return end - start;
   }, [startTime, endTime]);
@@ -270,8 +274,8 @@ export function QuickDownloadPanel(): ReactElement {
 
   /** Giai đoạn 3 (2026-09-23): lấy 2 khung hình thật (mốc bắt đầu + kết thúc) qua yt-dlp + ffmpeg. */
   async function loadPreviewFrames(): Promise<void> {
-    const startSeconds = parseDurationToSeconds(startTime);
-    const endSeconds = parseDurationToSeconds(endTime);
+    const startSeconds = tryParseDurationSeconds(startTime);
+    const endSeconds = tryParseDurationSeconds(endTime);
     const trimmedUrl = url.trim();
     if (startSeconds === null || endSeconds === null || !trimmedUrl) return;
     setPreviewLoading(true);

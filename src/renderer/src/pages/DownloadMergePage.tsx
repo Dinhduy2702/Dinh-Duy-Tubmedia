@@ -119,6 +119,8 @@ type WorkflowState = 'idle' | 'running' | 'paused' | 'failed' | 'completed';
 // maxGlobalMergeJobs (trần ghép ĐỒNG THỜI thật, vẫn 1-4 theo khuyến nghị phần cứng).
 const MERGE_IDS: MergeLaneId[] = ['merge-1', 'merge-2', 'merge-3', 'merge-4', 'merge-5', 'merge-6'];
 const MAX_LANE_COUNT = 6;
+const EMPTY_JOBS: QueueJob[] = [];
+const EMPTY_LOGS: LogEntry[] = [];
 const ACTIVE = [
   'pending',
   'analyzing',
@@ -828,6 +830,26 @@ export function DownloadMergePage(): React.JSX.Element {
   useEffect(() => {
     latestRef.current = { forms, states, jobs, refreshProjects, setError };
   });
+  const jobsByProject = useMemo(() => {
+    const grouped = new Map<string, QueueJob[]>();
+    for (const job of jobs) {
+      if (!job.projectId) continue;
+      const list = grouped.get(job.projectId);
+      if (list) list.push(job);
+      else grouped.set(job.projectId, [job]);
+    }
+    return grouped;
+  }, [jobs]);
+  const logsByProject = useMemo(() => {
+    const grouped = new Map<string, LogEntry[]>();
+    for (const entry of logs) {
+      if (!entry.projectId) continue;
+      const list = grouped.get(entry.projectId);
+      if (list) list.push(entry);
+      else grouped.set(entry.projectId, [entry]);
+    }
+    return grouped;
+  }, [logs]);
   const laneCount = settings?.mergeLaneCount ?? 1;
   const recommendation = recommendedMergeLimit(hardware);
   // Đợt 5 mục 16: "Bớt quy trình" chỉ ẩn — quy trình đã lưu vẫn còn dữ liệu và vẫn hiện ở Ghép & Xuất.
@@ -1298,7 +1320,7 @@ export function DownloadMergePage(): React.JSX.Element {
       <nav className="workflow-tabs mt-4" aria-label="Quy trình tải và ghép">
         {MERGE_IDS.slice(0, laneCount).map((slot) => {
           const projectId = states[slot]?.project?.id;
-          const laneJobs = projectId ? jobs.filter((job) => job.projectId === projectId) : [];
+          const laneJobs = projectId ? (jobsByProject.get(projectId) ?? EMPTY_JOBS) : EMPTY_JOBS;
           const laneState = workflowState(laneJobs);
           return (
             <button
@@ -1336,8 +1358,8 @@ export function DownloadMergePage(): React.JSX.Element {
                 update={(updater) => updateForm(slot, updater)}
                 qualities={qualities}
                 resources={resources}
-                jobs={projectId ? jobs.filter((job) => job.projectId === projectId) : []}
-                liveLogs={projectId ? logs.filter((entry) => entry.projectId === projectId) : []}
+                jobs={projectId ? (jobsByProject.get(projectId) ?? EMPTY_JOBS) : EMPTY_JOBS}
+                liveLogs={projectId ? (logsByProject.get(projectId) ?? EMPTY_LOGS) : EMPTY_LOGS}
                 logsVersion={logsVersion[slot] ?? 0}
                 {...(projectId ? { projectId } : {})}
                 busy={busy === slot}
@@ -2111,7 +2133,10 @@ function MergeLogPanel({
   onToggle: () => void;
 }): React.JSX.Element {
   const [level, setLevel] = useState<'all' | 'info' | 'warn' | 'error'>('all');
-  const filtered = logs.filter((entry) => level === 'all' || entry.level === level).slice(0, 100);
+  const filtered = useMemo(
+    () => logs.filter((entry) => level === 'all' || entry.level === level).slice(0, 100),
+    [logs, level]
+  );
   return (
     <div className="lane-log">
       <button className="lane-log-toggle" onClick={onToggle}>

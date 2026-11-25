@@ -3,6 +3,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { isValidVersion } from '../../scripts/version-tools.mjs';
 
+import { parseQuickDownloadTime } from '../../src/shared/quick-download.js';
+
 const panel = readFileSync(join(process.cwd(), 'src/renderer/src/components/QuickDownloadPanel.tsx'), 'utf8');
 
 describe('lưu mốc thời lượng Tải nhanh', () => {
@@ -19,7 +21,8 @@ describe('lưu mốc thời lượng Tải nhanh', () => {
   });
 
   it('chấp nhận giờ lớn hơn 23', () => {
-    expect(panel).toContain('^\\d{2,4}:[0-5]\\d:[0-5]\\d$');
+    expect(panel).toContain('parseQuickDownloadTime');
+    expect(parseQuickDownloadTime('25:10:30')).toBe(25 * 3600 + 10 * 60 + 30);
   });
 
   it('giữ phiên bản công khai ở dạng hợp lệ', () => {

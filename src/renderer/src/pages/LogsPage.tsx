@@ -44,16 +44,27 @@ export function LogsPage(): React.JSX.Element {
   const selectedProject = projects.find((project) => project.id === projectId);
   const selectedProjectName = selectedProject ? projectLabel(selectedProject) : projectId;
 
-  const effectiveLogs = [...storeLogs, ...logs]
-    .filter((entry, index, entries) => entries.findIndex((candidate) => candidate.id === entry.id) === index)
-    .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  const effectiveLogs = useMemo(() => {
+    const byId = new Map<string, LogEntry>();
+    for (const entry of storeLogs) {
+      if (!byId.has(entry.id)) byId.set(entry.id, entry);
+    }
+    for (const entry of logs) {
+      if (!byId.has(entry.id)) byId.set(entry.id, entry);
+    }
+    return [...byId.values()].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  }, [storeLogs, logs]);
 
-  const moduleKeys = modulesMatching(module);
-  const filtered = effectiveLogs.filter(
-    (entry) =>
-      (projectId === 'all' || entry.projectId === projectId) &&
-      (level === 'all' || entry.level === level) &&
-      (!module || moduleKeys.includes(entry.module.toLowerCase()))
+  const moduleKeys = useMemo(() => modulesMatching(module), [module]);
+  const filtered = useMemo(
+    () =>
+      effectiveLogs.filter(
+        (entry) =>
+          (projectId === 'all' || entry.projectId === projectId) &&
+          (level === 'all' || entry.level === level) &&
+          (!module || moduleKeys.includes(entry.module.toLowerCase()))
+      ),
+    [effectiveLogs, level, module, moduleKeys, projectId]
   );
 
   // Đợt 3 mục 7 (rà soát bản cài 1.5.0): lọc mức/thành phần chạy ở CSDL — trước đây chỉ tải 2000 dòng MỚI NHẤT rồi lọc trên

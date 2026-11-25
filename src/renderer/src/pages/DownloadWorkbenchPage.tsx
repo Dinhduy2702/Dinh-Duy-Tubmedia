@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import {
   ChevronDown,
   ChevronUp,
@@ -81,6 +81,8 @@ const LANE_IDS: DownloadLaneId[] = [
   'download-6'
 ];
 const MAX_LANE_COUNT = 6;
+const EMPTY_JOBS: QueueJob[] = [];
+const EMPTY_LOGS: LogEntry[] = [];
 const ACTIVE = [
   'pending',
   'analyzing',
@@ -229,6 +231,26 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
   useEffect(() => {
     latestRef.current = { forms, states, jobs, refreshProjects, setError };
   });
+  const jobsByProject = useMemo(() => {
+    const grouped = new Map<string, QueueJob[]>();
+    for (const job of jobs) {
+      if (!job.projectId) continue;
+      const list = grouped.get(job.projectId);
+      if (list) list.push(job);
+      else grouped.set(job.projectId, [job]);
+    }
+    return grouped;
+  }, [jobs]);
+  const logsByProject = useMemo(() => {
+    const grouped = new Map<string, LogEntry[]>();
+    for (const entry of logs) {
+      if (!entry.projectId) continue;
+      const list = grouped.get(entry.projectId);
+      if (list) list.push(entry);
+      else grouped.set(entry.projectId, [entry]);
+    }
+    return grouped;
+  }, [logs]);
   const laneCount = settings?.downloadLaneCount ?? 2;
   const laneEntries = LANE_IDS.map((slot) => ({
     slot,
@@ -724,7 +746,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
       <nav className="workflow-tabs mt-4" aria-label="Danh sách tải">
         {LANE_IDS.slice(0, laneCount).map((slot) => {
           const projectId = states[slot]?.project?.id;
-          const laneJobs = projectId ? jobs.filter((job) => job.projectId === projectId) : [];
+          const laneJobs = projectId ? (jobsByProject.get(projectId) ?? EMPTY_JOBS) : EMPTY_JOBS;
           const laneState = workflowState(laneJobs);
           return (
             <button
@@ -762,8 +784,8 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
                 update={(updater) => updateForm(slot, updater)}
                 resources={resources}
                 settings={settings}
-                jobs={projectId ? jobs.filter((job) => job.projectId === projectId) : []}
-                logs={projectId ? logs.filter((entry) => entry.projectId === projectId) : []}
+                jobs={projectId ? (jobsByProject.get(projectId) ?? EMPTY_JOBS) : EMPTY_JOBS}
+                logs={projectId ? (logsByProject.get(projectId) ?? EMPTY_LOGS) : EMPTY_LOGS}
                 logsVersion={logsVersion[slot] ?? 0}
                 {...(projectId ? { projectId } : {})}
                 busy={busy === slot}
@@ -1016,6 +1038,7 @@ function LaneCard({
   setError: (error: unknown) => void;
 }): React.JSX.Element {
   const [showLogs, setShowLogs] = useState(false);
+  const [workersDraft, setWorkersDraft] = useState<string | null>(null);
   const combinedLogs = useLaneLogs(projectId, logs, logsVersion, setError);
   const state = workflowState(jobs);
   const number = laneNumber(slot);
@@ -1073,6 +1096,7 @@ function LaneCard({
   };
   const selectProfile = (id: string): void => {
     const profile = profileById(resources, id);
+    setWorkersDraft(null);
     update((current) => ({
       ...current,
       resourceProfileId: id,
@@ -1195,13 +1219,31 @@ function LaneCard({
               type="number"
               min={1}
               max={16}
-              value={form.downloadWorkers}
-              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+              value={workersDraft ?? String(form.downloadWorkers)}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                const raw = event.target.value;
+                setWorkersDraft(raw);
+                const trimmed = raw.trim();
+                if (!/^\d+$/.test(trimmed)) return;
+                const parsed = Number(trimmed);
+                if (parsed >= 1 && parsed <= 16) {
+                  update((current) => ({
+                    ...current,
+                    downloadWorkers: parsed
+                  }));
+                }
+              }}
+              onBlur={() => {
+                if (workersDraft === null) return;
+                const trimmed = workersDraft.trim();
+                const parsed = Number(trimmed);
+                const committed = trimmed && Number.isFinite(parsed) && parsed >= 1 ? clampWorker(parsed) : form.downloadWorkers;
                 update((current) => ({
                   ...current,
-                  downloadWorkers: clampWorker(Number(event.target.value))
-                }))
-              }
+                  downloadWorkers: committed
+                }));
+                setWorkersDraft(null);
+              }}
             />
           </label>
         </div>
@@ -1220,7 +1262,9 @@ function LaneCard({
                   ? 'Đã tạm dừng'
                   : state === 'completed'
                     ? 'Đã hoàn tất'
-                    : 'Sẵn sàng'}
+                    : state === 'failed'
+                      ? 'Cần xử lý lỗi'
+                      : 'Sẵn sàng'}
             </b>
             <strong>
               {completed}/{jobs.length}
@@ -1345,7 +1389,10 @@ function LaneLogPanel({
   onToggle: () => void;
 }): React.JSX.Element {
   const [level, setLevel] = useState<'all' | 'info' | 'warn' | 'error'>('all');
-  const filtered = logs.filter((entry) => level === 'all' || entry.level === level).slice(0, 100);
+  const filtered = useMemo(
+    () => logs.filter((entry) => level === 'all' || entry.level === level).slice(0, 100),
+    [logs, level]
+  );
   return (
     <div className="lane-log">
       <button className="lane-log-toggle" onClick={onToggle}>
