@@ -381,10 +381,62 @@ function matchesDownloadResidueName(name: string): boolean {
 
 function matchesTempResidueName(name: string): boolean {
   return (
-    /^clip-\d+-[a-z0-9-]+\.mp4(?:\.pending\.mp4)?$/i.test(name) ||
+    /^clip-\d+-[a-z0-9-]+\.[a-z0-9]+(?:\.pending\.[a-z0-9]+)?(?:\.previous-\d+\.bak)?$/i.test(name) ||
+    /\.tubmedia-checkpoint\.json$/i.test(name) ||
     /^concat-[a-f0-9-]+\.txt$/i.test(name) ||
     /\.pending(?:\.[a-z0-9]+)?$/i.test(name)
   );
+}
+
+function matchesMergeFolderResidueName(name: string): boolean {
+  return (
+    matchesTempResidueName(name) ||
+    /\.complete\.json$/i.test(name) ||
+    /\.normalized-[^.]+\.mp4$/i.test(name) ||
+    /\.remux\.mp4$/i.test(name)
+  );
+}
+
+function isOwnedMergeSubdirectory(path: string): boolean {
+  const lower = path.replaceAll('/', '\\').toLowerCase();
+  return (
+    lower.endsWith('\\tubmedia\\merge-checkpoints') ||
+    lower.endsWith('\\_normalized-cache') ||
+    lower.endsWith('\\_remux-cache')
+  );
+}
+
+async function collectOwnedSubdirectories(
+  root: string,
+  out: string[],
+  options: ScanOptions,
+  depth = 0
+): Promise<void> {
+  if (depth > MAX_RECURSION_DEPTH) return;
+  let entries: Dirent[];
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    checkCancelled(options);
+    if (!entry.isDirectory()) continue;
+    const fullPath = join(root, entry.name);
+    if (containsQuarantineSegment(join(fullPath, '_'))) continue;
+    let info;
+    try {
+      info = await lstat(fullPath);
+    } catch {
+      continue;
+    }
+    if (info.isSymbolicLink() || !info.isDirectory()) continue;
+    if (await hasTubmediaOwnershipMarker(fullPath)) {
+      out.push(fullPath);
+      continue;
+    }
+    await collectOwnedSubdirectories(fullPath, out, options, depth + 1);
+  }
 }
 
 async function hasTubmediaOwnershipMarker(root: string): Promise<boolean> {
@@ -451,40 +503,59 @@ export async function listResidueFiles(
       continue;
     }
 
-    if (spec.kind === 'temp' && !(await hasTubmediaOwnershipMarker(safeRoot))) {
-      // Thư mục tạm tùy chọn có thể chứa file cá nhân — chỉ quét rộng khi có dấu sở hữu hợp lệ.
-      continue;
+    const scanUnits: Array<{ folder: string; mergeOwned: boolean }> = [];
+    if (spec.kind === 'temp') {
+      if (await hasTubmediaOwnershipMarker(safeRoot)) {
+        scanUnits.push({ folder: safeRoot, mergeOwned: isOwnedMergeSubdirectory(safeRoot) });
+      } else {
+        // Thư mục tạm người dùng chọn thường không tự mang marker — chỉ quét các thư mục con
+        // bên trong có dấu sở hữu .tubmedia-owned.json (ví dụ _yt_tmp, Tubmedia\merge-checkpoints).
+        const ownedSubdirs: string[] = [];
+        await collectOwnedSubdirectories(safeRoot, ownedSubdirs, options);
+        for (const sub of ownedSubdirs) {
+          scanUnits.push({ folder: sub, mergeOwned: isOwnedMergeSubdirectory(sub) });
+        }
+      }
+    } else {
+      scanUnits.push({ folder: safeRoot, mergeOwned: false });
     }
 
-    const files: FoundFile[] = [];
-    await collectFilesRecursively(safeRoot, files, options);
+    for (const unit of scanUnits) {
+      const files: FoundFile[] = [];
+      await collectFilesRecursively(unit.folder, files, options);
 
-    for (const file of files) {
-      // Mục 5 (2026-10-02): tệp trong khu cách ly là bản người dùng tự xử lý — không bao giờ là "rác".
-      if (containsQuarantineSegment(file.path)) continue;
-      if (spec.kind === 'quick-temp') {
-        const relative = file.path.slice(safeRoot.length).replace(/^[\\/]+/, '');
-        const firstSegment = relative.split(/[\\/]/)[0] ?? '';
-        if (!/^[a-f0-9]{12}$/i.test(firstSegment)) continue;
-      } else {
-        const name = file.path.split(/[\\/]/).pop() ?? '';
-        const matchesName = spec.kind === 'temp' ? matchesTempResidueName(name) : matchesDownloadResidueName(name);
-        if (!matchesName) continue;
+      for (const file of files) {
+        // Mục 5 (2026-10-02): tệp trong khu cách ly là bản người dùng tự xử lý — không bao giờ là "rác".
+        if (containsQuarantineSegment(file.path)) continue;
+        if (spec.kind === 'quick-temp') {
+          const relative = file.path.slice(safeRoot.length).replace(/^[\\/]+/, '');
+          const firstSegment = relative.split(/[\\/]/)[0] ?? '';
+          if (!/^[a-f0-9]{12}$/i.test(firstSegment)) continue;
+        } else {
+          const name = file.path.split(/[\\/]/).pop() ?? '';
+          const matchesName =
+            spec.kind === 'temp'
+              ? unit.mergeOwned
+                ? matchesMergeFolderResidueName(name)
+                : matchesTempResidueName(name)
+              : matchesDownloadResidueName(name);
+          if (!matchesName) continue;
+        }
+
+        if (!isOldEnough(file.mtimeMs, now)) continue;
+
+        const key = normalizeForCompare(file.path);
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        const reason =
+          spec.kind === 'quick-temp'
+            ? 'Thư mục tạm Tải nhanh do Tubmedia tạo đã quá 7 ngày.'
+            : spec.kind === 'temp'
+              ? 'Clip/checkpoint tạm do Tubmedia tạo đã quá 7 ngày.'
+              : 'Phần tải dở có dấu nhận diện LINK/QD của Tubmedia đã quá 7 ngày.';
+        matches.push({ ...file, reason });
       }
-
-      if (!isOldEnough(file.mtimeMs, now)) continue;
-
-      const key = normalizeForCompare(file.path);
-      if (seen.has(key)) continue;
-      seen.add(key);
-
-      const reason =
-        spec.kind === 'quick-temp'
-          ? 'Thư mục tạm Tải nhanh do Tubmedia tạo đã quá 7 ngày.'
-          : spec.kind === 'temp'
-            ? 'Clip/checkpoint tạm do Tubmedia tạo đã quá 7 ngày.'
-            : 'Phần tải dở có dấu nhận diện LINK/QD của Tubmedia đã quá 7 ngày.';
-      matches.push({ ...file, reason });
     }
   }
 

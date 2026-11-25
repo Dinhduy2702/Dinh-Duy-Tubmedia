@@ -1,4 +1,4 @@
-import { lstat, readdir, realpath, rm } from 'node:fs/promises';
+import { lstat, readdir, realpath, rm, rmdir } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, parse, relative, resolve } from 'node:path';
 import { isTubmediaOwnedDirectory } from './file-ownership.js';
 import { containsQuarantineSegment } from './quarantine-location.js';
@@ -20,6 +20,15 @@ export interface TemporaryCleanupOptions {
 }
 
 const RESERVED_TEMP_DIRECTORIES = ['_normalized', '_yt_tmp'];
+const MERGE_CACHE_DIRECTORY_NAMES = new Set(['_normalized-cache', '_remux-cache']);
+
+function isMergeCheckpointDirectory(folderPath: string): boolean {
+  const resolved = resolve(folderPath);
+  return (
+    basename(resolved).toLowerCase() === 'merge-checkpoints' &&
+    basename(dirname(resolved)).toLowerCase() === 'tubmedia'
+  );
+}
 
 function isSafeFolder(folder: string): boolean {
   const resolved = resolve(folder);
@@ -64,7 +73,8 @@ async function physicallyInside(folder: string, path: string): Promise<boolean> 
 
 export function isTubmediaTemporaryFile(name: string): boolean {
   return (
-    /^clip-\d+-[a-z0-9-]+\.mp4(?:\.pending\.mp4)?$/i.test(name) ||
+    /^clip-\d+-[a-z0-9-]+\.[a-z0-9]+(?:\.pending\.[a-z0-9]+)?(?:\.previous-\d+\.bak)?$/i.test(name) ||
+    /\.tubmedia-checkpoint\.json$/i.test(name) ||
     /\.(?:part|ytdl|aria2)$/i.test(name) ||
     /\.pending(?:\.[a-z0-9]+)?$/i.test(name) ||
     /\.frag\d+$/i.test(name) ||
@@ -150,15 +160,21 @@ export async function cleanupTemporaryArtifacts(
       report.skippedUnsafePaths += 1;
       continue;
     }
-    try {
-      const stat = await lstat(file);
-      if (!stat.isFile() || stat.isSymbolicLink()) {
-        report.skippedUnsafePaths += 1;
-        continue;
+    const candidates = [file];
+    if (/^clip-\d+-[a-z0-9-]+\.[a-z0-9]+$/i.test(basename(file))) {
+      candidates.push(`${file}.tubmedia-checkpoint.json`);
+    }
+    for (const candidate of candidates) {
+      try {
+        const fileStat = await lstat(candidate);
+        if (!fileStat.isFile() || fileStat.isSymbolicLink()) {
+          if (candidate === file) report.skippedUnsafePaths += 1;
+          continue;
+        }
+        await removeEntry(resolve(candidate), false);
+      } catch {
+        // Tệp đã được dọn ở lần chạy trước hoặc không có checkpoint sidecar.
       }
-      await removeEntry(resolve(file), false);
-    } catch {
-      // Tệp đã được dọn ở lần chạy trước.
     }
   }
 
@@ -176,10 +192,25 @@ export async function cleanupTemporaryArtifacts(
         continue;
       }
       if (!entry.isDirectory()) continue;
-      const reservedDirectory = RESERVED_TEMP_DIRECTORIES.includes(entry.name.toLowerCase());
-      if (reservedDirectory && (await isTubmediaOwnedDirectory(path))) {
-        await removeEntry(path, true);
-        continue;
+      const lowerName = entry.name.toLowerCase();
+      // Bản đệm ghép (_normalized-cache / _remux-cache) do download-temp-cleanup quản lý theo toàn bộ
+      // các danh sách dùng chung tempFolder; không xóa ở đây khi mới chỉ một danh sách hoàn tất.
+      if (MERGE_CACHE_DIRECTORY_NAMES.has(lowerName)) continue;
+
+      const owned = await isTubmediaOwnedDirectory(path);
+      if (owned) {
+        if (preserveTrackedFiles && isMergeCheckpointDirectory(path)) continue;
+        const reservedDirectory = RESERVED_TEMP_DIRECTORIES.includes(lowerName);
+        if (reservedDirectory || !preserveTrackedFiles) {
+          await removeEntry(path, true);
+          if (
+            basename(folder).toLowerCase() === 'tubmedia' &&
+            !touchesProtectedFolder(folder, protectedFolders)
+          ) {
+            await rmdir(folder).catch(() => undefined);
+          }
+          continue;
+        }
       }
       await walk(path);
     }

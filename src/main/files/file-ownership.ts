@@ -6,7 +6,7 @@ import {
   sep as hotfix13Sep
 } from 'node:path';
 import { readFile, writeFile } from 'node:fs/promises';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import { ensureDirectory } from './ensure-directory.js';
@@ -102,10 +102,13 @@ export async function ensureTubmediaOwnedDirectory(
 }
 
 export async function isTubmediaOwnedDirectory(path: string): Promise<boolean> {
-  if (!isReservedTubmediaDirectory(path)) return false;
   try {
     const parsed = ownershipSchema.safeParse(JSON.parse(await readFile(join(path, OWNERSHIP_FILE), 'utf8')));
-    return parsed.success;
+    if (!parsed.success) return false;
+    if (parsed.data.purpose === 'merge-checkpoints') {
+      return isExplicitMergeCheckpointNamespaceAllowed(path, 'merge-checkpoints', dirname(resolve(path)));
+    }
+    return true;
   } catch {
     return false;
   }

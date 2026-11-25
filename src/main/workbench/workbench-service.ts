@@ -27,7 +27,7 @@ import { REQUIRED_TOOL_NAMES } from '../tools/tool-manager.js';
 import { sanitizeFilename } from '@shared/utils/filename.js';
 import { sizeFiles, sizePaths } from '../storage/workbench-storage.js';
 import { cleanupTemporaryArtifacts } from '../files/temporary-cleanup.js';
-import { downloadWorkFolder, removeDownloadWorkFolder } from '../files/download-temp-cleanup.js';
+import { downloadWorkFolder, removeDownloadWorkFolder, removeMergeCaches } from '../files/download-temp-cleanup.js';
 import { buildCleanupProtection } from '../files/cleanup-protection.js';
 import {
   executePostMergeSourceCleanup,
@@ -517,7 +517,8 @@ export class WorkbenchService {
     await Promise.all(projects.flatMap((project) => [
       cleanupTemporaryArtifacts(project.tempFolder, [], false, protection),
       cleanupTemporaryArtifacts(join(project.outputFolder, '_normalized'), [], false, protection),
-      removeDownloadWorkFolder(downloadWorkFolder(project.tempFolder, project.id), protection)
+      removeDownloadWorkFolder(downloadWorkFolder(project.tempFolder, project.id), protection),
+      removeMergeCaches(project.tempFolder, protection)
     ]));
     const projectsRemoved = this.projectRepo.removeAll();
     this.queue.clearAllHistory();
@@ -538,11 +539,22 @@ export class WorkbenchService {
     if (projects.length === 0) return this.slotState(slot);
     // Tính danh sách bảo vệ TRƯỚC khi xóa tác vụ, để tệp thành phẩm của chính danh sách này vẫn được bảo vệ.
     const protection = this.cleanupProtection();
+    const removedIds = new Set(projects.map((project) => project.id));
+    const remainingTempFolders = new Set(
+      this.projectRepo
+        .list(true)
+        .filter((project) => !removedIds.has(project.id) && project.tempFolder?.trim())
+        .map((project) => project.tempFolder.toLowerCase())
+    );
     for (const project of projects) {
       await this.queue.removeProject(project.id);
       await Promise.all([
         cleanupTemporaryArtifacts(project.tempFolder, [], false, protection),
-        cleanupTemporaryArtifacts(join(project.outputFolder, '_normalized'), [], false, protection)
+        cleanupTemporaryArtifacts(join(project.outputFolder, '_normalized'), [], false, protection),
+        removeDownloadWorkFolder(downloadWorkFolder(project.tempFolder, project.id), protection),
+        ...(project.tempFolder && !remainingTempFolders.has(project.tempFolder.toLowerCase())
+          ? [removeMergeCaches(project.tempFolder, protection)]
+          : [])
       ]);
       this.logger.clearProject(project.id);
       await this.projects.remove(project.id, false);

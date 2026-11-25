@@ -120,7 +120,7 @@ export async function removeDownloadWorkFolder(workFolder: string, protection: D
  * Giữ giữa các lần chạy để ghép lại nhanh; dọn khi không còn quy trình nào dùng thư mục tạm này (gọi từ hàng đợi). Chỉ xoá
  * thư mục có dấu sở hữu của Tubmedia, nằm thật trong thư mục tạm, không phải thư mục người dùng chọn.
  */
-export const MERGE_CACHE_FOLDERS = ['_normalized-cache', '_remux-cache'] as const;
+export const MERGE_CACHE_FOLDERS = ['_normalized-cache', '_remux-cache', join('Tubmedia', 'merge-checkpoints')] as const;
 
 export async function removeMergeCaches(tempFolder: string, protection: DownloadTempProtection): Promise<number> {
   let removed = 0;
@@ -128,11 +128,22 @@ export async function removeMergeCaches(tempFolder: string, protection: Download
     const cache = join(tempFolder, name);
     if (protection.protectedFolders.some((folder) => folder.trim() && isInside(cache, folder))) continue;
     try {
+      if (name.includes('merge-checkpoints')) {
+        const tubmediaStat = await lstat(join(tempFolder, 'Tubmedia'));
+        if (!tubmediaStat.isDirectory() || tubmediaStat.isSymbolicLink()) continue;
+      }
       const info = await lstat(cache);
       if (!info.isDirectory() || info.isSymbolicLink() || !(await isTubmediaOwnedDirectory(cache))) continue;
       const [realCache, realTemp] = await Promise.all([realpath(cache), realpath(tempFolder)]);
-      if (!samePath(dirname(realCache), realTemp)) continue;
+      const expectedParent = name.includes('merge-checkpoints') ? dirname(dirname(realCache)) : dirname(realCache);
+      if (!samePath(expectedParent, realTemp)) continue;
       await rm(cache, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+      if (name.includes('merge-checkpoints')) {
+        const tubmediaDir = join(tempFolder, 'Tubmedia');
+        if (!protection.protectedFolders.some((folder) => folder.trim() && samePath(folder, tubmediaDir))) {
+          await rmdir(tubmediaDir).catch(() => undefined);
+        }
+      }
       removed += 1;
     } catch {
       // Chưa có bản đệm, hoặc đang bị khoá — lượt quét sau dọn tiếp.

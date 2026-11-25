@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { access, rm, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
-import { basename, extname, join } from 'node:path';
+import { basename, dirname, extname, join } from 'node:path';
 import type {
   MediaInfo,
   QualityDecision,
@@ -66,12 +66,43 @@ function normalizedExtension(path: string): string {
   return extname(path).toLocaleLowerCase('en-US');
 }
 
+const MAX_SAFE_TEMP_PATH_LENGTH = 250;
+const PENDING_SUFFIX_RESERVE = 24;
+
+function trimStemSafely(stem: string, maxLength: number): string {
+  if (maxLength <= 0) return '';
+  if (stem.length <= maxLength) return stem;
+  let sliced = stem.slice(0, maxLength);
+  const last = sliced.charCodeAt(sliced.length - 1);
+  if (last >= 0xd800 && last <= 0xdbff) sliced = sliced.slice(0, -1);
+  return sliced.replace(/[. ]+$/g, '');
+}
+
+function buildBoundedCachePath(outputFolder: string, safeStem: string, suffix: string, fallbackShortTag: string): string {
+  const maxFinalLength = MAX_SAFE_TEMP_PATH_LENGTH - PENDING_SUFFIX_RESERVE;
+  const separatorLength = 1;
+  const maxStemLength = maxFinalLength - outputFolder.length - separatorLength - suffix.length;
+  if (maxStemLength >= 4) {
+    const trimmed = trimStemSafely(safeStem, maxStemLength) || 'v';
+    return join(outputFolder, `${trimmed}${suffix}`);
+  }
+  const compactSuffix = suffix.replace(/^\./, '');
+  const withoutStem = join(outputFolder, compactSuffix);
+  if (withoutStem.length <= maxFinalLength) return withoutStem;
+  return join(outputFolder, `${fallbackShortTag}.mp4`);
+}
+
 /**
  * Tệp tạm riêng cho MỖI lần làm bản đệm (hai quy trình dùng chung một nguồn trước đây cùng ghi vào "<bản đệm>.pending.mp4").
- * Giữ đuôi ".pending.mp4" để bộ dọn rác vẫn nhận ra.
+ * Giữ đuôi ".pending.mp4" và kẹp độ dài đường dẫn <= 250 ký tự (tránh lỗi Windows 260 ký tự).
  */
 function cachePendingPath(final: string): string {
-  return final + '.' + randomUUID().slice(0, 8) + '.pending.mp4';
+  const candidate = final + '.' + randomUUID().slice(0, 8) + '.pending.mp4';
+  if (candidate.length <= MAX_SAFE_TEMP_PATH_LENGTH) return candidate;
+  const hash = createHash('sha256').update(final).digest('hex').slice(0, 10);
+  const compact = join(dirname(final), `${hash}.${randomUUID().slice(0, 6)}.pending.mp4`);
+  if (compact.length <= MAX_SAFE_TEMP_PATH_LENGTH) return compact;
+  return join(dirname(final), `${randomUUID().slice(0, 8)}.pending.mp4`);
 }
 
 export class NormalizeEngine {
@@ -190,7 +221,7 @@ export class NormalizeEngine {
       audioCodec: source.audioCodec
     });
     const safe = sanitizeFilename(basename(input).replace(/\.[^.]+$/, ''));
-    const final = join(outputFolder, `${safe}.${key}.remux.mp4`);
+    const final = buildBoundedCachePath(outputFolder, safe, `.${key}.remux.mp4`, `${key}.r`);
     const pending = cachePendingPath(final);
 
     if (await this.validRemuxCache(final, source, job, signal)) {
@@ -378,9 +409,12 @@ export class NormalizeEngine {
         preset: profile?.preset ?? 'veryfast',
         audioMode: profile?.audioMode ?? 'aac_256'
       });
-      return join(
+      const fpsLabel = Math.round(target.fps * 100) / 100;
+      return buildBoundedCachePath(
         outputFolder,
-        `${safe}.${cacheKey}.normalized-${target.width}x${target.height}-${Math.round(target.fps * 100) / 100}fps.mp4`
+        safe,
+        `.${cacheKey}.normalized-${target.width}x${target.height}-${fpsLabel}fps.mp4`,
+        `${cacheKey}.n`
       );
     };
 
@@ -761,7 +795,13 @@ export class NormalizeEngine {
     );
 
     const ffmpeg = this.tools.get('ffmpeg');
-    const repaired = `${pending}.audio-fallback.mp4`;
+    const repairedCandidate = /\.pending\.mp4$/i.test(pending)
+      ? pending.replace(/\.pending\.mp4$/i, '.af.pending.mp4')
+      : `${pending}.af.pending.mp4`;
+    const repaired =
+      repairedCandidate.length <= MAX_SAFE_TEMP_PATH_LENGTH
+        ? repairedCandidate
+        : join(dirname(pending), `${randomUUID().slice(0, 8)}.af.pending.mp4`);
     await rm(repaired, { force: true });
     let result: ProcessResult;
     try {
@@ -850,7 +890,12 @@ export class NormalizeEngine {
       await renameWithRetry(pending, final, commitContext);
       return final;
     } catch (error) {
-      const own = final.replace(/\.mp4$/i, '') + '.' + randomUUID().slice(0, 8) + '.mp4';
+      const tag = randomUUID().slice(0, 8);
+      const ownCandidate = final.replace(/\.mp4$/i, '') + '.' + tag + '.mp4';
+      const own =
+        ownCandidate.length <= MAX_SAFE_TEMP_PATH_LENGTH
+          ? ownCandidate
+          : join(dirname(final), `${createHash('sha256').update(final).digest('hex').slice(0, 12)}.${tag}.mp4`);
       await renameWithRetry(pending, own, commitContext);
       this.logger.warn('normalize', 'NORMALIZE_CACHE_IN_USE', 'Bản đệm đang được quy trình khác dùng — quy trình này dùng bản vừa làm dưới tên riêng.', {
         ...(job.projectId ? { projectId: job.projectId } : {}),
