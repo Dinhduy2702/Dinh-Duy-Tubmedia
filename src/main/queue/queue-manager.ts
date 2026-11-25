@@ -335,6 +335,8 @@ export class QueueManager {
   private readonly startBlockLoggedAt = new Map<string, number>();
   /** Sửa B: tác vụ đang GIỮ lượt mã hoá (ffmpeg mã hoá nền đang chạy) + đo CPU riêng của chúng. */
   private readonly encodeHolders = new Set<string>();
+  /** #15: tác vụ từng giữ ghế encode nhưng đã tạm dừng (đã nhả encodesRunning để danh sách khác chạy tiếp). */
+  private readonly pausedEncodeHolders = new Set<string>();
   private readonly encodeCpu = new EncodeCpuMonitor();
   private downloadStarvedSince: number | null = null;
   private lastBackgroundEncodeCpu = 0;
@@ -398,6 +400,25 @@ export class QueueManager {
     return job.type === 'download' && !this.encodingJobs.has(job.id);
   }
 
+  private isJobPaused(jobId: string): boolean {
+    const status = this.repo.get(jobId)?.status;
+    return status === 'paused' || status === 'interrupted';
+  }
+
+  private releaseEncodeSlotForPause(jobId: string): void {
+    if (!this.encodeHolders.delete(jobId)) return;
+    this.pausedEncodeHolders.add(jobId);
+    this.encodesRunning = Math.max(0, this.encodesRunning - 1);
+    this.updateBackgroundEncodeCpuCap(Date.now(), true);
+  }
+
+  private reclaimEncodeSlotForResume(jobId: string): void {
+    if (!this.pausedEncodeHolders.delete(jobId)) return;
+    this.encodeHolders.add(jobId);
+    this.encodesRunning += 1;
+    this.updateBackgroundEncodeCpuCap(Date.now(), true);
+  }
+
   /** 1.7.5: xin lượt mã hoá bản CapCut — trả chỗ tải ngay, chờ theo thứ tự tới khi dưới trần và CPU còn rảnh. */
   private async acquireEncodeSlot(
     job: QueueJob,
@@ -412,9 +433,13 @@ export class QueueManager {
     try {
       for (;;) {
         if (signal.aborted) throw new ProcessCancelledError();
-        const limit = this.editEncodeLimitOverride ?? editEncodeLimit(cpus().length, threadsPerEncode);
-        const cpuRoom = this.encodesRunning === 0 || this.lastCpuPercent < ENCODE_START_CPU_MAX_PERCENT;
-        if (this.encodeWaiters[0] === job.id && this.encodesRunning < limit && cpuRoom) break;
+        if (!this.isJobPaused(job.id)) {
+          const limit = this.editEncodeLimitOverride ?? editEncodeLimit(cpus().length, threadsPerEncode);
+          const cpuRoom = this.encodesRunning === 0 || this.lastCpuPercent < ENCODE_START_CPU_MAX_PERCENT;
+          // #15: bỏ qua waiter đang paused để không làm kẹt danh sách khác đang chờ ghế encode.
+          const head = this.encodeWaiters.find((id) => !this.isJobPaused(id));
+          if (head === job.id && this.encodesRunning < limit && cpuRoom) break;
+        }
         if (!notified) {
           notified = true;
           onWaiting();
@@ -432,8 +457,11 @@ export class QueueManager {
     return () => {
       if (released) return;
       released = true;
-      this.encodesRunning = Math.max(0, this.encodesRunning - 1);
-      this.encodeHolders.delete(job.id);
+      const wasActiveHolder = this.encodeHolders.delete(job.id);
+      this.pausedEncodeHolders.delete(job.id);
+      if (wasActiveHolder) {
+        this.encodesRunning = Math.max(0, this.encodesRunning - 1);
+      }
       if (this.encodesRunning === 0) {
         this.updateBackgroundEncodeCpuCap(Date.now(), true);
       }
@@ -851,6 +879,7 @@ export class QueueManager {
     preserveCookieMarker: boolean
   ): Promise<QueueJob | null> {
     await this.processes.resumeByJob(current.id);
+    this.reclaimEncodeSlotForResume(current.id);
     const observed = this.repo.get(current.id);
     if (!observed || TERMINAL_STATUSES.has(observed.status)) return observed;
     const targetStatus = resolveResumeStatus(observed.status, current.input.resumeStatus, active.job.type);
@@ -1913,6 +1942,7 @@ export class QueueManager {
       .finally(() => {
         this.active.delete(job.id);
         this.encodingJobs.delete(job.id);
+        this.pausedEncodeHolders.delete(job.id);
         this.progressUpdates.delete(job.id);
         this.downloadSpeeds.delete(job.id);
         void (this.processes as Partial<Pick<ProcessManager, 'killByJob'>>).killByJob?.(job.id)?.catch(() => undefined);
@@ -2382,6 +2412,10 @@ export class QueueManager {
   ): void {
     const current = this.repo.get(jobId);
     if (!current) return;
+    // #15: chặn tick progress đến trễ ghi đè trạng thái paused/interrupted hoặc terminal.
+    if (current.status === 'paused' || current.status === 'interrupted' || TERMINAL_STATUSES.has(current.status)) {
+      return;
+    }
     const safeProgress = sanitizeProgress(progress, current.progress);
     const safeEtaSeconds = sanitizeNullableSeconds(etaSeconds, current.etaSeconds);
     const nextStatus = status ?? current.status;
@@ -2483,6 +2517,7 @@ export class QueueManager {
             },
             this.pauseResumeInput(current)
           );
+          this.releaseEncodeSlotForPause(active.job.id);
         }
       } catch (error) {
         const current = this.repo.get(active.job.id);
@@ -3796,6 +3831,7 @@ export class QueueManager {
       { status: 'paused', speed: null, etaSeconds: null },
       this.pauseResumeInput(before)
     );
+    this.releaseEncodeSlotForPause(jobId);
 
     if (emitChange) this.emit();
   }
