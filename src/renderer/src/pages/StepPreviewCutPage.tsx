@@ -10,6 +10,7 @@ import { StepTabs } from '../components/StepTabs';
 import { Card } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
 import { InfoHint } from '../components/InfoHint';
+import { showNotice } from '../utils/notify';
 import { safeUiText } from '../utils/ui-error';
 import { useAppStore } from '../stores/app-store';
 
@@ -278,6 +279,24 @@ export function StepPreviewCutPage(): React.JSX.Element {
     }
   }
 
+  async function revealOutput(kind: 'quick' | 'localCut', taskId: string): Promise<void> {
+    try {
+      const revealed =
+        kind === 'quick'
+          ? await window.desktop.quickDownload.revealOutput(taskId)
+          : await window.desktop.localCut.revealOutput(taskId);
+      if (!revealed) {
+        showNotice(
+          'warning',
+          'Không thấy tệp đầu ra',
+          'Tệp có thể đã bị di chuyển hoặc xóa khỏi thư mục lưu.'
+        );
+      }
+    } catch (revealError) {
+      setError(safeUiText(revealError, 'Không mở được vị trí tệp đầu ra.'));
+    }
+  }
+
   return <div className="page-shell step-preview-cut-page">
     <div className="tm-step-heading">
       <div>
@@ -316,7 +335,7 @@ export function StepPreviewCutPage(): React.JSX.Element {
                 <button
                   type="button"
                   className="btn"
-                  onClick={() => void window.desktop.quickDownload.revealOutput(download.taskId)}
+                  onClick={() => void revealOutput('quick', download.taskId)}
                 >
                   <FolderOpen size={15}/>
                   Mở vị trí file
@@ -576,7 +595,7 @@ export function StepPreviewCutPage(): React.JSX.Element {
                   </small>
                 )}
               </div>
-              <button type="button" className="btn" onClick={() => void window.desktop.localCut.revealOutput(status.taskId)}>
+              <button type="button" className="btn" onClick={() => void revealOutput('localCut', status.taskId)}>
                 <FolderOpen size={15}/>
                 Mở vị trí file
               </button>

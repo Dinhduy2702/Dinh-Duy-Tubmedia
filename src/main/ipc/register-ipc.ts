@@ -62,6 +62,7 @@ import { exportSanitizedLogTree } from '../logging/diagnostic-exporter.js';
 import { redactSecrets } from '@shared/utils/secret-redaction.js';
 import type { AppContext } from '../app/app-context.js';
 import { openPathBlockReason } from '../security/open-path-policy.js';
+import { openLocalPathOrThrow } from './open-local-path.js';
 import { saveTextTypeFor, withRequiredExtension } from '../files/save-text-file-policy.js';
 
 import { SystemCleanupService } from '../system/system-cleanup-service.js';
@@ -222,7 +223,7 @@ export function registerIpc(ctx: AppContext): void {
   handle(IPC.app.showPath, showPathSchema, ({ path }) => {
     const blocked = openPathBlockReason(path);
     if (blocked) throw new InvalidInputError(blocked);
-    return shell.openPath(path);
+    return openLocalPathOrThrow(path, (target) => shell.openPath(target));
   });
   noArgs(IPC.app.readClipboard, () => clipboard.readText());
   handle(IPC.app.writeClipboard, clipboardTextSchema, ({ text }) => {
@@ -439,7 +440,7 @@ export function registerIpc(ctx: AppContext): void {
   noArgs(IPC.tools.openNvidiaDriverPage, () => shell.openExternal(NVIDIA_DRIVER_DOWNLOAD_URL));
   noArgs(IPC.tools.openFolder, async () => {
     const folder = await ctx.tools.ensureWritableToolFolder();
-    await shell.openPath(folder);
+    await openLocalPathOrThrow(folder, (target) => shell.openPath(target));
     return folder;
   });
 
@@ -464,7 +465,9 @@ export function registerIpc(ctx: AppContext): void {
       ...(query.modules !== undefined ? { modules: query.modules } : {})
     })
   );
-  noArgs(IPC.logs.openFolder, () => shell.openPath(join(ctx.userData, 'logs')));
+  noArgs(IPC.logs.openFolder, () =>
+    openLocalPathOrThrow(join(ctx.userData, 'logs'), (target) => shell.openPath(target))
+  );
   handle(IPC.logs.clear, clearLogsSchema, ({ projectId }) => {
     const removed = projectId ? ctx.logger.clearProject(projectId) : ctx.logger.clearAll();
     return { removed };
@@ -534,7 +537,7 @@ export function registerIpc(ctx: AppContext): void {
   // 1.8.0: mở thư mục báo cáo lỗi tự động (chỉ thư mục cố định trong userData).
   noArgs(IPC.errorReport.openAutoFolder, async () => {
     await mkdir(ctx.autoErrorReports.directory, { recursive: true });
-    return shell.openPath(ctx.autoErrorReports.directory);
+    return openLocalPathOrThrow(ctx.autoErrorReports.directory, (target) => shell.openPath(target));
   });
   // 1.8.0: ErrorBoundary ở giao diện gửi báo cáo lỗi sập giao diện để tự lưu.
   handle(IPC.errorReport.reportRenderer, rendererErrorReportSchema, async (payload) => {
