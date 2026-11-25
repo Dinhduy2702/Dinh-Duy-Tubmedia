@@ -3807,7 +3807,23 @@ export class QueueManager {
     if (!['paused', 'interrupted'].includes(current.status)) {
       throw new InvalidInputError(`Không thể tiếp tục tác vụ ở trạng thái ${current.status}.`);
     }
+    // #14: kiểm tra ổ đĩa nếu tác vụ từng dừng vì DISK_FULL trước khi cho chạy lại.
+    if (current.errorCode === 'DISK_FULL') {
+      const disk = await this.diskSpaceStateForJobs([current]);
+      if (!disk.ready) {
+        const folder = disk.folder ?? 'thư mục lưu';
+        throw new InvalidInputError(
+          `Ổ đĩa chứa ${folder} vẫn chưa đủ dung lượng. Hiện còn ${this.formatDiskBytes(disk.freeBytes)}, cần tối thiểu ${this.formatDiskBytes(disk.requiredBytes)}.`
+        );
+      }
+    }
+    // #14: mở khóa giới hạn nền tảng (rateLimits) cho nền tảng của tác vụ tải khi người dùng chủ động Tiếp tục.
+    if (current.type === 'download' && this.rateLimits.hasAny()) {
+      const platform = this.downloadPlatformOf(current);
+      if (platform) this.rateLimits.clear(platform);
+    }
     this.clearBlockingNoticeKeys(current.projectId, true);
+    if (current.projectId) this.repeatedFailures.delete(current.projectId);
     const preserveCookieMarker = isCookieBlockingCode(current.errorCode);
     if (active) {
       await this.resumeActiveJobState(current, active, preserveCookieMarker);
@@ -3822,7 +3838,10 @@ export class QueueManager {
         { resumeStatus: null }
       );
     }
-    if (emitChange) this.emit();
+    if (emitChange) {
+      if (current.projectId) this.projects.setStatus(current.projectId, 'active');
+      this.emit();
+    }
   }
   public cancel(jobId: string, emitChange = true): void {
     const current = this.repo.get(jobId);
@@ -3930,6 +3949,39 @@ export class QueueManager {
       },
       { startupInterruptions: 0, recoverableExternalFailure: false }
     );
+    // #14: tự khôi phục các tác vụ con đang ở DEPENDENCY_FAILED, xóa repeatedFailures và đặt dự án về active.
+    if (current.projectId) {
+      this.clearBlockingNoticeKeys(current.projectId, true);
+      this.repeatedFailures.delete(current.projectId);
+      const projectJobs = this.repo.list(current.projectId);
+      const recovered = new Set<string>([jobId]);
+      let discovered = true;
+      while (discovered) {
+        discovered = false;
+        for (const dependent of projectJobs) {
+          if (recovered.has(dependent.id)) continue;
+          if (dependent.status !== 'failed' || dependent.errorCode !== 'DEPENDENCY_FAILED') continue;
+          const dependsOn = this.dependencyIds(dependent);
+          if (!dependsOn.some((id) => recovered.has(id))) continue;
+          this.claimBeforeStartup([dependent.id]);
+          this.repo.update(
+            dependent.id,
+            {
+              status: 'pending',
+              progress: 0,
+              attempts: 0,
+              errorCode: null,
+              errorMessage: null,
+              finishedAt: null
+            },
+            { startupInterruptions: 0, recoverableExternalFailure: false }
+          );
+          recovered.add(dependent.id);
+          discovered = true;
+        }
+      }
+      this.projects.setStatus(current.projectId, 'active');
+    }
     this.emit();
   }
   public retryFailed(projectId?: string): number {
