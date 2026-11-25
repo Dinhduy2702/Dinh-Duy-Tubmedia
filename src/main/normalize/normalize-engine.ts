@@ -17,7 +17,7 @@ import {
 } from '@shared/utils/encoder-selection.js';
 import { sanitizeFilename } from '@shared/utils/filename.js';
 import { matchNormalizationTarget } from '@shared/utils/normalization-match.js';
-import { sourceEquivalentVideoBitrate } from '@shared/utils/merge-target.js';
+import { buildAnullsrcInput, clampAacChannels, sourceEquivalentVideoBitrate } from '@shared/utils/merge-target.js';
 import {
   buildFfmpegStallMessage,
   FFMPEG_FASTSTART_FINALIZE_STALL_TIMEOUT_MS,
@@ -522,7 +522,7 @@ export class NormalizeEngine {
           '-f',
           'lavfi',
           '-i',
-          `anullsrc=channel_layout=${(target.channels ?? 2) === 1 ? 'mono' : 'stereo'}:sample_rate=${target.sampleRate ?? 48000}`
+          buildAnullsrcInput(target.channels, target.sampleRate, source.duration)
         );
       }
 
@@ -570,7 +570,7 @@ export class NormalizeEngine {
             '-c:a', 'aac',
             '-b:a', profile?.audioMode === 'aac_320' ? '320k' : '256k',
             '-ar', String(target.sampleRate ?? 48000),
-            '-ac', String(target.channels ?? 2)
+            '-ac', String(clampAacChannels(target.channels))
           );
         }
       }
@@ -821,7 +821,7 @@ export class NormalizeEngine {
           '-aac_coder', 'fast',
           '-b:a', profile?.audioMode === 'aac_320' ? '320k' : '256k',
           '-ar', String(target.sampleRate ?? 48000),
-          '-ac', String(target.channels ?? 2),
+          '-ac', String(clampAacChannels(target.channels)),
           '-map_metadata', '-1',
           '-avoid_negative_ts', 'make_zero',
           '-movflags', '+faststart',

@@ -27,6 +27,41 @@ function even(value: number): number {
   return rounded - (rounded % 2);
 }
 
+export type AacChannelCount = 1 | 2 | 6 | 8;
+
+export function clampAacChannels(channels: number | null | undefined): AacChannelCount {
+  if (typeof channels !== 'number' || !Number.isFinite(channels) || channels <= 0) return 2;
+  if (channels <= 1) return 1;
+  if (channels <= 2) return 2;
+  if (channels <= 6) return 6;
+  return 8;
+}
+
+export function buildAnullsrcInput(
+  channels: number | null | undefined,
+  sampleRate: number | null | undefined,
+  durationSeconds?: number | null
+): string {
+  const clampedChannels = clampAacChannels(channels);
+  const layout =
+    clampedChannels === 1
+      ? 'mono'
+      : clampedChannels === 6
+        ? '5.1'
+        : clampedChannels === 8
+          ? '7.1'
+          : 'stereo';
+  const rate =
+    typeof sampleRate === 'number' && Number.isFinite(sampleRate) && sampleRate > 0
+      ? Math.round(sampleRate)
+      : 48000;
+  const durationPart =
+    typeof durationSeconds === 'number' && Number.isFinite(durationSeconds) && durationSeconds > 0
+      ? `:d=${Number(Math.max(0.05, durationSeconds).toFixed(3))}`
+      : '';
+  return `anullsrc=channel_layout=${layout}:sample_rate=${rate}${durationPart}`;
+}
+
 function fitInside(
   width: number,
   height: number,
@@ -141,7 +176,7 @@ export function chooseMergeTarget(
     (a, b) => b.width * b.height - a.width * a.height
   )[0]!;
   const dominant = dominantSource(infos);
-  const smart = profile.mode === 'smart_merge';
+  const smart = profile.mode === 'smart_merge' || profile.mode === 'highest_source';
   const compatible =
     profile.mode === 'compatible_1080p' || profile.mode === 'smooth_background';
   const canvasSource = smart ? dominant : largestRealSource;
@@ -166,9 +201,9 @@ export function chooseMergeTarget(
   const channels = profile.forceStereo
     ? 2
     : smart && dominant.audioCodec
-      ? dominant.channels ?? 2
+      ? clampAacChannels(dominant.channels)
       : audioInfos.length
-        ? Math.min(2, Math.max(...audioInfos.map((info) => info.channels ?? 2)))
+        ? clampAacChannels(Math.min(2, Math.max(...audioInfos.map((info) => info.channels ?? 2))))
         : 2;
 
   const maxFps = Math.max(...infos.map((info) => info.fps));
