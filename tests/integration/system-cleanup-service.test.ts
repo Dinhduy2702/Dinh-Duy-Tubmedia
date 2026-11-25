@@ -1,11 +1,11 @@
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SystemCleanupService } from '../../src/main/system/system-cleanup-service.js';
 import { QuarantineStore } from '../../src/main/system/cleanup-quarantine.js';
-import type { CleanupEnvironmentPaths } from '../../src/main/system/cleanup-scanner.js';
+import { USER_TEMP_MIN_AGE_MS, type CleanupEnvironmentPaths } from '../../src/main/system/cleanup-scanner.js';
 
 // Toàn bộ bài kiểm này chạy trên một sandbox riêng dưới os.tmpdir() — SystemCleanupService nhận
 // CleanupEnvironmentPaths, TubmediaCleanupRoots và QuarantineStore GIẢ (đều trỏ vào sandbox) qua
@@ -67,10 +67,18 @@ describe('SystemCleanupService', () => {
     }
   }
 
+  const staleTempTime = new Date(Date.now() - USER_TEMP_MIN_AGE_MS - 60 * 60 * 1000);
+  async function writeStaleTemp(path: string, data: Buffer): Promise<void> {
+    await writeFile(path, data);
+    await utimes(path, staleTempTime, staleTempTime);
+  }
+
   describe('GĐ4a — quét (mode estimate), không xóa gì', () => {
     it('scans real files under the fake environment and reports the exact byte total', async () => {
-      await writeFile(join(env.tempDir, 'a.tmp'), Buffer.alloc(1000));
-      await writeFile(join(env.tempDir, 'b.tmp'), Buffer.alloc(2000));
+      await writeStaleTemp(join(env.tempDir, 'a.tmp'), Buffer.alloc(1000));
+      await writeStaleTemp(join(env.tempDir, 'b.tmp'), Buffer.alloc(2000));
+      // Tệp mới tạo dưới ngưỡng tuổi an toàn 24h phải được giữ nguyên, không cộng vào số rác.
+      await writeFile(join(env.tempDir, 'fresh.tmp'), Buffer.alloc(500));
 
       const service = makeService();
       const started = await service.start({ mode: 'estimate', categories: ['userTemp'] });
@@ -84,10 +92,11 @@ describe('SystemCleanupService', () => {
       // Quét (estimate) không bao giờ đụng tới file thật — vẫn còn nguyên tại chỗ.
       expect(existsSync(join(env.tempDir, 'a.tmp'))).toBe(true);
       expect(existsSync(join(env.tempDir, 'b.tmp'))).toBe(true);
+      expect(existsSync(join(env.tempDir, 'fresh.tmp'))).toBe(true);
     });
 
     it('rejects a second run while one is still active', async () => {
-      await writeFile(join(env.tempDir, 'big.tmp'), Buffer.alloc(5000));
+      await writeStaleTemp(join(env.tempDir, 'big.tmp'), Buffer.alloc(5000));
       const service = makeService();
 
       const first = await service.start({ mode: 'estimate', categories: ['userTemp'] });
@@ -100,7 +109,7 @@ describe('SystemCleanupService', () => {
     });
 
     it('cancel() stops the run and leaves it in the cancelled phase', async () => {
-      await writeFile(join(env.tempDir, 'c.tmp'), Buffer.alloc(100));
+      await writeStaleTemp(join(env.tempDir, 'c.tmp'), Buffer.alloc(100));
 
       const service = makeService();
       const started = await service.start({
@@ -149,8 +158,8 @@ describe('SystemCleanupService', () => {
     it('quarantines real matching files: originals disappear, quarantine holds the exact bytes, manifest records them', async () => {
       const fileA = join(env.tempDir, 'a.tmp');
       const fileB = join(env.tempDir, 'b.tmp');
-      await writeFile(fileA, Buffer.alloc(1000));
-      await writeFile(fileB, Buffer.alloc(2000));
+      await writeStaleTemp(fileA, Buffer.alloc(1000));
+      await writeStaleTemp(fileB, Buffer.alloc(2000));
 
       const service = makeService();
       const started = await service.start({ mode: 'clean', categories: ['userTemp'] });
@@ -180,7 +189,7 @@ describe('SystemCleanupService', () => {
 
     it('restore() puts a quarantined file back at its exact original path with identical content', async () => {
       const original = join(env.tempDir, 'restore-me.tmp');
-      await writeFile(original, Buffer.from('nội dung thật cần giữ nguyên'));
+      await writeStaleTemp(original, Buffer.from('nội dung thật cần giữ nguyên'));
 
       const service = makeService();
       const started = await service.start({ mode: 'clean', categories: ['userTemp'] });
@@ -199,7 +208,7 @@ describe('SystemCleanupService', () => {
 
     it('restore() never overwrites a file that now exists at the original path — picks a safe alternate name', async () => {
       const original = join(env.tempDir, 'conflict.tmp');
-      await writeFile(original, Buffer.from('bản gốc bị dọn'));
+      await writeStaleTemp(original, Buffer.from('bản gốc bị dọn'));
 
       const service = makeService();
       const started = await service.start({ mode: 'clean', categories: ['userTemp'] });
@@ -232,7 +241,7 @@ describe('SystemCleanupService', () => {
 
     it('cancelling a clean run stops further quarantining but keeps already-quarantined files quarantined (never half-moved)', async () => {
       for (let i = 0; i < 20; i += 1) {
-        await writeFile(join(env.tempDir, `f${i}.tmp`), Buffer.alloc(10));
+        await writeStaleTemp(join(env.tempDir, `f${i}.tmp`), Buffer.alloc(10));
       }
 
       const service = makeService();
@@ -291,8 +300,8 @@ describe('SystemCleanupService', () => {
     it('permanently deletes only entries past their retention window, leaves active ones intact', async () => {
       const fileOld = join(env.tempDir, 'old.tmp');
       const fileNew = join(env.tempDir, 'new.tmp');
-      await writeFile(fileOld, Buffer.alloc(50));
-      await writeFile(fileNew, Buffer.alloc(50));
+      await writeStaleTemp(fileOld, Buffer.alloc(50));
+      await writeStaleTemp(fileNew, Buffer.alloc(50));
 
       const service = makeService();
       const started = await service.start({ mode: 'clean', categories: ['userTemp'] });
@@ -326,7 +335,7 @@ describe('SystemCleanupService', () => {
 
     it('never purges a restored entry even if its retention window has passed', async () => {
       const original = join(env.tempDir, 'restored-then-old.tmp');
-      await writeFile(original, Buffer.alloc(20));
+      await writeStaleTemp(original, Buffer.alloc(20));
 
       const service = makeService();
       const started = await service.start({ mode: 'clean', categories: ['userTemp'] });

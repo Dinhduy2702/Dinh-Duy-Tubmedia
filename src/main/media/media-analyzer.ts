@@ -290,7 +290,11 @@ export class MediaAnalyzer {
   }
 
   public forget(path: string): void {
+    const entry = this.cacheByPath.get(path);
     this.cacheByPath.delete(path);
+    if (entry) {
+      this.cacheByFingerprint.delete(entry.fingerprint);
+    }
   }
 
   private pruneCache(): void {

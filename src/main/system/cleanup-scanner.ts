@@ -50,10 +50,14 @@ export interface TubmediaResidueRoots {
   quickTempRoots: string[];
 }
 
+export const USER_TEMP_MIN_AGE_MS = 24 * 60 * 60 * 1000;
+
 export interface CleanupTarget {
   path: string;
   /** Mẫu tên file (hỗ trợ '*'); nếu có, chỉ quét một cấp (không đệ quy). Không có nghĩa là quét toàn bộ, đệ quy. */
   patterns?: string[];
+  /** Chỉ quét tệp cũ hơn ít nhất chừng này mili-giây để tránh xóa tệp tạm đang được ứng dụng sử dụng. */
+  minAgeMs?: number;
 }
 
 export class CleanupScanCancelledError extends Error {
@@ -65,6 +69,7 @@ export class CleanupScanCancelledError extends Error {
 
 export interface ScanOptions {
   shouldCancel?: () => boolean;
+  now?: number;
 }
 
 const MAX_RECURSION_DEPTH = 64;
@@ -211,7 +216,10 @@ export async function categoryTargets(
 ): Promise<CleanupTarget[]> {
   switch (category) {
     case 'userTemp':
-      return [{ path: env.tempDir }, { path: join(env.localAppData, 'Temp') }];
+      return [
+        { path: env.tempDir, minAgeMs: USER_TEMP_MIN_AGE_MS },
+        { path: join(env.localAppData, 'Temp'), minAgeMs: USER_TEMP_MIN_AGE_MS }
+      ];
 
     case 'thumbnailCache':
       return [
@@ -334,6 +342,11 @@ export async function listCategoryFiles(target: CleanupTarget, options: ScanOpti
     }
   } else {
     await collectFilesRecursively(safePath, files, options);
+  }
+
+  if (target.minAgeMs && target.minAgeMs > 0) {
+    const now = options.now ?? Date.now();
+    return files.filter((file) => now - file.mtimeMs >= target.minAgeMs!);
   }
 
   return files;

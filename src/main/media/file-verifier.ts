@@ -739,7 +739,11 @@ export class FileVerifier {
             '-i',
             path,
             ...(expectedStreams.video ? ['-map', '0:v:0'] : []),
-            ...(expectedStreams.audio ? ['-map', '0:a:0'] : []),
+            ...(expectedStreams.audio
+              ? ['-map', '0:a:0']
+              : info.audioCodec !== null
+                ? ['-map', '0:a:0?']
+                : []),
             ...defaultFfmpegThreadArgs(options.logicalCpus ?? cpus().length, options.resource),
             '-progress',
             'pipe:1',
