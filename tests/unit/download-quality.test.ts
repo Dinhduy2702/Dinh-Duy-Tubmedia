@@ -302,6 +302,26 @@ describe('download quality', () => {
     }
   });
 
+  it('1.8.0: CapCut + ô bật → trước nhánh không giới hạn bv*+ba có nhánh trong khung (nguồn chỉ có 4K hoặc >60 FPS vẫn lấy bản gần khung nhất)', () => {
+    for (const [mode, max] of [['capcut_sdr_1080p', 1080], ['capcut_sdr_2k', 1440]] as const) {
+      const branches = buildDownloadFormatSelector(
+        settings({ downloadCompatibilityMode: mode, downloadAllowBelowMinimum: true })
+      ).split('/');
+      const unbounded = branches.indexOf('bv*+ba');
+      const inFrame = branches.indexOf(`bv*[height<=?${max}][fps<=?60]+ba`);
+      const heightOnly = branches.indexOf(`bv*[height<=?${max}]+ba`);
+      const fpsOnly = branches.indexOf('bv*[fps<=?60]+ba');
+      expect(inFrame, mode).toBeGreaterThan(-1);
+      expect(inFrame).toBeLessThan(heightOnly);
+      expect(heightOnly).toBeLessThan(fpsOnly);
+      expect(fpsOnly).toBeLessThan(unbounded);
+    }
+    // Ô tắt: bộ chọn không đổi (không có nhánh nới nào).
+    const strict = buildDownloadFormatSelector(settings({ downloadCompatibilityMode: 'capcut_sdr_1080p', downloadAllowBelowMinimum: false }));
+    expect(strict.split('/')).not.toContain('bv*[fps<=?60]+ba');
+    expect(strict).not.toContain('height<=?');
+  });
+
   it('1.8.0 việc B: CapCut + ô "Cho phép thấp hơn" → bản dưới 1080p chỉ là cảnh báo, không chặn', () => {
     const result = validateDownloadedQuality(
       settings({

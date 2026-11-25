@@ -8,11 +8,96 @@ import type { ProcessManager } from '../processes/process-manager.js';
 import {
   FORMAT_PROBE_PRINT_TEMPLATE,
   parseFormatProbeOutput,
-  type AvailableFormatSummary
+  type AvailableFormatSummary,
+  type FormatUnavailableDiagnosis
 } from '@shared/utils/format-availability.js';
 import { buildSafeYtDlpArguments } from './ytdlp-arguments.js';
 
 export const FORMAT_PROBE_TIMEOUT_MS = 90_000;
+/** 1.8.0 việc C: tối đa 3 lượt dò định dạng/phút/nền tảng để tránh gây thêm 429 khi cả danh sách cùng lỗi định dạng. */
+export const FORMAT_PROBE_MAX_PER_MINUTE = 3;
+export const FORMAT_PROBE_WINDOW_MS = 60_000;
+const FORMAT_PROBE_CACHE_MAX_ENTRIES = 200;
+
+export interface FormatProbeGuardOptions {
+  maxPerMinute?: number;
+  windowMs?: number;
+  now?: () => number;
+  isPlatformBlocked?: (platform: string) => boolean;
+}
+
+export type FormatProbeGuardOutcome =
+  | { kind: 'probed'; result: FormatProbeResult; cached: boolean }
+  | { kind: 'rate-limited'; lastProjectDiagnosis: FormatUnavailableDiagnosis | null }
+  | { kind: 'platform-blocked' };
+
+/**
+ * 1.8.0 việc C: bảo vệ bước dò định dạng (yt-dlp --print) khỏi dồn yêu cầu vào nền tảng:
+ * - Bộ nhớ đệm theo video trong phiên (không gọi lại cho cùng một video).
+ * - Tối đa 3 lượt dò/phút/nền tảng; quá mức thì dùng chẩn đoán gần nhất của cùng danh sách (hoặc câu chung).
+ * - Không dò khi nền tảng đang bị 429 / chặn bot.
+ */
+export class FormatProbeGuard {
+  private readonly cache = new Map<string, FormatProbeResult>();
+  private readonly recentProbes = new Map<string, number[]>();
+  private readonly projectDiagnoses = new Map<string, FormatUnavailableDiagnosis>();
+  private readonly maxPerMinute: number;
+  private readonly windowMs: number;
+  private readonly now: () => number;
+  private isPlatformBlocked: (platform: string) => boolean;
+
+  public constructor(options: FormatProbeGuardOptions = {}) {
+    this.maxPerMinute = options.maxPerMinute ?? FORMAT_PROBE_MAX_PER_MINUTE;
+    this.windowMs = options.windowMs ?? FORMAT_PROBE_WINDOW_MS;
+    this.now = options.now ?? (() => Date.now());
+    this.isPlatformBlocked = options.isPlatformBlocked ?? (() => false);
+  }
+
+  public setPlatformBlockedCheck(check: (platform: string) => boolean): void {
+    this.isPlatformBlocked = check;
+  }
+
+  public rememberProjectDiagnosis(projectId: string, diagnosis: FormatUnavailableDiagnosis): void {
+    if (!projectId) return;
+    this.projectDiagnoses.set(projectId, diagnosis);
+  }
+
+  public async probe(input: {
+    videoKey: string;
+    platform: string | null;
+    projectId: string;
+    runProbe: () => Promise<FormatProbeResult>;
+  }): Promise<FormatProbeGuardOutcome> {
+    const cached = this.cache.get(input.videoKey);
+    if (cached) return { kind: 'probed', result: cached, cached: true };
+
+    const platformKey = (input.platform || 'generic').toLowerCase();
+    if (this.isPlatformBlocked(platformKey)) {
+      return { kind: 'platform-blocked' };
+    }
+
+    const now = this.now();
+    const cutoff = now - this.windowMs;
+    const recent = (this.recentProbes.get(platformKey) ?? []).filter((ts) => ts > cutoff);
+    if (recent.length >= this.maxPerMinute) {
+      this.recentProbes.set(platformKey, recent);
+      return {
+        kind: 'rate-limited',
+        lastProjectDiagnosis: input.projectId ? (this.projectDiagnoses.get(input.projectId) ?? null) : null
+      };
+    }
+
+    recent.push(now);
+    this.recentProbes.set(platformKey, recent);
+    const result = await input.runProbe();
+    if (this.cache.size >= FORMAT_PROBE_CACHE_MAX_ENTRIES) {
+      const oldestKey = this.cache.keys().next().value;
+      if (oldestKey !== undefined) this.cache.delete(oldestKey);
+    }
+    this.cache.set(input.videoKey, result);
+    return { kind: 'probed', result, cached: false };
+  }
+}
 
 export interface FormatProbeRequest {
   jobId: string;

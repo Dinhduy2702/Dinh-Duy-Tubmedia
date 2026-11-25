@@ -98,6 +98,13 @@ export class PlatformRateLimitGate {
     return this.states.get(platform)?.stopped === true;
   }
 
+  /** 1.8.0: nền tảng đang trong thời gian nghỉ 429/chặn bot hoặc đã dừng vì hết vòng chờ. */
+  public isBlocked(platform: string, now: number): boolean {
+    const state = this.states.get(platform);
+    if (!state) return false;
+    return state.stopped || (state.resumeAt !== null && now < state.resumeAt);
+  }
+
   /** Người dùng đã xác minh và bấm Tiếp tục — tải lại bình thường. */
   public clear(platform: string): void {
     this.states.delete(platform);

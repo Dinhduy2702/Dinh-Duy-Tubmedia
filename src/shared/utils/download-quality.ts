@@ -242,6 +242,10 @@ function buildCapCutFormatSelector(settings: AppSettings): string {
     `bv*${below}+ba`,
     `b${below}${h264}`,
     `b${below}`,
+    // 1.8.0: trước khi thả hẳn ra bv*+ba, ưu tiên nhánh nằm trong khung (kể cả khi thiếu metadata height/fps hoặc chỉ vượt 1 chiều).
+    `bv*[height<=?${maxHeight}][fps<=?60]+ba`,
+    `bv*[height<=?${maxHeight}]+ba`,
+    `bv*[fps<=?60]+ba`,
     'bv*+ba',
     ...videoOnly,
     'b'
