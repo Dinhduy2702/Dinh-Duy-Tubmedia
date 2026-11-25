@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -81,6 +81,7 @@ import { FriendlyIssueCard } from '../components/FriendlyIssueCard';
 import { audioModeLabel, jobTypeLabel, statusLabel } from '../utils/vi-labels';
 import { progressFillStyle } from '../utils/progress-style';
 import { hiddenLanesNote, hiddenLanesWithData, laneFormWhenShown } from '@shared/utils/merge-lane-visibility';
+import { mergeLoadedLaneForms } from '@shared/utils/workbench-draft';
 
 interface MergeForm {
   name: string;
@@ -816,9 +817,14 @@ export function DownloadMergePage(): React.JSX.Element {
   const [applyTempAsDefault, setApplyTempAsDefault] = useState(false);
   const [activeLane, setActiveLane] = useState<MergeLaneId>('merge-1');
   const initializedRef = useRef(false);
+  const mountedRef = useRef(true);
   const dirtySlotsRef = useRef<Set<MergeLaneId>>(new Set());
   const deletedSlotsRef = useRef<Set<MergeLaneId>>(new Set());
   const revisionRef = useRef<MergeMap<number>>(mapOf(() => 0));
+  const latestRef = useRef({ forms, states, jobs, refreshProjects, setError });
+  useEffect(() => {
+    latestRef.current = { forms, states, jobs, refreshProjects, setError };
+  });
   const laneCount = settings?.mergeLaneCount ?? 1;
   const recommendation = recommendedMergeLimit(hardware);
   // Đợt 5 mục 16: "Bớt quy trình" chỉ ẩn — quy trình đã lưu vẫn còn dữ liệu và vẫn hiện ở Ghép & Xuất.
@@ -835,6 +841,7 @@ export function DownloadMergePage(): React.JSX.Element {
     void window.desktop.workbench
       .state()
       .then((workbench) => {
+        if (!mountedRef.current) return;
         const firstProject = workbench.mergeLanes.find((lane) => lane.project)?.project;
         if (firstProject) {
           if (!loadWorkbenchPath('merge-source'))
@@ -870,11 +877,13 @@ export function DownloadMergePage(): React.JSX.Element {
           }
         }
         setStates(nextStates);
-        setForms(nextForms);
+        setForms((current) =>
+          mergeLoadedLaneForms(MERGE_IDS, current, nextForms, dirtySlotsRef.current, deletedSlotsRef.current)
+        );
         initializedRef.current = true;
       })
-      .catch((error: unknown) => setError(messageOf(error)));
-  }, [setError]);
+      .catch((error: unknown) => latestRef.current.setError(messageOf(error)));
+  }, []);
 
   const notify = (
     title: string,
@@ -923,39 +932,59 @@ export function DownloadMergePage(): React.JSX.Element {
     setForms((current) => ({ ...current, [slot]: updater(current[slot]) }));
   };
 
-  useEffect(() => {
+  const flushDirtyDrafts = useCallback(async (): Promise<void> => {
     if (!initializedRef.current || dirtySlotsRef.current.size === 0) return;
-    const timer = window.setTimeout(() => {
-      const pending = [...dirtySlotsRef.current].map((slot) => ({
-        slot,
-        revision: revisionRef.current[slot]
-      }));
-      void Promise.all(
+    const { forms: currentForms, states: currentStates, jobs: currentJobs, refreshProjects: refresh, setError: reportError } = latestRef.current;
+    const pending = [...dirtySlotsRef.current].map((slot) => ({
+      slot,
+      revision: revisionRef.current[slot]
+    }));
+    try {
+      await Promise.all(
         pending.map(async ({ slot, revision }) => {
           if (deletedSlotsRef.current.has(slot)) return;
-          const projectId = states[slot]?.project?.id;
+          const projectId = currentStates[slot]?.project?.id;
           const currentState = projectId
-            ? workflowState(jobs.filter((job) => job.projectId === projectId))
+            ? workflowState(currentJobs.filter((job) => job.projectId === projectId))
             : 'idle';
           if (currentState === 'running' || currentState === 'paused') return;
+          const form = currentForms[slot];
           const next = await window.desktop.workbench.saveMergeDraft({
             slot,
-            ...forms[slot],
+            ...form,
             // Tên hiển thị của quy trình tối đa 160 ký tự; tên tệp thành phẩm (finalFileName) được phép tới 220.
-            name: forms[slot].finalFileName.slice(0, MERGE_LANE_NAME_MAX_LENGTH),
+            name: form.finalFileName.slice(0, MERGE_LANE_NAME_MAX_LENGTH),
             exportTimelineTxt: false
           });
           if (revisionRef.current[slot] === revision) {
             dirtySlotsRef.current.delete(slot);
           }
-          setStates((current) => ({ ...current, [slot]: next }));
+          if (mountedRef.current) {
+            setStates((current) => ({ ...current, [slot]: next }));
+          }
         })
-      )
-        .then(() => refreshProjects())
-        .catch((error: unknown) => setError(messageOf(error)));
+      );
+      await refresh();
+    } catch (error: unknown) {
+      reportError(messageOf(error));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!initializedRef.current || dirtySlotsRef.current.size === 0) return;
+    const timer = window.setTimeout(() => {
+      void flushDirtyDrafts();
     }, 800);
     return () => window.clearTimeout(timer);
-  }, [forms, jobs, refreshProjects, setError, states]);
+  }, [forms, flushDirtyDrafts]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      void flushDirtyDrafts();
+    };
+  }, [flushDirtyDrafts]);
 
   const start = async (slot: MergeLaneId): Promise<void> => {
     setBusy(slot);

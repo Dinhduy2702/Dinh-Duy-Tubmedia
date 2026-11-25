@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
 import {
   ChevronDown,
   ChevronUp,
@@ -37,6 +37,7 @@ import { activeDownloadWorkersLabel } from '@shared/utils/active-download-worker
 import { planApplyTempFolderToAll } from '@shared/utils/apply-temp-folder';
 import { machineRecommendationPatch, reference1080Patch } from '@shared/utils/download-presets';
 import { isCapCutDownloadMode } from '@shared/utils/download-quality';
+import { mergeLoadedLaneForms } from '@shared/utils/workbench-draft';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CookieManagerDialog } from '../components/CookieManagerDialog';
 import { InfoDisclosure } from '../components/InfoDisclosure';
@@ -220,9 +221,14 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
   const [applyTempAsDefault, setApplyTempAsDefault] = useState(false);
   const [activeLane, setActiveLane] = useState<DownloadLaneId>('download-1');
   const initializedRef = useRef(false);
+  const mountedRef = useRef(true);
   const dirtySlotsRef = useRef<Set<DownloadLaneId>>(new Set());
   const deletedSlotsRef = useRef<Set<DownloadLaneId>>(new Set());
   const revisionRef = useRef<LaneMap<number>>(mapOf(() => 0));
+  const latestRef = useRef({ forms, states, jobs, refreshProjects, setError });
+  useEffect(() => {
+    latestRef.current = { forms, states, jobs, refreshProjects, setError };
+  });
   const laneCount = settings?.downloadLaneCount ?? 2;
 
   useEffect(() => {
@@ -233,6 +239,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
     void window.desktop.workbench
       .state()
       .then((workbench) => {
+        if (!mountedRef.current) return;
         const firstProject = workbench.downloadLanes.find((lane) => lane.project)?.project;
         if (firstProject) {
           if (!loadWorkbenchPath('download-output'))
@@ -259,11 +266,13 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
           }
         }
         setStates(nextStates);
-        setForms(nextForms);
+        setForms((current) =>
+          mergeLoadedLaneForms(LANE_IDS, current, nextForms, dirtySlotsRef.current, deletedSlotsRef.current)
+        );
         initializedRef.current = true;
       })
-      .catch((error: unknown) => setError(messageOf(error)));
-  }, [setError]);
+      .catch((error: unknown) => latestRef.current.setError(error));
+  }, []);
 
   // #10 (khám phá bản cài 2026-10-05): thông báo gọi đúng tên danh sách người dùng thấy ("Danh sách tải 2" hoặc
   // tên đã đổi), không phải số ô "Danh sách 2".
@@ -318,22 +327,23 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
     setForms((current) => ({ ...current, [slot]: update(current[slot]) }));
   };
 
-  useEffect(() => {
+  const flushDirtyDrafts = useCallback(async (): Promise<void> => {
     if (!initializedRef.current || dirtySlotsRef.current.size === 0) return;
-    const timer = window.setTimeout(() => {
-      const pending = [...dirtySlotsRef.current].map((slot) => ({
-        slot,
-        revision: revisionRef.current[slot]
-      }));
-      void Promise.all(
+    const { forms: currentForms, states: currentStates, jobs: currentJobs, refreshProjects: refresh, setError: reportError } = latestRef.current;
+    const pending = [...dirtySlotsRef.current].map((slot) => ({
+      slot,
+      revision: revisionRef.current[slot]
+    }));
+    try {
+      await Promise.all(
         pending.map(async ({ slot, revision }) => {
           if (deletedSlotsRef.current.has(slot)) return;
-          const projectId = states[slot]?.project?.id;
+          const projectId = currentStates[slot]?.project?.id;
           const currentState = projectId
-            ? workflowState(jobs.filter((job) => job.projectId === projectId))
+            ? workflowState(currentJobs.filter((job) => job.projectId === projectId))
             : 'idle';
           if (currentState === 'running' || currentState === 'paused') return;
-          const form = forms[slot];
+          const form = currentForms[slot];
           const next = await window.desktop.workbench.saveDownloadDraft({
             slot,
             name: form.name,
@@ -346,14 +356,32 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
           if (revisionRef.current[slot] === revision) {
             dirtySlotsRef.current.delete(slot);
           }
-          setStates((current) => ({ ...current, [slot]: next }));
+          if (mountedRef.current) {
+            setStates((current) => ({ ...current, [slot]: next }));
+          }
         })
-      )
-        .then(() => refreshProjects())
-        .catch((error: unknown) => setError(messageOf(error)));
+      );
+      await refresh();
+    } catch (error: unknown) {
+      reportError(error);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!initializedRef.current || dirtySlotsRef.current.size === 0) return;
+    const timer = window.setTimeout(() => {
+      void flushDirtyDrafts();
     }, 800);
     return () => window.clearTimeout(timer);
-  }, [forms, jobs, refreshProjects, setError, states]);
+  }, [forms, flushDirtyDrafts]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      void flushDirtyDrafts();
+    };
+  }, [flushDirtyDrafts]);
 
   const saveProfile = async (slot: DownloadLaneId): Promise<ResourceProfile> => {
     const form = forms[slot];
