@@ -68,8 +68,10 @@ import type { ToolManager } from '../tools/tool-manager.js';
 import { parseYtDlpProgress, YTDLP_PROGRESS_FLAGS, YTDLP_UTF8_FLAGS } from './ytdlp-progress.js';
 import { buildSafeYtDlpArguments } from './ytdlp-arguments.js';
 import { ytDlpJsRuntimeArguments } from './ytdlp-js-runtime.js';
-import { probeAvailableFormats, type FormatProbeResult } from './format-probe.js';
+import { FormatProbeGuard, probeAvailableFormats, type FormatProbeResult } from './format-probe.js';
 import { diagnoseFormatUnavailable, type FormatUnavailableDiagnosis } from '@shared/utils/format-availability.js';
+import { formatAppFaultMessage } from '@shared/utils/user-action-message.js';
+import type { AppFaultInput } from '../diagnostics/auto-error-report.js';
 // Rà soát toàn diện (2026-09-24) — mục 2.2: logic dựng tham số cookie gộp về dùng chung với các luồng
 // yt-dlp khác (quick-download-command.ts, preview-frame-command.ts) — không đổi hành vi, chỉ tổ chức
 // lại code.
@@ -101,6 +103,8 @@ export interface DownloadResult {
   audioIssue?: AudioIssue;
   /** P1: đỉnh âm lượng đo được (dB) khi tiếng im lặng. */
   audioMaxVolumeDb?: number;
+  /** 1.8.0: cảnh báo chất lượng (vd. CapCut + bật "Cho phép thấp hơn" nên tải bản dưới 1080p). */
+  qualityWarning?: string;
 }
 
 export function isFinalDownloadForMediaId(fileName: string, mediaId: string): boolean {
@@ -165,10 +169,22 @@ export class DownloadEngine {
 
   /** yt-dlp nhận bản sao tạm của tệp cookies cho mỗi lượt (xem cookie-jar-store.ts). */
   private encodeSlotProvider: EncodeSlotProvider | null = null;
+  /** 1.8.0 việc C: bộ nhớ đệm theo video + giới hạn 3 lượt dò định dạng/phút/nền tảng + bỏ qua khi nền tảng bị 429. */
+  private readonly formatProbeGuard = new FormatProbeGuard();
+  /** 1.8.0: tự lưu báo cáo khi yt-dlp trả về lỗi chưa phân loại được (unknown). */
+  private appFaultReporter: ((input: AppFaultInput) => void) | null = null;
 
   /** Chưa đặt (bài kiểm, công cụ khác) → mã hoá ngay như trước. */
   public setEncodeSlotProvider(provider: EncodeSlotProvider): void {
     this.encodeSlotProvider = provider;
+  }
+
+  public setFormatProbeBlockedCheck(check: (platform: string) => boolean): void {
+    this.formatProbeGuard.setPlatformBlockedCheck(check);
+  }
+
+  public setAppFaultReporter(reporter: (input: AppFaultInput) => void): void {
+    this.appFaultReporter = reporter;
   }
 
   /**
@@ -569,6 +585,7 @@ export class DownloadEngine {
     jobId: string;
     projectId: string;
     url: string;
+    mediaId?: string | null;
     ytdlp: ReturnType<ToolManager['get']>;
     appSettings: AppSettings;
     platform: string | null;
@@ -577,26 +594,47 @@ export class DownloadEngine {
     signal: AbortSignal;
   }): Promise<FormatUnavailableDiagnosis> {
     const jsRuntimeArgs = ytDlpJsRuntimeArguments(input.ytdlp);
-    const extraArgs = [
-      ...(input.attachConfiguredCookies ? buildCookieArguments(input.appSettings) : []),
-      ...(input.appSettings.proxy ? ['--proxy', input.appSettings.proxy] : []),
-      ...jsRuntimeArgs
-    ];
-    const cookieLease =
-      input.attachConfiguredCookies && this.cookieJar ? await this.cookieJar.lease(input.appSettings).catch(() => null) : null;
-    let probe: FormatProbeResult = { summary: null, text: '', exitCode: null };
-    try {
-      probe = await probeAvailableFormats(this.processes, {
-        jobId: input.jobId,
-        projectId: input.projectId,
-        executablePath: input.ytdlp.executablePath ?? 'yt-dlp',
-        url: input.url,
-        extraArgs: cookieLease ? withLeasedCookieFile(extraArgs, cookieLease) : extraArgs,
-        signal: input.signal
-      });
-    } finally {
-      await cookieLease?.release(probe.exitCode === 0 ? 'success' : 'unclassified-failure').catch(() => undefined);
+    const videoKey = `${(input.platform || 'generic').toLowerCase()}:${input.mediaId || input.url}:${input.attachConfiguredCookies ? '1' : '0'}`;
+    const outcome = await this.formatProbeGuard.probe({
+      videoKey,
+      platform: input.platform,
+      projectId: input.projectId,
+      runProbe: async () => {
+        const extraArgs = [
+          ...(input.attachConfiguredCookies ? buildCookieArguments(input.appSettings) : []),
+          ...(input.appSettings.proxy ? ['--proxy', input.appSettings.proxy] : []),
+          ...jsRuntimeArgs
+        ];
+        const cookieLease =
+          input.attachConfiguredCookies && this.cookieJar ? await this.cookieJar.lease(input.appSettings).catch(() => null) : null;
+        let probe: FormatProbeResult = { summary: null, text: '', exitCode: null };
+        try {
+          probe = await probeAvailableFormats(this.processes, {
+            jobId: input.jobId,
+            projectId: input.projectId,
+            executablePath: input.ytdlp.executablePath ?? 'yt-dlp',
+            url: input.url,
+            extraArgs: cookieLease ? withLeasedCookieFile(extraArgs, cookieLease) : extraArgs,
+            signal: input.signal
+          });
+        } finally {
+          await cookieLease?.release(probe.exitCode === 0 ? 'success' : 'unclassified-failure').catch(() => undefined);
+        }
+        return probe;
+      }
+    });
+    if (outcome.kind === 'rate-limited' && outcome.lastProjectDiagnosis) {
+      return {
+        ...outcome.lastProjectDiagnosis,
+        details: {
+          ...outcome.lastProjectDiagnosis.details,
+          formatProbeSkipped: 'rate-limited',
+          formatProbeReusedProjectDiagnosis: true
+        }
+      };
     }
+    const probe: FormatProbeResult =
+      outcome.kind === 'probed' ? outcome.result : { summary: null, text: '', exitCode: null };
     const diagnosis = diagnoseFormatUnavailable({
       summary: probe.summary,
       settings: input.appSettings,
@@ -606,9 +644,17 @@ export class DownloadEngine {
       jsRuntime: jsRuntimeArgs.length > 0,
       diagnosticText: `${input.downloadText}\n${probe.text}`
     });
+    if (outcome.kind === 'probed') {
+      this.formatProbeGuard.rememberProjectDiagnosis(input.projectId, diagnosis);
+    }
     return {
       ...diagnosis,
-      details: { ...diagnosis.details, formatProbeExitCode: probe.exitCode, formatProbeNotes: sanitizeYtDlpDiagnostic(probe.text) }
+      details: {
+        ...diagnosis.details,
+        formatProbeExitCode: probe.exitCode,
+        formatProbeNotes: sanitizeYtDlpDiagnostic(probe.text),
+        ...(outcome.kind === 'probed' ? { formatProbeCached: outcome.cached } : { formatProbeSkipped: outcome.kind })
+      }
     };
   }
 
@@ -1957,6 +2003,7 @@ export class DownloadEngine {
             jobId: job.id,
             projectId: project.id,
             url: source.originalUrl,
+            mediaId: resolvedId ?? source.mediaId,
             ytdlp,
             appSettings,
             platform: source.platform ?? null,
@@ -2060,6 +2107,29 @@ export class DownloadEngine {
         }
 
         // 2026-10-27: nêu nguyên nhân cụ thể + tên nền tảng (định dạng không khớp chất lượng, đang phát trực tiếp, 404/410…).
+        // 1.8.0: lỗi yt-dlp chưa phân loại được (unknown) → tự lưu báo cáo lỗi ứng dụng, không đổ cho người dùng.
+        if (failure.subtype === 'unknown') {
+          try {
+            this.appFaultReporter?.({
+              source: 'download-unclassified',
+              error: new Error(technicalSummary || 'yt-dlp unknown failure'),
+              jobId: job.id,
+              projectId: project.id,
+              context: { platform: source.platform ?? null, exitCode: result.code, failureDetails }
+            });
+          } catch {
+            // Lưu báo cáo không được làm hỏng luồng báo lỗi.
+          }
+          throw new DownloadFailedError(
+            formatAppFaultMessage({
+              summary:
+                'Không tải được video này do công cụ tải gặp lỗi không xác định — không phải do bạn thao tác sai. Báo cáo lỗi đã được lưu tự động để sửa.',
+              technical: technicalSummary
+            }),
+            false,
+            failureDetails
+          );
+        }
         throw new DownloadFailedError(
           finalDownloadFailureMessage(
             failure.subtype,
@@ -2298,25 +2368,33 @@ export class DownloadEngine {
     const capCutReady =
       isCapCutDownloadMode(appSettings.downloadCompatibilityMode) ||
       (appSettings.downloadEditCopyMode ?? 'off') !== 'off';
+    const bounds = effectiveDownloadBounds(appSettings);
     const acceptedMinimumFallback =
-      appSettings.downloadAllowBelowMinimum &&
-      appSettings.downloadMinHeight > 0 &&
-      info.height < appSettings.downloadMinHeight;
+      bounds.allowBelowMinimum && bounds.minHeight > 0 && info.height > 0 && info.height < bounds.minHeight;
+    const qualityWarning = acceptedMinimumFallback
+      ? capCutReady
+        ? `CapCut: tải bản ${info.height}p (thấp hơn ${bounds.minHeight}p vì bật "Cho phép thấp hơn")`
+        : `Tải bản ${info.height}p (thấp hơn mức tối thiểu ${bounds.minHeight}p)`
+      : undefined;
     const audio = await this.assessAudio(job, project.id, finalPath, info, signal);
     const nativeUpperNote = quality.warnings.find((w) => w.includes('không cho chọn chất lượng'));
-    const baseResultMessage = capCutReady
-        ? `Đã giữ nguyên video master chất lượng cao và tạo riêng bản edit mượt cho CapCut: ${finalPath}`
-        : workflow === 'download-merge'
-          ? `Đã tải nguồn tốt nhất mà ${source.platform || 'nền tảng'} cung cấp để ghép, chưa mã hóa giảm chất lượng: ${finalPath}`
-          : acceptedMinimumFallback
-            ? `Đã tải thành công ${info.height}p — thấp hơn mức mong muốn ${appSettings.downloadMinHeight}p nhưng là fallback được danh sách cho phép: ${finalPath}`
-            : `Đã tải và kiểm tra hoàn tất: ${finalPath}`;
+    const baseResultMessage =
+      capCutReady && acceptedMinimumFallback
+        ? `Đã tải bản ${info.height}p (thấp hơn ${bounds.minHeight}p vì bật "Cho phép thấp hơn") và chuyển sang chuẩn CapCut: ${finalPath}`
+        : capCutReady
+          ? `Đã giữ nguyên video master chất lượng cao và tạo riêng bản edit mượt cho CapCut: ${finalPath}`
+          : workflow === 'download-merge'
+            ? `Đã tải nguồn tốt nhất mà ${source.platform || 'nền tảng'} cung cấp để ghép, chưa mã hóa giảm chất lượng: ${finalPath}`
+            : acceptedMinimumFallback
+              ? `Đã tải thành công ${info.height}p — thấp hơn mức mong muốn ${bounds.minHeight}p nhưng là fallback được danh sách cho phép: ${finalPath}`
+              : `Đã tải và kiểm tra hoàn tất: ${finalPath}`;
     const resultMessage = nativeUpperNote ? `${baseResultMessage} Lưu ý: ${nativeUpperNote}` : baseResultMessage;
     return {
       outputPath: finalPath,
       skipped: false,
       resultMessage: audio.audioIssue ? `${resultMessage} Lưu ý: ${audioIssueNote(audio.audioIssue)}` : resultMessage,
       ...audio,
+      ...(qualityWarning ? { qualityWarning } : {}),
       ...(keptOldVersions.length
         ? { keptOldVersions: keptOldVersions.map((item) => ({ path: item.quarantinePath, bytes: item.bytes })) }
         : {})

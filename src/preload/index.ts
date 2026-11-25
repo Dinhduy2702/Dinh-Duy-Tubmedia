@@ -115,7 +115,9 @@ const api: DesktopApi = {
     start: (jobId) => invoke(IPC.errorReport.start, { jobId }),
     status: (runId) => invoke(IPC.errorReport.status, { runId }),
     cancel: (runId) => invoke(IPC.errorReport.cancel, { runId }),
-    reveal: (runId) => invoke(IPC.errorReport.reveal, { runId })
+    reveal: (runId) => invoke(IPC.errorReport.reveal, { runId }),
+    openAutoFolder: () => invoke(IPC.errorReport.openAutoFolder),
+    reportRenderer: (input) => invoke(IPC.errorReport.reportRenderer, input)
   },
   backups: {
     create: (projectId, includeMedia = false) => invoke(IPC.backups.create, { projectId, includeMedia }),

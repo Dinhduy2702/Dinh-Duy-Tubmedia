@@ -42,6 +42,7 @@ import {
   systemCleanupRunSchema,
   systemCleanupQuarantineRestoreSchema,
   errorReportRunSchema,
+  rendererErrorReportSchema,
   quarantineDeleteSchema,
   videoLinkFilterRequestSchema,
   quickDownloadRequestSchema,
@@ -163,8 +164,13 @@ export function registerIpc(ctx: AppContext): void {
     analyzer: ctx.analyzer,
     verifier: ctx.verifier,
     appInfo: () => ({ appVersion: app.getVersion(), buildCommit: APP_BUILD_COMMIT }),
-    hardware: () => ctx.settings.detectHardware()
+    hardware: () => ctx.settings.detectHardware(),
+    listAutoReports: (jobId) => ctx.autoErrorReports.listForJob(jobId)
   });
+
+  const recordIpcFault = (channel: string) => (error: Error): void => {
+    void ctx.autoErrorReports.record({ source: 'ipc', error, context: { channel } });
+  };
 
   const handle = <Input, Output>(
     channel: string,
@@ -173,14 +179,14 @@ export function registerIpc(ctx: AppContext): void {
   ): void => {
     ipcMain.handle(channel, (event: IpcMainInvokeEvent, raw: unknown) => {
       ctx.sender.assert(event);
-      return runWithWireErrors(() => handler(schema.parse(raw)));
+      return runWithWireErrors(() => handler(schema.parse(raw)), recordIpcFault(channel));
     });
   };
 
   const noArgs = <Output>(channel: string, handler: () => MaybePromise<Output>): void => {
     ipcMain.handle(channel, (event: IpcMainInvokeEvent) => {
       ctx.sender.assert(event);
-      return runWithWireErrors(() => handler());
+      return runWithWireErrors(() => handler(), recordIpcFault(channel));
     });
   };
 
@@ -513,6 +519,28 @@ export function registerIpc(ctx: AppContext): void {
   handle(IPC.errorReport.reveal, errorReportRunSchema, ({ runId }) => {
     const status = errorReports.status(runId);
     if (status?.state === 'completed') shell.showItemInFolder(status.outputPath);
+  });
+  // 1.8.0: mở thư mục báo cáo lỗi tự động (chỉ thư mục cố định trong userData).
+  noArgs(IPC.errorReport.openAutoFolder, async () => {
+    await mkdir(ctx.autoErrorReports.directory, { recursive: true });
+    return shell.openPath(ctx.autoErrorReports.directory);
+  });
+  // 1.8.0: ErrorBoundary ở giao diện gửi báo cáo lỗi sập giao diện để tự lưu.
+  handle(IPC.errorReport.reportRenderer, rendererErrorReportSchema, async (payload) => {
+    const err = new Error(payload.message);
+    if (payload.name) err.name = payload.name;
+    if (payload.stack) err.stack = payload.stack;
+    ctx.logger.error('renderer', 'RENDERER_CRASH', `${err.name}: ${err.message}`, {
+      metadata: { supportCode: payload.supportCode ?? null }
+    });
+    await ctx.autoErrorReports.record({
+      source: 'renderer',
+      error: err,
+      context: {
+        ...(payload.supportCode ? { supportCode: payload.supportCode } : {}),
+        ...(payload.componentStack ? { componentStack: payload.componentStack } : {})
+      }
+    });
   });
 
   handle(IPC.backups.create, backupCreateSchema, ({ projectId, includeMedia }) =>

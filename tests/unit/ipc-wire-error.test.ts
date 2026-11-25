@@ -54,8 +54,8 @@ describe('gắn dấu kiểu cho lỗi nghiệp vụ trước khi qua IPC', () =
   it('cả hai đường đăng ký IPC đều đi qua bộ gắn dấu kiểu', () => {
     const ipc = source('src/main/ipc/register-ipc.ts');
     expect(ipc).toContain("from './wire-error.js'");
-    expect(ipc).toContain('runWithWireErrors(() => handler(schema.parse(raw)))');
-    expect(ipc).toContain('runWithWireErrors(() => handler())');
+    expect(ipc).toContain('runWithWireErrors(() => handler(schema.parse(raw))');
+    expect(ipc).toContain('runWithWireErrors(() => handler()');
     expect(ipc.match(/ipcMain\.handle\(/g)?.length).toBe(2);
   });
 

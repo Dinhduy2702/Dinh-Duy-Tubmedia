@@ -101,12 +101,14 @@ export const IPC = {
     openFolder: 'logs:open-folder',
     clear: 'logs:clear'
   },
-  /** "Xuất báo cáo lỗi" của một tác vụ lỗi (2026-10-20). */
+  /** "Xuất báo cáo lỗi" của một tác vụ lỗi (2026-10-20) + 1.8.0 tự lưu báo cáo lỗi ứng dụng. */
   errorReport: {
     start: 'error-report:start',
     status: 'error-report:status',
     cancel: 'error-report:cancel',
-    reveal: 'error-report:reveal'
+    reveal: 'error-report:reveal',
+    openAutoFolder: 'error-report:open-auto-folder',
+    reportRenderer: 'error-report:report-renderer'
   },
   backups: {
     create: 'backups:create',

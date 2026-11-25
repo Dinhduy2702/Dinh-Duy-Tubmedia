@@ -355,14 +355,19 @@ function initializeApplication(): void {
   const current = new AppContext(prepareForAppUpdate);
   context = current;
   current.initialize();
-  // Lưới an toàn cuối cùng: promise bị từ chối mà không ai bắt (ví dụ trong tác vụ nền) chỉ được ghi
-  // nhật ký thay vì bật hộp thoại lỗi nghiêm trọng của Electron và làm gián đoạn tác vụ đang chạy.
+  // Lưới an toàn cuối cùng: promise bị từ chối hoặc ngoại lệ không ai bắt chỉ được ghi nhật ký + tự lưu báo cáo lỗi
+  // (auto-error-report.ts) thay vì bật hộp thoại lỗi nghiêm trọng của Electron và làm gián đoạn tác vụ đang chạy.
   process.on('unhandledRejection', (reason: unknown) => {
     current.logger.error(
       'app',
       'UNHANDLED_REJECTION',
       reason instanceof Error ? (reason.stack ?? reason.message) : String(reason)
     );
+    void current.autoErrorReports.record({ source: 'main-unhandled-rejection', error: reason });
+  });
+  process.on('uncaughtException', (error: Error) => {
+    current.logger.error('app', 'UNCAUGHT_EXCEPTION', error.stack ?? error.message);
+    void current.autoErrorReports.record({ source: 'main-uncaught-exception', error });
   });
   const startupTools = connectToolsAtStartup(current)
     .catch((error: unknown) => {

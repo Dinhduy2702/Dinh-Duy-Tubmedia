@@ -42,6 +42,8 @@ import { PreviewFrameService } from '../download/preview-frame-service.js';
 import { logMigrationReports } from '../database/migration-report.js';
 import { CookieJarStore } from '../cookies/cookie-jar-store.js';
 import { createDiskKindLookup } from '../settings/disk-kind-lookup.js';
+import { AutoErrorReporter } from '../diagnostics/auto-error-report.js';
+import { APP_BUILD_COMMIT } from '@shared/constants/build-info.js';
 
 /** P2: chỉ có giá trị khi chạy e2e từ mã nguồn (xem development-environment.ts); bản đóng gói luôn undefined. */
 const E2E_DRIVE_ROOT = readDevelopmentEnvironment(process.env, app.isPackaged).e2eDriveRoot;
@@ -58,6 +60,11 @@ export class AppContext {
   public readonly logRepo = new LogRepository(this.database.db);
   public readonly sourceRepo = new MediaSourceRepository(this.database.db);
   public readonly logger = new Logger(this.logRepo, join(this.userData, 'logs'));
+  /** 1.8.0: tự động lưu báo cáo JSON cho lỗi của chính ứng dụng (không mở hộp thoại). */
+  public readonly autoErrorReports = new AutoErrorReporter(
+    join(this.userData, 'diagnostics', 'auto-reports'),
+    () => ({ appVersion: app.getVersion(), buildCommit: APP_BUILD_COMMIT })
+  );
   public readonly paths = new PathService();
   public readonly hardware = new HardwareService();
   public readonly settings = new SettingsService(this.settingsRepo, this.hardware, this.logger);
@@ -200,6 +207,15 @@ export class AppContext {
       gate: () => this.queue.sharedRateLimitGate(),
       activeOfPlatform: (platform) => this.queue.countActiveDownloadsOfPlatform(platform)
     });
+    // 1.8.0: không dò định dạng khi nền tảng đang bị 429/chặn bot; tự lưu báo cáo khi lỗi ứng dụng.
+    this.downloader.setFormatProbeBlockedCheck((platform) =>
+      this.queue.sharedRateLimitGate().isBlocked(platform, Date.now())
+    );
+    const reportAppFault = (input: Parameters<AutoErrorReporter['record']>[0]): void => {
+      void this.autoErrorReports.record(input);
+    };
+    this.queue.setAppFaultReporter(reportAppFault);
+    this.downloader.setAppFaultReporter(reportAppFault);
     if (E2E_RATE_LIMIT_WAIT_MS !== undefined) this.queue.setRateLimitWaitOverrideMs(E2E_RATE_LIMIT_WAIT_MS);
     if (E2E_GLOBAL_DOWNLOAD_CAP !== undefined) this.queue.setGlobalDownloadCapOverride(E2E_GLOBAL_DOWNLOAD_CAP);
     this.appUpdates = new AppUpdateService(

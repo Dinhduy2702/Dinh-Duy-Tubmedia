@@ -190,6 +190,16 @@ export interface DesktopApi {
     cancel(runId: string): Promise<ErrorReportStatus | null>;
     /** Mở thư mục chứa tệp .zip vừa xuất (chỉ tệp của lượt đã xong). */
     reveal(runId: string): Promise<void>;
+    /** 1.8.0: mở thư mục báo cáo lỗi tự động (userData/diagnostics/auto-reports). */
+    openAutoFolder(): Promise<string>;
+    /** 1.8.0: ghi nhận lỗi giao diện sập từ ErrorBoundary vào thư mục báo cáo tự động. */
+    reportRenderer(input: {
+      name?: string;
+      message: string;
+      stack?: string;
+      componentStack?: string;
+      supportCode?: string;
+    }): Promise<void>;
   };
   backups: {
     create(projectId?: string, includeMedia?: boolean): Promise<string>;

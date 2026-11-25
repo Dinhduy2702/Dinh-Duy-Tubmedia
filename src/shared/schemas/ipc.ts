@@ -308,6 +308,15 @@ export const errorReportRunSchema = z
     runId: idSchema
   })
   .strict();
+export const rendererErrorReportSchema = z
+  .object({
+    name: z.string().max(120).optional(),
+    message: z.string().min(1).max(8_000),
+    stack: z.string().max(32_000).optional(),
+    componentStack: z.string().max(32_000).optional(),
+    supportCode: z.string().max(64).optional()
+  })
+  .strict();
 export const systemCleanupQuarantineRestoreSchema = z
   .object({
     ids: z.array(idSchema).min(1).max(500)

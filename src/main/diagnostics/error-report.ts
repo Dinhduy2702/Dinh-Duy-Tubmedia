@@ -31,6 +31,7 @@ export interface ErrorReportDeps {
   verifier: Pick<FileVerifier, 'decodeStreamFailure'>;
   appInfo(): { appVersion: string; buildCommit: string };
   hardware(): Promise<unknown>;
+  listAutoReports?(jobId: string): Promise<Array<{ name: string; data: string }>>;
 }
 
 type FileRole = 'nguồn' | 'tệp cắt' | 'bản đệm chuẩn hóa' | 'bản đệm remux';
@@ -274,11 +275,13 @@ export async function collectErrorReport(
       .reverse()
       .map((entry) => JSON.stringify(redactSecrets(entry)))
       .join('\n') + '\n';
+  const autoReports = deps.listAutoReports ? await deps.listAutoReports(jobId).catch(() => []) : [];
   return [
     { name: 'tom-tat.txt', data: summaryText({ appVersion: app.appVersion, job, projectName: project?.name ?? null, ffmpeg, files }) },
     { name: 'bao-cao.json', data: JSON.stringify(redactSecrets(report), null, 2) },
     { name: 'nhat-ky/tac-vu.jsonl', data: jsonl(jobLogs) },
-    ...(project ? [{ name: 'nhat-ky/danh-sach.jsonl', data: jsonl(projectLogs) }] : [])
+    ...(project ? [{ name: 'nhat-ky/danh-sach.jsonl', data: jsonl(projectLogs) }] : []),
+    ...autoReports.map((item) => ({ name: `bao-cao-tu-dong/${item.name}`, data: item.data }))
   ];
 }
 

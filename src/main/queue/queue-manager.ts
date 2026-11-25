@@ -103,6 +103,8 @@ import {
 } from '../files/download-temp-cleanup.js';
 import { RATE_LIMIT_MAX_AUTO_ROUNDS, formatAutoResumeEta, rateLimitPlatformLabel } from '@shared/utils/rate-limit-backoff.js';
 import { PlatformRateLimitGate } from './platform-rate-limit-gate.js';
+import { formatAppFaultMessage } from '@shared/utils/user-action-message.js';
+import type { AppFaultInput } from '../diagnostics/auto-error-report.js';
 
 /** S3: số lượt ghép tự đưa video nguồn bị thiếu đi tải lại trước khi dừng hẳn và báo lỗi. */
 const MAX_MISSING_SOURCE_REQUEUES = 2;
@@ -314,6 +316,12 @@ export class QueueManager {
   private adaptiveSampleAt = 0;
   private tempSweepTimer: NodeJS.Timeout | null = null;
   private globalDownloadCapOverride: number | null = null;
+  /** 1.8.0: lưu báo cáo lỗi tự động khi tác vụ sập vì lỗi của ứng dụng (auto-error-report.ts). Chưa đặt → chỉ ghi nhật ký. */
+  private appFaultReporter: ((input: AppFaultInput) => void) | null = null;
+
+  public setAppFaultReporter(reporter: (input: AppFaultInput) => void): void {
+    this.appFaultReporter = reporter;
+  }
   /**
    * 1.7.5 (đo thật 2026-11-03): tác vụ tải đã sang bước mã hoá bản CapCut — KHÔNG còn giữ chỗ tải (trước đây giữ → mọi chỗ đang
    * mã hoá thì 0 lượt tải). Số bản mã hoá cùng lúc có trần theo CPU máy đang chạy (editEncodeLimit) và chỉ mở thêm khi CPU còn
@@ -1938,6 +1946,18 @@ export class QueueManager {
       jobId: job.id,
       ...(job.projectId ? { projectId: job.projectId } : {})
     });
+    // 1.8.0: lỗi của ứng dụng — tự lưu báo cáo (không hộp thoại) để sửa; người dùng thấy "Lỗi của ứng dụng", không bị đổ lỗi.
+    try {
+      this.appFaultReporter?.({
+        source: 'queue-executor',
+        error,
+        jobId: job.id,
+        ...(job.projectId ? { projectId: job.projectId } : {}),
+        context: { jobType: job.type, status: job.status, attempts: job.attempts }
+      });
+    } catch {
+      // Lưu báo cáo không được làm hỏng lưới an toàn.
+    }
     try {
       const current = this.repo.get(job.id);
       if (
@@ -1953,7 +1973,7 @@ export class QueueManager {
               status: 'failed',
               attempts: job.attempts + 1,
               errorCode: 'UNHANDLED_ERROR',
-              errorMessage: message,
+              errorMessage: formatAppFaultMessage({ technical: message }),
               finishedAt: new Date().toISOString()
             },
             { recoverableExternalFailure: false }
@@ -2721,6 +2741,7 @@ export class QueueManager {
             reusedExistingFile: result.skipped,
             audioIssue: result.audioIssue ?? null,
             audioMaxVolumeDb: result.audioMaxVolumeDb ?? null,
+            qualityWarning: result.qualityWarning ?? null,
             cookieFailureConfirmed: false,
             cookieRetryRequested: false,
             resumeStatus: null,

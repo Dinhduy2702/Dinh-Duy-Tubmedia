@@ -18,7 +18,7 @@ export interface UserActionMessage {
   steps: string[];
 }
 
-export type UserActionPage = 'settings' | 'tools';
+export type UserActionPage = 'settings' | 'tools' | 'cleanup' | 'updates';
 
 export interface UserActionShortcut {
   label: string;
@@ -61,8 +61,45 @@ export function parseUserActionMessage(text: string): UserActionMessage | null {
 /** Nút đường tắt theo nơi bước ĐẦU TIÊN có chỉ chỗ trỏ tới (không cần mã hoá thêm gì vào câu lỗi). */
 export function userActionShortcut(steps: readonly string[]): UserActionShortcut | null {
   for (const step of steps) {
-    if (step.includes('Cài đặt › Tải danh sách')) return { label: 'Mở Cài đặt', page: 'settings' };
+    if (step.includes('Cài đặt ›')) return { label: 'Mở Cài đặt', page: 'settings' };
     if (step.includes('Trung tâm công cụ')) return { label: 'Mở Trung tâm công cụ', page: 'tools' };
+    if (step.includes('Dọn rác hệ thống')) return { label: 'Mở Dọn rác hệ thống', page: 'cleanup' };
+    if (step.includes('trang Cập nhật')) return { label: 'Mở trang Cập nhật', page: 'updates' };
   }
   return null;
+}
+
+/*
+ * 1.8.0 (yêu cầu người dùng 2026-11-25: "lỗi app, lỗi code mới cần lưu để fix lại"): lỗi do CHÍNH ỨNG DỤNG (ngoại lệ không
+ * lường trước, lỗi công cụ tải chưa phân loại được, tiến trình xử lý sập) không được đổ cho người dùng. Tiến trình chính tự
+ * lưu báo cáo (auto-error-report.ts) rồi dựng câu bằng formatAppFaultMessage(); giao diện nhận ra qua parseAppFaultMessage()
+ * và hiện thẻ "Lỗi của ứng dụng" + nút mở thư mục báo cáo. Dòng 1 là câu cho người dùng; phần sau "Chi tiết kỹ thuật:"
+ * chỉ hiện trong mục Chi tiết (thu gọn).
+ */
+export const APP_FAULT_TITLE = 'Lỗi của ứng dụng';
+export const APP_FAULT_DEFAULT_SUMMARY =
+  'Tubmedia gặp lỗi ngoài dự kiến — không phải do bạn thao tác sai. Báo cáo lỗi đã được lưu tự động để sửa.';
+const APP_FAULT_DETAIL_HEADER = 'Chi tiết kỹ thuật:';
+const APP_FAULT_DETAIL_LIMIT = 2_000;
+
+export interface AppFaultMessage {
+  summary: string;
+  technical: string;
+}
+
+export function formatAppFaultMessage(input: { summary?: string; technical?: string } = {}): string {
+  const head = `${APP_FAULT_TITLE}${TITLE_SEPARATOR}${oneLine(input.summary ?? APP_FAULT_DEFAULT_SUMMARY)}`;
+  const technical = (input.technical ?? '').trim().slice(0, APP_FAULT_DETAIL_LIMIT);
+  return technical ? `${head}\n${APP_FAULT_DETAIL_HEADER}\n${technical}` : head;
+}
+
+export function parseAppFaultMessage(text: string): AppFaultMessage | null {
+  const normalized = text.replace(/\r\n/g, '\n').trim();
+  const prefix = `${APP_FAULT_TITLE}${TITLE_SEPARATOR}`;
+  if (!normalized.startsWith(prefix)) return null;
+  const newline = normalized.indexOf('\n');
+  const summary = (newline < 0 ? normalized : normalized.slice(0, newline)).slice(prefix.length).trim();
+  const rest = newline < 0 ? '' : normalized.slice(newline + 1).trim();
+  const technical = rest.startsWith(APP_FAULT_DETAIL_HEADER) ? rest.slice(APP_FAULT_DETAIL_HEADER.length).trim() : rest;
+  return { summary: summary || APP_FAULT_DEFAULT_SUMMARY, technical };
 }

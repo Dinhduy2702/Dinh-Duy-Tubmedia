@@ -5,7 +5,13 @@ import {
   stripTypedMarker,
   type NoticeTone
 } from './notice-tone.js';
-import { parseUserActionMessage, userActionShortcut, type UserActionShortcut } from './user-action-message.js';
+import {
+  APP_FAULT_TITLE,
+  parseAppFaultMessage,
+  parseUserActionMessage,
+  userActionShortcut,
+  type UserActionShortcut
+} from './user-action-message.js';
 
 export type UiTone = NoticeTone;
 
@@ -19,7 +25,18 @@ export interface FriendlyIssue {
   code?: string;
   /** 1.8.0: nút đường tắt mở đúng trang để người dùng tự xử lý (user-action-message.ts). */
   action?: UserActionShortcut;
+  /**
+   * 1.8.0: 'app-fault' = lỗi của chính ứng dụng (đã tự lưu báo cáo, không đổ cho người dùng); 'user-action' = người dùng tự
+   * xử lý được theo các bước. Không có = thông tin / lỗi chưa phân loại.
+   */
+  kind?: 'user-action' | 'app-fault';
 }
+
+/** Các bước cho lỗi của ứng dụng: người dùng chỉ cần thử lại hoặc gửi báo cáo (đã được lưu sẵn). */
+export const APP_FAULT_STEPS: readonly string[] = [
+  'Bấm Thử lại — lỗi loại này thường không lặp lại.',
+  'Nếu vẫn lỗi: bấm Gửi báo cáo lỗi rồi gửi tệp .zip cho bên hỗ trợ Tubmedia.'
+];
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -275,6 +292,18 @@ function classifyIssue(value: unknown): FriendlyIssue {
     };
   }
   const lower = cleaned.toLowerCase();
+  // 1.8.0: lỗi của chính ứng dụng (báo cáo đã tự lưu) — không đổ cho người dùng, chi tiết kỹ thuật chỉ ở mục Chi tiết.
+  const appFault = parseAppFaultMessage(cleaned);
+  if (appFault) {
+    return {
+      title: APP_FAULT_TITLE,
+      message: appFault.summary,
+      steps: [...APP_FAULT_STEPS],
+      technical: appFault.technical || technical,
+      tone: 'error',
+      kind: 'app-fault'
+    };
+  }
   // 1.8.0 việc C: câu dựng bằng formatUserActionMessage (lỗi người dùng tự xử lý được) → tiêu đề + các bước đánh số + nút
   // mở đúng chỗ, không đoán theo nội dung.
   const userAction = parseUserActionMessage(cleaned);
@@ -286,6 +315,7 @@ function classifyIssue(value: unknown): FriendlyIssue {
       steps: userAction.steps,
       technical,
       tone: 'warning',
+      kind: 'user-action',
       ...(action ? { action } : {})
     };
   }
@@ -402,6 +432,98 @@ function classifyIssue(value: unknown): FriendlyIssue {
       tone: 'warning'
     };
   }
+  // 1.8.0 (yêu cầu người dùng 2026-11-25): các lỗi hay gặp mà người dùng tự xử lý được — tiêu đề đời thường + bước cụ thể
+  // (đúng tên trang/ô trong app). Đặt TRƯỚC các luật chung (thiếu công cụ, quyền ghi, mạng) để không bị bắt nhầm.
+  if (
+    lower.includes('http 429') ||
+    lower.includes('giới hạn số yêu cầu') ||
+    lower.includes('source_rate_limited') ||
+    lower.includes('not a bot') ||
+    lower.includes('nghi tải tự động')
+  ) {
+    return {
+      title: 'Nền tảng đang tạm giới hạn tải',
+      message:
+        'Nền tảng tạm chặn (HTTP 429) vì máy này gửi nhiều yêu cầu trong thời gian ngắn — không phải lỗi cookies hay lỗi ứng dụng. Tubmedia đã tạm nghỉ với nền tảng này.',
+      steps: [
+        'Chờ — Tubmedia tự đếm ngược rồi tải tiếp; không cần bấm Thử lại liên tục.',
+        'Nếu nền tảng đòi xác minh: mở video đó trên trình duyệt, đăng nhập và xem thử vài giây, rồi bấm Tiếp tục.',
+        'Vẫn bị chặn lâu: đổi mạng (ví dụ phát Wi-Fi từ điện thoại) hoặc giảm số luồng tải trong Cài đặt › Cấu hình máy.'
+      ],
+      technical,
+      tone: 'warning'
+    };
+  }
+  if (lower.includes('đường dẫn tệp quá dài') || lower.includes('path_too_long') || lower.includes('file name too long')) {
+    return {
+      title: 'Đường dẫn lưu tệp quá dài',
+      message: 'Windows chỉ cho đường dẫn tối đa 260 ký tự; thư mục lưu hiện tại nằm quá sâu hoặc có tên quá dài.',
+      steps: [
+        'Chọn thư mục lưu ngắn, gần gốc ổ đĩa (ví dụ E:\\Video) ở ô Thư mục lưu video của danh sách.',
+        'Bấm Thử lại đúng video — Tubmedia cũng tự rút ngắn tên tệp.'
+      ],
+      technical,
+      tone: 'warning'
+    };
+  }
+  if (
+    lower.includes('chương trình khác khoá') ||
+    lower.includes('chương trình khác khóa') ||
+    lower.includes('being used by another process') ||
+    /\bebusy\b/.test(lower)
+  ) {
+    return {
+      title: 'Tệp đang bị chương trình khác mở',
+      message:
+        'Tubmedia không ghi được tệp vì trình phát video, CapCut, phần mềm diệt virus hoặc đồng bộ đám mây (OneDrive, Google Drive) đang giữ tệp.',
+      steps: [
+        'Đóng trình phát hoặc CapCut đang mở đúng tệp đó; tạm dừng đồng bộ OneDrive/Google Drive nếu thư mục nằm trong đó.',
+        'Bấm Thử lại đúng video.',
+        'Vẫn lỗi: chọn thư mục khác (ngoài thư mục đồng bộ) ở ô Thư mục lưu video.'
+      ],
+      technical,
+      tone: 'warning'
+    };
+  }
+  if (
+    lower.includes('riêng tư') ||
+    lower.includes('private video') ||
+    lower.includes('độ tuổi') ||
+    lower.includes('age-restricted') ||
+    lower.includes('confirm your age')
+  ) {
+    return {
+      title: 'Video không xem được công khai',
+      message:
+        'Video riêng tư, đã bị gỡ, giới hạn độ tuổi hoặc bị chặn theo vùng — chỉ tài khoản hoặc khu vực có quyền xem mới tải được.',
+      steps: [
+        'Mở link trong trình duyệt để xem lý do cụ thể.',
+        'Nếu bạn xem được khi đăng nhập: thêm cookies của tài khoản đó trong khung Cookies của danh sách, rồi bấm Thử lại.',
+        'Nếu video đã bị gỡ hoặc riêng tư hẳn: xoá link này khỏi danh sách.'
+      ],
+      technical,
+      tone: 'warning'
+    };
+  }
+  if (
+    lower.includes('getaddrinfo') ||
+    lower.includes('enotfound') ||
+    lower.includes('failed to resolve') ||
+    lower.includes('mất kết nối mạng') ||
+    lower.includes('không có kết nối mạng')
+  ) {
+    return {
+      title: 'Mất kết nối mạng',
+      message: 'Máy không kết nối được tới máy chủ video.',
+      steps: [
+        'Kiểm tra Wi-Fi hoặc cáp mạng; thử mở một trang web bất kỳ.',
+        'Nếu dùng VPN/proxy: tắt thử, hoặc kiểm tra lại ở Cài đặt › Công cụ và mạng.',
+        'Bấm Tiếp tục khi có mạng — video tải dở được giữ nguyên.'
+      ],
+      technical,
+      tone: 'warning'
+    };
+  }
   if (
     lower.includes('enoent') ||
     lower.includes('tool_not_found') ||
@@ -427,7 +549,11 @@ function classifyIssue(value: unknown): FriendlyIssue {
     return {
       title: 'Ổ đĩa không đủ dung lượng',
       message: 'Danh sách đã tạm dừng trước khi ghi thêm dữ liệu để tránh làm hỏng tệp.',
-      steps: ['Giải phóng dung lượng hoặc đổi thư mục lưu.', 'Nhấn Tiếp tục sau khi đã xử lý.'],
+      steps: [
+        'Mở Dọn rác hệ thống để xoá tệp tạm, hoặc xoá bớt tệp không cần trên ổ đó.',
+        'Hoặc chọn ổ khác còn trống ở ô Thư mục lưu video của danh sách.',
+        'Bấm Tiếp tục — video tải dở được giữ nguyên.'
+      ],
       technical,
       tone: 'error'
     };
@@ -440,7 +566,11 @@ function classifyIssue(value: unknown): FriendlyIssue {
     return {
       title: 'Không thể ghi vào thư mục đã chọn',
       message: 'Windows đang chặn quyền truy cập hoặc đường dẫn không còn tồn tại.',
-      steps: ['Chọn thư mục khác trên ổ dữ liệu.', 'Kiểm tra ổ đĩa còn kết nối rồi thử lại.'],
+      steps: [
+        'Chọn thư mục khác trên ổ dữ liệu (ví dụ D: hoặc E:) ở ô Thư mục lưu video — tránh thư mục hệ thống như C:\\Program Files.',
+        'Nếu là ổ cắm ngoài hoặc ổ mạng: kiểm tra ổ vẫn còn kết nối.',
+        'Bấm Thử lại.'
+      ],
       technical,
       tone: 'error'
     };
@@ -453,7 +583,10 @@ function classifyIssue(value: unknown): FriendlyIssue {
     return {
       title: 'Mạng hoặc máy chủ nguồn đang không ổn định',
       message: 'Ứng dụng đã tạm dừng đúng danh sách để tránh thử lại liên tục.',
-      steps: ['Kiểm tra kết nối mạng và cookies.', 'Nhấn Tiếp tục khi kết nối ổn định.'],
+      steps: [
+        'Kiểm tra Wi-Fi hoặc cáp mạng; nếu dùng VPN/proxy, tắt thử hoặc kiểm tra ở Cài đặt › Công cụ và mạng.',
+        'Bấm Tiếp tục khi kết nối ổn định — video tải dở được giữ nguyên.'
+      ],
       technical,
       tone: 'warning'
     };
@@ -704,9 +837,14 @@ function typedRaw(value: unknown): string {
  * không có dấu kiểu (lỗi lạ, chưa phân loại) mới dùng cách nhận diện theo nội dung như trước.
  */
 export function friendlyIssue(value: unknown): FriendlyIssue {
+  return withShortcut(typedIssue(value));
+}
+
+function typedIssue(value: unknown): FriendlyIssue {
   const issue = classifyIssue(value);
   const typed = readTypedMessage(typedRaw(value));
   if (!typed) return issue;
+  if (typed.code === 'UNHANDLED_ERROR' && issue.kind !== 'app-fault') return appFaultIssue(issue.technical);
   const generic = issue.title === GENERIC_FALLBACK_TITLE;
   if (!generic) return { ...issue, tone: typed.tone, code: typed.code };
   const known = KNOWN_CODE_FALLBACK[typed.code];
@@ -718,6 +856,44 @@ export function friendlyIssue(value: unknown): FriendlyIssue {
     ...(known?.message ? { message: known.message } : {}),
     ...(known?.steps ? { steps: known.steps } : {})
   };
+}
+
+function appFaultIssue(technical: string): FriendlyIssue {
+  return {
+    title: APP_FAULT_TITLE,
+    message: 'Tubmedia gặp lỗi ngoài dự kiến — không phải do bạn thao tác sai.',
+    steps: [...APP_FAULT_STEPS],
+    technical,
+    tone: 'error',
+    kind: 'app-fault'
+  };
+}
+
+/**
+ * 1.8.0: mọi lỗi có bước trỏ tới một trang (Cài đặt ›, Trung tâm công cụ, Dọn rác hệ thống, trang Cập nhật) đều có nút mở
+ * đúng trang đó; lỗi cảnh báo/lỗi có bước cụ thể (không phải câu chung) được đánh dấu "người dùng tự xử lý được".
+ */
+function withShortcut(issue: FriendlyIssue): FriendlyIssue {
+  const action = issue.action ?? (issue.kind === 'app-fault' ? null : userActionShortcut(issue.steps));
+  const actionable =
+    !issue.kind &&
+    issue.steps.length > 0 &&
+    issue.title !== GENERIC_FALLBACK_TITLE &&
+    (issue.tone === 'warning' || issue.tone === 'error');
+  return {
+    ...issue,
+    ...(action ? { action } : {}),
+    ...(actionable ? { kind: 'user-action' as const } : {})
+  };
+}
+
+/** Lỗi của một tác vụ: tác vụ sập vì lỗi của ứng dụng (UNHANDLED_ERROR) luôn hiện là lỗi ứng dụng, kể cả câu lỗi cũ. */
+export function jobFriendlyIssue(job: { errorMessage?: string | null; errorCode?: string | null }): FriendlyIssue {
+  const issue = friendlyIssue(job.errorMessage ?? job.errorCode ?? '');
+  if (job.errorCode === 'UNHANDLED_ERROR' && issue.kind !== 'app-fault') {
+    return appFaultIssue(issue.technical || (job.errorMessage ?? ''));
+  }
+  return issue;
 }
 
 /** Nhãn chữ của mức, dùng chung cho mọi thành phần hiển thị thông báo. */
