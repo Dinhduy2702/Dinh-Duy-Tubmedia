@@ -75,7 +75,7 @@ const checks = [
   ],
   [
     'installer closes old app before overwrite',
-    nsisInstaller.includes('taskkill.exe /F /T /IM') && nsisInstaller.includes('Sleep 1500')
+    nsisInstaller.includes('StopInstallDirProcessesAndWait') && nsisInstaller.includes('AllowSkipFiles off')
   ],
   [
     'silent updater can force app relaunch',

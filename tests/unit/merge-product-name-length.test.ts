@@ -52,8 +52,10 @@ describe('Tên sản phẩm đầu ra của Tải & Ghép: giới hạn giao di�
 
   it('cả hai lần gửi (bắt đầu và lưu nháp) đều cắt name, và ô nhập bị giới hạn 220 ký tự', async () => {
     const source = await pageSource();
-    expect(source.match(/name: forms\[slot\]\.finalFileName\.slice\(0, MERGE_LANE_NAME_MAX_LENGTH\),/g)).toHaveLength(2);
-    expect(source).not.toMatch(/name: forms\[slot\]\.finalFileName,/);
+    expect(
+      source.match(/name: (?:forms\[slot\]|form)\.finalFileName\.slice\(0, MERGE_LANE_NAME_MAX_LENGTH\),/g)
+    ).toHaveLength(2);
+    expect(source).not.toMatch(/name: (?:forms\[slot\]|form)\.finalFileName,/);
     expect(source).toContain('maxLength={MERGE_FINAL_FILE_NAME_MAX_LENGTH}');
   });
 });
