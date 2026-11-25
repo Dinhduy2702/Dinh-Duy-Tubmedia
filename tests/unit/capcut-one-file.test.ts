@@ -85,6 +85,49 @@ describe('HDR: thu nhỏ trước rồi mới chuyển màu (nhanh gấp ~3 lầ
       'format=yuv420p'
     ]);
   });
+
+  it('#10: video dọc 1080x1920 và 21:9 1920x800 không bị thu nhỏ sai; 4K dọc thu đúng về 1080x1920', () => {
+    const vertical1080 = info({ width: 1080, height: 1920, videoCodec: 'vp9' });
+    const vPlan = planCapCutCompatibility(settings({ downloadCompatibilityMode: 'capcut_sdr_1080p' }), vertical1080);
+    expect(capCutFilterChain(vPlan, vertical1080).some((f) => f.startsWith('scale=') || f.includes('zscale=w='))).toBe(
+      false
+    );
+
+    const wide219 = info({ width: 1920, height: 800, videoCodec: 'vp9' });
+    const wPlan = planCapCutCompatibility(settings({ downloadCompatibilityMode: 'capcut_sdr_1080p' }), wide219);
+    expect(capCutFilterChain(wPlan, wide219).some((f) => f.startsWith('scale=') || f.includes('zscale=w='))).toBe(
+      false
+    );
+
+    const vertical4kHdr = info({
+      width: 2160,
+      height: 3840,
+      hdr: true,
+      videoCodec: 'av1',
+      pixelFormat: 'yuv420p10le'
+    });
+    const v4kPlan = planCapCutCompatibility(settings({ downloadCompatibilityMode: 'capcut_sdr_1080p' }), vertical4kHdr);
+    expect(capCutFilterChain(v4kPlan, vertical4kHdr)[0]).toBe('zscale=w=1080:h=1920:t=linear:npl=100');
+
+    const vertical4kSdr = info({ width: 2160, height: 3840, videoCodec: 'vp9' });
+    const v4kSdrPlan = planCapCutCompatibility(
+      settings({ downloadCompatibilityMode: 'capcut_sdr_1080p' }),
+      vertical4kSdr
+    );
+    expect(capCutFilterChain(v4kSdrPlan, vertical4kSdr)[0]).toBe(
+      "scale=w='min(iw,1080)':h='min(ih,1920)':force_original_aspect_ratio=decrease:force_divisible_by=2"
+    );
+
+    const wide4kHdr = info({
+      width: 3840,
+      height: 1600,
+      hdr: true,
+      videoCodec: 'av1',
+      pixelFormat: 'yuv420p10le'
+    });
+    const w4kPlan = planCapCutCompatibility(settings({ downloadCompatibilityMode: 'capcut_sdr_1080p' }), wide4kHdr);
+    expect(capCutFilterChain(w4kPlan, wide4kHdr)[0]).toBe('zscale=w=1920:h=800:t=linear:npl=100');
+  });
 });
 
 describe('một tệp mỗi video', () => {

@@ -440,4 +440,88 @@ describe('download quality', () => {
       }
     }
   });
+
+  it('#10: CapCut hỗ trợ khung dọc (1080x1920 / 1440x2560) và siêu rộng 21:9 (1920x800) trong bộ chọn, kế hoạch và kiểm tra chất lượng', () => {
+    const cap1080Strict = buildDownloadFormatSelector(
+      settings({ downloadCompatibilityMode: 'capcut_sdr_1080p', downloadAllowBelowMinimum: false })
+    );
+    expect(cap1080Strict).toContain('[width=1080][height<=1920][fps<=?60]');
+    expect(cap1080Strict).toContain('[width=1920][fps<=?60][height<=1080]');
+
+    const cap2kStrict = buildDownloadFormatSelector(
+      settings({ downloadCompatibilityMode: 'capcut_sdr_2k', downloadAllowBelowMinimum: false })
+    );
+    expect(cap2kStrict).toContain('[width=1440][height<=2560][fps<=?60]');
+    expect(cap2kStrict).toContain('[width>=1080][width<=1440][height<=2560][fps<=?60]');
+    expect(cap2kStrict).toContain('[width>=1920][width<=2560][height<1080][fps<=?60]');
+
+    const cap1080Fallback = buildDownloadFormatSelector(
+      settings({ downloadCompatibilityMode: 'capcut_sdr_1080p', downloadAllowBelowMinimum: true })
+    );
+    expect(cap1080Fallback).toContain('[width<=1080][height<=1920][fps<=?60]');
+    expect(cap1080Fallback).toContain('bv*[width<=?1080][height<=?1920][fps<=?60]+ba');
+
+    const vertical1080: MediaInfo = { ...info, width: 1080, height: 1920 };
+    const vertical1440: MediaInfo = { ...info, width: 1440, height: 2560 };
+    const wide219: MediaInfo = { ...info, width: 1920, height: 800 };
+    const vertical720: MediaInfo = { ...info, width: 720, height: 1280 };
+
+    expect(
+      planCapCutCompatibility(settings({ downloadCompatibilityMode: 'capcut_sdr_1080p' }), vertical1080)
+        .needsVideoTranscode
+    ).toBe(false);
+    expect(
+      planCapCutCompatibility(settings({ downloadCompatibilityMode: 'capcut_sdr_2k' }), vertical1440)
+        .needsVideoTranscode
+    ).toBe(false);
+    expect(
+      planCapCutCompatibility(settings({ downloadCompatibilityMode: 'capcut_sdr_1080p' }), wide219)
+        .needsVideoTranscode
+    ).toBe(false);
+
+    expect(
+      validateDownloadedQuality(
+        settings({ downloadCompatibilityMode: 'capcut_sdr_1080p', downloadAllowBelowMinimum: false }),
+        vertical1080
+      ).ok
+    ).toBe(true);
+    expect(
+      validateDownloadedQuality(
+        settings({ downloadCompatibilityMode: 'capcut_sdr_2k', downloadAllowBelowMinimum: false }),
+        vertical1440
+      ).ok
+    ).toBe(true);
+    expect(
+      validateDownloadedQuality(
+        settings({ downloadCompatibilityMode: 'capcut_sdr_1080p', downloadAllowBelowMinimum: false }),
+        wide219
+      ).ok
+    ).toBe(true);
+
+    expect(
+      validateDownloadedQuality(
+        settings({ downloadCompatibilityMode: 'capcut_sdr_1080p', downloadAllowBelowMinimum: false }),
+        vertical720
+      ).ok
+    ).toBe(false);
+    expect(
+      validateDownloadedQuality(
+        settings({ downloadCompatibilityMode: 'capcut_sdr_1080p', downloadAllowBelowMinimum: true }),
+        vertical720
+      ).ok
+    ).toBe(true);
+
+    expect(
+      validateDownloadedQuality(
+        settings({ downloadCompatibilityMode: 'source', downloadMinHeight: 1080, downloadMaxHeight: 1080 }),
+        vertical1080
+      ).ok
+    ).toBe(true);
+    expect(
+      validateDownloadedQuality(
+        settings({ downloadCompatibilityMode: 'source', downloadMinHeight: 1080, downloadMaxHeight: 1080 }),
+        wide219
+      ).ok
+    ).toBe(true);
+  });
 });

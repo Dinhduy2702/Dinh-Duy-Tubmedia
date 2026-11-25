@@ -137,6 +137,31 @@ export function capCutTargetMaxHeight(mode: DownloadCompatibilityMode): 1080 | 1
   return null;
 }
 
+/**
+ * #10: Khung tối đa cho CapCut theo hướng khung hình: ngang/21:9 giữ W×H (1920×1080 hoặc 2560×1440);
+ * dọc (height > width) đảo khung thành H×W (1080×1920 hoặc 1440×2560) để không kẹp/cắt sai video dọc.
+ */
+export function capCutFrameBounds(
+  maxShortEdge: number,
+  width: number,
+  height: number
+): { maxWidth: number; maxHeight: number } {
+  const maxLongEdge = maxShortEdge === 1440 ? 2560 : Math.round((maxShortEdge * 16) / 9);
+  if (height > width) {
+    return { maxWidth: maxShortEdge, maxHeight: maxLongEdge };
+  }
+  return { maxWidth: maxLongEdge, maxHeight: maxShortEdge };
+}
+
+function meetsMinimumResolution(width: number, height: number, minHeight: number): boolean {
+  if (width <= 0 || height <= 0) return height >= minHeight;
+  const shortEdge = Math.min(width, height);
+  const longEdge = Math.max(width, height);
+  if (shortEdge >= minHeight) return true;
+  // 21:9 / khung điện ảnh (vd 1920×800): chiều rộng đạt Full HD 1920px (hay 2K 2560px) và cạnh ngắn >= nửa ngưỡng.
+  return longEdge >= Math.round((minHeight * 16) / 9) && shortEdge >= Math.round(minHeight * 0.5);
+}
+
 export function effectiveDownloadBounds(settings: AppSettings): EffectiveDownloadBounds {
   const capCutHeight = capCutTargetMaxHeight(settings.downloadCompatibilityMode);
   if (capCutHeight) {
@@ -210,41 +235,63 @@ function videoWithAudio(videoFilter: string, settings: AppSettings): string[] {
 function buildCapCutFormatSelector(settings: AppSettings): string {
   const maxHeight = capCutTargetMaxHeight(settings.downloadCompatibilityMode);
   if (!maxHeight) return '';
+  const maxLong = maxHeight === 1440 ? 2560 : 1920;
   const exact = `[height=${maxHeight}][fps<=?60]`;
   const range = `[height>=1080][height<=${maxHeight}][fps<=?60]`;
+  const exactVertical = `[width=${maxHeight}][height<=${maxLong}][fps<=?60]`;
+  const rangeVertical = `[width>=1080][width<=${maxHeight}][height<=${maxLong}][fps<=?60]`;
+  const exactWide =
+    maxHeight === 1440
+      ? `[width>=1920][width<=2560][height<1080][fps<=?60]`
+      : `[width=1920][fps<=?60][height<=1080]`;
   const h264 = "[vcodec~='^avc1|^h264']";
   const aac = "[acodec~='^mp4a|^aac']";
-  const branches = [
-    `bv*${exact}${h264}+ba${aac}`,
-    `bv*${exact}${h264}+ba`,
-    `bv*${exact}+ba${aac}`,
-    `bv*${exact}+ba`,
-    `bv*${range}${h264}+ba${aac}`,
-    `bv*${range}${h264}+ba`,
-    `bv*${range}+ba${aac}`,
-    `bv*${range}+ba`,
-    // P3: bản gộp sẵn hình + tiếng (b) đứng TRƯỚC các nhánh bv* không kèm tiếng — bv* có thể là định dạng chỉ có hình.
-    `b${exact}${h264}`,
-    `b${exact}`,
-    `b${range}${h264}`,
-    `b${range}`
+  const withAudioFor = (filter: string): string[] => [
+    `bv*${filter}${h264}+ba${aac}`,
+    `bv*${filter}${h264}+ba`,
+    `bv*${filter}+ba${aac}`,
+    `bv*${filter}+ba`
   ];
-  const videoOnly = [`bv*${exact}${h264}`, `bv*${exact}`, `bv*${range}${h264}`, `bv*${range}`];
+  const mergedFor = (filter: string): string[] => [`b${filter}${h264}`, `b${filter}`];
+  const videoOnlyFor = (filter: string): string[] => [`bv*${filter}${h264}`, `bv*${filter}`];
+
+  const strictFilters = [
+    exact,
+    range,
+    exactVertical,
+    ...(maxHeight > 1080 ? [rangeVertical] : []),
+    exactWide
+  ];
+  const branches = [
+    ...withAudioFor(exact),
+    ...withAudioFor(range),
+    ...withAudioFor(exactVertical),
+    ...(maxHeight > 1080 ? withAudioFor(rangeVertical) : []),
+    ...withAudioFor(exactWide),
+    // P3: bản gộp sẵn hình + tiếng (b) đứng TRƯỚC các nhánh bv* không kèm tiếng — bv* có thể là định dạng chỉ có hình.
+    ...mergedFor(exact),
+    ...mergedFor(range),
+    ...mergedFor(exactVertical),
+    ...(maxHeight > 1080 ? mergedFor(rangeVertical) : []),
+    ...mergedFor(exactWide)
+  ];
+  const videoOnly = strictFilters.flatMap((filter) => videoOnlyFor(filter));
   if (!settings.downloadAllowBelowMinimum) return [...branches, ...videoOnly].join('/');
   // 1.8.0 việc B: ô "Cho phép thấp hơn" bật → nguồn/máy không có bản ≥1080p thì lấy bản tốt nhất dưới 1080p (ưu tiên
   // H.264 + AAC, vẫn ≤ 60 FPS và ≤ mức tối đa); bước chuyển CapCut giữ nguyên chiều cao, không phóng to giả. Cuối cùng bv*+ba/b.
   const below = `[height<=${maxHeight}][fps<=?60]`;
+  const belowVertical = `[width<=${maxHeight}][height<=${maxLong}][fps<=?60]`;
   return [
     ...branches,
-    `bv*${below}${h264}+ba${aac}`,
-    `bv*${below}${h264}+ba`,
-    `bv*${below}+ba${aac}`,
-    `bv*${below}+ba`,
-    `b${below}${h264}`,
-    `b${below}`,
+    ...withAudioFor(below),
+    ...withAudioFor(belowVertical),
+    ...mergedFor(below),
+    ...mergedFor(belowVertical),
     // 1.8.0: trước khi thả hẳn ra bv*+ba, ưu tiên nhánh nằm trong khung (kể cả khi thiếu metadata height/fps hoặc chỉ vượt 1 chiều).
     `bv*[height<=?${maxHeight}][fps<=?60]+ba`,
+    `bv*[width<=?${maxHeight}][height<=?${maxLong}][fps<=?60]+ba`,
     `bv*[height<=?${maxHeight}]+ba`,
+    `bv*[width<=?${maxHeight}][height<=?${maxLong}]+ba`,
     `bv*[fps<=?60]+ba`,
     'bv*+ba',
     ...videoOnly,
@@ -494,7 +541,8 @@ export function planCapCutCompatibility(settings: AppSettings, info: MediaInfo):
   const wrongCodec = !isH264(info.videoCodec);
   const wrongPixelFormat = info.pixelFormat.toLowerCase() !== 'yuv420p';
   const fpsTooHigh = info.fps > 60.5;
-  const resolutionTooHigh = info.height > maxHeight + 2;
+  const frameBounds = capCutFrameBounds(maxHeight, info.width, info.height);
+  const resolutionTooHigh = info.width > frameBounds.maxWidth + 2 || info.height > frameBounds.maxHeight + 2;
   const needsAudioTranscode = Boolean(
     info.audioCodec &&
     (info.audioCodec.toLowerCase() !== 'aac' || info.sampleRate !== 48_000 || (info.channels ?? 2) > 2)
@@ -555,14 +603,26 @@ export function validateDownloadedQuality(
   const capCutMode = isCapCutDownloadMode(settings.downloadCompatibilityMode);
   const nativeOnlySource = !sourceAllowsFormatSelection(options.platform, options.extractorKey);
 
-  if (bounds.maxHeight > 0 && info.height > bounds.maxHeight + 2 && !(capCutMode && allowCapCutPreparation)) {
+  const capFrame = bounds.maxHeight > 0 ? capCutFrameBounds(bounds.maxHeight, info.width, info.height) : null;
+  const exceedsMaxResolution =
+    bounds.maxHeight > 0 &&
+    (capCutMode
+      ? Boolean(capFrame && (info.width > capFrame.maxWidth + 2 || info.height > capFrame.maxHeight + 2))
+      : info.height > info.width
+        ? info.width > bounds.maxHeight + 2 || info.height > Math.round((bounds.maxHeight * 16) / 9) + 2
+        : info.height > bounds.maxHeight + 2);
+
+  if (exceedsMaxResolution && !(capCutMode && allowCapCutPreparation)) {
+    const allowedHeight = capCutMode && capFrame ? capFrame.maxHeight : bounds.maxHeight;
     if (!capCutMode && nativeOnlySource) {
       const src = nonSelectableSourceLabel(options.platform, options.extractorKey);
       warnings.push(
         `Video gốc ${src.prep} ${src.name} là ${info.height}p, cao hơn mức tối đa ${bounds.maxHeight}p của danh sách; Tubmedia giữ nguyên tệp gốc vì ${src.name} không cho chọn chất lượng.`
       );
+    } else if (capCutMode && capFrame && info.width > capFrame.maxWidth + 2 && info.height <= capFrame.maxHeight + 2) {
+      blockingReasons.push(`Chiều rộng ${info.width}px vượt mức tối đa ${capFrame.maxWidth}px.`);
     } else {
-      blockingReasons.push(`Chiều cao ${info.height}px vượt mức tối đa ${bounds.maxHeight}px.`);
+      blockingReasons.push(`Chiều cao ${info.height}px vượt mức tối đa ${allowedHeight}px.`);
     }
   }
   if (bounds.maxFps > 0 && info.fps > bounds.maxFps + 0.5 && !(capCutMode && allowCapCutPreparation)) {
@@ -575,8 +635,10 @@ export function validateDownloadedQuality(
       blockingReasons.push(`FPS ${info.fps.toFixed(2)} vượt mức tối đa ${bounds.maxFps}.`);
     }
   }
-  if (bounds.minHeight > 0 && info.height < bounds.minHeight) {
-    belowMinimum.push(`độ phân giải ${info.height}p thấp hơn ${bounds.minHeight}p`);
+  const reportedQualityHeight =
+    info.width > 0 && info.height > info.width ? Math.min(info.width, info.height) : info.height;
+  if (bounds.minHeight > 0 && !meetsMinimumResolution(info.width, info.height, bounds.minHeight)) {
+    belowMinimum.push(`độ phân giải ${reportedQualityHeight}p thấp hơn ${bounds.minHeight}p`);
   }
   if (bounds.minFps > 0 && info.fps + 0.5 < bounds.minFps) {
     belowMinimum.push(`FPS ${info.fps.toFixed(2)} thấp hơn ${bounds.minFps}`);
@@ -590,10 +652,14 @@ export function validateDownloadedQuality(
   if (belowMinimum.length > 0) {
     const message = `Nguồn không đạt mức tối thiểu: ${belowMinimum.join(', ')}.`;
     if (bounds.allowBelowMinimum) warnings.push(message);
-    else if (bounds.minHeight > 0 && info.height > 0 && info.height < bounds.minHeight) {
+    else if (
+      bounds.minHeight > 0 &&
+      info.height > 0 &&
+      !meetsMinimumResolution(info.width, info.height, bounds.minHeight)
+    ) {
       // 1.8.0 việc B: nói rõ ô cần bật và bản sẽ nhận được, thay vì chỉ báo "không đạt".
       blockingReasons.push(
-        `${message} Bật ô "${ALLOW_BELOW_MINIMUM_LABEL}" trong Cài đặt › Tải danh sách để lấy bản ${info.height}p.`
+        `${message} Bật ô "${ALLOW_BELOW_MINIMUM_LABEL}" trong Cài đặt › Tải danh sách để lấy bản ${reportedQualityHeight}p.`
       );
     } else blockingReasons.push(message);
   }

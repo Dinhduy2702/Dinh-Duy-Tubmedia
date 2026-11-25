@@ -1,5 +1,5 @@
 import type { AppSettings, MediaInfo } from '../types/domain.js';
-import { isCapCutDownloadMode, type CapCutCompatibilityPlan } from './download-quality.js';
+import { capCutFrameBounds, isCapCutDownloadMode, type CapCutCompatibilityPlan } from './download-quality.js';
 
 /**
  * 1.7.5 (người dùng duyệt 2026-11-03): mỗi video chỉ một tệp. "CapCut trực tiếp" mà không bật "tạo thêm bản CapCut" → tệp tải
@@ -59,9 +59,13 @@ export function capCutScaledSize(
  */
 export function capCutFilterChain(plan: CapCutCompatibilityPlan, info: MediaInfo): string[] {
   const filters: string[] = [];
-  const maxHeight = plan.maxHeight ?? info.height;
-  const maxWidth = maxHeight === 1440 ? 2560 : 1920;
-  const tooHigh = info.height > maxHeight + 2;
+  const bounds =
+    plan.maxHeight !== null
+      ? capCutFrameBounds(plan.maxHeight, info.width, info.height)
+      : { maxWidth: info.width, maxHeight: info.height };
+  const { maxWidth, maxHeight } = bounds;
+  const tooHigh =
+    plan.maxHeight !== null && (info.width > maxWidth + 2 || info.height > maxHeight + 2);
   let scaled = false;
   if (plan.requiresHdrToneMap) {
     if (tooHigh) {
