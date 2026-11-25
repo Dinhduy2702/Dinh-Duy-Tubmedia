@@ -11,8 +11,44 @@ function stringValue(value: unknown, fallback = ''): string {
 }
 
 function numberValue(value: unknown, fallback = 0): number {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value === 'string' && value.trim() === '') return fallback;
   const parsed = typeof value === 'number' ? value : Number(stringValue(value));
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function swapAspectRatio(value: string | null, rotated: boolean): string | null {
+  if (!value || !rotated) return value;
+  const parts = value.split(':');
+  if (parts.length !== 2) return value;
+  const left = Number(parts[0]);
+  const right = Number(parts[1]);
+  if (!Number.isFinite(left) || !Number.isFinite(right) || left <= 0 || right <= 0) return value;
+  return `${parts[1]!.trim()}:${parts[0]!.trim()}`;
+}
+
+function hasDisplayMatrixFlip(sideData: readonly Record<string, unknown>[]): boolean {
+  for (const entry of sideData) {
+    const type = stringValue(entry.side_data_type).toLowerCase();
+    const isDisplayMatrix =
+      type.includes('display matrix') || entry.displaymatrix !== undefined || entry.rotation !== undefined;
+    if (!isDisplayMatrix) continue;
+    if (Boolean(entry.hflip) || Boolean(entry.vflip) || Boolean(entry.flip)) return true;
+    const matrixText = stringValue(entry.displaymatrix);
+    if (!matrixText) continue;
+    const rows: number[][] = [];
+    for (const line of matrixText.split(/\r?\n/)) {
+      const colon = line.indexOf(':');
+      const body = colon >= 0 ? line.slice(colon + 1) : line;
+      const nums = (body.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number).filter(Number.isFinite);
+      if (nums.length >= 2) rows.push(nums);
+    }
+    if (rows.length >= 2 && rows[0]!.length >= 2 && rows[1]!.length >= 2) {
+      const det = rows[0]![0]! * rows[1]![1]! - rows[0]![1]! * rows[1]![0]!;
+      if (Number.isFinite(det) && det < 0) return true;
+    }
+  }
+  return false;
 }
 
 function ratio(value: unknown): number {
@@ -172,9 +208,12 @@ export class MediaAnalyzer {
       numberValue(sideData.find((entry) => entry.rotation !== undefined)?.rotation, 0)
     );
     const rotation = ((Math.round(rawRotation) % 360) + 360) % 360;
+    const displayFlip = hasDisplayMatrixFlip(sideData);
     const codedWidth = numberValue(video.width);
     const codedHeight = numberValue(video.height);
     const rotated = rotation === 90 || rotation === 270;
+    const rawSar = stringValue(video.sample_aspect_ratio) || null;
+    const rawDar = stringValue(video.display_aspect_ratio) || null;
     const nominalFps = ratio(video.r_frame_rate);
     const averageFps = ratio(video.avg_frame_rate);
     const fps = averageFps > 0 ? averageFps : nominalFps;
@@ -216,9 +255,10 @@ export class MediaAnalyzer {
       audioStreamDuration,
       nominalFps: nominalFps > 0 ? nominalFps : null,
       variableFrameRate,
-      sampleAspectRatio: stringValue(video.sample_aspect_ratio) || null,
-      displayAspectRatio: stringValue(video.display_aspect_ratio) || null,
+      sampleAspectRatio: swapAspectRatio(rawSar, rotated),
+      displayAspectRatio: swapAspectRatio(rawDar, rotated),
       rotation,
+      displayFlip,
       streamStartTime,
       timestampCondition: streamStartTime === null ? 'unknown' : streamStartTime < -0.001 ? 'negative_start' : 'normal',
       colorPrimaries: primaries || null,

@@ -61,6 +61,7 @@ export function compareForConcat(
     ['SAR', reference.sampleAspectRatio ?? null, candidate.sampleAspectRatio ?? null],
     ['DAR', reference.displayAspectRatio ?? null, candidate.displayAspectRatio ?? null],
     ['Rotation', reference.rotation ?? 0, candidate.rotation ?? 0],
+    ['Display flip', reference.displayFlip ?? false, candidate.displayFlip ?? false],
     ['VFR', reference.variableFrameRate ?? false, candidate.variableFrameRate ?? false],
     ['Time base', reference.timeBase ?? null, candidate.timeBase ?? null],
     ['Codec audio', reference.audioCodec, candidate.audioCodec],

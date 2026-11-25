@@ -118,6 +118,7 @@ export interface MediaInfo {
   sampleAspectRatio?: string | null;
   displayAspectRatio?: string | null;
   rotation?: number;
+  displayFlip?: boolean;
   streamStartTime?: number | null;
   timestampCondition?: 'normal' | 'negative_start' | 'unknown';
   colorPrimaries: string | null;

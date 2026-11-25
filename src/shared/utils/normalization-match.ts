@@ -61,6 +61,7 @@ export function matchNormalizationTarget(
     source.hdr === target.hdr &&
     hdrTransferMatches &&
     (source.rotation ?? 0) === 0 &&
+    !source.displayFlip &&
     (!source.sampleAspectRatio || source.sampleAspectRatio === '1:1') &&
     displayAspectRatioMatches(source.displayAspectRatio, target.width, target.height);
   const audioMatches =
