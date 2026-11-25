@@ -9,6 +9,7 @@ import {
   FileText,
   FolderOpen,
   Gauge,
+  Info,
   ListPlus,
   LoaderCircle,
   Minus,
@@ -37,6 +38,7 @@ import { activeDownloadWorkersLabel } from '@shared/utils/active-download-worker
 import { planApplyTempFolderToAll } from '@shared/utils/apply-temp-folder';
 import { machineRecommendationPatch, reference1080Patch } from '@shared/utils/download-presets';
 import { isCapCutDownloadMode } from '@shared/utils/download-quality';
+import { hiddenLanesNote, hiddenLanesWithData, laneFormWhenShown } from '@shared/utils/merge-lane-visibility';
 import { mergeLoadedLaneForms } from '@shared/utils/workbench-draft';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CookieManagerDialog } from '../components/CookieManagerDialog';
@@ -212,6 +214,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
   const [cookieOpen, setCookieOpen] = useState(false);
   const [cookieTarget, setCookieTarget] = useState<DownloadLaneId | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DownloadLaneId | null>(null);
+  const [hideLaneCount, setHideLaneCount] = useState<number | null>(null);
   // Phần C (2026-10-06): áp dụng thư mục tạm của một danh sách cho tất cả danh sách của TRANG NÀY (có hỏi xác nhận).
   const [applyTemp, setApplyTemp] = useState<{ slot: DownloadLaneId; folder: string } | null>(null);
   // Đợt 3 mục 9: xóa nhật ký hỏi xác nhận trước (trước đây bấm là xóa ngay).
@@ -230,6 +233,17 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
     latestRef.current = { forms, states, jobs, refreshProjects, setError };
   });
   const laneCount = settings?.downloadLaneCount ?? 2;
+  const laneEntries = LANE_IDS.map((slot) => ({
+    slot,
+    name: forms[slot].name.trim() || `Danh sách tải ${laneNumber(slot)}`,
+    hasData: Boolean(states[slot]?.project || forms[slot].linksText.trim())
+  }));
+  const hiddenNote = hiddenLanesNote(
+    hiddenLanesWithData(laneEntries, laneCount).map((lane) => lane.name),
+    { itemLabel: 'danh sách', addButtonLabel: 'Thêm danh sách' }
+  );
+  const lanesToHide =
+    hideLaneCount === null ? [] : hiddenLanesWithData(laneEntries.slice(0, laneCount), hideLaneCount);
 
   useEffect(() => {
     const snapshot = useAppStore.getState();
@@ -543,7 +557,7 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
     await refreshJobs();
   };
 
-  const changeLaneCount = async (value: number): Promise<void> => {
+  const changeLaneCount = async (value: number, confirmedHide = false): Promise<void> => {
     const nextCount = clampCount(value);
     if (nextCount < laneCount) {
       const hiddenRunning = LANE_IDS.slice(nextCount).some((slot) => {
@@ -556,6 +570,10 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
         showNotice('warning', 'Danh sách đang chạy', 'Một danh sách sắp bị ẩn vẫn đang chạy. Hãy tạm dừng hoặc hủy riêng danh sách đó trước.');
         return;
       }
+      if (!confirmedHide && hiddenLanesWithData(laneEntries.slice(0, laneCount), nextCount).length > 0) {
+        setHideLaneCount(nextCount);
+        return;
+      }
     }
     setBusy('global');
     try {
@@ -565,15 +583,19 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
         const rememberedOutput = loadWorkbenchPath('download-output') ?? source.outputFolder;
         const rememberedTemp =
           loadWorkbenchPath('download-temp-default') ?? loadWorkbenchPath('download-temp') ?? source.tempFolder;
+        // Danh sách đã lưu hoặc đang có dữ liệu giữ nguyên thư mục và số luồng riêng khi hiện lại.
         setForms((current) => ({
           ...current,
-          [target]: {
-            ...current[target],
-            outputFolder: rememberedOutput,
-            tempFolder: rememberedTemp,
-            resourceProfileId: source.resourceProfileId,
-            downloadWorkers: source.downloadWorkers
-          }
+          [target]: laneFormWhenShown(
+            current[target],
+            {
+              outputFolder: rememberedOutput,
+              tempFolder: rememberedTemp,
+              resourceProfileId: source.resourceProfileId,
+              downloadWorkers: source.downloadWorkers
+            },
+            Boolean(states[target]?.project || current[target].linksText.trim())
+          )
         }));
         setActiveLane(target);
       } else if (laneNumber(activeLane) > nextCount) {
@@ -681,6 +703,12 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
           </button>
         </div>
       </header>
+      {hiddenNote && (
+        <p className="merge-hidden-lanes-note" role="status">
+          <Info size={14} aria-hidden="true" />
+          <span>{hiddenNote}</span>
+        </p>
+      )}
 
       <div className="workflow-utility-stack mt-4">
         <ToolReadinessPanel workflow="download" />
@@ -802,6 +830,26 @@ export function DownloadWorkbenchPage(): React.JSX.Element {
         onConfirm={() => {
           if (!clearLogsTarget) return;
           void clearLogs(clearLogsTarget.slot, clearLogsTarget.projectId).finally(() => setClearLogsTarget(null));
+        }}
+      />
+      <ConfirmDialog
+        open={hideLaneCount !== null}
+        title={
+          lanesToHide.length === 1
+            ? `Ẩn danh sách "${lanesToHide[0]!.name}"?`
+            : `Ẩn ${lanesToHide.length} danh sách còn dữ liệu?`
+        }
+        message={`Bớt danh sách chỉ ẩn ${lanesToHide.map((lane) => `"${lane.name}"`).join(', ')} khỏi trang này.`}
+        details={[
+          'Danh sách liên kết, hàng đợi và nhật ký vẫn được giữ nguyên.',
+          'Bấm "Thêm danh sách" để hiện lại đúng thư mục và số luồng riêng như cũ.'
+        ]}
+        confirmLabel="Ẩn danh sách"
+        onCancel={() => setHideLaneCount(null)}
+        onConfirm={() => {
+          const target = hideLaneCount;
+          setHideLaneCount(null);
+          if (target !== null) void changeLaneCount(target, true);
         }}
       />
       <ConfirmDialog

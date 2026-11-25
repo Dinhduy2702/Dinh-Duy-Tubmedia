@@ -16,10 +16,18 @@ export function hiddenLanesWithData<T extends LaneVisibilityEntry>(lanes: readon
   return lanes.slice(visibleCount).filter((lane) => lane.hasData);
 }
 
-export function hiddenLanesNote(names: readonly string[]): string | null {
+export function hiddenLanesNote(
+  names: readonly string[],
+  options: { itemLabel?: string; addButtonLabel?: string } = {}
+): string | null {
   if (names.length === 0) return null;
-  const subject = names.length === 1 ? `quy trình "${names[0]}"` : `${names.length} quy trình: ${names.map((name) => `"${name}"`).join(', ')}`;
-  return `Đang ẩn ${subject} — dữ liệu vẫn giữ nguyên. Bấm "Thêm quy trình" để hiện lại.`;
+  const itemLabel = options.itemLabel ?? 'quy trình';
+  const addButtonLabel = options.addButtonLabel ?? 'Thêm quy trình';
+  const subject =
+    names.length === 1
+      ? `${itemLabel} "${names[0]}"`
+      : `${names.length} ${itemLabel}: ${names.map((name) => `"${name}"`).join(', ')}`;
+  return `Đang ẩn ${subject} — dữ liệu vẫn giữ nguyên. Bấm "${addButtonLabel}" để hiện lại.`;
 }
 
 /**
