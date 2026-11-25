@@ -6,12 +6,20 @@ import type { DiskKind } from '@shared/utils/disk-load.js';
  * lần, có bộ nhớ đệm trong SettingsService); trong lúc chưa dò xong, hoặc dò lỗi, trả 'unknown' → giữ cách chạy cũ cho ngưỡng
  * ổ bận. Không bao giờ chặn luồng tải.
  */
+const RETRY_EMPTY_DISK_COOLDOWN_MS = 60_000;
+
 export function createDiskKindLookup(detect: () => Promise<HardwareProfile>): (letter: string) => DiskKind {
   let kinds: Map<string, DiskKind> | null = null;
-  let started = false;
+  let inFlight = false;
+  let lastAttemptAt = 0;
   return (letter: string): DiskKind => {
-    if (!started) {
-      started = true;
+    const now = Date.now();
+    const shouldDetect =
+      !inFlight &&
+      (kinds === null || (kinds.size === 0 && now - lastAttemptAt >= RETRY_EMPTY_DISK_COOLDOWN_MS));
+    if (shouldDetect) {
+      inFlight = true;
+      lastAttemptAt = now;
       void detect()
         .then((profile) => {
           kinds = new Map(
@@ -20,6 +28,9 @@ export function createDiskKindLookup(detect: () => Promise<HardwareProfile>): (l
         })
         .catch(() => {
           kinds = new Map();
+        })
+        .finally(() => {
+          inFlight = false;
         });
     }
     return kinds?.get(letter.toUpperCase()) ?? 'unknown';

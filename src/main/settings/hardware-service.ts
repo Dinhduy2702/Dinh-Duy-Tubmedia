@@ -124,26 +124,23 @@ export class HardwareService {
   public async detect(): Promise<HardwareProfile> {
     const quick = this.quickSnapshot();
     const cpuList = cpus();
-    const [coreData, gpuData, diskData, diskTypeData] = await Promise.all([
-      powershellJson(
-        'Get-CimInstance Win32_Processor | Select-Object Name,NumberOfCores,NumberOfLogicalProcessors'
-      ),
-      powershellJson(
-        'Get-CimInstance Win32_VideoController | Select-Object Name,AdapterRAM,DriverVersion'
-      ),
-      powershellJson(
-        'Get-Volume | Where-Object DriveLetter | Select-Object DriveLetter,Size,SizeRemaining,DriveType'
-      ),
-      // Chỉ đọc: ký tự ổ → ổ vật lý chứa nó (loại ổ + chuẩn nối). Lỗi/không có quyền thì mọi ổ giữ 'unknown' như trước.
-      powershellJson(
-        "Get-Partition | Where-Object DriveLetter | ForEach-Object { $physical = Get-PhysicalDisk | Where-Object DeviceId -eq ([string]$_.DiskNumber) | Select-Object -First 1; [pscustomobject]@{ DriveLetter = [string]$_.DriveLetter; MediaType = [string]$physical.MediaType; BusType = [string]$physical.BusType } }"
-      )
-    ]);
+    const combined = (await powershellJson(`
+      $cores = @(Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object Name,NumberOfCores,NumberOfLogicalProcessors)
+      $gpus = @(Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Select-Object Name,AdapterRAM,DriverVersion)
+      $disks = @(Get-Volume -ErrorAction SilentlyContinue | Where-Object DriveLetter | Select-Object DriveLetter,Size,SizeRemaining,DriveType)
+      $phys = @(Get-PhysicalDisk -ErrorAction SilentlyContinue)
+      $diskTypes = @(Get-Partition -ErrorAction SilentlyContinue | Where-Object DriveLetter | ForEach-Object {
+        $dn = [string]$_.DiskNumber
+        $physical = $phys | Where-Object { [string]$_.DeviceId -eq $dn } | Select-Object -First 1
+        [pscustomobject]@{ DriveLetter = [string]$_.DriveLetter; MediaType = [string]$physical.MediaType; BusType = [string]$physical.BusType }
+      })
+      [pscustomobject]@{ cores = $cores; gpus = $gpus; disks = $disks; diskTypes = $diskTypes }
+    `)) as Record<string, unknown> | null;
 
-    const cores = asRows(coreData);
-    const gpus = asRows(gpuData);
-    const disks = asRows(diskData);
-    const diskTypes = diskTypesByDriveLetter(asRows(diskTypeData));
+    const cores = asRows(combined?.cores);
+    const gpus = asRows(combined?.gpus);
+    const disks = asRows(combined?.disks);
+    const diskTypes = diskTypesByDriveLetter(asRows(combined?.diskTypes));
     const cpuModel = stringValue(cores[0]?.Name, cpuList[0]?.model ?? 'Bộ xử lý không xác định');
     const cpuCounts = cpuCountsFromWmi(cores, cpuList.length);
 

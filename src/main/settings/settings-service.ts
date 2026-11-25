@@ -1,4 +1,5 @@
 import { app } from 'electron';
+import { freemem } from 'node:os';
 import type { AppSettings, HardwareProfile, QualityProfile, ResourceProfile } from '@shared/types/domain.js';
 import { InvalidInputError } from '@shared/errors/app-errors.js';
 import { matchesLegacyTheoMayButton } from '@shared/utils/download-presets.js';
@@ -44,6 +45,7 @@ function validateDownloadRanges(settings: AppSettings): void {
 
 export class SettingsService {
   private hardwareCache: HardwareProfile | null = null;
+  private hardwareDetectedAt = 0;
   private readonly reportedDropped = new Set<string>();
 
   public constructor(
@@ -231,7 +233,9 @@ export class SettingsService {
       }
       this.repo.set('auto_profile_disk_floor_v177', true);
     }
-    app.setLoginItemSettings({ openAtLogin: this.get().startWithWindows });
+    if (app.isPackaged) {
+      app.setLoginItemSettings({ openAtLogin: this.get().startWithWindows });
+    }
   }
 
   public get(): AppSettings {
@@ -257,7 +261,7 @@ export class SettingsService {
     const next = { ...current, ...patch };
     validateDownloadRanges(next);
     this.repo.saveAppSettings(next);
-    if ('startWithWindows' in patch) {
+    if ('startWithWindows' in patch && app.isPackaged) {
       app.setLoginItemSettings({ openAtLogin: next.startWithWindows });
     }
     return next;
@@ -301,8 +305,13 @@ export class SettingsService {
   }
 
   public async detectHardware(force = false): Promise<HardwareProfile> {
-    if (!this.hardwareCache || force) {
+    const emptyDisksStale =
+      this.hardwareCache !== null &&
+      this.hardwareCache.disks.length === 0 &&
+      Date.now() - this.hardwareDetectedAt >= 60_000;
+    if (!this.hardwareCache || force || emptyDisksStale) {
       this.hardwareCache = await this.hardware.detect();
+      this.hardwareDetectedAt = Date.now();
     }
     return this.hardwareCache;
   }
@@ -312,6 +321,7 @@ export class SettingsService {
   }
 
   public async recommend(): Promise<ResourceProfile> {
-    return this.hardware.recommend(await this.detectHardware());
+    const profile = await this.detectHardware();
+    return this.hardware.recommend({ ...profile, freeMemoryBytes: freemem() });
   }
 }
