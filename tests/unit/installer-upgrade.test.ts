@@ -47,7 +47,9 @@ describe('installer upgrade identity', () => {
   it('closes the installed app before overwriting and can relaunch after silent updater install', async () => {
     const script = await readProjectFile('installer/video-studio-pro.nsi');
 
-    expect(script).toContain('taskkill.exe /F /T /IM "${APP_EXE}"');
+    // 1.8.0 (#2): chỉ dừng các PID có ExecutablePath nằm trong $INSTDIR\ thay vì kill theo tên rộng.
+    expect(script).toContain('!insertmacro StopInstallDirProcessesAndWait');
+    expect(script).toContain('TUBMEDIA_INSTDIR');
     expect(script).toContain('Function .onInstSuccess');
     expect(script).toContain('--force-run');
     expect(script).toContain("Exec '\"$INSTDIR\\${APP_EXE}\"'");

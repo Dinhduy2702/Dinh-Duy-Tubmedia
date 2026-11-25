@@ -1,6 +1,7 @@
 Unicode true
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
+AllowSkipFiles off
 
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
@@ -66,11 +67,58 @@ Function .onInit
     ReadRegStr $0 HKCU "Software\${LEGACY_PRODUCT_NAME}" "InstallLocation"
   ${EndIf}
 
-  ${If} $0 != ""
-    StrCpy $INSTDIR "$0"
-    StrCpy $IsUpgrade "1"
+  ; Only reuse the previous install path when /D= was not explicitly passed
+  ; and the old directory (or its root drive) still exists.
+  ClearErrors
+  ${GetOptions} $CMDLINE "/D=" $3
+  ${If} ${Errors}
+    ${If} $0 != ""
+      StrCpy $4 $0 3
+      ${If} ${FileExists} "$0\*.*"
+        StrCpy $INSTDIR "$0"
+        StrCpy $IsUpgrade "1"
+      ${ElseIf} ${FileExists} "$4*.*"
+        StrCpy $INSTDIR "$0"
+        StrCpy $IsUpgrade "1"
+      ${Else}
+        StrCpy $INSTDIR "$LOCALAPPDATA\Programs\${DEFAULT_INSTALL_DIRECTORY_NAME}"
+      ${EndIf}
+    ${EndIf}
   ${EndIf}
 FunctionEnd
+
+!macro CheckWriteLockTarget targetPath
+  ${If} ${FileExists} "${targetPath}"
+    ClearErrors
+    FileOpen $R1 "${targetPath}" a
+    ${If} ${Errors}
+      StrCpy $R2 "1"
+    ${Else}
+      FileClose $R1
+    ${EndIf}
+  ${EndIf}
+!macroend
+
+!macro StopInstallDirProcessesAndWait
+  ; Stop ONLY processes whose ExecutablePath is inside $INSTDIR\ (never kill broadly by name).
+  System::Call 'Kernel32::SetEnvironmentVariable(t "TUBMEDIA_INSTDIR", t "$INSTDIR")'
+  nsExec::ExecToLog 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$dir = [Environment]::GetEnvironmentVariable(\"TUBMEDIA_INSTDIR\"); if ($$dir) { $$prefix = ($$dir.TrimEnd(\"\\\") + \"\\\").ToLowerInvariant(); Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $$_.ExecutablePath -and $$_.ExecutablePath.ToLowerInvariant().StartsWith($$prefix) } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue } }"'
+  StrCpy $R0 0
+  ${DoWhile} $R0 < 10
+    StrCpy $R2 "0"
+    !insertmacro CheckWriteLockTarget "$INSTDIR\${APP_EXE}"
+    !insertmacro CheckWriteLockTarget "$INSTDIR\resources\tool\ffmpeg.exe"
+    !insertmacro CheckWriteLockTarget "$INSTDIR\resources\tool\yt-dlp.exe"
+    !insertmacro CheckWriteLockTarget "$INSTDIR\resources\tool\aria2c.exe"
+    !insertmacro CheckWriteLockTarget "$INSTDIR\resources\tool\deno.exe"
+    ${If} $R2 == "0"
+      ${ExitDo}
+    ${EndIf}
+    Sleep 1000
+    nsExec::ExecToLog 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$dir = [Environment]::GetEnvironmentVariable(\"TUBMEDIA_INSTDIR\"); if ($$dir) { $$prefix = ($$dir.TrimEnd(\"\\\") + \"\\\").ToLowerInvariant(); Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $$_.ExecutablePath -and $$_.ExecutablePath.ToLowerInvariant().StartsWith($$prefix) } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue } }"'
+    IntOp $R0 $R0 + 1
+  ${Loop}
+!macroend
 
 Function SkipDirectoryPageForUpgrade
   ${If} $IsUpgrade == "1"
@@ -79,12 +127,24 @@ Function SkipDirectoryPageForUpgrade
 FunctionEnd
 
 Section "Install" SEC_MAIN
-  nsExec::ExecToLog 'taskkill.exe /F /T /IM "${APP_EXE}"'
-  Sleep 1500
+  !insertmacro StopInstallDirProcessesAndWait
   SetOverwrite on
   SetOutPath "$INSTDIR"
+  ClearErrors
   File /r "${APP_SOURCE}\*.*"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
+  ${If} ${Errors}
+    Abort "Không thể ghi đè tệp ứng dụng vì tệp trong $INSTDIR đang bị khóa. Vui lòng đóng Tubmedia rồi thử lại."
+  ${EndIf}
+
+  ; Cache current installer for electron-updater differential (.blockmap) updates.
+  ${If} "$EXEPATH" != "$LOCALAPPDATA\tubmedia-updater\installer.exe"
+    CreateDirectory "$LOCALAPPDATA\tubmedia-updater"
+    ClearErrors
+    CopyFiles /SILENT "$EXEPATH" "$LOCALAPPDATA\tubmedia-updater\installer.exe"
+    ClearErrors
+  ${EndIf}
+
   ; Do not recreate shortcuts a user intentionally removed during an in-app
   ; update. A first install or a manually launched upgrade keeps normal setup behavior.
   ${If} $IsAppUpdate != "1"
@@ -118,10 +178,11 @@ Function .onInstSuccess
 FunctionEnd
 
 Section "Uninstall"
-  nsExec::ExecToLog 'taskkill.exe /F /T /IM "${APP_EXE}"'
-  Sleep 1500
+  !insertmacro StopInstallDirProcessesAndWait
   Delete "$DESKTOP\${PRODUCT_NAME}.lnk"
   RMDir /r "$SMPROGRAMS\${PRODUCT_NAME}"
+  Delete "$LOCALAPPDATA\tubmedia-updater\installer.exe"
+  RMDir "$LOCALAPPDATA\tubmedia-updater"
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}"
   DeleteRegKey HKCU "${INSTALL_REGISTRY_KEY}"
   ; User database, settings, source media and output media are intentionally outside $INSTDIR.

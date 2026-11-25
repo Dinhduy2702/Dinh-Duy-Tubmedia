@@ -68,7 +68,8 @@ describe('Tubmedia 1.2.0 smart merge and safe UI release gates', () => {
     expect(updateConfig).toContain('repo: Dinh-Duy-Tubmedia');
     expect(build).toContain('Create GitHub updater metadata');
     expect(build).toContain('latest.yml');
-    expect(nsis).toContain('taskkill.exe /F /T /IM');
+    // 1.8.0 (#2): dừng đúng tiến trình nằm trong $INSTDIR\ và chờ mở khóa ghi trước khi ghi đè.
+    expect(nsis).toContain('!insertmacro StopInstallDirProcessesAndWait');
     expect(nsis).toContain('--force-run');
   });
 });
