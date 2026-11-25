@@ -4,6 +4,7 @@ import { isValidVersion } from './version-tools.mjs';
 
 const root = process.cwd();
 const panel = readFileSync(join(root, 'src/renderer/src/components/QuickDownloadPanel.tsx'), 'utf8');
+const sharedQuickDownload = readFileSync(join(root, 'src/shared/quick-download.ts'), 'utf8');
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 
 const checks = [];
@@ -35,6 +36,9 @@ check('start duration is never reset to default', !/setStartTime\(\s*['"](?:00:)
 
 check('end duration is never reset to default', !/setEndTime\(\s*['"](?:00:)?13:00['"]\s*\)/.test(panel));
 
-check('hours above 23 remain supported', panel.includes('^\\d{2,4}:[0-5]\\d:[0-5]\\d$'));
+check(
+  'hours above 23 remain supported',
+  panel.includes('parseQuickDownloadTime') && sharedQuickDownload.includes('MAX_QUICK_DOWNLOAD_HOURS')
+);
 
 console.log(`Duration persistence verification OK: ${checks.length} checks.`);
