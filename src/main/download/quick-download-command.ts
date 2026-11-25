@@ -33,6 +33,8 @@ export interface QuickDownloadCommandOptions {
   proxy?: string | undefined;
   platform?: string | null | undefined;
   pacing?: DownloadPacingContext | undefined;
+  /** 1.8.0 việc A: `--js-runtimes deno:<deno.exe kèm sẵn>` (ytDlpJsRuntimeArguments); rỗng khi không có. */
+  jsRuntimeArgs?: readonly string[] | undefined;
 }
 
 /** Trước đây cố định 4 mảnh trên mọi máy; giờ theo số truyền vào (1–8) hoặc tự dò theo máy (co ≤ 2 trên ổ HDD). */
@@ -232,6 +234,9 @@ export function buildQuickDownloadArguments(
   const pacingArgs = downloadPacingArgs(options.platform ?? null, options.pacing);
   if (pacingArgs.length > 0) {
     args.push(...pacingArgs);
+  }
+  if (options.jsRuntimeArgs?.length) {
+    args.push(...options.jsRuntimeArgs);
   }
 
   if (options.forceGenericExtractor) {

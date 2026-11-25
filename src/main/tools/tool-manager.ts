@@ -8,6 +8,7 @@ import type { Logger } from '../logging/logger.js';
 import { IPC } from '@shared/contracts/channels.js';
 import { toolPathSyntaxError, type ToolPathSettingKey } from '../security/settings-policy.js';
 import { diagnoseNvencFailure, toSignedExitCode, type GpuEncoderIssue } from '@shared/utils/nvenc-diagnosis.js';
+import { registerBundledDenoFolders } from '../downloader/ytdlp-js-runtime.js';
 
 export const TOOL_NAMES = ['yt-dlp', 'ffmpeg', 'ffprobe', 'ffplay', 'aria2c'] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
@@ -83,7 +84,8 @@ export function verifiedCapabilities(
       'ytdlp_download',
       ...(text.includes('--dump-json') || text.includes('--print-json') ? ['ytdlp_metadata'] : []),
       ...(text.includes('--progress-template') ? ['ytdlp_progress'] : []),
-      ...(text.includes('--ffmpeg-location') ? ['ytdlp_ffmpeg_bridge'] : [])
+      ...(text.includes('--ffmpeg-location') ? ['ytdlp_ffmpeg_bridge'] : []),
+      ...(text.includes('--js-runtimes') ? ['ytdlp_js_runtimes'] : [])
     ];
   }
   if (name === 'ffprobe') {
@@ -134,6 +136,8 @@ export class ToolManager {
     private readonly packaged: boolean
   ) {
     this.toolRoot = applicationToolRoot(appPath, packaged);
+    // 1.8.0 việc A: deno.exe kèm sẵn nằm cạnh các công cụ đi kèm bộ cài (resources\tool), bản mã nguồn: <dự án>\tool.
+    registerBundledDenoFolders([join(this.resourcesPath, 'tool'), join(this.toolRoot, 'tool')]);
   }
 
   public setWindow(window: BrowserWindow): void { this.window = window; }

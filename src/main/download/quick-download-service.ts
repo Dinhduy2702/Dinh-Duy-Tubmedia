@@ -30,6 +30,7 @@ import type { SettingsService } from '../settings/settings-service.js';
 import type { ToolManager } from '../tools/tool-manager.js';
 import { renameWithRetry } from '../files/non-conflicting-path.js';
 import { buildQuickDownloadArguments } from './quick-download-command.js';
+import { ytDlpJsRuntimeArguments } from '../downloader/ytdlp-js-runtime.js';
 import { acceptPathInside } from '../files/path-containment.js';
 import type { CookieJarStore, CookieRunOutcome } from '../cookies/cookie-jar-store.js';
 
@@ -755,7 +756,8 @@ export class QuickDownloadService {
               rateLimit: appSettings?.rateLimit,
               proxy: appSettings?.proxy,
               platform,
-              pacing: { samePlatformActive, rateLimitStrikes }
+              pacing: { samePlatformActive, rateLimitStrikes },
+              jsRuntimeArgs: ytDlpJsRuntimeArguments(this.tools.get('yt-dlp'))
             }
           );
 

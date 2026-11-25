@@ -23,6 +23,7 @@ import { createMainWindow } from './windows/main-window.js';
 import { runDetached } from './app/detached-task.js';
 import { readDevelopmentEnvironment } from './runtime/development-environment.js';
 import { REQUIRED_TOOL_NAMES } from './tools/tool-manager.js';
+import { bundledDenoPath, ytDlpJsRuntimeArguments, ytDlpJsRuntimeStartupMessage } from './downloader/ytdlp-js-runtime.js';
 
 let context: AppContext | null = null;
 let mainWindow: BrowserWindow | null = null;
@@ -224,6 +225,17 @@ async function connectToolsAtStartup(current: AppContext): Promise<void> {
     `Đã tự động dò, tải nếu thiếu và kiểm tra công cụ khi khởi động (${ready}/${required.size} công cụ bắt buộc sẵn sàng` +
       `${recovered > 0 ? `; khôi phục ${recovered} tác vụ từng bị chặn` : ''}).`
   );
+  // 1.8.0 việc A: ghi một lần lúc khởi động để nhật ký máy người dùng cho biết ngay có bộ chạy JS cho yt-dlp hay không.
+  const ytdlp = current.tools.get('yt-dlp');
+  const denoPath = bundledDenoPath();
+  current.logger.info('tools', 'YTDLP_JS_RUNTIME', ytDlpJsRuntimeStartupMessage(ytdlp.version, denoPath), {
+    metadata: {
+      ytdlpVersion: ytdlp.version,
+      jsRuntime: denoPath ? 'deno-bundled' : 'none',
+      denoPath,
+      jsRuntimeArgsApplied: ytDlpJsRuntimeArguments(ytdlp, denoPath).length > 0
+    }
+  });
 }
 
 async function runBackgroundUpdateChecks(current: AppContext): Promise<void> {

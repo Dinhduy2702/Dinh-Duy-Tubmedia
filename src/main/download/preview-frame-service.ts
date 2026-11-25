@@ -21,6 +21,7 @@ import type { Logger } from '../logging/logger.js';
 import type { ProcessManager } from '../processes/process-manager.js';
 import type { SettingsService } from '../settings/settings-service.js';
 import type { ToolManager } from '../tools/tool-manager.js';
+import { ytDlpJsRuntimeArguments } from '../downloader/ytdlp-js-runtime.js';
 import type { CookieJarStore, CookieRunOutcome } from '../cookies/cookie-jar-store.js';
 import { buildFrameExtractArguments, buildPreviewFrameDownloadArguments } from './preview-frame-command.js';
 
@@ -66,7 +67,8 @@ export class PreviewFrameService {
         request.url,
         request.timestampSeconds,
         { ffmpegDirectory: dirname(ffmpeg.executablePath), workDirectory },
-        cookieLease?.settings ?? this.settings.get()
+        cookieLease?.settings ?? this.settings.get(),
+        ytDlpJsRuntimeArguments(ytdlp)
       );
 
       const downloadResult = await this.processes.run({

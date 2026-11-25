@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 import type { Logger } from '../logging/logger.js';
 import type { ToolManager } from '../tools/tool-manager.js';
+import { ytDlpJsRuntimeArguments } from '../downloader/ytdlp-js-runtime.js';
 import { processEnvironmentFor } from '../processes/process-manager.js';
 import { defaultWindowsJobHost, killProcessTreeBestEffort } from '../processes/windows-job-host.js';
 import { defaultYtDlpRuntimeTemp } from '../processes/ytdlp-runtime-temp.js';
@@ -98,7 +99,7 @@ export class VideoLinkFilterService {
       const tool = this.tools.get('yt-dlp');
       if (tool.available && tool.executablePath) {
         try {
-          resolvedLinks = await this.resolveByYtDlp(tool.executablePath, urls);
+          resolvedLinks = await this.resolveByYtDlp(tool.executablePath, urls, ytDlpJsRuntimeArguments(tool));
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           warnings.push('yt-dlp không nhận diện được toàn bộ link; Tubmedia đã tự chuyển sang tách ID trực tiếp.');
@@ -239,7 +240,11 @@ export class VideoLinkFilterService {
     return videos;
   }
 
-  private async resolveByYtDlp(executablePath: string, urls: string[]): Promise<VideoLinkFilterLink[]> {
+  private async resolveByYtDlp(
+    executablePath: string,
+    urls: string[],
+    jsRuntimeArgs: readonly string[] = []
+  ): Promise<VideoLinkFilterLink[]> {
     const folder = await mkdtemp(join(tmpdir(), 'TubmediaVideoFilter-'));
     const batchFile = join(folder, 'links.txt');
     await writeFile(batchFile, urls.join('\n'), 'utf8');
@@ -258,7 +263,8 @@ export class VideoLinkFilterService {
         '--batch-file',
         batchFile,
         '--print',
-        template
+        template,
+        ...jsRuntimeArgs
       ];
 
       const { code, stdout, stderr } = await this.runYtDlp(executablePath, args);

@@ -66,6 +66,7 @@ import type { SettingsService } from '../settings/settings-service.js';
 import type { ToolManager } from '../tools/tool-manager.js';
 import { parseYtDlpProgress, YTDLP_PROGRESS_FLAGS, YTDLP_UTF8_FLAGS } from './ytdlp-progress.js';
 import { buildSafeYtDlpArguments } from './ytdlp-arguments.js';
+import { ytDlpJsRuntimeArguments } from './ytdlp-js-runtime.js';
 // Rà soát toàn diện (2026-09-24) — mục 2.2: logic dựng tham số cookie gộp về dùng chung với các luồng
 // yt-dlp khác (quick-download-command.ts, preview-frame-command.ts) — không đổi hành vi, chỉ tổ chức
 // lại code.
@@ -1606,6 +1607,7 @@ export class DownloadEngine {
       );
     }
     if (appSettings.proxy) args.push('--proxy', appSettings.proxy);
+    args.push(...ytDlpJsRuntimeArguments(ytdlp));
     if (appSettings.rateLimit) args.push('--limit-rate', appSettings.rateLimit);
     // Hướng C 429: nhiều video cùng nền tảng / nền tảng vừa dính 429 → yt-dlp nghỉ giữa các yêu cầu và trước mỗi lần tải.
     // Link tệp trực tiếp giữ nguyên như cũ.

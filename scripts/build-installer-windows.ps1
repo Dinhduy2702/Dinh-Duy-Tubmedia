@@ -251,7 +251,9 @@ $packagedToolDir = Join-Path $appSource "resources\tool"
 $requiredPackagedTools = @(
   @{ Name = 'yt-dlp'; File = 'yt-dlp.exe'; Args = @('--version') },
   @{ Name = 'ffmpeg'; File = 'ffmpeg.exe'; Args = @('-version') },
-  @{ Name = 'ffprobe'; File = 'ffprobe.exe'; Args = @('-version') }
+  @{ Name = 'ffprobe'; File = 'ffprobe.exe'; Args = @('-version') },
+  # 1.8.0 viec A: bo chay JavaScript cho yt-dlp (prepare:deno chep vao tool\ truoc khi dong goi).
+  @{ Name = 'deno'; File = 'deno.exe'; Args = @('--version') }
 )
 foreach ($requiredTool in $requiredPackagedTools) {
   $toolPath = Join-Path $packagedToolDir $requiredTool.File

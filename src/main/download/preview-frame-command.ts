@@ -20,7 +20,8 @@ export function buildPreviewFrameDownloadArguments(
   url: string,
   timestampSeconds: number,
   paths: PreviewFrameCommandPaths,
-  cookies?: PreviewFrameCookieSettings
+  cookies?: PreviewFrameCookieSettings,
+  jsRuntimeArgs: readonly string[] = []
 ): string[] {
   const start = Math.max(0, timestampSeconds);
   const end = start + PREVIEW_WINDOW_SECONDS;
@@ -48,6 +49,7 @@ export function buildPreviewFrameDownloadArguments(
     `*${start}-${end}`,
     '--force-keyframes-at-cuts',
     ...buildCookieArguments(cookies),
+    ...jsRuntimeArgs,
     '--',
     url
   ];
