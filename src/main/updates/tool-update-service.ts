@@ -64,6 +64,11 @@ const CHECKSUM_FILE_NAMES: Partial<Record<ToolPackage, string>> = {
   'yt-dlp': 'SHA2-256SUMS',
   'ffmpeg-suite': 'checksums.sha256'
 };
+// Bản phát hành aria2 1.37.0 trên GitHub không kèm digest/SHA256SUMS; ghim SHA-256 chính thức đã kiểm chứng.
+const PINNED_ASSET_SHA256: Readonly<Record<string, string>> = {
+  'aria2-1.37.0-win-64bit-build1.zip':
+    '67d015301eef0b612191212d564c5bb0a14b5b9c4796b76454276a4d28d9b288'
+};
 // 1.7.7 V16: ghim nhánh phát hành ổn định chính thức (tuyệt đối không dùng nhánh dựng thử hàng đêm ffmpeg-master-latest).
 const FFMPEG_STABLE_WIN64_GPL_ZIP = 'ffmpeg-n8.1-latest-win64-gpl-8.1.zip';
 const FFMPEG_STABLE_RELEASE_ZIP_PATTERN = /^ffmpeg-n(\d+\.\d+)-latest-win64-gpl-\1\.zip$/i;
@@ -342,6 +347,8 @@ async function tubmediaFetchGitHubRelease(
 }
 
 export class ToolUpdateService {
+  private activeOperations = 0;
+
   public constructor(
     private readonly tools: ToolManager,
     private readonly settings: SettingsService,
@@ -349,6 +356,10 @@ export class ToolUpdateService {
     private readonly logger: Logger,
     private readonly processes: ProcessManager
   ) {}
+
+  public isActive(): boolean {
+    return this.activeOperations > 0;
+  }
 
   private async githubLatest(repository: string): Promise<GitHubRelease> {
     const response = await tubmediaFetchGitHubRelease(
@@ -529,11 +540,18 @@ export class ToolUpdateService {
       const packageName = packageForTool(status.name);
       const remote = sources.find((source) => source.packageName === packageName)!;
       const installed = metadata.packages[packageName];
+      const matchesPinnedAria2Version =
+        packageName === 'aria2c' &&
+        status.available &&
+        status.version?.trim() === '1.37.0' &&
+        (remote.version.includes('1.37.0') || remote.release.tag_name.includes('1.37.0'));
       return {
         name: status.name,
         currentVersion: status.version,
         latestVersion: remote.version,
-        available: !status.available || installed?.releaseId !== remote.release.id,
+        available:
+          !status.available ||
+          (installed?.releaseId !== remote.release.id && !matchesPinnedAria2Version),
         source: remote.asset.browser_download_url,
         publishedAt: remote.release.published_at
       };
@@ -599,6 +617,11 @@ export class ToolUpdateService {
    */
   private async ensureAssetDigest(source: PackageSource): Promise<void> {
     if (source.asset.digest?.toLowerCase().startsWith('sha256:')) return;
+    const pinnedHash = PINNED_ASSET_SHA256[source.asset.name.toLowerCase()];
+    if (pinnedHash) {
+      source.asset.digest = `sha256:${pinnedHash}`;
+      return;
+    }
     const checksumName = CHECKSUM_FILE_NAMES[source.packageName];
     if (checksumName) {
       try {
@@ -700,15 +723,16 @@ export class ToolUpdateService {
 
   private async updatePackage(packageName: ToolPackage, requiredOnly = false): Promise<void> {
     this.assertPackageIdle(packageName);
-    const source = await this.sourceFor(packageName);
-    await this.ensureAssetDigest(source);
-    const targetFolder = await this.tools.ensureWritableToolFolder();
-    const staging = join(this.managedFolder, '_staging', `${packageName}-${randomUUID()}`);
-    const extracted = join(staging, 'extracted');
-    const packagePath = join(staging, source.asset.name || `${packageName}.package`);
-    await mkdir(extracted, { recursive: true });
-
+    this.activeOperations += 1;
+    let staging = '';
     try {
+      const source = await this.sourceFor(packageName);
+      await this.ensureAssetDigest(source);
+      const targetFolder = await this.tools.ensureWritableToolFolder();
+      staging = join(this.managedFolder, '_staging', `${packageName}-${randomUUID()}`);
+      const extracted = join(staging, 'extracted');
+      const packagePath = join(staging, source.asset.name || `${packageName}.package`);
+      await mkdir(extracted, { recursive: true });
       this.logger.info('update', 'TOOL_DOWNLOAD_STARTED', `Đang tải ${source.asset.name}.`);
       await this.download(source.asset, packagePath);
       await this.verifyDigest(source.asset, packagePath);
@@ -801,7 +825,8 @@ export class ToolUpdateService {
         throw error;
       }
     } finally {
-      await rm(staging, { recursive: true, force: true });
+      this.activeOperations = Math.max(0, this.activeOperations - 1);
+      if (staging) await rm(staging, { recursive: true, force: true });
     }
   }
 
