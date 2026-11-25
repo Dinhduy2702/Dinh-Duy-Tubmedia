@@ -815,7 +815,7 @@ export function QueuePage({ mode }: { mode: 'downloads' | 'processing' | 'all' }
       const results = await Promise.allSettled(
         removable.map((job) => window.desktop.queue.remove(job.id, false))
       );
-      await refreshJobs();
+      await Promise.all([refreshJobs(), refreshProjects()]);
       setSelectedIds(new Set());
       setConfirm(null);
       notify(
@@ -835,7 +835,7 @@ export function QueuePage({ mode }: { mode: 'downloads' | 'processing' | 'all' }
     setBusy(`remove-${detailJob.id}`);
     try {
       const result = await window.desktop.queue.remove(detailJob.id, deleteOutput);
-      await refreshJobs();
+      await Promise.all([refreshJobs(), refreshProjects()]);
       setConfirm(null);
       setDetailId(null);
       notify(

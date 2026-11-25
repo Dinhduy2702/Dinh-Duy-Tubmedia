@@ -2380,9 +2380,9 @@ export class DownloadEngine {
         }
       }
     );
+    const editCopyEnabled = (appSettings.downloadEditCopyMode ?? 'off') !== 'off';
     const capCutReady =
-      isCapCutDownloadMode(appSettings.downloadCompatibilityMode) ||
-      (appSettings.downloadEditCopyMode ?? 'off') !== 'off';
+      isCapCutDownloadMode(appSettings.downloadCompatibilityMode) || editCopyEnabled;
     const bounds = effectiveDownloadBounds(appSettings);
     const acceptedMinimumFallback =
       bounds.allowBelowMinimum && bounds.minHeight > 0 && info.height > 0 && info.height < bounds.minHeight;
@@ -2396,9 +2396,11 @@ export class DownloadEngine {
     const baseResultMessage =
       capCutReady && acceptedMinimumFallback
         ? `Đã tải bản ${info.height}p (thấp hơn ${bounds.minHeight}p vì bật "Cho phép thấp hơn") và chuyển sang chuẩn CapCut: ${finalPath}`
-        : capCutReady
+        : editCopyEnabled
           ? `Đã giữ nguyên video master chất lượng cao và tạo riêng bản edit mượt cho CapCut: ${finalPath}`
-          : workflow === 'download-merge'
+          : capCutReady
+            ? `Đã tải và chuẩn hóa trực tiếp sang chuẩn CapCut: ${finalPath}`
+            : workflow === 'download-merge'
             ? `Đã tải nguồn tốt nhất mà ${source.platform || 'nền tảng'} cung cấp để ghép, chưa mã hóa giảm chất lượng: ${finalPath}`
             : acceptedMinimumFallback
               ? `Đã tải thành công ${info.height}p — thấp hơn mức mong muốn ${bounds.minHeight}p nhưng là fallback được danh sách cho phép: ${finalPath}`

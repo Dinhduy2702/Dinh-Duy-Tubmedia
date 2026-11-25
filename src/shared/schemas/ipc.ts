@@ -59,8 +59,8 @@ export const appSettingsSchema = z
     toolUpdateChannel: z.enum(['stable', 'beta']),
     autoCheckAppUpdates: z.boolean(),
     autoCheckToolUpdates: z.boolean(),
-    toolManifestUrl: z.union([z.literal(''), z.url()]),
-    appFeedUrl: z.union([z.literal(''), z.url()]),
+    toolManifestUrl: z.string().trim().pipe(z.union([z.literal(''), z.url()])),
+    appFeedUrl: z.string().trim().pipe(z.union([z.literal(''), z.url()])),
     ytdlpPath: z.string().max(32_768),
     ffmpegPath: z.string().max(32_768),
     ffprobePath: z.string().max(32_768),
@@ -129,7 +129,7 @@ export const appSettingsSchema = z
       )
   })
   .strict();
-export const settingsPatchSchema = appSettingsSchema.partial();
+export const settingsPatchSchema = appSettingsSchema.partial().strip();
 export const resourceProfileSchema = z
   .object({
     id: z.string().min(1).max(160),

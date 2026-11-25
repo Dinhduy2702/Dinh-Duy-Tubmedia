@@ -4221,6 +4221,13 @@ export class QueueManager {
       await this.removeJobDownloadTempFiles(current).catch(() => 0);
       if (current.projectId) await this.cleanupClearedProjectDownloadTemp(current.projectId);
     }
+    if (current.projectId) {
+      if (this.repo.list(current.projectId).length === 0) {
+        this.projects.setStatus(current.projectId, 'draft');
+      } else {
+        this.syncProjectStatus(current.projectId);
+      }
+    }
     this.emit();
     return { removed: true, outputDeleted, outputMissing, outputPath };
   }

@@ -12,11 +12,25 @@ import { isCookieBlockingCode } from './cookie-policy.js';
  *    bị chặn; thông báo thao tác/thông tin thì chỉ trong phiên.
  */
 
-type IssueNotice = Pick<AttentionNotice, 'id' | 'severity' | 'title' | 'code' | 'projectId' | 'jobId'>;
+type IssueNotice = Pick<AttentionNotice, 'id' | 'severity' | 'title' | 'code' | 'projectId' | 'jobId'> & {
+  message?: string;
+};
 
 const DISK_CODES = new Set(['DISK_FULL', 'DISK_SPACE_LOW', 'DISK_SPACE_RECOVERED']);
 const PERMISSION_CODES = new Set(['PERMISSION_DENIED', 'OUTPUT_PERMISSION_DENIED', 'PERMISSION_REQUIRED', 'FILE_LOCKED']);
 const NETWORK_CODES = new Set(['SOURCE_RATE_LIMITED', 'NETWORK_CIRCUIT_OPEN', 'NETWORK_ERROR', 'PROCESS_TIMEOUT']);
+const GENERIC_FALLBACK_TITLES = new Set([
+  'không thể hoàn tất thao tác',
+  'cần chú ý',
+  'thông tin',
+  'đã hoàn tất',
+  'đã ghi nhận',
+  'thông báo'
+]);
+
+function detailKeyOf(notice: IssueNotice): string {
+  return (notice.message ?? '').trim().toLowerCase() || notice.id;
+}
 
 function issueGroup(notice: IssueNotice): string {
   const code = (notice.code ?? '').trim().toUpperCase();
@@ -37,8 +51,13 @@ function issueGroup(notice: IssueNotice): string {
   ) {
     return 'job-failure';
   }
+  if (code === 'INVALID_INPUT') return `code:INVALID_INPUT:${detailKeyOf(notice)}`;
   if (code) return `code:${code}`;
-  return `title:${notice.title.trim().toLowerCase()}`;
+  const normalizedTitle = notice.title.trim().toLowerCase();
+  if (GENERIC_FALLBACK_TITLES.has(normalizedTitle)) {
+    return `title:${normalizedTitle}:${detailKeyOf(notice)}`;
+  }
+  return `title:${normalizedTitle}`;
 }
 
 export function noticeIssueKey(notice: IssueNotice): string {
