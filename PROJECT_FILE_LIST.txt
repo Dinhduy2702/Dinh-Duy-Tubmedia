@@ -615,6 +615,7 @@ tests/unit/active-download-workers-label.test.ts
 tests/unit/active-work-guard-v180.test.ts
 tests/unit/adapt-to-user-machine.test.ts
 tests/unit/adaptive-download.test.ts
+tests/unit/analyzer-verifier-usertemp-v180.test.ts
 tests/unit/app-update-restart-flow.test.ts
 tests/unit/app-update-version.test.ts
 tests/unit/apply-temp-folder.test.ts
@@ -672,6 +673,7 @@ tests/unit/encode-cpu-cap-v177.test.ts
 tests/unit/encode-cpu-monitor.test.ts
 tests/unit/encoder-selection.test.ts
 tests/unit/error-classification-v180.test.ts
+tests/unit/even-dimensions-v180.test.ts
 tests/unit/existing-download.test.ts
 tests/unit/failure-reason-coverage.test.ts
 tests/unit/failure-reason-notice.test.ts
@@ -706,6 +708,7 @@ tests/unit/lane-logs.test.ts
 tests/unit/light-mode-token-consistency.test.ts
 tests/unit/local-cut-command.test.ts
 tests/unit/local-cut-service.test.ts
+tests/unit/local-cut-v180.test.ts
 tests/unit/local-cut.test.ts
 tests/unit/logger-resilience.test.ts
 tests/unit/logs-page-dot3.test.ts
@@ -713,6 +716,7 @@ tests/unit/long-text-info-hint.test.ts
 tests/unit/low-ram-starvation-v8.test.ts
 tests/unit/machine-threads-a0.test.ts
 tests/unit/main-window-open-external.test.ts
+tests/unit/media-analyzer-display-matrix-v180.test.ts
 tests/unit/media-analyzer-hdr.test.ts
 tests/unit/media-duration-sanity.test.ts
 tests/unit/media-info-format.test.ts
@@ -723,6 +727,7 @@ tests/unit/merge-lane-visibility.test.ts
 tests/unit/merge-output-integrity.test.ts
 tests/unit/merge-product-name-length.test.ts
 tests/unit/merge-remux-verify-level.test.ts
+tests/unit/merge-target-and-anullsrc-v180.test.ts
 tests/unit/merge-target.test.ts
 tests/unit/merge-timeline-reorder.test.ts
 tests/unit/merge-uniform-transcode-and-match-v180.test.ts
@@ -811,6 +816,7 @@ tests/unit/system-cleanup-navigation.test.ts
 tests/unit/system-cleanup-policy.test.ts
 tests/unit/system-load-governor.test.ts
 tests/unit/taskbar-tray-icon.test.ts
+tests/unit/temp-path-and-cleanup-v180.test.ts
 tests/unit/temporary-cleanup-protection.test.ts
 tests/unit/temporary-cleanup-unowned.test.ts
 tests/unit/temporary-cleanup.test.ts
