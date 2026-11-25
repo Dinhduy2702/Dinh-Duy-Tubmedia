@@ -347,11 +347,14 @@ async function buildInternalPlan(projectId: string, deps: PostMergeSourceCleanup
   for (const other of allProjects) {
     if (other.id === projectId) continue;
     const otherJobs = deps.queue.list(other.id);
+    const otherMergeJob = otherJobs.filter((j) => j.type === 'merge').at(-1);
+    const otherIsStandaloneOrTimelineOnly =
+      !otherMergeJob || otherMergeJob.input.timelineOnly === true;
     const otherCompleted =
       other.status === 'completed' &&
       otherJobs.length > 0 &&
       otherJobs.every((j) => j.status === 'completed' || j.status === 'skipped');
-    if (!otherCompleted) {
+    if (!otherCompleted || otherIsStandaloneOrTimelineOnly) {
       otherIncompleteProjectIds.add(other.id);
       for (const item of deps.items.list(other.id)) {
         if (item.sourceId) sourceIdsUsedByOtherIncomplete.add(item.sourceId);
@@ -612,11 +615,18 @@ export async function executePostMergeSourceCleanup(
         protectedFiles: protection.protectedFiles
       }).catch(() => 0);
     }
-    const trackedClips = deps.items
-      .list(projectId)
+    const projectItems = deps.items.list(projectId);
+    const trackedClips = projectItems
       .map((item) => item.clipFile)
       .filter((p): p is string => typeof p === 'string' && p.length > 0);
     await cleanupTemporaryArtifacts(project.tempFolder, trackedClips, false, protection).catch(() => undefined);
+    for (const item of projectItems) {
+      if (!item.clipFile) continue;
+      const stillExists = await stat(item.clipFile).then(() => true).catch(() => false);
+      if (!stillExists) {
+        deps.items.setClipFile?.(item.id, null);
+      }
+    }
   }
 
   return {
