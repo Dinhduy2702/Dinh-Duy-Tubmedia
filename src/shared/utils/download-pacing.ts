@@ -29,6 +29,34 @@ export interface DownloadPacingContext {
   rateLimitStrikes: number;
   /** Đề xuất A: số mảnh hàng đợi đã tính cho video này (tự tận dụng phần trống). Không có → bộ tải dùng ô Cài đặt. */
   concurrentFragments?: number;
+  /** V11: giới hạn băng thông đã chia theo số luồng tải thực tế để không vượt tổng giới hạn người dùng đặt. */
+  rateLimit?: string;
+}
+
+const MIN_SPLIT_RATE_LIMIT_KB = 50;
+
+/**
+ * V11: Chia đều chuỗi `--limit-rate` (vd. `10M`, `500K`, `1G`) cho số luồng tải đang chạy thực tế
+ * để tổng băng thông không vượt mức người dùng cài đặt. Giữ sàn tối thiểu 50K cho mỗi luồng.
+ */
+export function splitRateLimitPerStream(
+  rateLimit: string | null | undefined,
+  activeDownloads: number
+): string | undefined {
+  const trimmed = rateLimit?.trim() ?? '';
+  if (!trimmed) return undefined;
+  const streams = Math.max(1, Math.trunc(activeDownloads));
+  if (streams <= 1) return trimmed;
+  const match = /^(\d+(?:\.\d+)?)\s*([kmg])?(?:i?b)?$/i.exec(trimmed);
+  if (!match) return trimmed;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value) || value <= 0) return trimmed;
+  const unit = (match[2] ?? '').toLowerCase();
+  const multiplier =
+    unit === 'g' ? 1024 * 1024 * 1024 : unit === 'm' ? 1024 * 1024 : unit === 'k' ? 1024 : 1;
+  const totalBytesPerSecond = value * multiplier;
+  const perStreamKb = Math.max(MIN_SPLIT_RATE_LIMIT_KB, Math.floor(totalBytesPerSecond / streams / 1024));
+  return `${perStreamKb}K`;
 }
 
 /** Nghỉ ~1 s giữa các yêu cầu và 1–3 s trước mỗi lần tải khi từ 2 video cùng nền tảng tải song song. */

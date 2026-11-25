@@ -1708,7 +1708,8 @@ export class DownloadEngine {
     }
     if (appSettings.proxy) args.push('--proxy', appSettings.proxy);
     args.push(...ytDlpJsRuntimeArguments(ytdlp));
-    if (appSettings.rateLimit) args.push('--limit-rate', appSettings.rateLimit);
+    const effectiveRateLimit = pacing?.rateLimit ?? appSettings.rateLimit;
+    if (effectiveRateLimit) args.push('--limit-rate', effectiveRateLimit);
     // Hướng C 429: nhiều video cùng nền tảng / nền tảng vừa dính 429 → yt-dlp nghỉ giữa các yêu cầu và trước mỗi lần tải.
     // Link tệp trực tiếp giữ nguyên như cũ.
     const pacingArgs = downloadPacingArgs(source.platform, pacing);

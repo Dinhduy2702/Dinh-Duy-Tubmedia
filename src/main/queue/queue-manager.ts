@@ -11,7 +11,7 @@ import { cpus, freemem, totalmem } from 'node:os';
 import { readdir, rm, stat, statfs } from 'node:fs/promises';
 import { nearestExistingFolder } from '../files/disk-check-path.js';
 import { removeEmptyDirectoryIfPossible } from '../files/non-conflicting-path.js';
-import { basename, dirname, extname, join, resolve } from 'node:path';
+import { basename, dirname, extname, join, parse, resolve } from 'node:path';
 import type { AttentionNotice, JobType, LaneWaitState, MediaSource, Project, QueueJob, RateLimitWaitState, ResourceProfile } from '@shared/types/domain.js';
 import { IPC } from '@shared/contracts/channels.js';
 import { retryDelayMs } from '@shared/utils/retry.js';
@@ -40,7 +40,7 @@ import {
   recommendedConcurrentFragments,
   recommendedConcurrentLists
 } from '@shared/utils/hardware-recommendation.js';
-import type { DownloadPacingContext } from '@shared/utils/download-pacing.js';
+import { splitRateLimitPerStream, type DownloadPacingContext } from '@shared/utils/download-pacing.js';
 import {
   ADAPTIVE_MAX_LEVEL,
   AdaptiveDownloadController,
@@ -271,6 +271,8 @@ function progressPhases(
 }
 /** 1.7.5: chỉ mở thêm bản mã hoá CapCut khi CPU toàn máy dưới mức này (người dùng còn chỗ làm việc). */
 const ENCODE_START_CPU_MAX_PERCENT = 50;
+/** V10b: trần an toàn số video chờ ghế mã hoá CapCut để tránh tải dồn tích tụ quá nhiều tệp tạm trên máy yếu. */
+const MAX_ENCODE_WAITERS = 8;
 /** 2026-11-05: ghi lý do chặn bắt đầu việc mới tối đa 1 dòng / khoảng này cho mỗi (loại chặn, loại việc) — nhịp tick 350 ms. */
 const START_BLOCK_LOG_INTERVAL_MS = 30_000;
 /**
@@ -419,6 +421,14 @@ export class QueueManager {
     this.updateBackgroundEncodeCpuCap(Date.now(), true);
   }
 
+  private activeEncodeWaitersCount(): number {
+    let count = 0;
+    for (const id of this.encodeWaiters) {
+      if (!this.isJobPaused(id)) count += 1;
+    }
+    return count;
+  }
+
   /** 1.7.5: xin lượt mã hoá bản CapCut — trả chỗ tải ngay, chờ theo thứ tự tới khi dưới trần và CPU còn rảnh. */
   private async acquireEncodeSlot(
     job: QueueJob,
@@ -427,7 +437,9 @@ export class QueueManager {
     onWaiting: () => void
   ): Promise<() => void> {
     this.encodingJobs.add(job.id);
-    this.encodeWaiters.push(job.id);
+    if (!this.encodeWaiters.includes(job.id)) {
+      this.encodeWaiters.push(job.id);
+    }
     this.scheduleTick(0);
     let notified = false;
     try {
@@ -1304,11 +1316,16 @@ export class QueueManager {
     };
   }
 
-  /** Các danh sách / quy trình đang giữ lượt: có ít nhất một tác vụ đang chạy trong làn đó. */
+  /** Các danh sách / quy trình đang giữ lượt: bỏ qua tác vụ đã tạm dừng/hủy/lỗi/kết thúc (V10b). */
   private laneHolders(lane: QueueExecutionLane): Set<string> {
     const holders = new Set<string>();
     for (const entry of this.active.values()) {
-      if (entry.job.projectId && queueExecutionLane(entry.job) === lane) holders.add(entry.job.projectId);
+      if (!entry.job.projectId || queueExecutionLane(entry.job) !== lane) continue;
+      const live = this.repo.get(entry.job.id);
+      if (!live || live.status === 'paused' || live.status === 'interrupted' || TERMINAL_STATUSES.has(live.status)) {
+        continue;
+      }
+      holders.add(entry.job.projectId);
     }
     return holders;
   }
@@ -1352,7 +1369,17 @@ export class QueueManager {
   private downloadPacingContext(job: QueueJob): DownloadPacingContext {
     const fragments = this.adaptiveFragmentsFor(job);
     const base = this.platformPacingContext(job);
-    return fragments === undefined ? base : { ...base, concurrentFragments: fragments };
+    let activeDownloads = 0;
+    for (const entry of this.active.values()) {
+      if (this.holdsDownloadSlot(entry.job)) activeDownloads += 1;
+    }
+    if (!this.active.has(job.id)) activeDownloads += 1;
+    const rateLimit = splitRateLimitPerStream(this.settings.get().rateLimit, activeDownloads);
+    return {
+      ...base,
+      ...(fragments !== undefined ? { concurrentFragments: fragments } : {}),
+      ...(rateLimit !== undefined ? { rateLimit } : {})
+    };
   }
 
   /**
@@ -1870,6 +1897,12 @@ export class QueueManager {
         (x) => sameSlot(x.job) && x.job.projectId === job.projectId
       ).length;
       if (job.type === 'download') {
+        // V10b: trần an toàn hàng chờ mã hoá CapCut — tránh tải dồn quá nhiều khi máy mã hoá chậm.
+        const pendingEncodes = this.activeEncodeWaitersCount();
+        if (pendingEncodes >= MAX_ENCODE_WAITERS) {
+          this.logStartBlocked(job, 'encode-backlog', { waiters: pendingEncodes, cap: MAX_ENCODE_WAITERS });
+          continue;
+        }
         // 2026-10-24: trần tổng theo máy (2 × số danh sách tự động: máy yếu 2 … rất mạnh 12) — thay ô "Tổng video tải đồng
         // thời toàn ứng dụng" đã lưu nhưng hàng đợi không đọc.
         if (activeOfType >= this.autoGlobalDownloadCap()) continue;
@@ -2497,11 +2530,62 @@ export class QueueManager {
       }
     );
   }
+  private driveKeyOf(folder: string | null | undefined): string | null {
+    if (!folder?.trim()) return null;
+    const letter = driveLetterOf(folder);
+    if (letter) return letter.toUpperCase();
+    const root = parse(resolve(folder)).root.trim().toLowerCase();
+    return root || null;
+  }
+
+  private projectDriveKeys(projectId: string): Set<string> {
+    const project = this.projects.get(projectId);
+    const drives = new Set<string>();
+    if (!project) return drives;
+    for (const folder of [project.sourceFolder, project.tempFolder, project.outputFolder]) {
+      const key = this.driveKeyOf(folder);
+      if (key) drives.add(key);
+    }
+    return drives;
+  }
+
   private async pauseProjectForBlockingError(job: QueueJob, code: string, message: string): Promise<void> {
     if (!job.projectId) return;
 
+    const targetProjectIds = new Set<string>([job.projectId]);
+    // V11: khi phát hiện DISK_FULL trên một ổ đĩa, dừng toàn bộ các dự án khác đang ghi vào cùng ổ đĩa đó.
+    if (code === 'DISK_FULL') {
+      const affectedDrives = new Set<string>();
+      for (const folder of this.diskFoldersForJob(job)) {
+        const key = this.driveKeyOf(folder);
+        if (key) affectedDrives.add(key);
+      }
+      if (affectedDrives.size === 0) {
+        for (const key of this.projectDriveKeys(job.projectId)) affectedDrives.add(key);
+      }
+      if (affectedDrives.size > 0) {
+        const candidateProjects = new Set<string>();
+        for (const active of this.active.values()) {
+          if (active.job.projectId) candidateProjects.add(active.job.projectId);
+        }
+        for (const unfinished of this.repo.listUnfinished()) {
+          if (unfinished.projectId) candidateProjects.add(unfinished.projectId);
+        }
+        for (const candidateId of candidateProjects) {
+          if (targetProjectIds.has(candidateId)) continue;
+          const candidateDrives = this.projectDriveKeys(candidateId);
+          for (const drive of candidateDrives) {
+            if (affectedDrives.has(drive)) {
+              targetProjectIds.add(candidateId);
+              break;
+            }
+          }
+        }
+      }
+    }
+
     for (const active of this.active.values()) {
-      if (active.job.id === job.id || active.job.projectId !== job.projectId) continue;
+      if (active.job.id === job.id || !active.job.projectId || !targetProjectIds.has(active.job.projectId)) continue;
       try {
         await this.processes.pauseByJob(active.job.id);
         const current = this.repo.get(active.job.id);
@@ -2538,23 +2622,25 @@ export class QueueManager {
       }
     }
 
-    for (const queued of this.repo.list(job.projectId)) {
-      if (queued.id === job.id) continue;
-      if (queued.status === 'pending' || queued.status === 'retrying') {
-        this.repo.update(
-          queued.id,
-          {
-            status: 'paused',
-            errorCode: code,
-            errorMessage: message,
-            speed: null,
-            etaSeconds: null
-          },
-          this.pauseResumeInput(queued)
-        );
+    for (const projectId of targetProjectIds) {
+      for (const queued of this.repo.list(projectId)) {
+        if (queued.id === job.id) continue;
+        if (queued.status === 'pending' || queued.status === 'retrying') {
+          this.repo.update(
+            queued.id,
+            {
+              status: 'paused',
+              errorCode: code,
+              errorMessage: message,
+              speed: null,
+              etaSeconds: null
+            },
+            this.pauseResumeInput(queued)
+          );
+        }
       }
+      this.projects.setStatus(projectId, 'paused');
     }
-    this.projects.setStatus(job.projectId, 'paused');
   }
 
   private async openCircuitAfterRepeatedFailure(job: QueueJob, message: string): Promise<boolean> {
@@ -4277,6 +4363,21 @@ export class QueueManager {
     this.paused = false;
     this.emit();
     return removed;
+  }
+
+  /**
+   * V12: cập nhật nóng khi người dùng đổi Cài đặt hoặc hồ sơ tài nguyên —
+   * xóa cache giới hạn luồng, bộ điều tiết CPU, đồng hồ chờ kiểm tra ổ đĩa và đánh thức scheduler ngay.
+   */
+  public handleSettingsUpdated(): void {
+    this.autoListsCache = null;
+    this.globalDownloadCapCache = null;
+    this.loadGovernors.clear();
+    this.diskRecoveryChecks.clear();
+    if (!this.settings.get().downloadAdaptiveBoost) {
+      this.diskBusy.stop();
+    }
+    this.emit();
   }
 
   public refreshState(): void {

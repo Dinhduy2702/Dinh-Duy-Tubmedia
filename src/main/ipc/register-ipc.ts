@@ -363,13 +363,17 @@ export function registerIpc(ctx: AppContext): void {
       Object.entries(patch).filter(([, value]) => value !== undefined)
     ) as Partial<AppSettings>;
 
-    return ctx.settings.update(definedPatch);
+    const updated = ctx.settings.update(definedPatch);
+    ctx.queue.handleSettingsUpdated();
+    return updated;
   });
   noArgs(IPC.settings.hardware, () => ctx.settings.detectHardware(true));
   noArgs(IPC.settings.profiles, () => ctx.settings.profiles());
-  handle(IPC.settings.saveResourceProfile, resourceProfileSchema, (profile) =>
-    ctx.settings.saveResource(profile)
-  );
+  handle(IPC.settings.saveResourceProfile, resourceProfileSchema, (profile) => {
+    const saved = ctx.settings.saveResource(profile);
+    ctx.queue.handleSettingsUpdated();
+    return saved;
+  });
   handle(IPC.settings.saveQualityProfile, qualityProfileSchema, (profile) => {
     const { bitrateMode, ...requiredProfile } = profile;
     return ctx.settings.saveQuality({

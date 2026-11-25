@@ -589,11 +589,15 @@ tests/integration/queue-failure-reason-notice.test.ts
 tests/integration/queue-ipc-coalesce.test.ts
 tests/integration/queue-list-concurrency.test.ts
 tests/integration/queue-load-governor.test.ts
+tests/integration/queue-pause-progress-and-encode-slot.test.ts
 tests/integration/queue-rate-limit-platform-wait.test.ts
+tests/integration/queue-resume-retry-recovery.test.ts
 tests/integration/queue-retry-requeue.test.ts
+tests/integration/queue-source-removed-merge.test.ts
 tests/integration/queue-startup-hold.test.ts
 tests/integration/queue-startup-session-jobs.test.ts
 tests/integration/queue-temp-cleanup-safety.test.ts
+tests/integration/queue-v10b-v11-v12.test.ts
 tests/integration/remux-fresh-deep-verify.test.ts
 tests/integration/restore-sources-policy.test.ts
 tests/integration/settings-adapt-to-machine.test.ts
@@ -652,6 +656,7 @@ tests/unit/download-path-budget.test.ts
 tests/unit/download-performance.test.ts
 tests/unit/download-presets.test.ts
 tests/unit/download-quality.test.ts
+tests/unit/download-rate-limit-split.test.ts
 tests/unit/download-recovery-policy.test.ts
 tests/unit/download-recovery-r49.test.ts
 tests/unit/e2e-database-busy-timeout.test.ts
@@ -842,6 +847,7 @@ tests/unit/weak-machine-merge-threads-v4.test.ts
 tests/unit/window-close-policy.test.ts
 tests/unit/windows-process-control.test.ts
 tests/unit/workbench-storage.test.ts
+tests/unit/workflow-state.test.ts
 tests/unit/youtube-cookie-check.test.ts
 tests/unit/youtube-geo-restricted-v18.test.ts
 tests/unit/youtube-source-removed-r36.test.ts
