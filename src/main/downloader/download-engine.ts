@@ -1534,7 +1534,7 @@ export class DownloadEngine {
 
     const ytdlp = this.tools.get('yt-dlp');
     if (!ytdlp.available || !ytdlp.executablePath) {
-      throw new ToolNotFoundError('yt-dlp');
+      throw new ToolNotFoundError('yt-dlp', ytdlp.error ?? undefined);
     }
 
     await ensureDirectory(project.sourceFolder);

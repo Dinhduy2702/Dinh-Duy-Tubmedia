@@ -32,7 +32,7 @@ export class ClipEngine {
     private readonly analyzer?: MediaAnalyzer
   ) {}
   public async create(job: QueueJob, item: ProjectItem, input: string, tempFolder: string, resource: ResourceProfile, signal: AbortSignal, onProgress: (percent: number) => void): Promise<string> {
-    const ffmpeg = this.tools.get('ffmpeg'); if (!ffmpeg.available || !ffmpeg.executablePath) throw new ToolNotFoundError('ffmpeg');
+    const ffmpeg = this.tools.get('ffmpeg'); if (!ffmpeg.available || !ffmpeg.executablePath) throw new ToolNotFoundError('ffmpeg', ffmpeg.error ?? undefined);
     if (item.timestampStartSeconds === null && item.timestampEndSeconds === null && item.audioMode !== 'mute') return input;
     await ensureDirectory(tempFolder);
     if (isReservedTubmediaDirectory(tempFolder)) await ensureTubmediaOwnedDirectory(tempFolder, 'download-temp');

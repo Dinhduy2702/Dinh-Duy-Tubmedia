@@ -208,7 +208,7 @@ export class NormalizeEngine {
   ): Promise<string> {
     const source = await this.analyzer.analyze(input, job.id);
     const ffmpeg = this.tools.get('ffmpeg');
-    if (!ffmpeg.available || !ffmpeg.executablePath) throw new ToolNotFoundError('ffmpeg');
+    if (!ffmpeg.available || !ffmpeg.executablePath) throw new ToolNotFoundError('ffmpeg', ffmpeg.error ?? undefined);
 
     await ensureDirectory(outputFolder);
     if (isReservedTubmediaDirectory(outputFolder)) {
@@ -377,7 +377,7 @@ export class NormalizeEngine {
     if (matches) return input;
 
     const ffmpeg = this.tools.get('ffmpeg');
-    if (!ffmpeg.available || !ffmpeg.executablePath) throw new ToolNotFoundError('ffmpeg');
+    if (!ffmpeg.available || !ffmpeg.executablePath) throw new ToolNotFoundError('ffmpeg', ffmpeg.error ?? undefined);
 
     await ensureDirectory(outputFolder);
     if (isReservedTubmediaDirectory(outputFolder)) {

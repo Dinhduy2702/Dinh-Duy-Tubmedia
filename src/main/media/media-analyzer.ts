@@ -157,7 +157,7 @@ export class MediaAnalyzer {
     }
 
     const tool = this.tools.get('ffprobe');
-    if (!tool.available || !tool.executablePath) throw new ToolNotFoundError('ffprobe');
+    if (!tool.available || !tool.executablePath) throw new ToolNotFoundError('ffprobe', tool.error ?? undefined);
 
     const result = await this.processes.run({
       jobId,

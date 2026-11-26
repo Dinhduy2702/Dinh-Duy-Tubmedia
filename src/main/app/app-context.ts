@@ -207,6 +207,10 @@ export class AppContext {
       );
     });
     this.tools.setRequiredRepairHandler(() => this.toolUpdates.repairRequired());
+    this.tools.setSystemLoadProvider(() => ({
+      cpuPercent: Math.round(this.systemStats.lastCpuPercent()),
+      activeJobs: this.queue.activeCount()
+    }));
     // Mọi nơi chạy yt-dlp có cookies đều mượn bản sao tạm từ CÙNG một kho (cookie-jar-store.ts).
     this.downloader.setCookieJar(this.cookieJar);
     this.quickDownload.setCookieJar(this.cookieJar);

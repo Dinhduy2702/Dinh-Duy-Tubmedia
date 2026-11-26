@@ -20,7 +20,8 @@ import { StatusBadge } from '../components/StatusBadge';
 import { useAppStore } from '../stores/app-store';
 import { createUiEventId } from '../utils/ui-id';
 import { toolSourceLabel } from '../utils/vi-labels';
-import { safeUiText } from '../utils/ui-error';
+import { friendlyIssue, safeUiText } from '../utils/ui-error';
+import { FriendlyIssueCard } from '../components/FriendlyIssueCard';
 import { GpuEncoderIssueNotice } from '../components/GpuEncoderIssueNotice';
 
 const messageOf = (error: unknown): string => safeUiText(error, 'Không thể hoàn tất thao tác với công cụ.');
@@ -191,10 +192,10 @@ export function ToolsPage(): React.JSX.Element {
           <div className="tool-capabilities">
             {tool.capabilities.slice(0, 8).map((capability) => <span key={capability}>{capabilityLabel(capability)}</span>)}
             {tool.capabilities.length > 8 && <span>+{tool.capabilities.length - 8} khả năng khác</span>}
-            {!tool.capabilities.length && <em>{connecting ? 'Đang nhận diện khả năng của công cụ.' : tool.available ? 'Đã xác nhận tệp thực thi và phiên bản.' : 'Chưa thể kiểm tra khả năng vì công cụ chưa chạy được.'}</em>}
+            {!tool.capabilities.length && <em>{tool.lastCheckedAt === null ? 'Đang tự động kiểm tra công cụ...' : tool.available ? 'Đã xác nhận tệp thực thi và phiên bản.' : 'Chưa thể kiểm tra khả năng vì công cụ chưa chạy được.'}</em>}
           </div>
 
-          {tool.error && !connecting && <div className="tool-error-box"><CircleAlert size={17}/><span>{safeUiText(tool.error, 'Công cụ chưa sẵn sàng. Hãy chạy Sửa chữa tất cả.')}</span></div>}
+          {tool.error && tool.lastCheckedAt !== null && <FriendlyIssueCard className="mt-3" issue={friendlyIssue(tool.error)}/>}
 
           <footer className="tool-card-actions">
             <div className="tool-action-group tool-action-group-secondary">

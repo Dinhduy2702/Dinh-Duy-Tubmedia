@@ -997,7 +997,7 @@ export class MergeEngine {
   ): Promise<MergeResult> {
     if (!inputs.length) throw new MergeFailedError('Không có video hợp lệ để ghép.');
     const ffmpeg = this.tools.get('ffmpeg');
-    if (!ffmpeg.available || !ffmpeg.executablePath) throw new ToolNotFoundError('ffmpeg');
+    if (!ffmpeg.available || !ffmpeg.executablePath) throw new ToolNotFoundError('ffmpeg', ffmpeg.error ?? undefined);
 
     const startedAt = Date.now();
     let knownTotalDuration = 0;
@@ -2192,7 +2192,7 @@ export class MergeEngine {
     mergeEndPercent = 92
   ): Promise<ProcessResult> {
     const ffmpeg = this.tools.get('ffmpeg');
-    if (!ffmpeg.available || !ffmpeg.executablePath) throw new ToolNotFoundError('ffmpeg');
+    if (!ffmpeg.available || !ffmpeg.executablePath) throw new ToolNotFoundError('ffmpeg', ffmpeg.error ?? undefined);
 
     const concatPath = join(workFolder, `concat-${job.id}.txt`);
     await writeFile(
@@ -2308,7 +2308,7 @@ export class MergeEngine {
     onProgress: (progress: AspectRatioConversionProgress) => void
   ): Promise<string> {
     const ffmpeg = this.tools.get('ffmpeg');
-    if (!ffmpeg.available || !ffmpeg.executablePath) throw new ToolNotFoundError('ffmpeg');
+    if (!ffmpeg.available || !ffmpeg.executablePath) throw new ToolNotFoundError('ffmpeg', ffmpeg.error ?? undefined);
 
     const safeName = sanitizeFilename(finalFileName.replace(/\.mp4$/i, ''), 'Thanh-pham');
     const tag = aspectRatio.replace(':', 'x');

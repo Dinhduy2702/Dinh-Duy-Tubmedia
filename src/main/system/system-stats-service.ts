@@ -5,6 +5,7 @@ import type { QueueManager } from '../queue/queue-manager.js';
 import type { ProcessManager } from '../processes/process-manager.js';
 export class SystemStatsService {
   private previous = cpus();
+  private latestCpuPercent = 0;
   public constructor(
     private readonly queue: QueueManager,
     private readonly processes: ProcessManager,
@@ -15,7 +16,12 @@ export class SystemStatsService {
     const current = cpus(); let idle = 0; let total = 0;
     const sumTimes = (times: { user:number; nice:number; sys:number; idle:number; irq:number }): number => times.user + times.nice + times.sys + times.idle + times.irq;
     current.forEach((cpu, i) => { const before = this.previous[i] ?? cpu; const nowTotal = sumTimes(cpu.times); const beforeTotal = sumTimes(before.times); total += nowTotal - beforeTotal; idle += cpu.times.idle - before.times.idle; });
-    this.previous = current; return total > 0 ? Math.max(0, Math.min(100, (1 - idle / total) * 100)) : 0;
+    this.previous = current;
+    this.latestCpuPercent = total > 0 ? Math.max(0, Math.min(100, (1 - idle / total) * 100)) : 0;
+    return this.latestCpuPercent;
+  }
+  public lastCpuPercent(): number {
+    return this.latestCpuPercent;
   }
   public async sample(): Promise<SystemStats> {
     const total = totalmem(); const used = total - freemem(); const disks: SystemStats['disks'] = [];

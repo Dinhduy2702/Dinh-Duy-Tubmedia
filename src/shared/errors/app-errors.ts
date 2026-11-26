@@ -12,8 +12,9 @@ export class AppError extends Error {
   }
 }
 export class ToolNotFoundError extends AppError {
-  public constructor(tool: string) {
-    super('TOOL_NOT_FOUND', `Không tìm thấy công cụ ${tool}.`);
+  public constructor(tool: string, reason?: string) {
+    const detail = reason?.trim();
+    super('TOOL_NOT_FOUND', detail || `Không tìm thấy công cụ ${tool}.`);
   }
 }
 export class ToolHealthCheckError extends AppError {

@@ -102,7 +102,7 @@ export class LocalCutService {
     }
 
     const ffmpeg = this.tools.get('ffmpeg');
-    if (!ffmpeg.available || !ffmpeg.executablePath) throw new ToolNotFoundError('ffmpeg');
+    if (!ffmpeg.available || !ffmpeg.executablePath) throw new ToolNotFoundError('ffmpeg', ffmpeg.error ?? undefined);
 
     const workDirectory = await mkdtemp(join(tmpdir(), 'tubmedia-local-cut-frame-'));
     try {
@@ -139,7 +139,7 @@ export class LocalCutService {
     if (!existsSync(trimmedPath)) throw new Error('Không tìm thấy tệp nguồn.');
 
     const ffmpeg = this.tools.get('ffmpeg');
-    if (!ffmpeg.available || !ffmpeg.executablePath) throw new ToolNotFoundError('ffmpeg');
+    if (!ffmpeg.available || !ffmpeg.executablePath) throw new ToolNotFoundError('ffmpeg', ffmpeg.error ?? undefined);
 
     try {
       const sourceInfo = this.probeSourceInfo
@@ -292,7 +292,7 @@ export class LocalCutService {
   private async run(active: ActiveLocalCut): Promise<void> {
     const { request, status } = active;
     const ffmpeg = this.tools.get('ffmpeg');
-    if (!ffmpeg.available || !ffmpeg.executablePath) throw new ToolNotFoundError('ffmpeg');
+    if (!ffmpeg.available || !ffmpeg.executablePath) throw new ToolNotFoundError('ffmpeg', ffmpeg.error ?? undefined);
 
     const sourceStat = await stat(request.filePath).catch(() => null);
     if (!sourceStat || !sourceStat.isFile()) {

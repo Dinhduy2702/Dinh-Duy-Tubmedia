@@ -8,6 +8,11 @@ import type { Logger } from '../logging/logger.js';
 import { IPC } from '@shared/contracts/channels.js';
 import { toolPathSyntaxError, type ToolPathSettingKey } from '../security/settings-policy.js';
 import { diagnoseNvencFailure, toSignedExitCode, type GpuEncoderIssue } from '@shared/utils/nvenc-diagnosis.js';
+import {
+  diagnoseToolHealthFailure,
+  formatToolHealthFailureMessage,
+  type ToolSystemLoad
+} from '@shared/utils/tool-diagnosis.js';
 import { registerBundledDenoFolders } from '../downloader/ytdlp-js-runtime.js';
 
 export const TOOL_NAMES = ['yt-dlp', 'ffmpeg', 'ffprobe', 'ffplay', 'aria2c'] as const;
@@ -112,6 +117,7 @@ export class ToolManager {
   private healthCheckTail: Promise<void> = Promise.resolve();
   private requiredReadyTail: Promise<void> = Promise.resolve();
   private requiredRepairHandler: (() => Promise<ToolStatus[]>) | null = null;
+  private systemLoadProvider: (() => ToolSystemLoad) | null = null;
   private readonly wingetCandidateCache = new Map<ToolName, string[]>();
   private readonly toolRoot: string;
   private statuses: ToolStatus[] = TOOL_NAMES.map((name) => ({
@@ -144,6 +150,10 @@ export class ToolManager {
 
   public setRequiredRepairHandler(handler: () => Promise<ToolStatus[]>): void {
     this.requiredRepairHandler = handler;
+  }
+
+  public setSystemLoadProvider(provider: () => ToolSystemLoad): void {
+    this.systemLoadProvider = provider;
   }
 
   private requiredMissing(statuses: ToolStatus[]): ToolStatus[] {
@@ -404,8 +414,8 @@ export class ToolManager {
             tool,
             executablePath: candidate.path,
             args: versionArgs[tool],
-            timeoutMs: 15_000,
-            priority: 'below_normal'
+            timeoutMs: tool === 'yt-dlp' ? 35_000 : 20_000,
+            priority: 'normal'
           });
           const merged = `${result.stdoutTail}\n${result.stderrTail}`;
           const version = result.code === 0 ? parseVersion(tool, merged) : null;
@@ -443,19 +453,37 @@ export class ToolManager {
         }
       }
 
+      const hasExistingBinary = candidates.some((candidate) => candidate.source !== 'path');
+      const diagnosis = healthy
+        ? null
+        : diagnoseToolHealthFailure({
+            tool,
+            hasExistingBinary,
+            failures,
+            load: this.systemLoadProvider?.()
+          });
       const status: ToolStatus = healthy ?? {
         name: tool,
         available: false,
-        executablePath: candidates[0]?.path ?? tool,
+        executablePath: hasExistingBinary ? (candidates[0]?.path ?? tool) : null,
         version: null,
-        source: candidates[0]?.source ?? 'path',
+        source: hasExistingBinary ? (candidates[0]?.source ?? 'path') : null,
         capabilities: [],
         health: 'broken',
-        error: failures.join(' | ') || 'Không tìm thấy hoặc không thể chạy công cụ.',
+        error: formatToolHealthFailureMessage(diagnosis!),
         lastCheckedAt: checkedAt
       };
       this.statuses = this.statuses.map((current) => current.name === tool ? status : current);
-      if (!healthy) this.logger.warn('tools', 'TOOL_HEALTH_FAILED', `${tool}: ${status.error}`);
+      if (!healthy) {
+        this.logger.warn('tools', 'TOOL_HEALTH_FAILED', `${tool}: ${diagnosis!.technicalSummary}`, {
+          metadata: {
+            cause: diagnosis!.cause,
+            cpuPercent: diagnosis!.cpuPercent,
+            activeJobs: diagnosis!.activeJobs,
+            hasExistingBinary
+          }
+        });
+      }
     }
     this.notifyChanged();
     return this.list();

@@ -55,8 +55,8 @@ export class PreviewFrameService {
   public async extractFrame(request: PreviewFrameRequest): Promise<PreviewFrameResult> {
     const ytdlp = this.tools.get('yt-dlp');
     const ffmpeg = this.tools.get('ffmpeg');
-    if (!ytdlp.available || !ytdlp.executablePath) throw new ToolNotFoundError('yt-dlp');
-    if (!ffmpeg.available || !ffmpeg.executablePath) throw new ToolNotFoundError('ffmpeg');
+    if (!ytdlp.available || !ytdlp.executablePath) throw new ToolNotFoundError('yt-dlp', ytdlp.error ?? undefined);
+    if (!ffmpeg.available || !ffmpeg.executablePath) throw new ToolNotFoundError('ffmpeg', ffmpeg.error ?? undefined);
 
     const workDirectory = await mkdtemp(join(tmpdir(), 'tubmedia-preview-'));
     // Bản sao tạm của tệp cookies cho riêng lượt này; lỗi thì KHÔNG ghi ngược (không phân loại được lỗi ở đây).

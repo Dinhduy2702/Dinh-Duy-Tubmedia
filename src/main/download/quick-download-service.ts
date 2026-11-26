@@ -507,7 +507,7 @@ export class QuickDownloadService {
 
     for (const tool of [ytDlp, ffmpeg, ffprobe]) {
       if (!tool.available || !tool.executablePath) {
-        throw new ToolNotFoundError(tool.name);
+        throw new ToolNotFoundError(tool.name, tool.error ?? undefined);
       }
     }
 

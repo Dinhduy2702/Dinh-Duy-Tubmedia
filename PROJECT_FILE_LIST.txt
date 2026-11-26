@@ -530,6 +530,7 @@ src/shared/utils/shared-folder-policy.ts
 src/shared/utils/text-encoding.ts
 src/shared/utils/theme.ts
 src/shared/utils/timestamp.ts
+src/shared/utils/tool-diagnosis.ts
 src/shared/utils/tooltip-placement.ts
 src/shared/utils/ui-error.ts
 src/shared/utils/url.ts
@@ -841,6 +842,7 @@ tests/unit/timestamp.test.ts
 tests/unit/tool-action-buttons-labels.test.ts
 tests/unit/tool-bootstrap-release.test.ts
 tests/unit/tool-capabilities.test.ts
+tests/unit/tool-health-diagnosis-v181.test.ts
 tests/unit/tool-manager-configured-path.test.ts
 tests/unit/tool-manager-cwd.test.ts
 tests/unit/tool-manager-managed-ffmpeg-trust.test.ts
