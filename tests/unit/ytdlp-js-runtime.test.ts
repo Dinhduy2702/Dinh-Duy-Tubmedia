@@ -37,7 +37,12 @@ describe('1.8.0 việc A: bộ chạy JavaScript Deno kèm sẵn cho yt-dlp', ()
     const withDeno = folderWithDeno();
     registerBundledDenoFolders([empty, withDeno]);
     expect(bundledDenoPath()).toBe(join(withDeno, 'deno.exe'));
-    expect(ytDlpJsRuntimeArguments(modern)).toEqual(['--js-runtimes', `deno:${join(withDeno, 'deno.exe')}`]);
+    expect(ytDlpJsRuntimeArguments(modern)).toEqual([
+      '--js-runtimes',
+      `deno:${join(withDeno, 'deno.exe')}`,
+      '--remote-components',
+      'ejs:github'
+    ]);
   });
 
   it('không có tệp → không thêm tham số nào (yt-dlp tự dùng deno trong PATH nếu máy có)', () => {
@@ -57,7 +62,12 @@ describe('1.8.0 việc A: bộ chạy JavaScript Deno kèm sẵn cho yt-dlp', ()
 
   it('đường dẫn có dấu cách/Unicode vẫn là MỘT đối số', () => {
     const path = 'C:\\Program Files\\Tubmedia Việt\\resources\\tool\\deno.exe';
-    expect(ytDlpJsRuntimeArguments(modern, path)).toEqual(['--js-runtimes', `deno:${path}`]);
+    expect(ytDlpJsRuntimeArguments(modern, path)).toEqual([
+      '--js-runtimes',
+      `deno:${path}`,
+      '--remote-components',
+      'ejs:github'
+    ]);
   });
 
   it('Tải nhanh và khung xem trước truyền tham số trước dấu "--"', () => {
@@ -69,7 +79,7 @@ describe('1.8.0 việc A: bộ chạy JavaScript Deno kèm sẵn cho yt-dlp', ()
       undefined,
       js
     );
-    expect(preview.slice(-4)).toEqual([...js, '--', 'https://example.invalid/x']);
+    expect(preview.slice(-(js.length + 2))).toEqual([...js, '--', 'https://example.invalid/x']);
 
     const request = validateQuickDownloadRequest({
       url: 'https://example.com/video',

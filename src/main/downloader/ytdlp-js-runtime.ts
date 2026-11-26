@@ -39,12 +39,23 @@ export function ytDlpSupportsJsRuntimes(ytdlp: Pick<ToolStatus, 'version' | 'cap
   return Boolean(version && version >= YTDLP_JS_RUNTIMES_MIN_VERSION);
 }
 
-/** Tham số yt-dlp chỉ định bộ chạy JS kèm sẵn; rỗng khi không có tệp hoặc yt-dlp quá cũ. */
+export function ytDlpSupportsRemoteComponents(ytdlp: Pick<ToolStatus, 'version' | 'capabilities'>): boolean {
+  if (ytdlp.capabilities.includes('ytdlp_remote_components')) return true;
+  const version = /^\d{4}\.\d{2}\.\d{2}/.exec(ytdlp.version ?? '')?.[0];
+  return Boolean(version && version >= YTDLP_JS_RUNTIMES_MIN_VERSION);
+}
+
+/** Tham số yt-dlp chỉ định bộ chạy JS kèm sẵn (+ cho phép tải script EJS mới nhất từ GitHub khi YouTube đổi player). */
 export function ytDlpJsRuntimeArguments(
   ytdlp: Pick<ToolStatus, 'version' | 'capabilities'>,
   denoPath: string | null = bundledDenoPath()
 ): string[] {
-  return denoPath && ytDlpSupportsJsRuntimes(ytdlp) ? ['--js-runtimes', `deno:${denoPath}`] : [];
+  if (!denoPath || !ytDlpSupportsJsRuntimes(ytdlp)) return [];
+  return [
+    '--js-runtimes',
+    `deno:${denoPath}`,
+    ...(ytDlpSupportsRemoteComponents(ytdlp) ? ['--remote-components', 'ejs:github'] : [])
+  ];
 }
 
 /** Câu nhật ký khởi động: có/không bộ chạy JS và phiên bản yt-dlp (để đọc nhật ký máy người dùng là biết ngay). */

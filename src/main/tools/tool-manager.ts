@@ -60,6 +60,23 @@ function parseVersion(name: ToolName, text: string): string | null {
   return /(?:ffmpeg|ffprobe|ffplay) version\s+([^\s]+)/i.exec(text)?.[1] ?? null;
 }
 
+/** So sánh 2 chuỗi phiên bản yt-dlp (dạng YYYY.MM.DD[.patch]): >0 nếu left mới hơn right. */
+export function compareYtDlpVersions(left: string | null | undefined, right: string | null | undefined): number {
+  const toParts = (value: string | null | undefined): number[] => {
+    const matched = /^\d{4}\.\d{2}\.\d{2}(?:\.\d+)*/.exec(value?.trim() ?? '');
+    if (!matched) return [];
+    return matched[0].split('.').map((part) => Number.parseInt(part, 10) || 0);
+  };
+  const a = toParts(left);
+  const b = toParts(right);
+  const length = Math.max(a.length, b.length);
+  for (let index = 0; index < length; index += 1) {
+    const diff = (a[index] ?? 0) - (b[index] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
 function uniqueCandidates<T extends { path: string }>(values: T[]): T[] {
   const seen = new Set<string>();
   return values.filter((value) => {
@@ -90,7 +107,8 @@ export function verifiedCapabilities(
       ...(text.includes('--dump-json') || text.includes('--print-json') ? ['ytdlp_metadata'] : []),
       ...(text.includes('--progress-template') ? ['ytdlp_progress'] : []),
       ...(text.includes('--ffmpeg-location') ? ['ytdlp_ffmpeg_bridge'] : []),
-      ...(text.includes('--js-runtimes') ? ['ytdlp_js_runtimes'] : [])
+      ...(text.includes('--js-runtimes') ? ['ytdlp_js_runtimes'] : []),
+      ...(text.includes('--remote-components') ? ['ytdlp_remote_components'] : [])
     ];
   }
   if (name === 'ffprobe') {
@@ -407,7 +425,11 @@ export class ToolManager {
       const failures: string[] = [];
       let healthy: ToolStatus | null = null;
 
-      for (const candidate of candidates) {
+      for (let index = 0; index < candidates.length; index += 1) {
+        const candidate = candidates[index]!;
+        if (healthy && !(tool === 'yt-dlp' && healthy.source === 'managed' && candidate.source === 'bundled')) {
+          continue;
+        }
         try {
           const result = await this.processes.run({
             jobId: `health-${tool}`,
@@ -422,6 +444,12 @@ export class ToolManager {
           if (result.code !== 0 || !version) {
             throw new Error(`Kiểm tra phiên bản thất bại (exit ${result.code}).`);
           }
+          // v1.8.1: nếu bản yt-dlp đi kèm bộ cài (bundled) KHÔNG mới hơn bản managed đã có, giữ nguyên managed (không cần đo capability lại).
+          if (healthy && tool === 'yt-dlp' && healthy.source === 'managed' && candidate.source === 'bundled') {
+            if (compareYtDlpVersions(version, healthy.version) <= 0) {
+              break;
+            }
+          }
           let capabilities: string[];
           let gpuEncoderIssue: GpuEncoderIssue | null = null;
           try {
@@ -434,7 +462,7 @@ export class ToolManager {
               `${tool} đã chạy được và đọc được phiên bản, nhưng bước nhận diện khả năng chi tiết chưa hoàn tất: ${error instanceof Error ? error.message : String(error)}`
             );
           }
-          healthy = {
+          const nextStatus: ToolStatus = {
             name: tool,
             available: true,
             executablePath: candidate.path,
@@ -446,10 +474,24 @@ export class ToolManager {
             lastCheckedAt: checkedAt,
             ...(tool === 'ffmpeg' ? { gpuEncoderIssue } : {})
           };
-          break;
+          if (healthy && tool === 'yt-dlp' && healthy.source === 'managed' && candidate.source === 'bundled') {
+            this.logger.info(
+              'tools',
+              'TOOLS_BUNDLED_NEWER_THAN_MANAGED',
+              `Bản yt-dlp đi kèm bộ cài (${version}) mới hơn bản tự cập nhật cũ (${healthy.version}) — ưu tiên dùng bản mới hơn.`
+            );
+            healthy = nextStatus;
+            break;
+          }
+          healthy = nextStatus;
+          const hasBundledBehind =
+            tool === 'yt-dlp' &&
+            candidate.source === 'managed' &&
+            candidates.slice(index + 1).some((item) => item.source === 'bundled');
+          if (!hasBundledBehind) break;
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error);
-          failures.push(`${candidate.path}: ${detail}`);
+          if (!healthy) failures.push(`${candidate.path}: ${detail}`);
         }
       }
 

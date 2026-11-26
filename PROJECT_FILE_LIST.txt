@@ -885,6 +885,7 @@ tests/unit/youtube-page-reload-v181.test.ts
 tests/unit/youtube-source-removed-r36.test.ts
 tests/unit/youtube-url-validation-r34.test.ts
 tests/unit/ytdlp-arguments.test.ts
+tests/unit/ytdlp-bundled-newer-and-ejs-v181.test.ts
 tests/unit/ytdlp-cookie-arguments.test.ts
 tests/unit/ytdlp-js-runtime.test.ts
 tests/unit/ytdlp-killed-classification.test.ts
