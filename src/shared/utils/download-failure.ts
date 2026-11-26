@@ -441,7 +441,13 @@ export function classifyYtDlpFailure(text: string): YtDlpFailureDetail {
   if (
     // Chỉ câu "not a bot" — KHÔNG dùng "sign in to confirm" chung: "Sign in to confirm your age" là video giới hạn độ tuổi, cần
     // đăng nhập thật (rà soát 2026-10-27).
-    includesAny(lower, ['confirm you are not a bot', "confirm you're not a bot", 'confirm you’re not a bot', 'not a bot']) &&
+    includesAny(lower, [
+      'confirm you are not a bot',
+      "confirm you're not a bot",
+      'confirm you’re not a bot',
+      'not a bot',
+      'the page needs to be reloaded'
+    ]) &&
     !includesAny(lower, ['confirm your age'])
   ) {
     return { category: 'authentication', subtype: 'bot_check', httpStatus: null, retryable: false };
