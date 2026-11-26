@@ -51,11 +51,9 @@ export function ytDlpJsRuntimeArguments(
   denoPath: string | null = bundledDenoPath()
 ): string[] {
   if (!denoPath || !ytDlpSupportsJsRuntimes(ytdlp)) return [];
-  return [
-    '--js-runtimes',
-    `deno:${denoPath}`,
-    ...(ytDlpSupportsRemoteComponents(ytdlp) ? ['--remote-components', 'ejs:github'] : [])
-  ];
+  const args = ['--js-runtimes', `deno:${denoPath}`];
+  if (ytDlpSupportsRemoteComponents(ytdlp)) args.push('--remote-components', 'ejs:github');
+  return args;
 }
 
 /** Câu nhật ký khởi động: có/không bộ chạy JS và phiên bản yt-dlp (để đọc nhật ký máy người dùng là biết ngay). */

@@ -41,12 +41,14 @@ describe('v1.8.1 — fix triệt để yt-dlp-ejs: ưu tiên bản bundled mới
     writeFileSync(managedExe, 'old-managed');
     writeFileSync(bundledExe, 'new-bundled');
 
+    const bundledVersion = '2026.11.23';
+    const managedVersion = '2026.08.19';
     const processes = {
       run: vi.fn((opts: { executablePath: string; args: string[] }) => {
         if (opts.args.includes('-h')) {
           return Promise.resolve({ code: 0, stdoutTail: '--dump-json --js-runtimes --remote-components', stderrTail: '' });
         }
-        const version = opts.executablePath === bundledExe ? '2026.11.23' : '2026.08.19';
+        const version = opts.executablePath === bundledExe ? bundledVersion : managedVersion;
         return Promise.resolve({ code: 0, stdoutTail: `${version}\n`, stderrTail: '' });
       })
     };
@@ -66,7 +68,7 @@ describe('v1.8.1 — fix triệt để yt-dlp-ejs: ưu tiên bản bundled mới
     expect(ytdlp?.available).toBe(true);
     expect(ytdlp?.source).toBe('bundled');
     expect(ytdlp?.executablePath).toBe(bundledExe);
-    expect(ytdlp?.version).toBe('2026.11.23');
+    expect(ytdlp?.version).toBe(bundledVersion);
   });
 
   it('ToolManager vẫn giữ bản managed nếu bản managed mới hơn hoặc bằng bản bundled', async () => {
@@ -81,12 +83,14 @@ describe('v1.8.1 — fix triệt để yt-dlp-ejs: ưu tiên bản bundled mới
     writeFileSync(managedExe, 'new-managed');
     writeFileSync(bundledExe, 'old-bundled');
 
+    const managedVersion = '2026.12.01';
+    const bundledVersion = '2026.11.23';
     const processes = {
       run: vi.fn((opts: { executablePath: string; args: string[] }) => {
         if (opts.args.includes('-h')) {
           return Promise.resolve({ code: 0, stdoutTail: '--dump-json --js-runtimes --remote-components', stderrTail: '' });
         }
-        const version = opts.executablePath === managedExe ? '2026.12.01' : '2026.11.23';
+        const version = opts.executablePath === managedExe ? managedVersion : bundledVersion;
         return Promise.resolve({ code: 0, stdoutTail: `${version}\n`, stderrTail: '' });
       })
     };
@@ -106,6 +110,6 @@ describe('v1.8.1 — fix triệt để yt-dlp-ejs: ưu tiên bản bundled mới
     expect(ytdlp?.available).toBe(true);
     expect(ytdlp?.source).toBe('managed');
     expect(ytdlp?.executablePath).toBe(managedExe);
-    expect(ytdlp?.version).toBe('2026.12.01');
+    expect(ytdlp?.version).toBe(managedVersion);
   });
 });

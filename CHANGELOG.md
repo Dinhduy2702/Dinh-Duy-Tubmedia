@@ -1,3 +1,16 @@
+# Tubmedia 1.8.1
+
+- Sửa triệt để lỗi tải YouTube trên các máy đã cài bản cũ từ trước:
+  - Tự so sánh phiên bản và luôn ưu tiên dùng bản công cụ tải `yt-dlp` **mới hơn** giữa bản đi kèm bộ cài và bản tự cập nhật cũ trong thư mục dữ liệu máy (tránh kẹt ở bản cũ gây lỗi giải mã trình phát mới của YouTube).
+  - Bật sẵn chế độ cho công cụ tải tự lấy bộ giải mã YouTube mới nhất cùng bộ chạy JavaScript đi kèm để hạn chế lỗi đứt định dạng khi YouTube đổi trình phát giữa chừng.
+  - Nhận diện lỗi YouTube *"The page needs to be reloaded"* vào nhóm chống chặn tự động để hàng đợi tự nghỉ ngắn / thử gắn cookies thay vì dừng với *"Lỗi của ứng dụng"*.
+- Báo lỗi công cụ rõ đúng nguyên nhân thực tế và chống báo lỗi oan khi máy đang bận:
+  - Nâng mức ưu tiên và tăng thời gian chờ kiểm tra công cụ tải từ 15 giây lên 35 giây để không bị ngắt nhầm khi CPU đang cao.
+  - Tách rõ 4 nguyên nhân thật sự khi công cụ gặp sự cố (**CPU quá tải / phản hồi chậm** kèm % CPU và số công việc đang chạy, **bị Windows hoặc phần mềm diệt virus chặn**, **có tệp nhưng chạy lỗi**, hoặc **thật sự thiếu tệp**), kèm các bước xử lý đánh số và nút mở nhanh **Cài đặt** ngay trên từng thẻ Công cụ và ở Hàng đợi.
+- Sửa lỗi dính hồ sơ trình duyệt khi đổi Cookies sang Firefox:
+  - Tự xóa trắng ô *Hồ sơ trình duyệt* khi đổi trình duyệt trong **Cài đặt** và khung **Cookies** (và tự bỏ qua tên hồ sơ kiểu Chrome/Edge cũ như `Default` nếu cấu hình cũ còn dính lại khi dùng Firefox).
+  - Phân loại lỗi không tìm thấy kho cookies của trình duyệt thành thẻ hướng dẫn cụ thể có nút **Mở Cài đặt**, không báo nhầm là *"Lỗi của ứng dụng"*.
+
 # Tubmedia 1.8.0
 
 - Tải YouTube ổn định hơn trên mọi máy, không còn lỗi thiếu bản 1080p–4K và chế độ CapCut linh hoạt hơn:
