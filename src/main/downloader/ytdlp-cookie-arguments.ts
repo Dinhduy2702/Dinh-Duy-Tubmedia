@@ -15,13 +15,21 @@ export type CookieArgumentSettings = Pick<
  * Ưu tiên tệp cookies Netscape nếu có; nếu không thì lấy từ trình duyệt (kèm hồ sơ nếu có, nối bằng
  * ':'); nếu không có gì (hoặc không truyền `settings`) thì không thêm tham số nào.
  */
+/**
+ * Tên hồ sơ mặc định của Chromium (Chrome/Edge) — Firefox không dùng các tên thư mục này.
+ * Nếu cài đặt cũ nâng cấp từ ≤1.8.0 còn sót `Default` / `Profile N` sau khi đổi sang Firefox, bỏ qua tên hồ sơ
+ * để yt-dlp tự chọn hồ sơ Firefox thật thay vì lỗi `could not find firefox cookies database`.
+ */
+const CHROMIUM_ONLY_PROFILE_NAME = /^(?:default|profile\s+\d+)$/i;
+
 export function buildCookieArguments(settings?: CookieArgumentSettings): string[] {
   if (!settings) return [];
   if (settings.cookiesFilePath) return ['--cookies', settings.cookiesFilePath];
   if (settings.cookiesBrowser !== 'none') {
-    const spec = settings.cookiesBrowserProfile
-      ? `${settings.cookiesBrowser}:${settings.cookiesBrowserProfile}`
-      : settings.cookiesBrowser;
+    const rawProfile = settings.cookiesBrowserProfile.trim();
+    const effectiveProfile =
+      settings.cookiesBrowser === 'firefox' && CHROMIUM_ONLY_PROFILE_NAME.test(rawProfile) ? '' : rawProfile;
+    const spec = effectiveProfile ? `${settings.cookiesBrowser}:${effectiveProfile}` : settings.cookiesBrowser;
     return ['--cookies-from-browser', spec];
   }
   return [];

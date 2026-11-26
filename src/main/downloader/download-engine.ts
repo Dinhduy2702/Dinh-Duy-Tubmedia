@@ -39,6 +39,7 @@ import {
   parseFfmpegOutTimeSeconds
 } from '@shared/utils/ffmpeg-progress.js';
 import {
+  browserCookieNotFoundMessage,
   classifyYtDlpFailure,
   pathTooLongLength,
   sanitizeYtDlpDiagnostic,
@@ -2059,6 +2060,15 @@ export class DownloadEngine {
               browser,
               appSettings.cookiesBrowserProfile,
               browserCookieDpapiMessage(appSettings.cookiesBrowser),
+              failureDetails
+            );
+          }
+          if (failure.subtype === 'browser_cookie_not_found') {
+            const browser = appSettings.cookiesBrowser === 'none' ? 'trình duyệt' : appSettings.cookiesBrowser;
+            throw new BrowserCookieLockedError(
+              browser,
+              appSettings.cookiesBrowserProfile,
+              browserCookieNotFoundMessage(appSettings.cookiesBrowser, appSettings.cookiesBrowserProfile),
               failureDetails
             );
           }

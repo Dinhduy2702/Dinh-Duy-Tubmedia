@@ -438,8 +438,8 @@ export function DownloadSettings({ settings, patch, setError }: { settings: AppS
       <p className="settings-detail-copy">Chỉ khi yt-dlp xác nhận video cần đăng nhập, cookies đã lưu mới được dùng hoặc ứng dụng mới thông báo cho bạn thêm cookies.</p>
     </InfoDisclosure>
     <Grid>
-      <Select label="Cookies từ trình duyệt" value={settings.cookiesBrowser} onChange={(value) => { patch('cookiesBrowser', value as AppSettings['cookiesBrowser']); if (value !== 'none') patch('cookiesFilePath', ''); }} options={[["none","Không dùng"],["chrome","Chrome"],["edge","Edge"],["firefox","Firefox"]]}/>
-      <Text label="Hồ sơ trình duyệt (không bắt buộc)" value={settings.cookiesBrowserProfile} onChange={(value) => patch('cookiesBrowserProfile', value)} placeholder="Mặc định hoặc Hồ sơ 1"/>
+      <Select label="Cookies từ trình duyệt" value={settings.cookiesBrowser} onChange={(value) => { const next = value as AppSettings['cookiesBrowser']; patch('cookiesBrowser', next); if (next !== settings.cookiesBrowser) patch('cookiesBrowserProfile', ''); if (next !== 'none') patch('cookiesFilePath', ''); }} options={[["none","Không dùng"],["chrome","Chrome"],["edge","Edge"],["firefox","Firefox"]]}/>
+      <Text label="Hồ sơ trình duyệt (không bắt buộc)" value={settings.cookiesBrowserProfile} onChange={(value) => patch('cookiesBrowserProfile', value)} placeholder={settings.cookiesBrowser === 'firefox' ? 'Để trống (khuyên dùng cho Firefox)' : 'Mặc định hoặc Hồ sơ 1'}/>
       <label><span className="label">Tệp cookies Netscape</span><div className="flex gap-2"><input className="input" value={settings.cookiesFilePath} onChange={(event: ChangeEvent<HTMLInputElement>) => patch('cookiesFilePath', event.target.value)}/><button className="btn" type="button" onClick={() => void chooseCookies()}>Chọn</button></div></label>
     </Grid>
     <details className="settings-inline-note mt-3"><summary>Phương án khi Chrome/Edge khóa cookies<ChevronDown size={15}/></summary><p>Ứng dụng sẽ tạm dừng đúng hàng đợi; Firefox, dán trực tiếp hoặc tệp TXT là phương án thay thế.</p></details>

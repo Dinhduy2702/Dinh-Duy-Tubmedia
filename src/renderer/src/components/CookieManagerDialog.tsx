@@ -300,9 +300,11 @@ export function CookieManagerDialog({ open, onClose, onConfigured }: Props): Rea
                   className="select"
                   aria-label="Trình duyệt"
                   value={browser}
-                  onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-                    setBrowser(event.target.value as BrowserName)
-                  }
+                  onChange={(event: ChangeEvent<HTMLSelectElement>) => {
+                    const next = event.target.value as BrowserName;
+                    setBrowser(next);
+                    if (next !== browser) setProfile('');
+                  }}
                 >
                   <option value="firefox">Firefox — khuyến nghị trên Windows</option>
                   <option value="chrome">Chrome</option>
@@ -334,7 +336,7 @@ export function CookieManagerDialog({ open, onClose, onConfigured }: Props): Rea
                     className="input"
                     value={profile}
                     onChange={(event: ChangeEvent<HTMLInputElement>) => setProfile(event.target.value)}
-                    placeholder="Mặc định hoặc Hồ sơ 1"
+                    placeholder={browser === 'firefox' ? 'Để trống (khuyên dùng cho Firefox)' : 'Mặc định hoặc Hồ sơ 1'}
                   />
                 )}
                 {isManualProfile && profiles.length > 0 && (

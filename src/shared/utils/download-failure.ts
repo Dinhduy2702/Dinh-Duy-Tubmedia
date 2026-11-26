@@ -1,3 +1,7 @@
+import { browserCookieNotFoundMessage } from './cookie-guidance.js';
+
+export { browserCookieNotFoundMessage };
+
 export type YtDlpFailureCategory =
   'disk' | 'tool' | 'rate_limit' | 'authentication' | 'non_retryable' | 'retryable';
 
@@ -9,6 +13,7 @@ export type YtDlpFailureSubtype =
   | 'bot_check'
   | 'cookies_invalid'
   | 'browser_cookie_dpapi'
+  | 'browser_cookie_not_found'
   | 'removed'
   | 'unsupported_url'
   | 'unavailable'
@@ -58,6 +63,7 @@ const ALL_FAILURE_SUBTYPES: ReadonlySet<YtDlpFailureSubtype> = new Set([
   'bot_check',
   'cookies_invalid',
   'browser_cookie_dpapi',
+  'browser_cookie_not_found',
   'removed',
   'unsupported_url',
   'unavailable',
@@ -169,6 +175,8 @@ const YTDLP_FAILURE_CAUSES: Record<YtDlpFailureSubtype, string> = {
   cookies_invalid: 'cookies không còn hợp lệ (yt-dlp báo cookie đã bị xoay/thu hồi)',
   browser_cookie_dpapi:
     'trình duyệt Chrome/Edge 127+ khóa giải mã cookie trực tiếp (DPAPI / App-Bound Encryption)',
+  browser_cookie_not_found:
+    'không tìm thấy kho cookies của trình duyệt hoặc hồ sơ đã cấu hình (vd firefox:Default)',
   removed: 'video đã bị xóa khỏi nền tảng',
   unsupported_url: 'liên kết không phải trang video (yt-dlp báo Unsupported URL)',
   unavailable: 'video không khả dụng (riêng tư, bị chặn theo vùng hoặc không còn định dạng phù hợp)',
@@ -312,6 +320,20 @@ export function isBrowserCookieDpapiErrorText(text: string): boolean {
   return includesAny(lower, BROWSER_COOKIE_DPAPI_PHRASES) || (lower.includes('dpapi') && lower.includes('cookie'));
 }
 
+/**
+ * v1.8.1: yt-dlp báo không tìm thấy cơ sở dữ liệu cookies của trình duyệt (vd `could not find firefox cookies database in ...`).
+ */
+export function isBrowserCookieNotFoundErrorText(text: string): boolean {
+  const lower = text.toLowerCase();
+  return (
+    /could not find\s+[\w\s-]*cookies?\s+database/.test(lower) ||
+    /cannot find\s+[\w\s-]*cookies?\s+database/.test(lower) ||
+    lower.includes('could not find firefox profile') ||
+    lower.includes('could not find chrome profile') ||
+    lower.includes('could not find edge profile')
+  );
+}
+
 export function isGeoRestrictedText(text: string): boolean {
   return includesAny(text.toLowerCase(), GEO_RESTRICTED_PHRASES);
 }
@@ -394,6 +416,11 @@ export function classifyYtDlpFailure(text: string): YtDlpFailureDetail {
   // #13: Chrome/Edge 127+ bật App-Bound Encryption khiến yt-dlp báo Failed to decrypt with DPAPI (issues/10927).
   if (isBrowserCookieDpapiErrorText(lower)) {
     return { category: 'authentication', subtype: 'browser_cookie_dpapi', httpStatus: null, retryable: false };
+  }
+
+  // v1.8.1: không tìm thấy kho cookies của trình duyệt (vd firefox:Default do còn sót hồ sơ Chrome/Edge hoặc chưa cài Firefox).
+  if (isBrowserCookieNotFoundErrorText(lower)) {
+    return { category: 'authentication', subtype: 'browser_cookie_not_found', httpStatus: null, retryable: false };
   }
 
   // 2026-10-27 (điều tra "cookie hỏng sau vài phút"): yt-dlp nói RÕ cookie YouTube không còn hợp lệ (bị xoay/thu hồi) — đây

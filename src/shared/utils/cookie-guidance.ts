@@ -46,3 +46,34 @@ export function browserCookieDpapiMessage(browser?: string | null): string {
     ]
   });
 }
+
+/**
+ * v1.8.1: yt-dlp báo không tìm thấy cơ sở dữ liệu cookies của trình duyệt (vd firefox:Default do còn sót hồ sơ Chrome/Edge,
+ * hoặc máy chưa cài trình duyệt đó).
+ */
+export function browserCookieNotFoundMessage(browser?: string | null, profile?: string | null): string {
+  const browserLabel =
+    browser === 'firefox'
+      ? 'Firefox'
+      : browser === 'edge'
+        ? 'Microsoft Edge'
+        : browser === 'chrome'
+          ? 'Google Chrome'
+          : 'trình duyệt đã chọn';
+  const trimmedProfile = profile?.trim() ?? '';
+  const profileHint = trimmedProfile
+    ? browser === 'firefox'
+      ? ` với hồ sơ "${trimmedProfile}" (Firefox không dùng tên hồ sơ kiểu Chrome/Edge như "Default" hoặc "Profile 1")`
+      : ` với hồ sơ "${trimmedProfile}"`
+    : ' (có thể máy chưa cài trình duyệt này hoặc chưa có hồ sơ đăng nhập)';
+  return formatUserActionMessage({
+    title: `Không tìm thấy kho cookies của ${browserLabel}`,
+    summary: `Không tìm thấy dữ liệu đăng nhập của ${browserLabel}${profileHint} nên không thể lấy cookies tự động — không phải lỗi của Tubmedia.`,
+    steps: [
+      'Mở Cài đặt › Cookies (hoặc khung Cookies trong danh sách đang tải).',
+      'Nếu chỉ tải video công khai bình thường: đổi "Cookies từ trình duyệt" sang "Không dùng" và xoá trắng ô "Hồ sơ trình duyệt".',
+      `Nếu cần đăng nhập bằng ${browserLabel}: giữ ${browserLabel} nhưng xoá trắng ô "Hồ sơ trình duyệt" để ứng dụng tự nhận, hoặc chọn tệp cookies.txt / dán cookies trực tiếp.`,
+      'Bấm Lưu cài đặt rồi quay lại Hàng đợi bấm Thử lại lỗi.'
+    ]
+  });
+}
